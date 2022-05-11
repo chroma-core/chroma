@@ -31,9 +31,10 @@ Right now graphql queries are handwritten. This can be changed over to a number 
 ```
 # if you need node, follow these instructions https://formulae.brew.sh/formula/node
 
-# requires node version 14.13.1, we can probably use an even newer verison, this was the min version required by our deps
+# requires node version 16, we can probably use an even newer verison, this was the min version required by our deps
 # if you need nvm, follow these instructions https://github.com/nvm-sh/nvm#installing-and-updating
-nvm install 14.13.1
+# bumped from 14.13.1 to 16 for m1 mac support
+nvm install 16
  
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
 
