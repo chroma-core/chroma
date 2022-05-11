@@ -68,6 +68,12 @@ source todo_api_env/bin/activate
 # install dependencies
 pip install flask ariadne flask-sqlalchemy
 
+# set up db if todo.db doesn not exist
+python
+from main import db
+db.create_all()
+exit()
+
 # run the app, development gives you hot reloading
 FLASK_APP=main.py FLASK_ENV=development flask run
 
@@ -114,7 +120,7 @@ select * from todo;
 `FLASK_APP=main.py FLASK_ENV=development flask run`
 
 # Todos
-- Test on M1 mac
+- [x] Test on M1 mac
 - Test on linux
 
 # Future work
