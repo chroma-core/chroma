@@ -4,7 +4,7 @@ This example demonstrates how to use together
 - React
 - Flask
 - Sqlite db
-- Pip package
+- Pip package including monkey patching
 - using Graphql for networking
 
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
@@ -13,7 +13,7 @@ The folder structure is:
 - `frontend`: react app
 - `backend`: flask app
 - `pip_package`: pip package 
-- `examples`: example script
+- `examples`: example script that uses the pip package
 
 Currently this uses a simple todo list app to demonstrate this. You can 
 - list todos in the react app or in the pip package, both powerwered via the graphql flask API
@@ -78,6 +78,8 @@ open http://127.0.0.1:5000/graphql
 This demonstrates how to send data to the flash backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
 
 Run the example to see it in action! (make sure to have the backend running)
+
+This uses `gorilla` for monkey patching.
 ```
 # cd into directory
 cd pip_package
