@@ -114,6 +114,7 @@ select * from todo;
 
 # Todos
 - Test on M1 mac
+- Test on linux
 
 # Future work
 - make the pip url configurable. right now it is hardcoded
