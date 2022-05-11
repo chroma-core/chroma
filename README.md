@@ -138,6 +138,8 @@ Tutorials I referneced lashing this up:
 - move the react app to typescript
 
 # Productionizing
+- Add frontend UI Framework
+- Add CLI
 - Support multiple databases
 - Tests
 - Linting
