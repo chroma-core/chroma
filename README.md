@@ -110,6 +110,9 @@ select * from todo;
 ### Running the backend
 `FLASK_APP=main.py FLASK_ENV=development flask run`
 
+# Todos
+- Test on M1 mac
+
 # Future work
 - make the pip url configurable. right now it is hardcoded
 - run the frontend and backend in one command, right now it requires multiple terminal windows which is annoying
