@@ -1,0 +1,42 @@
+# schema driven dev with ariadne
+
+schema {
+    query: Query
+    mutation: Mutation
+}
+
+type Todo {
+    id: ID!
+    description: String!
+    completed: Boolean!
+    dueDate: String!
+}
+
+type TodoResult {
+    success: Boolean!
+    errors: [String]
+    todo: Todo
+}
+
+type TodosResult {
+    success: Boolean!
+    errors: [String]
+    todos: [Todo]
+}
+
+type Query {
+    todos: TodosResult!
+    todo(todoId: ID!): TodoResult!
+}
+
+type DeleteTodoResult {
+    success: Boolean!
+    errors: [String]
+}
+
+type Mutation {
+    createTodo(description: String!, dueDate: String!): TodoResult!
+    deleteTodo(todoId: ID!): DeleteTodoResult!
+    markDone(todoId: String!): TodoResult!
+    updateDueDate(todoId: String, newDate: String!): TodoResult!
+}

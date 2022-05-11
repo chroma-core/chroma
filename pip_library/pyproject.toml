@@ -1,0 +1,7 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "gql"
+]
+build-backend = "setuptools.build_meta"
