@@ -82,7 +82,7 @@ open http://127.0.0.1:5000/graphql
 ```
 
 ### The pip package
-This demonstrates how to send data to the flash backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
+This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
 
 Run the example to see it in action! (make sure to have the backend running)
 
