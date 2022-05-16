@@ -161,18 +161,17 @@ Tutorials I referneced lashing this up:
 - https://gorilla.readthedocs.io/en/latest/tutorial.html
 - https://github.com/mlflow/mlflow/blob/adb0a1142f90ad2832df643cb7b13e1ef5d5c536/tests/utils/test_gorilla.py#L40
 
-<<<<<<< HEAD
 
-# Ideal flow
+# Test flow
 
 ```
 mkdir fresh_test
 cd fresh_test
+# grab the example script and pull it in
 pip install todoer
-todoer db setup
 todoer application run
 ```
-=======
+
 # Open questions
 - How to easily sync updates to graphql schema to frontend graphql code and the sdk/agent grapqhl code
 - make the pip url configurable. right now it is hardcoded
@@ -197,4 +196,3 @@ todoer application run
 - Live updating UI
 - Cloud deployment
 - ...........
->>>>>>> master

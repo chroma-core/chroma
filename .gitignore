@@ -13,12 +13,9 @@ todo_api_env/
 # ignore node_modules
 frontend/node_modules/
 
-<<<<<<< HEAD
 # pip build dirs
 build/
 dist/
 todoer.egg-info/
-=======
 # ignore the database
 *.db
->>>>>>> master
