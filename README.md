@@ -86,10 +86,41 @@ cd pip_package
 
 # build pip package
 pip install .
+#  pip install . --use-feature=in-tree-build builds it locally which can be convenient for looking in it
 
 # run the example
 cd ../examples
 python save_a_todo.py
+```
+
+Building for release (WIP)
+```
+# manually build the react app (for now)
+cd frontend
+yarn build
+# this automatically copies a built version of the react app into the backend dir, the backend will serve up the react app
+
+# build sdist and bdist
+# BEWARE of caching! you might want to remove dist and the egg-info folder first
+rm -rf dist && rm -rf todoer.egg-info && python -m build
+
+# rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && open todoer-0.0.1 && cd ..
+# this will drop the files in a dist folder
+
+# install twince to upload
+pip install twine
+
+# upload to test pypi (will ask for credentials)
+python -m twine upload -repository testpypi dist/*
+
+# uninstall locally
+pip uninstall package_name
+
+# test via test pypi
+pip install -i https://test.pypi.org/simple package_name
+
+# upload to prod pypi (will ask for credentials)
+python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
@@ -125,6 +156,17 @@ select * from todo;
 Tutorials I referneced lashing this up:
 - https://www.twilio.com/blog/graphql-api-python-flask-ariadne
 - https://blog.sethcorker.com/how-to-create-a-react-flask-graphql-project/
-- https://www.youtube.com/watch?v=v4bkJef4W94 
+- https://www.youtube.com/watch?v=JkeNVaiUq_c
 - https://gorilla.readthedocs.io/en/latest/tutorial.html
 - https://github.com/mlflow/mlflow/blob/adb0a1142f90ad2832df643cb7b13e1ef5d5c536/tests/utils/test_gorilla.py#L40
+
+
+# Ideal flow
+
+```
+mkdir fresh_test
+cd fresh_test
+pip install todoer
+todoer db setup
+todoer application run
+```

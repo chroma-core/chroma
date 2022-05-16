@@ -1,0 +1,7 @@
+recursive-include todoer/backend *
+recursive-include todoer/cli_commands *
+
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude todo.db
+prune backend/todo_api_env

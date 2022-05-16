@@ -6,6 +6,13 @@
 backend/__pycache__/
 backend/todo_api_env/
 pip_library/todoer/__pycache__/
+__pycache__
+todo_api_env/
 
 # ignore node_modules
 frontend/node_modules/
+
+# pip build dirs
+build/
+dist/
+todoer.egg-info/
