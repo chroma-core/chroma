@@ -118,27 +118,6 @@ class MultiCommand:
         """
         self.print_output(name, colored(output, "red"))
 
-    # def initialize_database(self):
-    #     """Makes sure all the tables are created."""
-    #     # Set up DB tables
-    #     self.print_output("Todoer", "Setting up DB")
-
-    #     base_dir = cwd = os.getcwd() 
-    #     backend_directory = "/".join((base_dir, 'backend'))
-
-    #     self.process = subprocess.Popen(
-    #         'python setup_db.py',
-    #         stdout=subprocess.PIPE,
-    #         stderr=subprocess.STDOUT,
-    #         cwd = backend_directory,
-    #         shell=True
-    #     )
-
-    #     for line in self.process.stdout:
-    #         self.parent.output_queue.append((self.name, line))
-
-    #     self.print_output("Todoer", "Database setup")
-
     def is_ready(self):
         """
         Detects when all Todoer components are ready to serve.

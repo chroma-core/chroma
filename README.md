@@ -6,13 +6,14 @@ This example demonstrates how to use together
 - Sqlite db
 - Pip package including monkey patching
 - using Graphql for networking
+- pip installed CLI
+- Bundling all the above into a pip package
 
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
 - `frontend`: react app
-- `backend`: flask app
-- `pip_package`: pip package 
+- `todoer`: contains all python code, the core library and flask appp
 - `examples`: example script that uses the pip package
 
 Currently this uses a simple todo list app to demonstrate this. You can 
@@ -48,16 +49,18 @@ yarn
 yarn start
 ```
 
+To build the frontend to deploy with the pip package, run `yarn build`. This will copy the built artifact into the backend/frontend folder. 
+
 ### The backend
 The backend uses:
 - Flask
 - Araidne (graphql)
 
-It runs on port 5000. You can view a graphql playgroun at http://127.0.0.1:5000/graphql.
+It runs on port 5000. You can view a graphql playground at http://127.0.0.1:5000/graphql.
 
 ```
 # cd into directory
-cd backend
+cd todoer/backend
 
 # Create the virtual environment.
 python3 -m venv todo_api_env
@@ -69,17 +72,22 @@ source todo_api_env/bin/activate
 pip install flask ariadne flask-sqlalchemy
 
 # set up db if todo.db doesn not exist
-python
-from main import db
-db.create_all()
-exit()
+# python
+# from main import db
+# db.create_all()
+# exit()
+# The pip bundled flask app now handles the DB creation through checking to see if the DB exists at runtime, and if not, it creates it.
 
 # run the app, development gives you hot reloading
 FLASK_APP=main.py FLASK_ENV=development flask run
 
 # Verify it works
 open http://127.0.0.1:5000/graphql
+# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:5000
 ```
+
+The pip bundled flask app installs these above dependencies through `setup.cfg`. 
+
 
 ### The pip package
 This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
@@ -100,7 +108,7 @@ cd ../examples
 python save_a_todo.py
 ```
 
-Building for release (WIP)
+Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
 ```
 # manually build the react app (for now)
 cd frontend
@@ -165,11 +173,15 @@ Tutorials I referneced lashing this up:
 # Test flow
 
 ```
+cd todo_e2e_example
+rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && cd ..
+cd ..
 mkdir fresh_test
 cd fresh_test
 # grab the example script and pull it in
-pip install todoer
+pip uninstall -y todoer && pip install ../todo_e2e_example/dist/todoer-0.0.1.tar.gz
 todoer application run
+# run an example script like the one in the examples folder
 ```
 
 # Open questions
