@@ -10,7 +10,9 @@ typer_app = typer.Typer()
 @typer_app.command()
 def run():
     typer.echo("Running application...")
-    # base_dir = os.getcwd() 
+    
+    # os.getcwd will give the directory wherever the CLI is called
+    # so we have to do this instead 
     base_dir = str(pathlib.Path(__file__).parent.parent.resolve())
 
     multicommand = MultiCommand()
@@ -26,15 +28,7 @@ def run():
         env=backend_env,
         cwd=backend_directory
     ))
-    
-    # frontend_directory = "/".join((base_dir, 'frontend'))
-    # multicommand.append_threaded_command("frontend", SubCommand(
-    #     multicommand,
-    #     name="frontend",
-    #     command=['yarn start'],
-    #     cwd=frontend_directory
-    # ))
-
+  
     multicommand.run()
 
 if __name__ == "__main__":

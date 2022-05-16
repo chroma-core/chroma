@@ -19,3 +19,4 @@ dist/
 todoer.egg-info/
 # ignore the database
 *.db
+backend/*.db

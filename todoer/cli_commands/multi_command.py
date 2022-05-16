@@ -1,3 +1,5 @@
+# heavily based on https://github.com/apache/airflow/blob/main/airflow/cli/commands/standalone_command.py
+
 import logging
 import os
 import random
