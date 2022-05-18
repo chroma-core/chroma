@@ -6,13 +6,14 @@ This example demonstrates how to use together
 - Sqlite db
 - Pip package including monkey patching
 - using Graphql for networking
+- pip installed CLI
+- Bundling all the above into a pip package
 
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
 - `frontend`: react app
-- `backend`: flask app
-- `pip_package`: pip package 
+- `todoer`: contains all python code, the core library and flask appp
 - `examples`: example script that uses the pip package
 
 Currently this uses a simple todo list app to demonstrate this. You can 
@@ -48,16 +49,18 @@ yarn
 yarn start
 ```
 
+To build the frontend to deploy with the pip package, run `yarn build`. This will copy the built artifact into the backend/frontend folder. 
+
 ### The backend
 The backend uses:
 - Flask
 - Araidne (graphql)
 
-It runs on port 5000. You can view a graphql playgroun at http://127.0.0.1:5000/graphql.
+It runs on port 5000. You can view a graphql playground at http://127.0.0.1:5000/graphql.
 
 ```
 # cd into directory
-cd backend
+cd todoer/backend
 
 # Create the virtual environment.
 python3 -m venv todo_api_env
@@ -69,17 +72,22 @@ source todo_api_env/bin/activate
 pip install flask ariadne flask-sqlalchemy
 
 # set up db if todo.db doesn not exist
-python
-from main import db
-db.create_all()
-exit()
+# python
+# from main import db
+# db.create_all()
+# exit()
+# The pip bundled flask app now handles the DB creation through checking to see if the DB exists at runtime, and if not, it creates it.
 
 # run the app, development gives you hot reloading
 FLASK_APP=main.py FLASK_ENV=development flask run
 
 # Verify it works
 open http://127.0.0.1:5000/graphql
+# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:5000
 ```
+
+The pip bundled flask app installs these above dependencies through `setup.cfg`. 
+
 
 ### The pip package
 This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
@@ -93,10 +101,41 @@ cd pip_package
 
 # build pip package
 pip install .
+#  pip install . --use-feature=in-tree-build builds it locally which can be convenient for looking in it
 
 # run the example
 cd ../examples
 python save_a_todo.py
+```
+
+Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
+```
+# manually build the react app (for now)
+cd frontend
+yarn build
+# this automatically copies a built version of the react app into the backend dir, the backend will serve up the react app
+
+# build sdist and bdist
+# BEWARE of caching! you might want to remove dist and the egg-info folder first
+rm -rf dist && rm -rf todoer.egg-info && python -m build
+
+# rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && open todoer-0.0.1 && cd ..
+# this will drop the files in a dist folder
+
+# install twince to upload
+pip install twine
+
+# upload to test pypi (will ask for credentials)
+python -m twine upload -repository testpypi dist/*
+
+# uninstall locally
+pip uninstall package_name
+
+# test via test pypi
+pip install -i https://test.pypi.org/simple package_name
+
+# upload to prod pypi (will ask for credentials)
+python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
@@ -126,9 +165,24 @@ select * from todo;
 Tutorials I referneced lashing this up:
 - https://www.twilio.com/blog/graphql-api-python-flask-ariadne
 - https://blog.sethcorker.com/how-to-create-a-react-flask-graphql-project/
-- https://www.youtube.com/watch?v=v4bkJef4W94 
+- https://www.youtube.com/watch?v=JkeNVaiUq_c
 - https://gorilla.readthedocs.io/en/latest/tutorial.html
 - https://github.com/mlflow/mlflow/blob/adb0a1142f90ad2832df643cb7b13e1ef5d5c536/tests/utils/test_gorilla.py#L40
+
+
+# Test flow
+
+```
+cd todo_e2e_example
+rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && cd ..
+cd ..
+mkdir fresh_test
+cd fresh_test
+# grab the example script and pull it in
+pip uninstall -y todoer && pip install ../todo_e2e_example/dist/todoer-0.0.1.tar.gz
+todoer application run
+# run an example script like the one in the examples folder
+```
 
 # Open questions
 - How to easily sync updates to graphql schema to frontend graphql code and the sdk/agent grapqhl code
