@@ -8,7 +8,6 @@ import subprocess
 import threading
 import time
 from collections import deque
-from termcolor import colored
 from typing import Dict, List
 
 class MultiCommand:
@@ -101,22 +100,15 @@ class MultiCommand:
         Prints an output line with name and colouring. You can pass multiple
         lines to output if you wish; it will be split for you.
         """
-        color = {
-            "alert": "red",
-            "scheduler": "blue",
-            "triggerer": "cyan",
-            "Todoer": "white",
-        }.get(name, "white")
-        colorised_name = colored("%10s" % name, color)
         for line in output.split("\n"):
-            print(f"{colorised_name} | {line.strip()}")
+            print(f"{name} | {line.strip()}")
 
     def print_error(self, name: str, output):
         """
         Prints an error message to the console (this is the same as
         print_output but with the text red)
         """
-        self.print_output(name, colored(output, "red"))
+        self.print_output(name, output)
 
     def is_ready(self):
         """
