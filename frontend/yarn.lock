@@ -1394,6 +1394,11 @@
     minimatch "^3.1.2"
     strip-json-comments "^3.1.1"
 
+"@flekschas/utils@^0.29.0":
+  version "0.29.0"
+  resolved "https://registry.yarnpkg.com/@flekschas/utils/-/utils-0.29.0.tgz#9289134234539cc9cb8f5777279c32028e60fbef"
+  integrity sha512-iIthDImmmZ7pHHJuSVQqLPqKfaD4RxgmMlibMcfqIb20q9WK1uoqRJbHcIIIecZmEJ+VHZohvmMSacXegf5PHQ==
+
 "@humanwhocodes/config-array@^0.9.2":
   version "0.9.5"
   resolved "https://registry.yarnpkg.com/@humanwhocodes/config-array/-/config-array-0.9.5.tgz#2cbaf9a89460da24b5ca6531b8bbfc23e1df50c7"
@@ -3151,6 +3156,13 @@ camelcase@^6.2.0, camelcase@^6.2.1:
   resolved "https://registry.yarnpkg.com/camelcase/-/camelcase-6.3.0.tgz#5685b95eb209ac9c0c177467778c9c84df58ba9a"
   integrity sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==
 
+camera-2d-simple@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/camera-2d-simple/-/camera-2d-simple-3.0.0.tgz#03d5f5251f77eef3786d5b06362951723b38252d"
+  integrity sha512-hBeuUeerQ2Repi/61PGyFkuJ9jt6IKAny7pjQo2w8/8uZh+RKvNLZQy4xbQeDH8FrlnFxAJDjyM4/yuLdOV5vQ==
+  dependencies:
+    gl-matrix "~3.3.0"
+
 caniuse-api@^3.0.0:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/caniuse-api/-/caniuse-api-3.0.0.tgz#5e4d90e2274961d46291997df599e3ed008ee4c0"
@@ -3905,6 +3917,14 @@ doctrine@^3.0.0:
   integrity sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==
   dependencies:
     esutils "^2.0.2"
+
+dom-2d-camera@~2.2.3:
+  version "2.2.3"
+  resolved "https://registry.yarnpkg.com/dom-2d-camera/-/dom-2d-camera-2.2.3.tgz#4ba2889d9c5fc2f23a0484bdf51b4068dfdb3606"
+  integrity sha512-oakGz91ABp1TrGmvv5+ogirbLZQv/9FFYkfGdEtYdFXbOQ3RfiHJC48NgWJkgs395n1ZNdp3WQ65/8wr2/SC/Q==
+  dependencies:
+    camera-2d-simple "^3.0.0"
+    gl-matrix "^3.3.0"
 
 dom-accessibility-api@^0.5.6, dom-accessibility-api@^0.5.9:
   version "0.5.14"
@@ -4828,6 +4848,16 @@ get-symbol-description@^1.0.0:
   dependencies:
     call-bind "^1.0.2"
     get-intrinsic "^1.1.1"
+
+gl-matrix@^3.3.0:
+  version "3.4.3"
+  resolved "https://registry.yarnpkg.com/gl-matrix/-/gl-matrix-3.4.3.tgz#fc1191e8320009fd4d20e9339595c6041ddc22c9"
+  integrity sha512-wcCp8vu8FT22BnvKVPjXa/ICBWRq/zjFfdofZy1WSpQZpphblv12/bOQLBC1rMM7SGOFS9ltVmKOHil5+Ml7gA==
+
+gl-matrix@~3.3.0:
+  version "3.3.0"
+  resolved "https://registry.yarnpkg.com/gl-matrix/-/gl-matrix-3.3.0.tgz#232eef60b1c8b30a28cbbe75b2caf6c48fd6358b"
+  integrity sha512-COb7LDz+SXaHtl/h4LeaFcNdJdAQSDeVqjiIihSXNrkWObZLhDI4hIkZC11Aeqp7bcE72clzB0BnDXr2SmslRA==
 
 glob-parent@^5.1.2, glob-parent@~5.1.2:
   version "5.1.2"
@@ -6120,6 +6150,11 @@ jsonpointer@^5.0.0:
     array-includes "^3.1.4"
     object.assign "^4.1.2"
 
+kdbush@~3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/kdbush/-/kdbush-3.0.0.tgz#f8484794d47004cc2d85ed3a79353dbe0abc2bf0"
+  integrity sha512-hRkd6/XW4HTsA9vjVpY9tuXJYLSlelnkTmVFu4M9/7MIYQtFcHpbugAU7UbOfjOiVSVYl2fqgBuJ32JUmRo5Ew==
+
 kind-of@^6.0.2:
   version "6.0.3"
   resolved "https://registry.yarnpkg.com/kind-of/-/kind-of-6.0.3.tgz#07c05034a6c349fa06e24fa35aa76db4580ce4dd"
@@ -6226,6 +6261,11 @@ locate-path@^6.0.0:
   integrity sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==
   dependencies:
     p-locate "^5.0.0"
+
+lodash-es@~4.17.21:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash-es/-/lodash-es-4.17.21.tgz#43e626c46e6591b7750beb2b50117390c609e3ee"
+  integrity sha512-mKnC+QJ9pWVzv+C4/U3rRsHapFfHvQFoFB92e52xeyGMcX6/OlIl78je1u8vePzYZSkkogMPJ2yjxxsb89cxyw==
 
 lodash.debounce@^4.0.8:
   version "4.0.8"
@@ -7574,6 +7614,11 @@ psl@^1.1.33:
   resolved "https://registry.yarnpkg.com/psl/-/psl-1.8.0.tgz#9326f8bcfb013adcc005fdff056acce020e51c24"
   integrity sha512-RIdOzyoavK+hA18OGGWDqUTsCLhtA7IcZ/6NCs4fFJaHBDab+pDDmDIByWFRQJq2Cd7r1OoQxBGKOaztq+hjIQ==
 
+pub-sub-es@^2.0.1, pub-sub-es@~2.0.1:
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/pub-sub-es/-/pub-sub-es-2.0.1.tgz#86ee2f85a8094157435307569c6f191baadfbd96"
+  integrity sha512-KuL5i+1YdQ/o9xGCz7AsG6hb6PBUFhKNIt3NhZ6Jh/d6F3fVfURyq5fAAwxPcpJS6kkrR4vOYyzZfMpYI8sxlQ==
+
 punycode@^2.1.0, punycode@^2.1.1:
   version "2.1.1"
   resolved "https://registry.yarnpkg.com/punycode/-/punycode-2.1.1.tgz#b58b010ac40c22c5657616c8d2c2c02c7bf479ec"
@@ -7918,6 +7963,33 @@ regjsparser@^0.8.2:
   integrity sha512-J3LABycON/VNEu3abOviqGHuB/LOtOQj8SKmfP9anY5GfAVw/SPjwzSjxGjbZXIxbGfqTHtJw58C2Li/WkStmA==
   dependencies:
     jsesc "~0.5.0"
+
+regl-line@~1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/regl-line/-/regl-line-1.0.0.tgz#4fe9de66b70ab76ae60572fc570ae93ad819325d"
+  integrity sha512-AkLBm/XbJl1a6EBSd18o33teVjtHFMSGQLY8EnpvcG+OcBRBEc/OHPbmJGJruLXrtTypvuqoCSfG5fPzN7zSVw==
+  dependencies:
+    gl-matrix "^3.3.0"
+    regl "^2.1.0"
+
+regl-scatterplot@^1.2.3:
+  version "1.2.3"
+  resolved "https://registry.yarnpkg.com/regl-scatterplot/-/regl-scatterplot-1.2.3.tgz#d3adbd58eb755fbca52b1a0795daa510ddeba8c7"
+  integrity sha512-Od4Dkbp7u9y+Z8uwtx+HBOOdoj0j2zE2VVeNVCPNmvsyj9/Sld4axVmjLzcDOwoLsZcW9t+Iq4P02EWJ2ejFOw==
+  dependencies:
+    "@flekschas/utils" "^0.29.0"
+    dom-2d-camera "~2.2.3"
+    gl-matrix "~3.3.0"
+    kdbush "~3.0.0"
+    lodash-es "~4.17.21"
+    pub-sub-es "~2.0.1"
+    regl "~2.1.0"
+    regl-line "~1.0.0"
+
+regl@^2.1.0, regl@~2.1.0:
+  version "2.1.0"
+  resolved "https://registry.yarnpkg.com/regl/-/regl-2.1.0.tgz#7dae71e9ff20f29c4f42f510c70cd92ebb6b657c"
+  integrity sha512-oWUce/aVoEvW5l2V0LK7O5KJMzUSKeiOwFuJehzpSFd43dO5spP9r+sSUfhKtsky4u6MCqWJaRL+abzExynfTg==
 
 relateurl@^0.2.7:
   version "0.2.7"

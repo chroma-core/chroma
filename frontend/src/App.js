@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import TestViz from "./components/viz-container";
 
 function createTodo(description, cb) {
   fetch(`/graphql`, {
@@ -69,7 +70,6 @@ function App() {
     getTodos(data => setMyTodos(data.todos))
   }, [])
 
-
   return (
     <div className="App">
       <h1>Todos</h1>
@@ -88,6 +88,7 @@ function App() {
           <input type="submit" value="New Todo" />
         </form>
         <h3>My Todos</h3>
+        <TestViz></TestViz>
         <ul>
           {myTodos.map(item => (
             <li key={item.id}>
