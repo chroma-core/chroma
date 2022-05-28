@@ -35,6 +35,9 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     }
   }, [points])
 
+  // all the commented out code in this file has to do with resizing 
+  // the webgl canvas... i havent figured it out yet
+
   // useEffect(() => {
   //   const resizeListener = () => {
   //     config.scatterplot.resizeHandler()

@@ -6,19 +6,8 @@ import reportWebVitals from './reportWebVitals';
 import defaultTheme from './themes/defaultTheme'
 import { BrowserRouter } from 'react-router-dom'
 
-// 1. Import the extendTheme function
 import { extendTheme, ChakraProvider } from '@chakra-ui/react'
 import { Global, css } from '@emotion/react';
-
-// 2. Extend the theme to include custom colors, fonts, etc
-// const colors = {
-//   brand: {
-//     900: '#1a365d',
-//     800: '#153e75',
-//     700: '#2a69ac',
-//   },
-// }
-// const theme = extendTheme({ colors })
 
 const GlobalStyles = css`
   /*
@@ -29,7 +18,6 @@ const GlobalStyles = css`
     outline: none;
     box-shadow: none;
   }
-  
 `
 
 const root = ReactDOM.createRoot(
