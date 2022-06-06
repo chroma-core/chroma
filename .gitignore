@@ -11,7 +11,7 @@ __pycache__
 chroma_env/
 
 # ignore node_modules
-frontend/node_modules/
+chroma-ui/node_modules/
 
 # pip build dirs
 build/

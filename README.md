@@ -3,7 +3,7 @@
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
-- `frontend`: react app
+- `chroma-ui`: react app
 - `chroma`: contains all python code, the core library and flask appp
 - `examples`: example script that uses the pip package
 
@@ -12,7 +12,7 @@ TODO: update with what this repo does
 # Setup 
 
 ### The frontend
-The frontend uses (see all boilerplate dependencies in frontend/package.json):
+The frontend uses (see all boilerplate dependencies in chroma-ui/package.json):
 - React via Create React App
 
 Right now graphql queries are handwritten. This can be changed over to a number of libraries.
@@ -28,7 +28,7 @@ nvm install 16
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
 
 # cd into directory
-cd frontend
+cd chroma-ui
 
 # install dependencies
 yarn
@@ -105,7 +105,7 @@ python save.py
 Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
 ```
 # manually build the react app (for now)
-cd frontend
+cd chroma-ui
 yarn build
 # this automatically copies a built version of the react app into the backend dir, the backend will serve up the react app
 
@@ -186,7 +186,6 @@ chroma application run
 - move the react app to typescript
 
 # Productionizing
-- Add frontend UI Framework
 - Add CLI
 - Support multiple databases
 - Tests
