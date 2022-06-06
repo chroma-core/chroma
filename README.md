@@ -112,8 +112,7 @@ pip install .
 #  pip install . --use-feature=in-tree-build builds it locally which can be convenient for looking in it
 
 # run the example
-cd ../examples
-python save.py
+python examples/save.py
 ```
 
 Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
@@ -158,14 +157,6 @@ select * from chroma;
 .exit
 ```
 
-# Running, once setup
-
-### Running the frontend
-`yarn start`
-
-### Running the backend
-`FLASK_APP=main.py FLASK_ENV=development flask run`
-
 # TODOs
 - Test setup on linux
 
@@ -194,10 +185,6 @@ chroma application run
 
 # Open questions
 - How to easily sync updates to graphql schema to frontend graphql code and the sdk/agent grapqhl code
-- make the pip url configurable. right now it is hardcoded
-- run the frontend and backend in one command, right now it requires multiple terminal windows which is annoying
-- build the frontend and backend into the pip package, right now the pip package does not include them
-- move the react app to typescript
 
 # Productionizing
 - Add CLI
