@@ -1,13 +1,15 @@
 # Chroma
 
+Embeddings, Projections, and more.
+
+## Tech decisions
+
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
 - `chroma-ui`: react app
-- `chroma`: contains all python code, the core library and flask appp
+- `chroma`: contains all python code, the core library and flask apps
 - `examples`: example script that uses the pip package
-
-TODO: update with what this repo does
 
 # Setup 
 
@@ -16,6 +18,8 @@ The frontend uses (see all boilerplate dependencies in chroma-ui/package.json):
 - React via Create React App
 
 Right now graphql queries are handwritten. This can be changed over to a number of libraries.
+
+We use a custom build of `regl-scatterplot`. Here is how to configure that
 
 ```
 # if you need node, follow these instructions https://formulae.brew.sh/formula/node
@@ -27,17 +31,27 @@ nvm install 16
  
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
 
-# cd into directory
-cd chroma-ui
+# cd to your source where you have chroma and clone the repo
+git clone git@github.com:chroma-core/regl-scatterplot.git
+
+# build it
+cd regl-scatterplot
+npm install .
+yarn build
+
+# cd into chroma ui
+cd ../chroma/chroma-ui
+
+# optional cleanup if you have built regl-scatterplot before
+rm -rf node_modules
+rm package-lock.json
 
 # install dependencies
-yarn
+yarn install
 
 # run - this will load http://localhost:3000 in the browser
 yarn start
 ```
-
-TODO: update this with regl-scatterplot instructions
 
 To build the frontend to deploy with the pip package, run `yarn build`. This will copy the built artifact into the backend/frontend folder. 
 
