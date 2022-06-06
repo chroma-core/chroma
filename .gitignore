@@ -24,3 +24,6 @@ backend/*.db
 
 # ignore stored pytorch model state dicts
 *.pt
+
+# ignore downloaded example data
+examples/data/

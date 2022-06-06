@@ -1,0 +1,42 @@
+schema {
+    query: Query
+    mutation: Mutation
+}
+
+type Embedding {
+    id: ID!
+    data: [Float!]!
+}
+
+type EmbeddingResult {
+    success: Boolean!
+    errors: [String]
+    embedding: Embedding
+}
+
+type EmbeddingsResult {
+    success: Boolean!
+    errors: [String]
+    embeddings: [Embedding]
+}
+
+type Query {
+    embeddings: EmbeddingsResult!
+    embedding(embeddingId: ID!): EmbeddingResult!
+}
+
+type DeleteEmbeddingResult {
+    success: Boolean!
+    errors: [String]
+}
+
+type BatchCreateEmbeddingResult {
+    success: Boolean!
+    errors: [String]
+}
+
+type Mutation {
+    createEmbedding(data: [Float!]!): EmbeddingResult!
+    batchCreateEmbeddings(data: [[Float!]!]): BatchCreateEmbeddingResult!
+    deleteEmbedding(EmbeddingId: ID!): DeleteEmbeddingResult!
+}

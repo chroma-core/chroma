@@ -8,8 +8,10 @@ from functools import partial
 # Use the model as defined in training
 from main_training import Net
 
+from data_manager import data_manager
+
 def get_and_store_layer_outputs(self, input, output, storage):
-    storage.append(output.data.detach())
+    storage.store_batch_embeddings(output.data.detach().tolist())
 
 def infer(model, device, data_loader):
     test_loss = 0
@@ -52,7 +54,7 @@ def main():
     model.to(device)
 
     # Define somewhere to store the embeddings
-    embedding_store = []
+    embedding_store = data_manager.ChromaDataManager()
 
     # Attach the hook
     get_layer_outputs = partial(get_and_store_layer_outputs, storage=embedding_store)
@@ -71,14 +73,14 @@ def main():
         transforms.Normalize((0.1307,), (0.3081,))
         ])
     dataset = datasets.MNIST('../data', train=False,
-                       transform=transform)
+                       transform=transform, download=True)
     data_loader = torch.utils.data.DataLoader(dataset, **inference_kwargs)
 
     # Run inference over the test set
     infer(model, device, data_loader)
 
     # Output stored embeddings
-    print(embedding_store)
+    print(str(embedding_store.get_embeddings()))
 
     
 if __name__ == '__main__':
