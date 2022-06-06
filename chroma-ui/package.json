@@ -18,7 +18,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build && yarn post-build",
-    "post-build": "cd ../chroma/backend && rm -rf chroma-ui && mkdir -p chroma-ui && cp -r ../../chroma-ui/build ./chroma-ui",
+    "post-build": "cd ../chroma/app_backend && rm -rf chroma-ui && mkdir -p chroma-ui && cp -r ../../chroma-ui/build ./chroma-ui",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
