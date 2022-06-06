@@ -28,7 +28,7 @@
     "react-router-dom": "^6.3.0",
     "react-scripts": "5.0.1",
     "regl": "^2.1.0",
-    "regl-scatterplot": "file:../regl-scatterplot",
+    "regl-scatterplot": "file:../../regl-scatterplot",
     "typescript": "^4.4.2",
     "web-vitals": "^2.1.0"
   },
