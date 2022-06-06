@@ -1,25 +1,13 @@
-# End to end Todo example
-
-This example demonstrates how to use together
-- React
-- Flask
-- Sqlite db
-- Pip package including monkey patching
-- using Graphql for networking
-- pip installed CLI
-- Bundling all the above into a pip package
+# Chroma
 
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
 - `frontend`: react app
-- `todoer`: contains all python code, the core library and flask appp
+- `chroma`: contains all python code, the core library and flask appp
 - `examples`: example script that uses the pip package
 
-Currently this uses a simple todo list app to demonstrate this. You can 
-- list todos in the react app or in the pip package, both powerwered via the graphql flask API
-- create a todo via the react app or pip package
-- that's it, no update or deleting right now
+TODO: update with what this repo does
 
 # Setup 
 
@@ -49,6 +37,8 @@ yarn
 yarn start
 ```
 
+TODO: update this with regl-scatterplot instructions
+
 To build the frontend to deploy with the pip package, run `yarn build`. This will copy the built artifact into the backend/frontend folder. 
 
 ### The backend
@@ -60,18 +50,18 @@ It runs on port 5000. You can view a graphql playground at http://127.0.0.1:5000
 
 ```
 # cd into directory
-cd todoer/backend
+cd chroma/backend
 
 # Create the virtual environment.
-python3 -m venv todo_api_env
+python3 -m venv chroma_env
 
 # load it in
-source todo_api_env/bin/activate
+source chroma_env/bin/activate
 
 # install dependencies
 pip install flask ariadne flask-sqlalchemy
 
-# set up db if todo.db doesn not exist
+# set up db if chroma.db doesn not exist
 # python
 # from main import db
 # db.create_all()
@@ -88,6 +78,10 @@ open http://127.0.0.1:5000/graphql
 
 The pip bundled flask app installs these above dependencies through `setup.cfg`. 
 
+### The data manager
+The data manager is a seperate flask app that only fetches and writes data.
+
+TODO: write more
 
 ### The pip package
 This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
@@ -105,7 +99,7 @@ pip install .
 
 # run the example
 cd ../examples
-python save_a_todo.py
+python save.py
 ```
 
 Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
@@ -117,9 +111,9 @@ yarn build
 
 # build sdist and bdist
 # BEWARE of caching! you might want to remove dist and the egg-info folder first
-rm -rf dist && rm -rf todoer.egg-info && python -m build
+rm -rf dist && rm -rf chroma.egg-info && python -m build
 
-# rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && open todoer-0.0.1 && cd ..
+# rm -rf dist && rm -rf chroma.egg-info && python -m build && cd dist && tar -xzf chroma-0.0.1.tar.gz && open chroma-0.0.1 && cd ..
 # this will drop the files in a dist folder
 
 # install twince to upload
@@ -139,14 +133,14 @@ python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
-Sqlite saves it's db to `todo.db` in the backend directory.
+Sqlite saves it's db to `chroma.db` in the backend directory.
 
 You can view this directly in terminal if you want to. 
 ```
 cd backend
 sqlite3
-.open todo.db
-select * from todo;
+.open chroma.db
+select * from chroma;
 .exit
 ```
 
@@ -158,7 +152,7 @@ select * from todo;
 ### Running the backend
 `FLASK_APP=main.py FLASK_ENV=development flask run`
 
-# Todos
+# TODOs
 - Test setup on linux
 
 # Reference URLs
@@ -173,14 +167,14 @@ Tutorials I referneced lashing this up:
 # Test flow
 
 ```
-cd todo_e2e_example
-rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && cd ..
+cd chroma
+rm -rf dist && rm -rf chroma.egg-info && python -m build && cd dist && tar -xzf chroma-0.0.1.tar.gz && cd ..
 cd ..
 mkdir fresh_test
 cd fresh_test
 # grab the example script and pull it in
-pip uninstall -y todoer && pip install ../todo_e2e_example/dist/todoer-0.0.1.tar.gz
-todoer application run
+pip uninstall -y chroma && pip install ../chroma/dist/chroma-0.0.1.tar.gz
+chroma application run
 # run an example script like the one in the examples folder
 ```
 

@@ -1,0 +1,6 @@
+# schema driven dev with ariadne
+
+schema {
+    query: Query
+    mutation: Mutation
+}

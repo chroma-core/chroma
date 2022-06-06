@@ -18,7 +18,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build && yarn post-build",
-    "post-build": "cd ../todoer/backend && rm -rf frontend && mkdir -p frontend && cp -r ../../frontend/build ./frontend",
+    "post-build": "cd ../chroma/backend && rm -rf frontend && mkdir -p frontend && cp -r ../../frontend/build ./frontend",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

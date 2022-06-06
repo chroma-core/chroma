@@ -1,6 +1,6 @@
 import typer
 
-from todoer.cli_commands.webapp import typer_app as application
+from chroma.cli_commands.webapp import typer_app as application
 
 typer_app = typer.Typer()
 typer_app.add_typer(application, name="application")

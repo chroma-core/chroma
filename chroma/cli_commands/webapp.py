@@ -2,7 +2,7 @@ import typer
 import os
 import time
 import subprocess
-from todoer.cli_commands.multi_command import MultiCommand, SubCommand
+from chroma.cli_commands.multi_command import MultiCommand, SubCommand
 import pathlib
 
 typer_app = typer.Typer()
