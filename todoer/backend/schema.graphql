@@ -24,9 +24,14 @@ type TodosResult {
     todos: [Todo]
 }
 
+type EmbeddingsResult {
+    data: String
+}
+
 type Query {
     todos: TodosResult!
     todo(todoId: ID!): TodoResult!
+    embeddings: EmbeddingsResult!
 }
 
 type DeleteTodoResult {
