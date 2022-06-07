@@ -1,13 +1,13 @@
 import os
 from os.path import isfile, getsize
 
-from data_manager.api import CHROMA_DATAMANAGER_DB_NAME, app, db
+from chroma.data_manager.api import CHROMA_DATAMANAGER_DB_NAME, app, db
 from ariadne import load_schema_from_path, make_executable_schema, \
     graphql_sync, snake_case_fallback_resolvers, ObjectType
 from ariadne.constants import PLAYGROUND_HTML
 from flask import request, jsonify
-from data_manager.api.queries import resolve_embeddings, resolve_embedding
-from data_manager.api.mutations import resolve_create_embedding, resolve_batch_create_embeddings, resolve_delete_embedding
+from chroma.data_manager.api.queries import resolve_embeddings, resolve_embedding
+from chroma.data_manager.api.mutations import resolve_create_embedding, resolve_batch_create_embeddings, resolve_delete_embedding
 
 
 def isSQLite3(filename):
