@@ -8344,7 +8344,7 @@ regl-line@~1.0.0:
     gl-matrix "^3.3.0"
     regl "^2.1.0"
 
-"regl-scatterplot@file:../regl-scatterplot":
+"regl-scatterplot@file:../../regl-scatterplot":
   version "1.2.3"
   dependencies:
     "@flekschas/utils" "^0.29.0"

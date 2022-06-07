@@ -1,0 +1,19 @@
+# schema driven dev with ariadne
+
+schema {
+    query: Query
+    mutation: Mutation
+}
+
+type EmbeddingsResult {
+    data: String
+}
+
+type Query {
+    embeddings: EmbeddingsResult!
+}
+
+# had to have something in here to not throw an error
+type Mutation {
+    markDone(embeddingID: String!): EmbeddingsResult!
+}

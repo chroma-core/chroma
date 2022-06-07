@@ -12,7 +12,7 @@ from typing import Dict, List
 
 class MultiCommand:
     """
-    Runs all components of Todoer under a single parent process.
+    Runs all components of Chroma under a single parent process.
     Useful for local development.
     """
 
@@ -45,7 +45,7 @@ class MultiCommand:
 
     def run(self):
         """Main run loop"""
-        self.print_output("Todoer", "Starting ")
+        self.print_output("Chroma", "Starting ")
         
         # Silence built-in logging at INFO
         logging.getLogger("").setLevel(logging.WARNING)
@@ -81,12 +81,12 @@ class MultiCommand:
                 break
 
         # Stop subcommand threads
-        self.print_output("Todoer", "Shutting down components")
+        self.print_output("Chroma", "Shutting down components")
         for command in self.threaded_subcommands.values():
             command.stop()
         for command in self.threaded_subcommands.values():
             command.join()
-        self.print_output("Todoer", "Complete")
+        self.print_output("Chroma", "Complete")
 
     def update_output(self):
         """Drains the output queue and prints its contents to the screen"""
@@ -112,7 +112,7 @@ class MultiCommand:
 
     def is_ready(self):
         """
-        Detects when all Todoer components are ready to serve.
+        Detects when all Chroma components are ready to serve.
         For now, it's simply time-based.
         """
         return (
@@ -135,15 +135,15 @@ class MultiCommand:
 
     def print_ready(self):
         """
-        Prints the banner shown when Todoer is ready to go
+        Prints the banner shown when Chroma is ready to go
         """
-        self.print_output("Todoer", "")
-        self.print_output("Todoer", "Todoer is ready")
+        self.print_output("Chroma", "")
+        self.print_output("Chroma", "Chroma is ready")
         self.print_output(
-            "Todoer",
-            "Todoer threaded is for development purposes only. Do not use this in production!",
+            "Chroma",
+            "Chroma threaded is for development purposes only. Do not use this in production!",
         )
-        self.print_output("Todoer", "")
+        self.print_output("Chroma", "")
 
 
 class SubCommand(threading.Thread):
