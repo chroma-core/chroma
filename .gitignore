@@ -13,6 +13,7 @@ todo_api_env/
 
 # ignore node_modules
 frontend/node_modules/
+node_modules/
 
 # pip build dirs
 build/
