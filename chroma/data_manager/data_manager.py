@@ -1,5 +1,6 @@
-from gql import gql, Client
+from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
+
 
 class ChromaDataManager:
 
@@ -42,7 +43,7 @@ class ChromaDataManager:
                         errors
                     }
                 }
-            """            
+            """
         )
 
     def __init__(self):
@@ -60,5 +61,7 @@ class ChromaDataManager:
 
     def store_batch_embeddings(self, data):
         params = {"data": data}
-        result = self._client.execute(self.Queries._gql_batch_create_embeddings, variable_values=params)
+        result = self._client.execute(
+            self.Queries._gql_batch_create_embeddings, variable_values=params
+        )
         return result

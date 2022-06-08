@@ -1,5 +1,7 @@
-import json 
+import json
+
 from chroma.data_manager.api import db
+
 
 class Embedding(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -7,7 +9,4 @@ class Embedding(db.Model):
 
     def to_dict(self):
         deserialized_data = json.loads(self.data)
-        return {
-            "id": self.id,
-            "data": deserialized_data
-        }
+        return {"id": self.id, "data": deserialized_data}

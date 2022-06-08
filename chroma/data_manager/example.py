@@ -1,13 +1,15 @@
-from data_manager import ChromaDataManager
 import numpy as np
+from data_manager import ChromaDataManager
 
 manager = ChromaDataManager()
 
 # Generate a random 1000 element float vector
-embedding = np.random.rand(1000,)
+embedding = np.random.rand(
+    1000,
+)
 embedding = embedding.tolist()
 
-# Try to save it 
+# Try to save it
 create_result = manager.store_embedding(data=embedding)
 print(str(create_result))
 
