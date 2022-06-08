@@ -8,8 +8,7 @@ import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
 import distinctColors from 'distinct-colors'
-import chroma from "chroma-js" // nothing to do with us! 
-// import testDataArray from './testData';
+import chroma from "chroma-js" // nothing to do with us! a color library
 
 function getEmbeddings(cb) {
   fetch(`/graphql`, {
@@ -46,37 +45,20 @@ var generateMetadataSets = function(testData) {
   return metadataSets
 }
 
-// let colorsOpts = distinctColors({"count": 20})
-
-// support for up to 20 classes right now,
-// TODO: what happens if it goes over......
-let colorsOpts = [
-  "#FFB300",    // Vivid Yellow
-  "#803E75",    // Strong Purple
-  "#FF6800",    // Vivid Orange
-  "#A6BDD7",    // Very Light Blue
-  "#C10020",    // Vivid Red
-  "#CEA262",    // Grayish Yellow
-  "#817066",    // Medium Gray
-  "#007D34",    // Vivid Green
-  "#F6768E",    // Strong Purplish Pink
-  "#00538A",    // Strong Blue
-  "#FF7A5C",    // Strong Yellowish Pink
-  "#53377A",    // Strong Violet
-  "#FF8E00",    // Vivid Orange Yellow
-  "#B32851",    // Strong Purplish Red
-  "#F4C800",    // Vivid Greenish Yellow
-  "#7F180D",    // Strong Reddish Brown
-  "#93AA00",    // Vivid Yellowish Green
-  "#593315",    // Deep Yellowish Brown
-  "#F13A13",    // Vivid Reddish Orange
-  "#232C16",    // Dark Olive Green
-]
-
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
 var generateLeftSidebarObject = function(metadataSets) {
+  var numberOfColors = metadataSets['class'].size
+
+  // https://medialab.github.io/iwanthue/
+  let colorsOpts = distinctColors({
+    "count": numberOfColors, 
+    "lightMin": 20,
+    "lightMax": 80,
+    "chromaMin": 80
+  })
+
   var colors = []
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx

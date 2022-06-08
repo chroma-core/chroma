@@ -18,7 +18,7 @@ export default function scatterplot (points, colorsScale, opts) {
 		  canvas,
 		  width,
 		  height,
-		  pointSize: 5
+		  pointSize: 7
 		});
 		scatterplot.set({ backgroundColor: '#F3F5F6' }); 
 		scatterplot.draw(points);
