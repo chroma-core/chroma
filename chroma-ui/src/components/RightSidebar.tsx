@@ -28,8 +28,6 @@ interface Hash<T> {
   [key: string]: T;
 }
 
-const hash: Hash<string> = {};
-
 const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected, clearSelected, serverData }) => {
   const theme = useTheme();
 
@@ -74,7 +72,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
                 >
                 <Flex flex="row" align="center" justify="space-between" wrap="wrap" width="100%" mb={3}>
                   <Text fontSize='sm' fontWeight={600} fontFamily="mono" width="200px">{point}</Text>
-                  {/* <Text fontSize='sm' fontWeight={600} fontFamily="mono" width="200px">data: {serverData[point][2]}</Text> */}
                   <Flex>
                     {/* <IconButton aria-label='Search database' icon={<GiExpand />} variant='ghost'/> */}
                     <IconButton aria-label='Clear' onClick={() => clearSelected([point])} icon={<GrClose />} variant='ghost'  />
