@@ -1,6 +1,9 @@
 import os
+
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+
+from chroma.data_manager import data_manager
 
 # setup the app and database
 template_dir = os.path.abspath('chroma-ui/build')
@@ -13,3 +16,6 @@ db_uri = f"sqlite:///{os.getcwd()}/{CHROMA_APP_DB_NAME}"
 app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
+
+# Connect to the chroma data manager
+chroma_data_manager = data_manager.ChromaDataManager()

@@ -5,7 +5,7 @@ from flask import request, jsonify, render_template
 from ariadne.constants import PLAYGROUND_HTML
 from ariadne import load_schema_from_path, make_executable_schema, \
     graphql_sync, snake_case_fallback_resolvers, ObjectType
-from api.queries import resolve_embeddings
+from api.queries import resolve_datapoints
 
 def isSQLite3(filename):
     print(os.getcwd())
@@ -28,13 +28,14 @@ else:
 
 # setting up graphql "routes"
 query = ObjectType("Query")
-query.set_field("embeddings", resolve_embeddings)
+query.set_field("datapoints", resolve_datapoints)
 
 mutation = ObjectType("Mutation")
 
-type_defs = load_schema_from_path("schema.graphql")
+app_backend_type_defs = load_schema_from_path("schema.graphql")
+
 schema = make_executable_schema(
-    type_defs, query, mutation, snake_case_fallback_resolvers
+    app_backend_type_defs, query, mutation, snake_case_fallback_resolvers
 )
 
 @app.route("/")
