@@ -28,12 +28,6 @@ export default function scatterplot (points, colorsScale, opts) {
         .fill()
         .map((x, i) => ((i + 1) / 10));
 
-		// const colorsScale = [
-		// 	'#3A76E5', // blue
-		// 	'#EA5412', // orange
-		// 	'#2FB874', // green
-		// 	'#EB4026' //red
-		// ];
 		scatterplot.set({ opacity: getOpacityRange() });
 		scatterplot.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5,  });
 		scatterplot.subscribe('select', opts.selectHandler);

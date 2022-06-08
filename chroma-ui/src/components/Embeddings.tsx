@@ -58,9 +58,9 @@ var generateLeftSidebarObject = function(metadataSets) {
   var classTypeDict = []
   var classOptions = metadataSets['class']
   var typeOptions = metadataSets['type']
+  var i = 0;
   classOptions.forEach(option => {
-    var color = colorsOpts.shift()?.hex()
-    console.log('color', color)
+    var color = colorsOpts[i].hex()
     colorsUsed.push(color)
 
     classTypeDict.push({
@@ -70,6 +70,8 @@ var generateLeftSidebarObject = function(metadataSets) {
       visible: true,
       color: color
     })
+
+    i++
   })
   classTypeDict.forEach(cClass => {
     typeOptions.forEach(option => {
@@ -101,24 +103,26 @@ var dataToPlotter = function(testData, classTypeDict) {
 function Embeddings() {
   const theme = useTheme();
 
-  console.log('colorsUsed', colorsUsed)
-
+  let [serverData, setServerData] = useState<any>([]);
   let [points, setPoints] = useState<any>(null);
   let [toolSelected, setToolSelected] = useState<any>('cursor');
   let [cursor, setCursor] = useState('grab');
   let [selectedPoints, setSelectedPoints] = useState([]) // callback from regl-scatterplot
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
   let [classDict, setClassDict] = useState(undefined) // object that renders the left sidebar
+  let [colorsUsed, setColorsUsed] = useState([])
 
   // set up data onload
   useEffect(() => {
     getEmbeddings(data => {
-      var serverData = JSON.parse(data)
-      var metadataSets = generateMetadataSets(serverData)
+      var dataFromServer = JSON.parse(data)
+      var metadataSets = generateMetadataSets(dataFromServer)
       var classTypeDict = generateLeftSidebarObject(metadataSets)
-      var dataToPlot = dataToPlotter(serverData, classTypeDict)
+      setColorsUsed(colorsOpts.slice(0,classTypeDict.length).map(color => color.hex()))
+      var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
+      setServerData(dataFromServer)
     } )
   }, []);
 
@@ -196,6 +200,7 @@ function Embeddings() {
           selectedPoints={selectedPoints}
           clearSelected={clearSelected}
           tagSelected={tagSelected}
+          serverData={serverData}
         ></RightSidebar>
       </PageContainer>
     </div>
