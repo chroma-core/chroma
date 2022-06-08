@@ -7,6 +7,8 @@ import Header from './Header';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
+import distinctColors from 'distinct-colors'
+import chroma from "chroma-js" // nothing to do with us! 
 // import testDataArray from './testData';
 
 function getEmbeddings(cb) {
@@ -44,23 +46,29 @@ var generateMetadataSets = function(testData) {
   return metadataSets
 }
 
+let colorsOpts = distinctColors({"count": 20})
+let colorsUsed = []
+
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
 var generateLeftSidebarObject = function(metadataSets) {
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
-  let colorsOpts = ['blue','orange', 'green', 'red']
   var classTypeDict = []
   var classOptions = metadataSets['class']
   var typeOptions = metadataSets['type']
   classOptions.forEach(option => {
+    var color = colorsOpts.shift()?.hex()
+    console.log('color', color)
+    colorsUsed.push(color)
+
     classTypeDict.push({
       'class': option,
       title: option, 
       'subtypes': [],
       visible: true,
-      color: colorsOpts.shift()
+      color: color
     })
   })
   classTypeDict.forEach(cClass => {
@@ -93,12 +101,7 @@ var dataToPlotter = function(testData, classTypeDict) {
 function Embeddings() {
   const theme = useTheme();
 
-  let colors = [
-    {'orange': theme.colors.ch_orange},
-    {'red': theme.colors.ch_red},
-    {'blue': theme.colors.ch_blue},
-    {'green': theme.colors.ch_green},
-  ]
+  console.log('colorsUsed', colorsUsed)
 
   let [points, setPoints] = useState<any>(null);
   let [toolSelected, setToolSelected] = useState<any>('cursor');
@@ -187,6 +190,7 @@ function Embeddings() {
           deselectHandler={deselectHandler}
           unselectedPoints={unselectedPoints}
           cursor={cursor}
+          colors={colorsUsed}
           ></EmbeddingsContainer>
         <RightSidebar 
           selectedPoints={selectedPoints}
