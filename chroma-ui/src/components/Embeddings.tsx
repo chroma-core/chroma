@@ -46,13 +46,38 @@ var generateMetadataSets = function(testData) {
   return metadataSets
 }
 
-let colorsOpts = distinctColors({"count": 20})
-let colorsUsed = []
+// let colorsOpts = distinctColors({"count": 20})
+
+// support for up to 20 classes right now,
+// TODO: what happens if it goes over......
+let colorsOpts = [
+  "#FFB300",    // Vivid Yellow
+  "#803E75",    // Strong Purple
+  "#FF6800",    // Vivid Orange
+  "#A6BDD7",    // Very Light Blue
+  "#C10020",    // Vivid Red
+  "#CEA262",    // Grayish Yellow
+  "#817066",    // Medium Gray
+  "#007D34",    // Vivid Green
+  "#F6768E",    // Strong Purplish Pink
+  "#00538A",    // Strong Blue
+  "#FF7A5C",    // Strong Yellowish Pink
+  "#53377A",    // Strong Violet
+  "#FF8E00",    // Vivid Orange Yellow
+  "#B32851",    // Strong Purplish Red
+  "#F4C800",    // Vivid Greenish Yellow
+  "#7F180D",    // Strong Reddish Brown
+  "#93AA00",    // Vivid Yellowish Green
+  "#593315",    // Deep Yellowish Brown
+  "#F13A13",    // Vivid Reddish Orange
+  "#232C16",    // Dark Olive Green
+]
 
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
 var generateLeftSidebarObject = function(metadataSets) {
+  var colors = []
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
   var classTypeDict = []
@@ -60,30 +85,37 @@ var generateLeftSidebarObject = function(metadataSets) {
   var typeOptions = metadataSets['type']
   var i = 0;
   classOptions.forEach(option => {
-    var color = colorsOpts[i].hex()
-    colorsUsed.push(color)
-
     classTypeDict.push({
       'class': option,
       title: option, 
       'subtypes': [],
       visible: true,
-      color: color
+      color: chroma(colorsOpts[i]).hex()
     })
 
     i++
   })
   classTypeDict.forEach(cClass => {
     typeOptions.forEach(option => {
+      let color;
+      if (option === 'production') {
+        color = chroma(cClass.color).brighten().hex()
+      } else if (option === 'test') {
+        color = chroma(cClass.color).darken().hex()
+      } else {
+        color = cClass.color
+      }
+      colors.push(color)
+
       cClass.subtypes.push({
         'type': option,
         title: option, 
         visible: true,
-        color: cClass.color
+        color: color
       })
     })
   })
-  return classTypeDict
+  return [classTypeDict, colors]
 }
 
 // then we take the data format that were given by the server for points
@@ -95,7 +127,8 @@ var dataToPlotter = function(testData, classTypeDict) {
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
     var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
-    dataToPlot.push([data[0], data[1], 1, objectIndex])
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
+    dataToPlot.push([data[0], data[1], 1, (objectIndex*3) + typeIndexOffset])
   })
   return dataToPlot
 }
@@ -117,8 +150,11 @@ function Embeddings() {
     getEmbeddings(data => {
       var dataFromServer = JSON.parse(data)
       var metadataSets = generateMetadataSets(dataFromServer)
-      var classTypeDict = generateLeftSidebarObject(metadataSets)
-      setColorsUsed(colorsOpts.slice(0,classTypeDict.length).map(color => color.hex()))
+      var response = generateLeftSidebarObject(metadataSets)
+      var classTypeDict = response[0]
+      var colors = response[1]
+      setColorsUsed(colors)
+      
       var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
