@@ -29,3 +29,5 @@ check_isort:
 	isort --check \
     `git ls-files 'examples/*.py' 'chroma/*.py'`
 
+pytest:
+	pytest
