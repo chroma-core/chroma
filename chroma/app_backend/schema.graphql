@@ -5,15 +5,15 @@ schema {
     mutation: Mutation
 }
 
-type EmbeddingsResult {
+type DataPointsResult {
     data: String
 }
 
 type Query {
-    embeddings: EmbeddingsResult!
+    datapoints: DataPointsResult!
 }
 
 # had to have something in here to not throw an error
 type Mutation {
-    markDone(embeddingID: String!): EmbeddingsResult!
+    markDone(pointID: String!): DataPointsResult!
 }

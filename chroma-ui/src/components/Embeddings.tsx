@@ -18,14 +18,14 @@ function getEmbeddings(cb) {
     },
     body: JSON.stringify({
       query: `query fetchAllEmbeddings {
-        embeddings {
+        datapoints {
           data
         }
       }`,
     }),
   })
     .then(res => res.json())
-    .then(res => cb(res.data.embeddings.data))
+    .then(res => cb(res.data.datapoints.data))
     .catch(console.error)
 }
 
