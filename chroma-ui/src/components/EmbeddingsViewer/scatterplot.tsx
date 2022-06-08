@@ -22,13 +22,7 @@ export default function scatterplot (points, colorsScale, opts) {
 		});
 		scatterplot.set({ backgroundColor: '#F3F5F6' }); 
 		scatterplot.draw(points);
-
-		const getOpacityRange = () =>
-			Array(10)
-        .fill()
-        .map((x, i) => ((i + 1) / 10));
-
-		scatterplot.set({ opacity: getOpacityRange() });
+		scatterplot.set({ opacity: [0,1] });
 		scatterplot.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5,  });
 		scatterplot.subscribe('select', opts.selectHandler);
 		scatterplot.subscribe('deselect', opts.deselectHandler);

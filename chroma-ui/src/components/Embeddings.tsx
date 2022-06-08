@@ -110,7 +110,17 @@ var dataToPlotter = function(testData, classTypeDict) {
     // color map for the classes are set in scatterplot
     var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
     var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
-    dataToPlot.push([data[0], data[1], 1, (objectIndex*3) + typeIndexOffset])
+    var classVisible = classTypeDict[objectIndex].visible
+    var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
+
+    var opacity = 1
+    if (!typeVisble) {
+      opacity = 0
+    } else if (!classVisible) {
+      opacity = 0
+    }
+    
+    dataToPlot.push([data[0], data[1], opacity, (objectIndex*3) + typeIndexOffset])
   })
   return dataToPlot
 }
@@ -171,6 +181,7 @@ function Embeddings() {
     classDict[objectIndex].visible = !currentVisibility
     classDict[objectIndex].subtypes.forEach((subtype) => subtype.visible = !currentVisibility)
     setClassDict([...classDict])
+    updatePointVisiblity()
   }
   function typeClicked(returnObject: string): void { 
     var objectIndex = classDict.findIndex((t, index)=>t.title === returnObject.classTitle);
@@ -178,6 +189,11 @@ function Embeddings() {
     var currentVisibility = classDict[objectIndex].subtypes[subTypeIndex].visible
     classDict[objectIndex].subtypes[subTypeIndex].visible = !currentVisibility
     setClassDict([...classDict])
+    updatePointVisiblity()
+  }
+
+  function updatePointVisiblity() {
+    setPoints(dataToPlotter(serverData, classDict))
   }
 
   // Right sidebar functions passed down
