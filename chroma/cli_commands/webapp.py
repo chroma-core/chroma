@@ -2,7 +2,7 @@ import typer
 import os
 import time
 import subprocess
-from todoer.cli_commands.multi_command import MultiCommand, SubCommand
+from chroma.cli_commands.multi_command import MultiCommand, SubCommand
 import pathlib
 
 typer_app = typer.Typer()
@@ -20,7 +20,7 @@ def run():
     backend_env = os.environ.copy()
     backend_env["FLASK_APP"] = "main.py"
     backend_env["FLASK_ENV"] = "development"
-    backend_directory = "/".join((base_dir, 'backend'))
+    backend_directory = "/".join((base_dir, 'app_backend'))
     multicommand.append_threaded_command("webserver", SubCommand(
         multicommand,
         name="webserver",

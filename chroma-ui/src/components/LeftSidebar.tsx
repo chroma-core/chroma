@@ -24,7 +24,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
 
   return (
       <Flex 
-        direction="column" w='300px' 
+        direction="column" 
+        minWidth={300} 
         bg={theme.colors.ch_gray.medium}
         borderRight="1px"
         borderLeft="1px"

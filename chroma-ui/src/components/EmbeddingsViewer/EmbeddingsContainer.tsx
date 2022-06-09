@@ -36,46 +36,23 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     }
   }, [points])
 
-  // all the commented out code in this file has to do with resizing 
-  // the webgl canvas... i havent figured it out yet
-
-  // useEffect(() => {
-  //   const resizeListener = () => {
-  //     config.scatterplot.resizeHandler()
-  //      var canvas = document.getElementById("regl-canvas")
-  //     var container = canvas?.parentElement
-  //     canvas.height = container?.offsetHeight
-  //     canvas.width = container?.offsetWidth
-  //   };
-  //   window.addEventListener('resize', resizeListener);
-  //   return () => {
-  //     window.removeEventListener('resize', resizeListener);
-  //   }
-  // }, [config])
-
-  // useEffect(() => {
-  //   // timeoutId for debounce mechanism
-  //   let timeoutId = null;
-  //   const resizeListener = () => {
-  //     // var canvas = document.getElementById("regl-canvas")
-  //     // var container = canvas?.parentElement
-  //     // canvas.height = container?.clientHeight
-  //     // canvas.width = container?.clientWidth
-  //     console.log('resize', config)
-  //   };
-  //   window.addEventListener('resize', resizeListener);
-  //   return () => {
-  //     window.removeEventListener('resize', resizeListener);
-  //   }
-  // }, [])
+  useEffect(() => {
+    const resizeListener = () => {
+      var canvas = document.getElementById("regl-canvas")
+      var container = document.getElementById("regl-canvas-container")
+      canvas.style.width = container?.clientWidth + "px"
+      canvas.style.height = container?.clientHeight + "px"
+    };
+    window.addEventListener('resize', resizeListener);
+    return () => {
+      window.removeEventListener('resize', resizeListener);
+    }
+  }, [])
     
   function getRef (ref) {
     if (!ref) return;
 
     if (!reglInitialized && (points !== null)) {
-      // const dimensions = getCanvasParentDimensions(ref)
-      // ref.width = dimensions.w;
-      // ref.height = dimensions.h;
 
       scatterplot(points, 
         colors,
@@ -96,18 +73,8 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     } 
   } 
 
-  // function getCanvasParentDimensions(ref) {
-  //   var parent = ref.parentNode,
-  //       styles = getComputedStyle(parent),
-  //       w = parseInt(styles.getPropertyValue("width"), 10),
-  //       h = parseInt(styles.getPropertyValue("height"), 10);
-  //   ref.width = w;
-  //   ref.height = h;
-  //   return {w: w, h:h}
-  // }
-
   return (
-    <Box flex='1' cursor={cursor}>
+    <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0}>
       <canvas 
         id="regl-canvas"
         ref={getRef.bind(this)} 

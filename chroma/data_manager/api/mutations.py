@@ -1,8 +1,8 @@
 import json
 from ariadne import convert_kwargs_to_snake_case
 
-from data_manager.api import db
-from data_manager.api.models import Embedding
+from chroma.data_manager.api import db
+from chroma.data_manager.api.models import Embedding
 
 
 @convert_kwargs_to_snake_case
