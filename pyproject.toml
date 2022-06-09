@@ -50,4 +50,4 @@ profile = "black"
 case_sensitive=true
 
 # profile=black just sets defaults, it won't read our line-length override in black's config
-line_length=100
+line_length=120
