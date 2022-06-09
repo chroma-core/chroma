@@ -20,7 +20,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
   var lassoSelected = (toolSelected === 'lasso')
 
   const { colorMode } = useColorMode()
-  const bgColor = { light: 'gray.50', dark: 'gray.800' }
+  const bgColor = { light: "#F3F5F6", dark: '#0c0c0b' }
 
   const handleKeyPress = useCallback((event) => {
     if (event.key === 'v') {

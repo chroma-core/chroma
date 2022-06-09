@@ -13,7 +13,7 @@ interface LeftSidebarProps {
 const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, classDict }) => {
   const theme = useTheme();
   const { colorMode } = useColorMode()
-  const bgColor = { light: 'gray.50', dark: 'gray.800' }
+  const bgColor = { light: "#F3F5F6", dark: '#0c0c0b' }
 
   if (classDict === undefined) {
     classDict = [{

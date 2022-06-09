@@ -12,7 +12,8 @@ const defaultTheme = extendTheme({
       light: "#F3F5F6", 
       medium: "#E3E4DF", 
       medium_dark: "#C2C5B9", 
-      dark: "#272622"
+      dark: "#272622",
+      black: "#0c0c0b"
     },
     ch_blue: "#3A76E5",
     ch_orange: "#EA5412",

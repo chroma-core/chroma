@@ -17,9 +17,10 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   let [reglInitialized, setReglInitialized] = useState(false);
   let [config, setConfig] = useState({})
 
-  const { colorMode } = useColorMode()
-  const bgColor = { light: 'white', dark: 'black' }
   const theme = useTheme();
+  const { colorMode } = useColorMode()
+  const bgColor = { light: "#F3F5F6", dark: "#0c0c0b" }
+ 
   
   if (reglInitialized && (points !== null)) {
     if (toolSelected == 'lasso') {
