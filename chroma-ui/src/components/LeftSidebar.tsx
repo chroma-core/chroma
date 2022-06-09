@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React from 'react';
-import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon } from '@chakra-ui/react'
+import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, useColorMode } from '@chakra-ui/react'
 import { BsFillSquareFill } from 'react-icons/bs';
 import SidebarButton from './Shared/SidebarButton';
 
@@ -12,6 +12,8 @@ interface LeftSidebarProps {
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, classDict }) => {
   const theme = useTheme();
+  const { colorMode } = useColorMode()
+  const bgColor = { light: 'gray.50', dark: 'gray.800' }
 
   if (classDict === undefined) {
     classDict = [{
@@ -26,6 +28,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
       <Flex 
         direction="column" 
         minWidth={300} 
+        bg={bgColor[colorMode]} 
         // bg={theme.colors.ch_gray.medium}
         borderRight="1px"
         borderLeft="1px"
@@ -40,15 +43,15 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
           },
         }}
         pt={16}>
-        <Flex>
+        <Flex key="buttons">
             <Button variant='ghost' size='sm' disabled>Classes</Button>
             {/* <Button variant='ghost' size='sm'>Filter</Button> */}
         </Flex>
         <Divider w="100%" pt={2}/>
         <Flex direction="column" mt={2}>
-          {classDict.map(function(chClass){
+          {classDict.map(function(chClass, index){
             return (
-              <>
+              <React.Fragment key={index}>
                 <SidebarButton 
                 text={chClass.title}
                 symbol="square" 
@@ -56,7 +59,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
                 color={chClass.color}
                 indent={0}
                 classTitle={chClass.title}
-                key={chClass.title}
+                keyName={chClass.title}
                 onClick={classClicked}
               ></SidebarButton>
               
@@ -68,13 +71,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
                 symbol="circle" 
                 color={chType.color} 
                 classTitle={chClass.title}
-                key={chClass.title + chType.title}
+                key={chType.title}
                 indent={6}
                 onClick={typeClicked}>
                 </SidebarButton>
                 )
               })}
-            </>
+            </React.Fragment>
           )
         })}
       </Flex>

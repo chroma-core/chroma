@@ -1,7 +1,7 @@
 //@ts-nocheck
 import React, { useState, useEffect, useRef } from 'react'
 import scatterplot from './scatterplot'
-import { Box, useTheme } from '@chakra-ui/react'
+import { Box, useTheme, useColorMode } from '@chakra-ui/react'
 
 interface EmbeddingsContainerProps {
   points: any[][]
@@ -17,6 +17,7 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   let [reglInitialized, setReglInitialized] = useState(false);
   let [config, setConfig] = useState({})
 
+  const { colorMode } = useColorMode()
   const theme = useTheme();
   
   if (reglInitialized && (points !== null)) {
@@ -28,6 +29,13 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     if (unselectedPoints.length !== 0) {
       config.scatterplot.deselectIds(unselectedPoints)
     }
+
+    // if (colorMode === 'light') {
+    //   scatterplot.set({ backgroundColor: '#F3F5F6' }); 
+    // } else if (colorMode === 'dark') {
+    //   scatterplot.set({ backgroundColor: '#111111' }); 
+    // }
+  
   }
 
   useEffect(() => {

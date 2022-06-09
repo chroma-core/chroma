@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flex, Text, Box, Button, IconButton, useTheme, Divider, Badge, Spacer } from '@chakra-ui/react'
+import { Flex, Text, Box, Button, IconButton, useTheme, Divider, Badge, Spacer, useColorMode } from '@chakra-ui/react'
 import { GiExpand } from 'react-icons/gi';
 import { GrClose } from 'react-icons/gr';
 
@@ -30,11 +30,14 @@ interface Hash<T> {
 
 const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected, clearSelected, serverData }) => {
   const theme = useTheme();
+  const { colorMode } = useColorMode()
+  const bgColor = { light: 'gray.50', dark: 'gray.800' }
 
   return (
     <Flex 
       direction="column" 
       minWidth={300} 
+      bg={bgColor[colorMode]}
       // bg={theme.colors.ch_gray.medium}
       borderRight="1px"
       borderLeft="1px"

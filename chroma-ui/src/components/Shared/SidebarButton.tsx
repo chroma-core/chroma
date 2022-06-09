@@ -22,9 +22,10 @@ interface SidebarButtonProps {
     onClick?: ({}) => void,
     visible: boolean,
     classTitle: string
+    keyName: string
 }
   
-const SidebarButton: React.FC<SidebarButtonProps> = ({ symbol, text, color, indent, onClick, visible = true, classTitle }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, onClick, visible = true, classTitle }) => {
   var icon: string = (visible === true) ? 'show' : 'hide'
   var opacity: string = (visible === true) ? "100%" : "30%"
 
@@ -34,9 +35,9 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ symbol, text, color, inde
       "classTitle": classTitle
     })
   }
-  
+
   return (
-    <Button justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
+    <Button width={{ base: '100%' }} key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
         <Flex justify="space-between" wrap="wrap" width="100%">
           <Box>
             <Icon as={IconMap[symbol] as any} color={color} mr={2} />
