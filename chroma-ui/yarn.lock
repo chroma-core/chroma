@@ -2468,6 +2468,11 @@
   dependencies:
     "@types/node" "*"
 
+"@types/chroma-js@^2.0.0":
+  version "2.1.3"
+  resolved "https://registry.npmjs.org/@types/chroma-js/-/chroma-js-2.1.3.tgz"
+  integrity sha512-1xGPhoSGY1CPmXLCBcjVZSQinFjL26vlR8ZqprsBWiFyED4JacJJ9zHhh5aaUXqbY9B37mKQ73nlydVAXmr1+g==
+
 "@types/connect-history-api-fallback@^1.3.5":
   version "1.3.5"
   resolved "https://registry.npmjs.org/@types/connect-history-api-fallback/-/connect-history-api-fallback-1.3.5.tgz"
@@ -3700,6 +3705,11 @@ chokidar@^3.4.2, chokidar@^3.5.3:
   optionalDependencies:
     fsevents "~2.3.2"
 
+chroma-js@^2.1.0:
+  version "2.4.2"
+  resolved "https://registry.npmjs.org/chroma-js/-/chroma-js-2.4.2.tgz"
+  integrity sha512-U9eDw6+wt7V8z5NncY2jJfZa+hUH8XEj8FQHgFJTrUFnJfXYf4Ml4adI2vXZOjqRDpFWtYVWypDfZwnJ+HIR4A==
+
 chrome-trace-event@^1.0.2:
   version "1.0.3"
   resolved "https://registry.npmjs.org/chrome-trace-event/-/chrome-trace-event-1.0.3.tgz"
@@ -4320,6 +4330,15 @@ dir-glob@^3.0.1:
   integrity sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==
   dependencies:
     path-type "^4.0.0"
+
+distinct-colors@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.npmjs.org/distinct-colors/-/distinct-colors-3.0.0.tgz"
+  integrity sha512-ID2CzFkvsdhkm4IVpUYxCcUpB6GspIvVW8dLSWFjIwJzV5kNOoayegfgDyyzcWkOWWMAFc1cyEhdtFH868AfYQ==
+  dependencies:
+    "@types/chroma-js" "^2.0.0"
+    chroma-js "^2.1.0"
+    mout "^1.2.2"
 
 dlv@^1.1.3:
   version "1.1.3"
@@ -5102,7 +5121,7 @@ flatted@^3.1.0:
 
 focus-lock@^0.11.2:
   version "0.11.2"
-  resolved "https://registry.yarnpkg.com/focus-lock/-/focus-lock-0.11.2.tgz#aeef3caf1cea757797ac8afdebaec8fd9ab243ed"
+  resolved "https://registry.npmjs.org/focus-lock/-/focus-lock-0.11.2.tgz"
   integrity sha512-pZ2bO++NWLHhiKkgP1bEXHhR1/OjVcSvlCJ98aNJDFeb7H5OOQaO+SKOZle6041O9rv2tmbrO4JzClAvDUHf0g==
   dependencies:
     tslib "^2.0.3"
@@ -6869,6 +6888,11 @@ mkdirp@~0.5.1:
   dependencies:
     minimist "^1.2.6"
 
+mout@^1.2.2:
+  version "1.2.3"
+  resolved "https://registry.npmjs.org/mout/-/mout-1.2.3.tgz"
+  integrity sha512-vtE+eZcSj/sBkIp6gxB87MznryWP+gHIp0XX9SKrzA5TAkvz6y7VTuNruBjYdJozd8NY5i9XVIsn8cn3SwNjzg==
+
 ms@2.0.0:
   version "2.0.0"
   resolved "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz"
@@ -8070,7 +8094,7 @@ react-focus-lock@2.5.2:
 
 react-focus-lock@^2.9.1:
   version "2.9.1"
-  resolved "https://registry.yarnpkg.com/react-focus-lock/-/react-focus-lock-2.9.1.tgz#094cfc19b4f334122c73bb0bff65d77a0c92dd16"
+  resolved "https://registry.npmjs.org/react-focus-lock/-/react-focus-lock-2.9.1.tgz"
   integrity sha512-pSWOQrUmiKLkffPO6BpMXN7SNKXMsuOakl652IBuALAu1esk+IcpJyM+ALcYzPTTFz1rD0R54aB9A4HuP5t1Wg==
   dependencies:
     "@babel/runtime" "^7.0.0"
