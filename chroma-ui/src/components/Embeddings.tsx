@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import React, { useEffect, useState } from 'react';
-import { useTheme } from '@chakra-ui/react'
+import { useTheme, Spinner, Center } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -210,6 +210,11 @@ function Embeddings() {
 
   return (
     <div>
+      {(points === null) ?
+      <Center height="100vh">
+       <Spinner size='xl'/>
+      </Center>
+      :
       <PageContainer>
         <Header
           toolSelected={toolSelected}
@@ -237,6 +242,7 @@ function Embeddings() {
           serverData={serverData}
         ></RightSidebar>
       </PageContainer>
+      }
     </div>
   );
 }
