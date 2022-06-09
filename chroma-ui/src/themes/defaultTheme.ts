@@ -5,7 +5,7 @@ const defaultTheme = extendTheme({
   fonts: {
     body: 'Inter, system-ui, sans-serif',
     heading: 'Inter, serif',
-    mono: 'Menlo, monospace',
+    mono: 'IBM Plex Mono, monospace',
   },
   colors: {
     ch_gray: {
