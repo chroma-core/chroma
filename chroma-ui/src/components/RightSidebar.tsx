@@ -11,15 +11,21 @@ interface RightSidebarProps {
   selectedPoints: []
   tagSelected: () => void
   clearSelected: any
+  serverData: []
 }
 
-const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected, clearSelected }) => {
-  const theme = useTheme()
+interface Hash<T> {
+  [key: string]: T;
+}
+
+const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected, clearSelected, serverData }) => {
+  const theme = useTheme();
 
   return (
-    <Flex
-      direction="column"
-      w="300px"
+    <Flex 
+      direction="column" 
+      minWidth={300} 
+      maxWidth={300}
       bg={theme.colors.ch_gray.medium}
       borderRight="1px"
       borderLeft="1px"
@@ -46,44 +52,49 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
           <PopoverForm tagSelected={tagSelected}></PopoverForm>
         </Flex>
       </Flex>
-      <Divider w="100%" pt={2} />
-
-      {selectedPoints.map(function (point) {
-        return (
-          <Box mt={3} bgColor={theme.colors.ch_gray.light} pr={0} borderRadius={5} pl={4}>
-            <Flex flex="row" align="center" justify="space-between" wrap="wrap" width="100%" mb={3}>
-              <Text fontSize="sm" fontWeight={600} fontFamily="mono" width="200px">
-                {point}
-              </Text>
-              <Flex>
-                {/* <IconButton aria-label='Search database' icon={<GiExpand />} variant='ghost'/> */}
-                <IconButton
-                  aria-label="Clear"
-                  onClick={() => clearSelected([point])}
-                  icon={<GrClose />}
-                  variant="ghost"
-                />
-              </Flex>
-              {/* <Spacer />
+      <Divider w="100%" pt={2}/>
+      
+          {selectedPoints.map(function(point){
+            let metadata: Hash<string> = serverData[point][2]
+            return (
+              <Box 
+                mt={3}
+                bgColor={theme.colors.ch_gray.light} 
+                pr={0} 
+                borderRadius={5}
+                pl={4}
+                key={point}
+                >
+                <Flex flex="row" align="center" justify="space-between" wrap="wrap" width="100%" mb={3}>
+                  <Text fontSize='sm' fontWeight={600} fontFamily="mono" width="200px">{point}</Text>
+                  <Flex>
+                    {/* <IconButton aria-label='Search database' icon={<GiExpand />} variant='ghost'/> */}
+                    <IconButton aria-label='Clear' onClick={() => clearSelected([point])} icon={<GrClose />} variant='ghost'  />
+                  </Flex>
+                  <Spacer />
                   <TableContainer>
                     <Table variant='simple' size="sm" fontFamily="mono">
                       <Tbody>
+                      {Object.entries(metadata).map(([key, val]) => {
+                        return (
                         <Tr>
-                          <Td p={1} pl={0} fontSize="xs">inches</Td>
-                          <Td p={1} fontSize="xs">millimetres (mm)</Td>
+                          <Td p={1} pl={0} fontSize="xs">{key}</Td>
+                          <Td p={1} fontSize="xs">{val}</Td>
                         </Tr>
-                        <Tr>
+                        )
+                        })
+                        /* <Tr>
                           <Td p={1} pl={0} fontSize="xs">feet</Td>
                           <Td p={1} fontSize="xs">centimetres (cm)</Td>
                         </Tr>
                         <Tr>
                           <Td p={1} pl={0} fontSize="xs">yards</Td>
                           <Td p={1} fontSize="xs">metres (m)</Td>
-                        </Tr>
+                        </Tr> */}
                       </Tbody>
                     </Table>
                   </TableContainer>
-                  <Divider bgColor={theme.colors.ch_gray.medium} />
+                  {/* <Divider bgColor={theme.colors.ch_gray.medium} />
                   <Flex pt={3} pb={3} wrap="wrap" rowGap={2} columnGap={2}>
                     <Badge variant='subtle' bgColor={theme.colors.ch_gray.medium} textTransform="none" fontFamily="mono" >Default</Badge>
                     <Badge variant='subtle' bgColor={theme.colors.ch_gray.medium} textTransform="none" fontFamily="mono" >Hello</Badge>

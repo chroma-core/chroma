@@ -10,17 +10,11 @@ interface EmbeddingsContainerProps {
   selectHandler: () => void
   unselectedPoints: []
   cursor: string
+  colors: []
 }
 
-const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({
-  points,
-  toolSelected,
-  deselectHandler,
-  selectHandler,
-  unselectedPoints,
-  cursor,
-}) => {
-  let [reglInitialized, setReglInitialized] = useState(false)
+const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor, colors }) => {
+  let [reglInitialized, setReglInitialized] = useState(false);
   let [config, setConfig] = useState({})
 
   const theme = useTheme()
@@ -42,77 +36,46 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({
     }
   }, [points])
 
-  // all the commented out code in this file has to do with resizing
-  // the webgl canvas... i havent figured it out yet
-
-  // useEffect(() => {
-  //   const resizeListener = () => {
-  //     config.scatterplot.resizeHandler()
-  //      var canvas = document.getElementById("regl-canvas")
-  //     var container = canvas?.parentElement
-  //     canvas.height = container?.offsetHeight
-  //     canvas.width = container?.offsetWidth
-  //   };
-  //   window.addEventListener('resize', resizeListener);
-  //   return () => {
-  //     window.removeEventListener('resize', resizeListener);
-  //   }
-  // }, [config])
-
-  // useEffect(() => {
-  //   // timeoutId for debounce mechanism
-  //   let timeoutId = null;
-  //   const resizeListener = () => {
-  //     // var canvas = document.getElementById("regl-canvas")
-  //     // var container = canvas?.parentElement
-  //     // canvas.height = container?.clientHeight
-  //     // canvas.width = container?.clientWidth
-  //     console.log('resize', config)
-  //   };
-  //   window.addEventListener('resize', resizeListener);
-  //   return () => {
-  //     window.removeEventListener('resize', resizeListener);
-  //   }
-  // }, [])
-
-  function getRef(ref) {
-    if (!ref) return
-
-    if (!reglInitialized && points !== null) {
-      // const dimensions = getCanvasParentDimensions(ref)
-      // ref.width = dimensions.w;
-      // ref.height = dimensions.h;
-
-      scatterplot(points, {
-        pixelRatio: Math.min(1.5, window.devicePixelRatio),
-        canvas: ref,
-        deselectHandler: deselectHandler,
-        selectHandler: selectHandler,
-      })
-        .then((config) => {
-          setReglInitialized(true)
-          setConfig(config)
-        })
-        .catch((err) => {
-          console.error('could not setup regl')
-          setReglInitialized(false)
-        })
+  useEffect(() => {
+    const resizeListener = () => {
+      var canvas = document.getElementById("regl-canvas")
+      var container = document.getElementById("regl-canvas-container")
+      canvas.style.width = container?.clientWidth + "px"
+      canvas.style.height = container?.clientHeight + "px"
+    };
+    window.addEventListener('resize', resizeListener);
+    return () => {
+      window.removeEventListener('resize', resizeListener);
     }
-  }
+  }, [])
+    
+  function getRef (ref) {
+    if (!ref) return;
 
-  // function getCanvasParentDimensions(ref) {
-  //   var parent = ref.parentNode,
-  //       styles = getComputedStyle(parent),
-  //       w = parseInt(styles.getPropertyValue("width"), 10),
-  //       h = parseInt(styles.getPropertyValue("height"), 10);
-  //   ref.width = w;
-  //   ref.height = h;
-  //   return {w: w, h:h}
-  // }
+    if (!reglInitialized && (points !== null)) {
+
+      scatterplot(points, 
+        colors,
+        {
+          pixelRatio: Math.min(1.5, window.devicePixelRatio),
+          canvas: ref,
+          deselectHandler: deselectHandler,
+          selectHandler: selectHandler
+        }
+      ).then(config => {
+        setReglInitialized(true)
+        setConfig(config)
+        
+      }).catch(err => {
+        console.error("could not setup regl")
+        setReglInitialized(false)
+      });
+    } 
+  } 
 
   return (
-    <Box flex="1" cursor={cursor}>
-      <canvas
+    <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0}>
+      <canvas 
         id="regl-canvas"
         ref={getRef.bind(this)}
         style={{ backgroundColor: theme.colors.ch_gray.light, height: '100%', width: '100%' }}

@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState } from 'react'
 import { useTheme } from '@chakra-ui/react'
-import PageContainer from './containers/PageContainer'
-import Header from './Header'
-import RightSidebar from './RightSidebar'
-import LeftSidebar from './LeftSidebar'
-import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer'
-// import testDataArray from './testData';
+import PageContainer from './containers/PageContainer';
+import Header from './Header';
+import RightSidebar from './RightSidebar';
+import LeftSidebar from './LeftSidebar';
+import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
+import distinctColors from 'distinct-colors'
+import chroma from "chroma-js" // nothing to do with us! a color library
 
 function getEmbeddings(cb) {
   fetch(`/graphql`, {
@@ -47,33 +48,56 @@ var generateMetadataSets = function (testData) {
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
-var generateLeftSidebarObject = function (metadataSets) {
+var generateLeftSidebarObject = function(metadataSets) {
+  var numberOfColors = metadataSets['class'].size
+
+  // https://medialab.github.io/iwanthue/
+  let colorsOpts = distinctColors({
+    "count": numberOfColors, 
+    "lightMin": 20,
+    "lightMax": 80,
+    "chromaMin": 80
+  })
+
+  var colors = []
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
-  let colorsOpts = ['blue', 'orange', 'green', 'red']
   var classTypeDict = []
   var classOptions = metadataSets['class']
   var typeOptions = metadataSets['type']
-  classOptions.forEach((option) => {
+  var i = 0;
+  classOptions.forEach(option => {
     classTypeDict.push({
       class: option,
       title: option,
       subtypes: [],
       visible: true,
-      color: colorsOpts.shift(),
+      color: chroma(colorsOpts[i]).hex()
     })
+
+    i++
   })
-  classTypeDict.forEach((cClass) => {
-    typeOptions.forEach((option) => {
+  classTypeDict.forEach(cClass => {
+    typeOptions.forEach(option => {
+      let color;
+      if (option === 'production') {
+        color = chroma(cClass.color).brighten().hex()
+      } else if (option === 'test') {
+        color = chroma(cClass.color).darken().hex()
+      } else {
+        color = cClass.color
+      }
+      colors.push(color)
+
       cClass.subtypes.push({
         type: option,
         title: option,
         visible: true,
-        color: cClass.color,
+        color: color
       })
     })
   })
-  return classTypeDict
+  return [classTypeDict, colors]
 }
 
 // then we take the data format that were given by the server for points
@@ -84,8 +108,19 @@ var dataToPlotter = function (testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data[2]['class'])
-    dataToPlot.push([data[0], data[1], 1, objectIndex])
+    var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
+    var classVisible = classTypeDict[objectIndex].visible
+    var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
+
+    var opacity = 1
+    if (!typeVisble) {
+      opacity = 0
+    } else if (!classVisible) {
+      opacity = 0
+    }
+    
+    dataToPlot.push([data[0], data[1], opacity, (objectIndex*3) + typeIndexOffset])
   })
   return dataToPlot
 }
@@ -93,31 +128,31 @@ var dataToPlotter = function (testData, classTypeDict) {
 function Embeddings() {
   const theme = useTheme()
 
-  let colors = [
-    { orange: theme.colors.ch_orange },
-    { red: theme.colors.ch_red },
-    { blue: theme.colors.ch_blue },
-    { green: theme.colors.ch_green },
-  ]
-
-  let [points, setPoints] = useState<any>(null)
-  let [toolSelected, setToolSelected] = useState<any>('cursor')
-  let [cursor, setCursor] = useState('grab')
+  let [serverData, setServerData] = useState<any>([]);
+  let [points, setPoints] = useState<any>(null);
+  let [toolSelected, setToolSelected] = useState<any>('cursor');
+  let [cursor, setCursor] = useState('grab');
   let [selectedPoints, setSelectedPoints] = useState([]) // callback from regl-scatterplot
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
   let [classDict, setClassDict] = useState(undefined) // object that renders the left sidebar
+  let [colorsUsed, setColorsUsed] = useState([])
 
   // set up data onload
   useEffect(() => {
-    getEmbeddings((data) => {
-      var serverData = JSON.parse(data)
-      var metadataSets = generateMetadataSets(serverData)
-      var classTypeDict = generateLeftSidebarObject(metadataSets)
-      var dataToPlot = dataToPlotter(serverData, classTypeDict)
+    getEmbeddings(data => {
+      var dataFromServer = JSON.parse(data)
+      var metadataSets = generateMetadataSets(dataFromServer)
+      var response = generateLeftSidebarObject(metadataSets)
+      var classTypeDict = response[0]
+      var colors = response[1]
+      setColorsUsed(colors)
+      
+      var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
-    })
-  }, [])
+      setServerData(dataFromServer)
+    } )
+  }, []);
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: selectedPoints }) => {
@@ -146,6 +181,7 @@ function Embeddings() {
     classDict[objectIndex].visible = !currentVisibility
     classDict[objectIndex].subtypes.forEach((subtype) => (subtype.visible = !currentVisibility))
     setClassDict([...classDict])
+    updatePointVisiblity()
   }
   function typeClicked(returnObject: string): void {
     var objectIndex = classDict.findIndex((t, index) => t.title === returnObject.classTitle)
@@ -153,6 +189,11 @@ function Embeddings() {
     var currentVisibility = classDict[objectIndex].subtypes[subTypeIndex].visible
     classDict[objectIndex].subtypes[subTypeIndex].visible = !currentVisibility
     setClassDict([...classDict])
+    updatePointVisiblity()
+  }
+
+  function updatePointVisiblity() {
+    setPoints(dataToPlotter(serverData, classDict))
   }
 
   // Right sidebar functions passed down
@@ -179,11 +220,13 @@ function Embeddings() {
           deselectHandler={deselectHandler}
           unselectedPoints={unselectedPoints}
           cursor={cursor}
-        ></EmbeddingsContainer>
-        <RightSidebar
+          colors={colorsUsed}
+          ></EmbeddingsContainer>
+        <RightSidebar 
           selectedPoints={selectedPoints}
           clearSelected={clearSelected}
           tagSelected={tagSelected}
+          serverData={serverData}
         ></RightSidebar>
       </PageContainer>
     </div>
