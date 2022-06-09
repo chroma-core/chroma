@@ -11,9 +11,10 @@ def resolve_datapoints(obj, info):
 
      projections = umap_project(vectors)
 
-     data = [[proj[0], proj[1], { "class": "forest", "type": "production","ml_model_version": "v2"}] for proj in projections]
+     datapoints = [{"x": proj[0], "y": proj[1], "metadata": json.dumps({ "class": "forest", "type": "production","ml_model_version": "v2"})} for proj in projections]
 
      payload = {
-         'data': json.dumps(str(data))
+         "success": True,
+         "datapoints": datapoints
      }
      return payload

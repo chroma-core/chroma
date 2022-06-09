@@ -18,13 +18,19 @@ function getEmbeddings(cb) {
     body: JSON.stringify({
       query: `query fetchAllEmbeddings {
         datapoints {
-          data
+          datapoints {
+            x,
+            y,
+            metadata
+          }
         }
       }`,
     }),
   })
     .then(res => res.json())
-    .then(res => cb(res.data.datapoints.data))
+    .then(res => {
+      cb(res.data.datapoints.datapoints)
+    })
     .catch(console.error)
 }
 
@@ -33,8 +39,9 @@ function getEmbeddings(cb) {
 var generateMetadataSets = function(testData) {
   var metadataSets = {}
   testData.forEach(data => {
+    let metadata = JSON.parse(data.metadata)
     // metadata stored in the third place in the array
-    for (const [k, v] of Object.entries(data[2])) {
+    for (const [k, v] of Object.entries(metadata)) {
       if (metadataSets[k] === undefined) {
         metadataSets[k] = new Set()
       } 
@@ -84,8 +91,9 @@ var dataToPlotter = function(testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
-    dataToPlot.push([data[0], data[1], 1, objectIndex])
+    let metadata = JSON.parse(data.metadata)
+    var objectIndex = classTypeDict.findIndex((t, index)=>t.title === metadata['class']);
+    dataToPlot.push([data.x, data.y, 1, objectIndex])
   })
   return dataToPlot
 }
@@ -109,8 +117,7 @@ function Embeddings() {
 
   // set up data onload
   useEffect(() => {
-    getEmbeddings(data => {
-      var serverData = JSON.parse(data)
+    getEmbeddings(serverData => {
       var metadataSets = generateMetadataSets(serverData)
       var classTypeDict = generateLeftSidebarObject(metadataSets)
       var dataToPlot = dataToPlotter(serverData, classTypeDict)
