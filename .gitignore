@@ -27,3 +27,6 @@ app_backend/*.db
 
 # ignore downloaded example data
 examples/data/
+
+# ignore python notebooks
+*.ipynb

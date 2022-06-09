@@ -53,6 +53,10 @@ class ChromaDataManager:
         result = self._client.execute(self.Queries._gql_get_all_embeddings)
         return result
 
+    async def get_embeddings_async(self):
+        result = await self._client.execute_async(self.Queries._gql_get_all_embeddings)
+        return result 
+        
     def store_embedding(self, data):
         params = {"data": data}
         result = self._client.execute(self.Queries._gql_create_embedding, variable_values=params)
