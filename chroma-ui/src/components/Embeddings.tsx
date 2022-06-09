@@ -155,7 +155,6 @@ function Embeddings() {
       setColorsUsed(colors)
       
       var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
-
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
       setServerData(dataFromServer)
