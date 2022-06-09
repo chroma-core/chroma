@@ -8,13 +8,10 @@ interface PageContainerProps {
 }
 
 const PageContainer: React.FC<PageContainerProps> = ({ children }) => {
-
   return (
     <>
       <Helmet defaultTitle="Chroma" />
-      <Flex minHeight="100vh">
-        {children}
-      </Flex>
+      <Flex minHeight="100vh">{children}</Flex>
     </>
   )
 }

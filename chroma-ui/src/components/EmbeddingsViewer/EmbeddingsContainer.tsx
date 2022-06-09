@@ -12,13 +12,20 @@ interface EmbeddingsContainerProps {
   cursor: string
 }
 
-const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor }) => {
-  let [reglInitialized, setReglInitialized] = useState(false);
+const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({
+  points,
+  toolSelected,
+  deselectHandler,
+  selectHandler,
+  unselectedPoints,
+  cursor,
+}) => {
+  let [reglInitialized, setReglInitialized] = useState(false)
   let [config, setConfig] = useState({})
 
-  const theme = useTheme();
-  
-  if (reglInitialized && (points !== null)) {
+  const theme = useTheme()
+
+  if (reglInitialized && points !== null) {
     if (toolSelected == 'lasso') {
       config.scatterplot.setLassoOverride(true)
     } else {
@@ -30,12 +37,12 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   }
 
   useEffect(() => {
-    if (reglInitialized && (points !== null)) {
+    if (reglInitialized && points !== null) {
       config.scatterplot.draw(points)
     }
   }, [points])
 
-  // all the commented out code in this file has to do with resizing 
+  // all the commented out code in this file has to do with resizing
   // the webgl canvas... i havent figured it out yet
 
   // useEffect(() => {
@@ -67,11 +74,11 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   //     window.removeEventListener('resize', resizeListener);
   //   }
   // }, [])
-    
-  function getRef (ref) {
-    if (!ref) return;
 
-    if (!reglInitialized && (points !== null)) {
+  function getRef(ref) {
+    if (!ref) return
+
+    if (!reglInitialized && points !== null) {
       // const dimensions = getCanvasParentDimensions(ref)
       // ref.width = dimensions.w;
       // ref.height = dimensions.h;
@@ -80,17 +87,18 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
         pixelRatio: Math.min(1.5, window.devicePixelRatio),
         canvas: ref,
         deselectHandler: deselectHandler,
-        selectHandler: selectHandler
-      }).then(config => {
-        setReglInitialized(true)
-        setConfig(config)
-        
-      }).catch(err => {
-        console.error("could not setup regl")
-        setReglInitialized(false)
-      });
-    } 
-  } 
+        selectHandler: selectHandler,
+      })
+        .then((config) => {
+          setReglInitialized(true)
+          setConfig(config)
+        })
+        .catch((err) => {
+          console.error('could not setup regl')
+          setReglInitialized(false)
+        })
+    }
+  }
 
   // function getCanvasParentDimensions(ref) {
   //   var parent = ref.parentNode,
@@ -103,11 +111,11 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   // }
 
   return (
-    <Box flex='1' cursor={cursor}>
-      <canvas 
+    <Box flex="1" cursor={cursor}>
+      <canvas
         id="regl-canvas"
-        ref={getRef.bind(this)} 
-        style={{ backgroundColor: theme.colors.ch_gray.light, height: "100%", width: "100%" }}
+        ref={getRef.bind(this)}
+        style={{ backgroundColor: theme.colors.ch_gray.light, height: '100%', width: '100%' }}
       ></canvas>
     </Box>
   )
