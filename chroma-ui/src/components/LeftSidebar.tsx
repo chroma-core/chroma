@@ -56,6 +56,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
                 color={chClass.color}
                 indent={0}
                 classTitle={chClass.title}
+                key={chClass.title}
                 onClick={classClicked}
               ></SidebarButton>
               
@@ -67,6 +68,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
                 symbol="circle" 
                 color={chClass.color} 
                 classTitle={chClass.title}
+                key={chClass.title + chType.title}
                 indent={6}
                 onClick={typeClicked}>
                 </SidebarButton>

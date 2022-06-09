@@ -7,7 +7,6 @@ import Header from './Header';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
-// import testDataArray from './testData';
 
 function getEmbeddings(cb) {
   fetch(`/graphql`, {
@@ -100,6 +99,7 @@ function Embeddings() {
     {'green': theme.colors.ch_green},
   ]
 
+  let [serverData, setServerData] = useState<any>([]);
   let [points, setPoints] = useState<any>(null);
   let [toolSelected, setToolSelected] = useState<any>('cursor');
   let [cursor, setCursor] = useState('grab');
@@ -110,12 +110,13 @@ function Embeddings() {
   // set up data onload
   useEffect(() => {
     getEmbeddings(data => {
-      var serverData = JSON.parse(data)
-      var metadataSets = generateMetadataSets(serverData)
+      var dataFromServer = JSON.parse(data)
+      var metadataSets = generateMetadataSets(dataFromServer)
       var classTypeDict = generateLeftSidebarObject(metadataSets)
-      var dataToPlot = dataToPlotter(serverData, classTypeDict)
+      var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
+      setServerData(dataFromServer)
     } )
   }, []);
 
@@ -192,6 +193,7 @@ function Embeddings() {
           selectedPoints={selectedPoints}
           clearSelected={clearSelected}
           tagSelected={tagSelected}
+          serverData={serverData}
         ></RightSidebar>
       </PageContainer>
     </div>
