@@ -1,4 +1,5 @@
 import { extendTheme } from '@chakra-ui/react'
+import { mode } from "@chakra-ui/theme-tools"
 
 const defaultTheme = extendTheme({
   fonts: {
@@ -33,6 +34,13 @@ const defaultTheme = extendTheme({
         borderRadius: "sm"
       }
     }
+  },
+  styles: {
+    global: (props:any) => ({
+      "html, body": {
+        background: mode("green", "white")(props),  //mode(light mode color, dark mode color)
+      },
+    }),
   },
 })
 

@@ -6,6 +6,7 @@ import { BsCursor } from 'react-icons/bs';
 import { BiSelection } from 'react-icons/bi';
 import { MdOutlineDraw } from 'react-icons/md';
 import {FaRegHandPaper} from 'react-icons/fa';
+import ColorToggle from './ColorToggle';
 
 interface HeaderProps {
   toolSelected: string
@@ -42,7 +43,8 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
       as="header" 
       position="fixed" 
       w="100%" 
-      bg={theme.colors.ch_gray.medium} height={14}
+      // bg={theme.colors.ch_gray.medium} 
+      height={14}
       borderBottom="1px"
       borderColor={theme.colors.ch_gray.dark}
       zIndex={10}
@@ -77,6 +79,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
         onClick={lassoClicked}
         pl={4} >Lasso</Button>    
         </Tooltip>
+        <ColorToggle/>
     </Flex>
   );
 }

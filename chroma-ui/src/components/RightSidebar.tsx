@@ -30,7 +30,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
     <Flex 
       direction="column" 
       minWidth={300} 
-      bg={theme.colors.ch_gray.medium}
+      // bg={theme.colors.ch_gray.medium}
       borderRight="1px"
       borderLeft="1px"
       borderColor={theme.colors.ch_gray.dark}
