@@ -1,14 +1,11 @@
 import os
 from os.path import isfile, getsize
-
-from data_manager.api import CHROMA_DATAMANAGER_DB_NAME, app, db
+from api import app, db
+from flask import request, jsonify, render_template
+from ariadne.constants import PLAYGROUND_HTML
 from ariadne import load_schema_from_path, make_executable_schema, \
     graphql_sync, snake_case_fallback_resolvers, ObjectType
-from ariadne.constants import PLAYGROUND_HTML
-from flask import request, jsonify
-from data_manager.api.queries import resolve_embeddings, resolve_embedding
-from data_manager.api.mutations import resolve_create_embedding, resolve_batch_create_embeddings, resolve_delete_embedding
-
+from api.queries import resolve_embeddings
 
 def isSQLite3(filename):
     print(os.getcwd())
@@ -23,33 +20,33 @@ def isSQLite3(filename):
 
     return header[:16].decode("utf-8") == 'SQLite format 3\x00'
 
-if not isSQLite3(CHROMA_DATAMANAGER_DB_NAME):
+if not isSQLite3('chroma.db'):
   db.create_all()
   print('No DB existed. Created DB.')
 else:
   print('DB in place')
 
-
+# setting up graphql "routes"
 query = ObjectType("Query")
-
 query.set_field("embeddings", resolve_embeddings)
-query.set_field("embedding", resolve_embedding)
 
 mutation = ObjectType("Mutation")
-mutation.set_field("createEmbedding", resolve_create_embedding)
-mutation.set_field("batchCreateEmbeddings", resolve_batch_create_embeddings)
-mutation.set_field("deleteEmbedding", resolve_delete_embedding)
 
 type_defs = load_schema_from_path("schema.graphql")
 schema = make_executable_schema(
     type_defs, query, mutation, snake_case_fallback_resolvers
 )
 
+@app.route("/")
+def my_index():
+    return render_template("index.html", flask_token="Hello world")
+
+# graphql playground
 @app.route("/graphql", methods=["GET"])
 def graphql_playground():
     return PLAYGROUND_HTML, 200
 
-
+# the one api endpoint for graphql
 @app.route("/graphql", methods=["POST"])
 def graphql_server():
     data = request.get_json()

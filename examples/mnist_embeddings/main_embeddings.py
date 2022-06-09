@@ -8,7 +8,7 @@ from functools import partial
 # Use the model as defined in training
 from main_training import Net
 
-from data_manager import data_manager
+from chroma import data_manager
 
 def get_and_store_layer_outputs(self, input, output, storage):
     storage.store_batch_embeddings(output.data.detach().tolist())

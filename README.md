@@ -1,33 +1,25 @@
-# End to end Todo example
+# Chroma
 
-This example demonstrates how to use together
-- React
-- Flask
-- Sqlite db
-- Pip package including monkey patching
-- using Graphql for networking
-- pip installed CLI
-- Bundling all the above into a pip package
+Embeddings, Projections, and more.
+
+## Tech decisions
 
 React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
-- `frontend`: react app
-- `todoer`: contains all python code, the core library and flask appp
+- `chroma-ui`: react app
+- `chroma`: contains all python code, the core library and flask apps
 - `examples`: example script that uses the pip package
-
-Currently this uses a simple todo list app to demonstrate this. You can 
-- list todos in the react app or in the pip package, both powerwered via the graphql flask API
-- create a todo via the react app or pip package
-- that's it, no update or deleting right now
 
 # Setup 
 
 ### The frontend
-The frontend uses (see all boilerplate dependencies in frontend/package.json):
+The frontend uses (see all boilerplate dependencies in chroma-ui/package.json):
 - React via Create React App
 
 Right now graphql queries are handwritten. This can be changed over to a number of libraries.
+
+We use a custom build of `regl-scatterplot`. Here is how to configure that
 
 ```
 # if you need node, follow these instructions https://formulae.brew.sh/formula/node
@@ -39,11 +31,23 @@ nvm install 16
  
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
 
-# cd into directory
-cd frontend
+# cd to your source where you have chroma and clone the repo
+git clone git@github.com:chroma-core/regl-scatterplot.git
+
+# build it
+cd regl-scatterplot
+npm install .
+yarn build
+
+# cd into chroma ui
+cd ../chroma/chroma-ui
+
+# optional cleanup if you have built regl-scatterplot before
+rm -rf node_modules
+rm package-lock.json
 
 # install dependencies
-yarn
+yarn install
 
 # run - this will load http://localhost:3000 in the browser
 yarn start
@@ -60,18 +64,18 @@ It runs on port 5000. You can view a graphql playground at http://127.0.0.1:5000
 
 ```
 # cd into directory
-cd todoer/backend
+cd chroma/backend
 
 # Create the virtual environment.
-python3 -m venv todo_api_env
+python3 -m venv chroma_env
 
 # load it in
-source todo_api_env/bin/activate
+source chroma_env/bin/activate
 
 # install dependencies
 pip install flask ariadne flask-sqlalchemy
 
-# set up db if todo.db doesn not exist
+# set up db if chroma.db doesn not exist
 # python
 # from main import db
 # db.create_all()
@@ -88,6 +92,10 @@ open http://127.0.0.1:5000/graphql
 
 The pip bundled flask app installs these above dependencies through `setup.cfg`. 
 
+### The data manager
+The data manager is a seperate flask app that only fetches and writes data.
+
+TODO: write more
 
 ### The pip package
 This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
@@ -104,22 +112,21 @@ pip install .
 #  pip install . --use-feature=in-tree-build builds it locally which can be convenient for looking in it
 
 # run the example
-cd ../examples
-python save_a_todo.py
+python examples/save.py
 ```
 
 Building for release (WIP instructions. These are basically right, but need further testing to verify they are 100%.)
 ```
 # manually build the react app (for now)
-cd frontend
+cd chroma-ui
 yarn build
 # this automatically copies a built version of the react app into the backend dir, the backend will serve up the react app
 
 # build sdist and bdist
 # BEWARE of caching! you might want to remove dist and the egg-info folder first
-rm -rf dist && rm -rf todoer.egg-info && python -m build
+rm -rf dist && rm -rf chroma.egg-info && python -m build
 
-# rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && open todoer-0.0.1 && cd ..
+# rm -rf dist && rm -rf chroma.egg-info && python -m build && cd dist && tar -xzf chroma-0.0.1.tar.gz && open chroma-0.0.1 && cd ..
 # this will drop the files in a dist folder
 
 # install twince to upload
@@ -139,26 +146,18 @@ python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
-Sqlite saves it's db to `todo.db` in the backend directory.
+Sqlite saves it's db to `chroma.db` in the backend directory.
 
 You can view this directly in terminal if you want to. 
 ```
 cd backend
 sqlite3
-.open todo.db
-select * from todo;
+.open chroma.db
+select * from chroma;
 .exit
 ```
 
-# Running, once setup
-
-### Running the frontend
-`yarn start`
-
-### Running the backend
-`FLASK_APP=main.py FLASK_ENV=development flask run`
-
-# Todos
+# TODOs
 - Test setup on linux
 
 # Reference URLs
@@ -173,26 +172,21 @@ Tutorials I referneced lashing this up:
 # Test flow
 
 ```
-cd todo_e2e_example
-rm -rf dist && rm -rf todoer.egg-info && python -m build && cd dist && tar -xzf todoer-0.0.1.tar.gz && cd ..
+cd chroma
+rm -rf dist && rm -rf chroma.egg-info && python -m build && cd dist && tar -xzf chroma-0.0.1.tar.gz && cd ..
 cd ..
 mkdir fresh_test
 cd fresh_test
 # grab the example script and pull it in
-pip uninstall -y todoer && pip install ../todo_e2e_example/dist/todoer-0.0.1.tar.gz
-todoer application run
+pip uninstall -y chroma && pip install ../chroma/dist/chroma-0.0.1.tar.gz
+chroma application run
 # run an example script like the one in the examples folder
 ```
 
 # Open questions
 - How to easily sync updates to graphql schema to frontend graphql code and the sdk/agent grapqhl code
-- make the pip url configurable. right now it is hardcoded
-- run the frontend and backend in one command, right now it requires multiple terminal windows which is annoying
-- build the frontend and backend into the pip package, right now the pip package does not include them
-- move the react app to typescript
 
 # Productionizing
-- Add frontend UI Framework
 - Add CLI
 - Support multiple databases
 - Tests

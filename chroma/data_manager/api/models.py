@@ -1,5 +1,5 @@
 import json 
-from data_manager.api import db
+from chroma.data_manager.api import db
 
 class Embedding(db.Model):
     id = db.Column(db.Integer, primary_key=True)
