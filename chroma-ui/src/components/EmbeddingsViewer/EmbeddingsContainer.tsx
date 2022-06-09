@@ -18,6 +18,7 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   let [config, setConfig] = useState({})
 
   const { colorMode } = useColorMode()
+  const bgColor = { light: 'white', dark: 'black' }
   const theme = useTheme();
   
   if (reglInitialized && (points !== null)) {
@@ -29,13 +30,6 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     if (unselectedPoints.length !== 0) {
       config.scatterplot.deselectIds(unselectedPoints)
     }
-
-    // if (colorMode === 'light') {
-    //   scatterplot.set({ backgroundColor: '#F3F5F6' }); 
-    // } else if (colorMode === 'dark') {
-    //   scatterplot.set({ backgroundColor: '#111111' }); 
-    // }
-  
   }
 
   useEffect(() => {
@@ -81,12 +75,14 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
     } 
   } 
 
+  
+
   return (
     <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0}>
       <canvas 
         id="regl-canvas"
         ref={getRef.bind(this)} 
-        style={{ backgroundColor: theme.colors.ch_gray.light, height: "100%", width: "100%" }}
+        style={{ backgroundColor: bgColor[colorMode], height: "100%", width: "100%" }}
       ></canvas>
     </Box>
   )

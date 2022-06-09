@@ -19,7 +19,7 @@ export default function scatterplot (points, colorsScale, opts) {
 		  height: 'auto',
 		  pointSize: 5
 		});
-		scatterplot.set({ backgroundColor: '#F3F5F6' }); 
+		// scatterplot.set({ backgroundColor: '#111111' }); 
 		scatterplot.draw(points);
 		scatterplot.set({ opacity: [0,1] });
 		scatterplot.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5,  });

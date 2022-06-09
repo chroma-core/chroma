@@ -35,13 +35,14 @@ const defaultTheme = extendTheme({
       }
     }
   },
-  styles: {
-    global: (props:any) => ({
-      "html, body": {
-        background: mode("green", "white")(props),  //mode(light mode color, dark mode color)
-      },
-    }),
-  },
+  // useful for reference
+  // styles: {
+  //   global: (props:any) => ({
+  //     "html, body": {
+  //       background: mode("green", "white")(props),  //mode(light mode color, dark mode color)
+  //     },
+  //   }),
+  // },
 })
 
 

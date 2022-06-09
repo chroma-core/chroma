@@ -37,7 +37,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   }
 
   return (
-    <Button width={{ base: '100%' }} key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
+    <Button key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
         <Flex justify="space-between" wrap="wrap" width="100%">
           <Box>
             <Icon as={IconMap[symbol] as any} color={color} mr={2} />

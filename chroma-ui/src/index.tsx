@@ -6,7 +6,7 @@ import reportWebVitals from './reportWebVitals';
 import defaultTheme from './themes/defaultTheme'
 import { BrowserRouter } from 'react-router-dom'
 
-import { extendTheme, ChakraProvider } from '@chakra-ui/react'
+import { extendTheme, ChakraProvider, ColorModeScript } from '@chakra-ui/react'
 import { Global, css } from '@emotion/react';
 
 const GlobalStyles = css`
@@ -27,6 +27,7 @@ root.render(
   <React.StrictMode>
     <ChakraProvider theme={defaultTheme}>
       <Global styles={GlobalStyles} />
+      <ColorModeScript initialColorMode="light" />
       <App />
     </ChakraProvider>
   </React.StrictMode>

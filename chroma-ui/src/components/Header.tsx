@@ -53,37 +53,42 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
       borderColor={theme.colors.ch_gray.dark}
       zIndex={10}
       p={0}
+      justifyContent="space-between"
       >
-      <Tooltip label='Keyboard: (v)'>
-        <Button 
-          borderRadius={0} 
+      <Flex>
+        <Tooltip label='Keyboard: (v)'>
+          <Button 
+            borderRadius={0} 
+            height="100%" 
+            pr={4} 
+            pl={4} 
+            leftIcon={<FaRegHandPaper />} 
+            variant='ghost' 
+
+            backgroundColor={cursorSelected ? theme.colors.ch_blue: null} 
+            _hover={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+            _active={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+            color={cursorSelected ? 'white': null}
+            onClick={moveClicked}
+            >
+              Move
+            </Button>
+        </Tooltip>
+        <Tooltip label='Keyboard: (l)'>
+        <Button leftIcon={<MdOutlineDraw />} variant='ghost'borderRadius={0} 
           height="100%" 
           pr={4} 
-          pl={4} 
-          leftIcon={<FaRegHandPaper />} 
-          variant='ghost' 
-
-          backgroundColor={cursorSelected ? theme.colors.ch_blue: null} 
-          _hover={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-          _active={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-          color={cursorSelected ? 'white': null}
-          onClick={moveClicked}
-          >
-            Move
-          </Button>
-      </Tooltip>
-      <Tooltip label='Keyboard: (l)'>
-      <Button leftIcon={<MdOutlineDraw />} variant='ghost'borderRadius={0} 
-        height="100%" 
-        pr={4} 
-        backgroundColor={lassoSelected ? theme.colors.ch_blue: null} 
-        _hover={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-        _active={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-        color={lassoSelected ? 'white': null}
-        onClick={lassoClicked}
-        pl={4} >Lasso</Button>    
-        </Tooltip>
-        <ColorToggle/>
+          backgroundColor={lassoSelected ? theme.colors.ch_blue: null} 
+          _hover={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+          _active={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+          color={lassoSelected ? 'white': null}
+          onClick={lassoClicked}
+          pl={4} >Lasso</Button>    
+          </Tooltip>
+        </Flex>
+        <Flex>
+          <ColorToggle/>
+        </Flex>
     </Flex>
   );
 }
