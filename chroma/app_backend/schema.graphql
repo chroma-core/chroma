@@ -5,8 +5,16 @@ schema {
     mutation: Mutation
 }
 
+type DataPoint {
+    x: Float!
+    y: Float!
+    metadata: String
+}
+
 type DataPointsResult {
-    data: String
+    success: Boolean!
+    errors: [String]
+    datapoints: [DataPoint]!
 }
 
 type Query {
