@@ -13,11 +13,10 @@ export default function scatterplot (points, opts) {
   	try {
 	    var canvas = config.canvas;
 
-		const { width, height } = canvas.getBoundingClientRect();
 		const scatterplot = createScatterplot({
 		  canvas,
-		  width,
-		  height,
+		  width: 'auto',
+		  height: 'auto',
 		  pointSize: 5
 		});
 		scatterplot.set({ backgroundColor: '#F3F5F6' }); 
