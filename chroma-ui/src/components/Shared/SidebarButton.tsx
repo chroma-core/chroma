@@ -1,12 +1,12 @@
 import * as CSS from "csstype";
 import { Flex, Button, useTheme, Icon, Box } from '@chakra-ui/react'
-import { BsCircle, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
+import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
 import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
 import { IconType } from "react-icons";
 
 const IconMap: any = {
-  circle: BsCircle,
+  circle: BsCircleFill,
   cross: BsXLg,
   square: BsFillSquareFill,
   square_outline: BsSquare,
