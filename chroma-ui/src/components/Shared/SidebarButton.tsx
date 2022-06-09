@@ -1,16 +1,9 @@
 import * as CSS from 'csstype'
 import { Flex, Button, useTheme, Icon, Box } from '@chakra-ui/react'
-<<<<<<< HEAD
-import { BsCircle, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs'
-import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai'
-import { useState } from 'react'
-import { IconType } from 'react-icons'
-=======
 import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
 import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
 import { IconType } from "react-icons";
->>>>>>> master
 
 const IconMap: any = {
   circle: BsCircleFill,
@@ -26,7 +19,7 @@ interface SidebarButtonProps {
   text: string
   color: CSS.Property.Color
   indent: number
-  onClick?: ({}) => void
+  onClick?: ({ }) => void
   visible: boolean
   classTitle: string
 }

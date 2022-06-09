@@ -18,6 +18,8 @@
     "@types/react-dom": "^18.0.0",
     "@types/react-helmet": "^6.1.5",
     "@types/react-router-dom": "^5.3.3",
+    "chroma-js": "^2.4.2",
+    "csstype": "^3.1.0",
     "distinct-colors": "^3.0.0",
     "framer-motion": "^6",
     "pub-sub-es": "^2.0.1",
@@ -54,11 +56,10 @@
     "start": "react-scripts start",
     "build": "react-scripts build && yarn post-build",
     "post-build": "cd ../chroma/app_backend && rm -rf chroma-ui && mkdir -p chroma-ui && cp -r ../../chroma-ui/build ./chroma-ui",
-    "test": "react-scripts test",
+    "test": "jest",
     "eject": "react-scripts eject",
     "format": "prettier --write .",
-    "lint": "tsc --noEmit && eslint  .",
-    "test": "jest"
+    "lint": "tsc --noEmit && eslint  ."
   },
   "eslintConfig": {
     "extends": [

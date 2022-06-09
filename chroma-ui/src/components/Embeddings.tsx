@@ -48,12 +48,12 @@ var generateMetadataSets = function (testData) {
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
-var generateLeftSidebarObject = function(metadataSets) {
-  var numberOfColors = metadataSets['class'].size
+var generateLeftSidebarObject = function (metadataSets) {
+  var numberOfColors = metadataSets.class.size
 
   // https://medialab.github.io/iwanthue/
   let colorsOpts = distinctColors({
-    "count": numberOfColors, 
+    "count": numberOfColors,
     "lightMin": 20,
     "lightMax": 80,
     "chromaMin": 80
@@ -63,8 +63,8 @@ var generateLeftSidebarObject = function(metadataSets) {
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
   var classTypeDict = []
-  var classOptions = metadataSets['class']
-  var typeOptions = metadataSets['type']
+  var classOptions = metadataSets.class
+  var typeOptions = metadataSets.type
   var i = 0;
   classOptions.forEach(option => {
     classTypeDict.push({
@@ -108,8 +108,8 @@ var dataToPlotter = function (testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
-    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
+    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data[2].class);
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data[2].type)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
 
@@ -119,8 +119,8 @@ var dataToPlotter = function (testData, classTypeDict) {
     } else if (!classVisible) {
       opacity = 0
     }
-    
-    dataToPlot.push([data[0], data[1], opacity, (objectIndex*3) + typeIndexOffset])
+
+    dataToPlot.push([data[0], data[1], opacity, (objectIndex * 3) + typeIndexOffset])
   })
   return dataToPlot
 }
@@ -146,18 +146,18 @@ function Embeddings() {
       var classTypeDict = response[0]
       var colors = response[1]
       setColorsUsed(colors)
-      
+
       var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
       setServerData(dataFromServer)
-    } )
+    })
   }, []);
 
   // Callback functions that are fired by regl-scatterplot
-  const selectHandler = ({ points: selectedPoints }) => {
+  const selectHandler = ({ points: newSelectedPoints }) => {
     setUnselectedPoints([])
-    setSelectedPoints(selectedPoints)
+    setSelectedPoints(newSelectedPoints)
   }
   const deselectHandler = () => {
     console.log('deselected points')
@@ -197,9 +197,9 @@ function Embeddings() {
   }
 
   // Right sidebar functions passed down
-  function clearSelected(points) {
-    if (points !== undefined) {
-      setUnselectedPoints(points)
+  function clearSelected(pointsToUnselect) {
+    if (pointsToUnselect !== undefined) {
+      setUnselectedPoints(pointsToUnselect)
     } else {
       setUnselectedPoints(selectedPoints)
     }
@@ -221,8 +221,8 @@ function Embeddings() {
           unselectedPoints={unselectedPoints}
           cursor={cursor}
           colors={colorsUsed}
-          ></EmbeddingsContainer>
-        <RightSidebar 
+        ></EmbeddingsContainer>
+        <RightSidebar
           selectedPoints={selectedPoints}
           clearSelected={clearSelected}
           tagSelected={tagSelected}

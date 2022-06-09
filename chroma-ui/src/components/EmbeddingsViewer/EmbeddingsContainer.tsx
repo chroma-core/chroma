@@ -48,13 +48,13 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
       window.removeEventListener('resize', resizeListener);
     }
   }, [])
-    
-  function getRef (ref) {
+
+  function getRef(ref) {
     if (!ref) return;
 
     if (!reglInitialized && (points !== null)) {
 
-      scatterplot(points, 
+      scatterplot(points,
         colors,
         {
           pixelRatio: Math.min(1.5, window.devicePixelRatio),
@@ -62,20 +62,20 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
           deselectHandler: deselectHandler,
           selectHandler: selectHandler
         }
-      ).then(config => {
+      ).then(scatterplotConfig => {
         setReglInitialized(true)
-        setConfig(config)
-        
+        setConfig(scatterplotConfig)
+
       }).catch(err => {
         console.error("could not setup regl")
         setReglInitialized(false)
       });
-    } 
-  } 
+    }
+  }
 
   return (
     <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0}>
-      <canvas 
+      <canvas
         id="regl-canvas"
         ref={getRef.bind(this)}
         style={{ backgroundColor: theme.colors.ch_gray.light, height: '100%', width: '100%' }}
