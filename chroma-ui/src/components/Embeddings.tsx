@@ -161,6 +161,7 @@ function Embeddings() {
   };
   const deselectHandler = () => {
     console.log('deselected points')
+    setSelectedPoints([])
   };
 
   // Topbar functions passed down
