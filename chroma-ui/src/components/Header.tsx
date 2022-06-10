@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useCallback, useEffect } from 'react';
-import { Flex, Button, useTheme, Tooltip, useColorMode } from '@chakra-ui/react'
+import { Flex, Button, useTheme, Tooltip, useColorModeValue } from '@chakra-ui/react'
 import { ArrowForwardIcon } from '@chakra-ui/icons';
 import { BsCursor } from 'react-icons/bs';
 import { BiSelection } from 'react-icons/bi';
@@ -19,8 +19,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
   var cursorSelected = (toolSelected === 'cursor')
   var lassoSelected = (toolSelected === 'lasso')
 
-  const { colorMode } = useColorMode()
-  const bgColor = { light: "#F3F5F6", dark: '#0c0c0b' }
+  const bgColor = useColorModeValue("#F3F5F6",  '#0c0c0b')
 
   const handleKeyPress = useCallback((event) => {
     if (event.key === 'v') {
@@ -46,7 +45,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
       as="header" 
       position="fixed" 
       w="100%" 
-      bg={bgColor[colorMode]}
+      bg={bgColor}
       height={14}
       borderBottom="1px"
       borderColor={theme.colors.ch_gray.dark}

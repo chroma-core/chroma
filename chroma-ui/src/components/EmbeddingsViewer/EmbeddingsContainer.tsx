@@ -1,7 +1,7 @@
 //@ts-nocheck
 import React, { useState, useEffect, useRef } from 'react'
 import scatterplot from './scatterplot'
-import { Box, useTheme, useColorMode } from '@chakra-ui/react'
+import { Box, useTheme, useColorModeValue } from '@chakra-ui/react'
 
 interface EmbeddingsContainerProps {
   points: any[][]
@@ -18,9 +18,7 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   let [config, setConfig] = useState({})
 
   const theme = useTheme();
-  const { colorMode } = useColorMode()
-  const bgColor = { light: "#F3F5F6", dark: "#0c0c0b" }
- 
+  const bgColor = useColorModeValue("#F3F5F6",  '#0c0c0b')
   
   if (reglInitialized && (points !== null)) {
     if (toolSelected == 'lasso') {
@@ -83,7 +81,7 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
       <canvas 
         id="regl-canvas"
         ref={getRef.bind(this)} 
-        style={{ backgroundColor: bgColor[colorMode], height: "100%", width: "100%" }}
+        style={{ backgroundColor: bgColor, height: "100%", width: "100%" }}
       ></canvas>
     </Box>
   )

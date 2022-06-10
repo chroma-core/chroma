@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React from 'react';
-import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, useColorMode } from '@chakra-ui/react'
+import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon } from '@chakra-ui/react'
 import { BsFillSquareFill } from 'react-icons/bs';
 import SidebarButton from './Shared/SidebarButton';
 
@@ -12,8 +12,7 @@ interface LeftSidebarProps {
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, classDict }) => {
   const theme = useTheme();
-  const { colorMode } = useColorMode()
-  const bgColor = { light: "#F3F5F6", dark: '#0c0c0b' }
+  const bgColor = useColorModeValue("#F3F5F6",  '#0c0c0b')
 
   if (classDict === undefined) {
     classDict = [{
@@ -28,7 +27,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
       <Flex 
         direction="column" 
         minWidth={300} 
-        bg={bgColor[colorMode]} 
+        bg={bgColor} 
         borderRight="1px"
         borderLeft="1px"
         borderColor={theme.colors.ch_gray.dark}
