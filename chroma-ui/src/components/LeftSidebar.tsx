@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React from 'react';
-import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon } from '@chakra-ui/react'
+import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, Tabs, TabList, Tab } from '@chakra-ui/react'
 import { BsFillSquareFill } from 'react-icons/bs';
 import SidebarButton from './Shared/SidebarButton';
 
@@ -12,7 +12,8 @@ interface LeftSidebarProps {
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, classDict }) => {
   const theme = useTheme();
-  const bgColor = useColorModeValue("#F3F5F6",  '#0c0c0b')
+  const bgColor = useColorModeValue("#FFFFFF",  '#0c0c0b')
+  const borderColor = useColorModeValue(theme.colors.ch_gray.light,  theme.colors.ch_gray.dark)
 
   if (classDict === undefined) {
     classDict = [{
@@ -30,8 +31,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
         bg={bgColor} 
         borderRight="1px"
         borderLeft="1px"
-        borderColor={theme.colors.ch_gray.dark}
-        p={3}
+        borderColor={borderColor}
         maxHeight="100vh"
         overflowX="hidden"
         overflowY="scroll"
@@ -40,10 +40,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
             width: '0px',
           },
         }}
-        pt={16}>
-        <Flex key="buttons">
-            <Button variant='ghost' size='sm' disabled>Classes</Button>
-            {/* <Button variant='ghost' size='sm'>Filter</Button> */}
+        pt={14}>
+        <Flex key="buttons" px={3}>
+          <Tabs size="sm" variant='unstyled'>
+            <TabList>
+              <Tab _selected={{ fontWeight: 600 }} px={1} isDisabled>Classes</Tab>
+            </TabList>
+          </Tabs>
         </Flex>
         <Divider w="100%" pt={2}/>
         <Flex direction="column" mt={2}>

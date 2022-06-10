@@ -40,7 +40,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
     <Button key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
         <Flex justify="space-between" wrap="wrap" width="100%">
           <Box>
-            <Icon as={IconMap[symbol] as any} color={color} mr={2} />
+            <Icon h={3} as={IconMap[symbol] as any} color={color} mr={2} />
             {text}
           </Box>
           {!visible ? (

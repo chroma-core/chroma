@@ -1,11 +1,7 @@
 // @ts-nocheck
 import React, { useCallback, useEffect } from 'react';
-import { Flex, Button, useTheme, Tooltip, useColorModeValue } from '@chakra-ui/react'
-import { ArrowForwardIcon } from '@chakra-ui/icons';
-import { BsCursor } from 'react-icons/bs';
-import { BiSelection } from 'react-icons/bi';
-import { MdOutlineDraw } from 'react-icons/md';
-import {FaRegHandPaper} from 'react-icons/fa';
+import { Flex, Button, useTheme, Tooltip, useColorModeValue, IconButton } from '@chakra-ui/react'
+import { BsCursorFill, BsBoundingBox } from 'react-icons/bs';
 import ColorToggle from './ColorToggle';
 
 interface HeaderProps {
@@ -19,7 +15,8 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
   var cursorSelected = (toolSelected === 'cursor')
   var lassoSelected = (toolSelected === 'lasso')
 
-  const bgColor = useColorModeValue("#F3F5F6",  '#0c0c0b')
+  const bgColor = useColorModeValue("#FFFFFF",  '#0c0c0b')
+  const borderColor = useColorModeValue(theme.colors.ch_gray.medium,  theme.colors.ch_gray.dark)
 
   const handleKeyPress = useCallback((event) => {
     if (event.key === 'v') {
@@ -46,47 +43,46 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
       position="fixed" 
       w="100%" 
       bg={bgColor}
-      height={14}
+      height="48px"
       borderBottom="1px"
-      borderColor={theme.colors.ch_gray.dark}
+      borderColor={borderColor}
       zIndex={10}
       p={0}
       justifyContent="space-between"
       >
       <Flex>
-        <Tooltip label='Keyboard: (v)'>
-          <Button 
+        <Tooltip label='Select'>
+          <IconButton aria-label='Select' icon={<BsCursorFill style={{transform: "rotate(-90deg)"}}/>} 
+          borderRadius={0} 
+          height="100%" 
+          pr={4} 
+          pl={4} 
+          variant='ghost' 
+          backgroundColor={cursorSelected ? theme.colors.ch_blue: null} 
+          _hover={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+          _active={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+          color={cursorSelected ? 'white': null}
+          onClick={moveClicked}
+          />
+        </Tooltip>
+        <Tooltip label='Lasso'>
+          <IconButton 
+            icon={<BsBoundingBox />} 
+            variant='ghost'
             borderRadius={0} 
             height="100%" 
             pr={4} 
-            pl={4} 
-            leftIcon={<FaRegHandPaper />} 
-            variant='ghost' 
-
-            backgroundColor={cursorSelected ? theme.colors.ch_blue: null} 
-            _hover={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-            _active={cursorSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-            color={cursorSelected ? 'white': null}
-            onClick={moveClicked}
-            >
-              Move
-            </Button>
+            backgroundColor={lassoSelected ? theme.colors.ch_blue: null} 
+            _hover={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+            _active={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
+            color={lassoSelected ? 'white': null}
+            onClick={lassoClicked}
+            pl={4} />    
         </Tooltip>
-        <Tooltip label='Keyboard: (l)'>
-        <Button leftIcon={<MdOutlineDraw />} variant='ghost'borderRadius={0} 
-          height="100%" 
-          pr={4} 
-          backgroundColor={lassoSelected ? theme.colors.ch_blue: null} 
-          _hover={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-          _active={lassoSelected ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" }: null}
-          color={lassoSelected ? 'white': null}
-          onClick={lassoClicked}
-          pl={4} >Lasso</Button>    
-          </Tooltip>
-        </Flex>
-        <Flex>
-          <ColorToggle/>
-        </Flex>
+      </Flex>
+      <Flex>
+        <ColorToggle/>
+      </Flex>
     </Flex>
   );
 }
