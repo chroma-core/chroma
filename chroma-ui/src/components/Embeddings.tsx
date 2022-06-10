@@ -117,7 +117,7 @@ var dataToPlotter = function(testData, classTypeDict) {
     // color map for the classes are set in scatterplot
     let metadata = JSON.parse(data.metadata)
     var objectIndex = classTypeDict.findIndex((t, index)=>t.title === metadata['class']);
-    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === metadata['type'])
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
 
