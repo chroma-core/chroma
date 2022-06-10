@@ -19,7 +19,7 @@ export default function scatterplot (points, colorsScale, opts) {
 		  height: 'auto',
 		  pointSize: 7,
 		  showReticle: true,
-  		  reticleColor: [1, 1, 0.878431373, 0.33],
+  		  reticleColor: [1, 1, 0.878431373, 0],
 		});
 		scatterplot.set({ backgroundColor: '#Ffffff' }); 
 		scatterplot.draw(points);

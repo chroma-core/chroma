@@ -8,9 +8,9 @@ function ColorToggle() {
       <header>
         <Button onClick={toggleColorMode} variant="ghost" borderRadius={0} height="100%" >
         {colorMode === 'light' ?
-          <MdDarkMode/>
-          : 
           <MdLightMode/>
+          : 
+          <MdDarkMode/>
           }
         </Button>
       </header>
