@@ -47,7 +47,6 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
       position="fixed" 
       w="100%" 
       bg={bgColor[colorMode]}
-      // bg={theme.colors.ch_gray.medium} 
       height={14}
       borderBottom="1px"
       borderColor={theme.colors.ch_gray.dark}
