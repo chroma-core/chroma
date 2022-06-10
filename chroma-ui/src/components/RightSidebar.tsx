@@ -32,6 +32,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
   const theme = useTheme();
   const { colorMode } = useColorMode()
   const bgColor = { light: "#F3F5F6", dark: '#0c0c0b' }
+  const bgColorCard = { light: "#E5E5E5", dark: '#222222' }
 
   return (
     <Flex 
@@ -66,10 +67,11 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
             return (
               <Box 
                 mt={3}
-                bgColor={theme.colors.ch_gray.light} 
+                bgColor={bgColorCard[colorMode]}
                 pr={0} 
                 borderRadius={5}
                 pl={4}
+                width={275}
                 key={point}
                 >
                 <Flex flex="row" align="center" justify="space-between" wrap="wrap" width="100%" mb={3}>
