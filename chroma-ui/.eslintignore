@@ -1,0 +1,8 @@
+build
+public
+node_modules
+
+.eslintrc.js
+.prettierrc.js
+*.css
+tsconfig.json 2ms

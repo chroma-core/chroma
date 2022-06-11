@@ -1,25 +1,27 @@
 // @ts-nocheck
-import React from 'react';
+import React from 'react'
 import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon } from '@chakra-ui/react'
-import { BsFillSquareFill } from 'react-icons/bs';
-import SidebarButton from './Shared/SidebarButton';
+import { BsFillSquareFill } from 'react-icons/bs'
+import SidebarButton from './Shared/SidebarButton'
 
 interface LeftSidebarProps {
-  classClicked: ((classtring: string) => void)
-  typeClicked: ((typestring: string) => void)
+  classClicked: (classtring: string) => void
+  typeClicked: (typestring: string) => void
   classDict: any[]
 }
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, classDict }) => {
-  const theme = useTheme();
+  const theme = useTheme()
 
   if (classDict === undefined) {
-    classDict = [{
-      title: 'no data',
-      color: 'red',
-      visible: true,
-      subtypes: []
-    }]
+    classDict = [
+      {
+        title: 'no data',
+        color: 'red',
+        visible: true,
+        subtypes: [],
+      },
+    ]
   }
 
   return (
@@ -51,7 +53,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
               <>
                 <SidebarButton 
                 text={chClass.title}
-                symbol="square" 
+                symbol="square"
                 visible={chClass.visible}
                 color={chClass.color}
                 indent={0}
@@ -59,8 +61,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
                 key={chClass.title}
                 onClick={classClicked}
               ></SidebarButton>
-              
-              {chClass.subtypes.map(function(chType){
+
+              {chClass.subtypes.map(function (chType) {
                 return (
                 <SidebarButton 
                 text={chType.title}
@@ -79,7 +81,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
         })}
       </Flex>
     </Flex>
-  );
+  )
 }
 
-export default LeftSidebar;
+export default LeftSidebar

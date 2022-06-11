@@ -11,4 +11,4 @@ if __name__ == "__main__":
 
 # for the setup.cfg entry_point
 def run():
-  typer_app()
+    typer_app()

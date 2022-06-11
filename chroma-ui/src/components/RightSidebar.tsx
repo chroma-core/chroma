@@ -1,21 +1,11 @@
-import React from 'react';
+import React from 'react'
 import { Flex, Text, Box, Button, IconButton, useTheme, Divider, Badge, Spacer } from '@chakra-ui/react'
-import { GiExpand } from 'react-icons/gi';
-import { GrClose } from 'react-icons/gr';
+import { GiExpand } from 'react-icons/gi'
+import { GrClose } from 'react-icons/gr'
 
-import {
-  Table,
-  Thead,
-  Tbody,
-  Tfoot,
-  Tr,
-  Th,
-  Td,
-  TableCaption,
-  TableContainer,
-} from '@chakra-ui/react'
-import { render } from '@testing-library/react';
-import PopoverForm from './TagButton';
+import { Table, Thead, Tbody, Tfoot, Tr, Th, Td, TableCaption, TableContainer } from '@chakra-ui/react'
+import { render } from '@testing-library/react'
+import PopoverForm from './TagButton'
 
 interface RightSidebarProps {
   selectedPoints: []
@@ -49,13 +39,18 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
           width: '0px',
         },
       }}
-      pt={16}>
+      pt={16}
+    >
       <Flex flex="row" align="center" justify="space-between" wrap="wrap" width="100%">
-          <Button variant='ghost' size='sm'>{selectedPoints.length} selected</Button>
-          <Flex>
-            <Button variant='ghost' size='sm' colorScheme="blue" onClick={() => clearSelected()}>Clear</Button>
-            <PopoverForm tagSelected={tagSelected}></PopoverForm>
-          </Flex>
+        <Button variant="ghost" size="sm">
+          {selectedPoints.length} selected
+        </Button>
+        <Flex>
+          <Button variant="ghost" size="sm" colorScheme="blue" onClick={() => clearSelected()}>
+            Clear
+          </Button>
+          <PopoverForm tagSelected={tagSelected}></PopoverForm>
+        </Flex>
       </Flex>
       <Divider w="100%" pt={2}/>
       
@@ -107,14 +102,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
                     <Badge variant='subtle' bgColor={theme.colors.ch_gray.medium} textTransform="none" fontFamily="mono" >asdflkklj88d</Badge>
                     <Badge variant='subtle' bgColor={theme.colors.ch_gray.medium} textTransform="none" fontFamily="mono" >12</Badge>
                   </Flex> */}
-              </Flex>
-            </Box>
-            )
-          })}
-        {/*  */}
-      
+            </Flex>
+          </Box>
+        )
+      })}
+      {/*  */}
     </Flex>
-  );
+  )
 }
 
-export default RightSidebar;
+export default RightSidebar
