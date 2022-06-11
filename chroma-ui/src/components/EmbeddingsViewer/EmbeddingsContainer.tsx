@@ -74,7 +74,7 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   } 
 
   return (
-    <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0}>
+    <Box flex='1' cursor={cursor} id="regl-canvas-container" minWidth={0} marginTop="56px">
       <canvas 
         id="regl-canvas"
         ref={getRef.bind(this)} 
