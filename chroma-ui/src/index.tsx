@@ -19,17 +19,19 @@ const GlobalStyles = css`
     box-shadow: none;
   }
 `
-
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
+
+// wonderig why we render everything twice? it's intentional, but only happens in dev mode
+// https://stackoverflow.com/questions/48846289/why-is-my-react-component-is-rendering-twice
 root.render(
-  <React.StrictMode>
+  // <React.StrictMode>
     <ChakraProvider theme={defaultTheme}>
       <Global styles={GlobalStyles} />
       <App />
     </ChakraProvider>
-  </React.StrictMode>
+  // </React.StrictMode>
 );
 
 // If you want to start measuring performance in your app, pass a function
