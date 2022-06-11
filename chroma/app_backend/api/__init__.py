@@ -3,7 +3,7 @@ import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
-from chroma.data_manager import data_manager
+from chroma.app_backend.utils import fetch_datapoints
 
 # setup the app and database
 template_dir = os.path.abspath('chroma-ui/build')
@@ -17,5 +17,5 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-# Connect to the chroma data manager
-chroma_data_manager = data_manager.ChromaDataManager()
+# Create a local dataset from what's stored in the data manager 
+_datapoints = fetch_datapoints()
