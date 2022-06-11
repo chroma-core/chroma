@@ -1,11 +1,12 @@
 // @ts-nocheck
 import React, { useCallback, useEffect } from 'react'
-import { Flex, Button, useTheme, Tooltip, useColorModeValue } from '@chakra-ui/react'
+import { Flex, Button, useTheme, Tooltip, useColorModeValue, IconButton } from '@chakra-ui/react'
 import { ArrowForwardIcon } from '@chakra-ui/icons'
-import { BsCursor } from 'react-icons/bs'
+import { BsCursorFill, BsBoundingBox } from 'react-icons/bs'
 import { BiSelection } from 'react-icons/bi'
 import { MdOutlineDraw } from 'react-icons/md'
 import { FaRegHandPaper } from 'react-icons/fa'
+import ColorToggle from './ColorToggle'
 
 interface HeaderProps {
   toolSelected: string

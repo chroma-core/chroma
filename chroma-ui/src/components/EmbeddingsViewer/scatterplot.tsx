@@ -11,8 +11,7 @@ export default function scatterplot(points, colorsScale, opts) {
 		try {
 			var canvas = config.canvas;
 
-
-			const scatterplot = createScatterplot({
+			const scatterplotInstance = createScatterplot({
 				canvas,
 				width: 'auto',
 				height: 'auto',
@@ -20,14 +19,14 @@ export default function scatterplot(points, colorsScale, opts) {
 				showReticle: true,
 				reticleColor: [1, 1, 0.878431373, 0],
 			});
-			scatterplot.set({ backgroundColor: '#Ffffff' });
-			scatterplot.draw(points);
-			scatterplot.set({ opacity: [0, 1] });
-			scatterplot.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, });
-			scatterplot.subscribe('select', opts.selectHandler);
-			scatterplot.subscribe('deselect', opts.deselectHandler);
-			config['scatterplot'] = scatterplot
-			config['regl'] = scatterplot.get('regl')
+			scatterplotInstance.set({ backgroundColor: '#Ffffff' });
+			scatterplotInstance.draw(points);
+			scatterplotInstance.set({ opacity: [0, 1] });
+			scatterplotInstance.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, });
+			scatterplotInstance.subscribe('select', opts.selectHandler);
+			scatterplotInstance.subscribe('deselect', opts.deselectHandler);
+			config.scatterplot = scatterplotInstance
+			config.regl = scatterplotInstance.get('regl')
 
 		} catch (e) {
 			if (regl) regl.destroy();
