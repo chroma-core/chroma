@@ -1,7 +1,7 @@
 // @ts-nocheck
 
-import React, { useEffect, useState } from 'react'
-import { useTheme } from '@chakra-ui/react'
+import React, { useEffect, useState } from 'react';
+import { useTheme, Spinner, Center } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -210,25 +210,31 @@ function Embeddings() {
 
   return (
     <div>
-      <PageContainer>
-        <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
-        <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
-        <EmbeddingsContainer
-          points={points}
-          toolSelected={toolSelected}
-          selectHandler={selectHandler}
-          deselectHandler={deselectHandler}
-          unselectedPoints={unselectedPoints}
-          cursor={cursor}
-          colors={colorsUsed}
-        ></EmbeddingsContainer>
-        <RightSidebar
-          selectedPoints={selectedPoints}
-          clearSelected={clearSelected}
-          tagSelected={tagSelected}
-          serverData={serverData}
-        ></RightSidebar>
-      </PageContainer>
+      {(points === null) ?
+        <Center height="100vh">
+          <Spinner size='xl' />
+        </Center>
+        :
+        <PageContainer>
+          <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
+          <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+          <EmbeddingsContainer
+            points={points}
+            toolSelected={toolSelected}
+            selectHandler={selectHandler}
+            deselectHandler={deselectHandler}
+            unselectedPoints={unselectedPoints}
+            cursor={cursor}
+            colors={colorsUsed}
+          ></EmbeddingsContainer>
+          <RightSidebar
+            selectedPoints={selectedPoints}
+            clearSelected={clearSelected}
+            tagSelected={tagSelected}
+            serverData={serverData}
+          ></RightSidebar>
+        </PageContainer>
+      }
     </div>
   )
 }
