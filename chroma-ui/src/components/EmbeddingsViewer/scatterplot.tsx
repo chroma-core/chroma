@@ -15,9 +15,11 @@ export default function scatterplot(points, colorsScale, opts) {
 				canvas,
 				width: 'auto',
 				height: 'auto',
-				pointSize: 5
+				pointSize: 7,
+				showReticle: true,
+				reticleColor: [1, 1, 0.878431373, 0],
 			});
-			scatterplotInstance.set({ backgroundColor: '#F3F5F6' });
+			scatterplotInstance.set({ backgroundColor: '#Ffffff' });
 			scatterplotInstance.draw(points);
 			scatterplotInstance.set({ opacity: [0, 1] });
 			scatterplotInstance.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, });
@@ -32,6 +34,4 @@ export default function scatterplot(points, colorsScale, opts) {
 		}
 		resolve(config)
 	});
-
-
 }

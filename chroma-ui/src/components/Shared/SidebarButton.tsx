@@ -18,23 +18,16 @@ interface SidebarButtonProps {
   symbol: 'square' | 'cross' | 'circle' | 'square_outline'
   text: string
   color: CSS.Property.Color
-  indent: number
-  onClick?: ({ }) => void
-  visible: boolean
+  indent: number,
+  onClick?: ({ }) => void,
+  visible: boolean,
   classTitle: string
+  keyName: string
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({
-  symbol,
-  text,
-  color,
-  indent,
-  onClick,
-  visible = true,
-  classTitle,
-}) => {
-  var icon: string = visible === true ? 'show' : 'hide'
-  var opacity: string = visible === true ? '100%' : '30%'
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, onClick, visible = true, classTitle }) => {
+  var icon: string = (visible === true) ? 'show' : 'hide'
+  var opacity: string = (visible === true) ? "100%" : "30%"
 
   function buttonClicked() {
     if (onClick)
@@ -45,13 +38,15 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({
   }
 
   return (
-    <Button justifyContent="flex-start" variant="ghost" size="sm" ml={indent} onClick={buttonClicked} opacity={opacity}>
+    <Button key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
       <Flex justify="space-between" wrap="wrap" width="100%">
         <Box>
-          <Icon as={IconMap[symbol] as any} color={color} mr={2} />
+          <Icon h={3} as={IconMap[symbol] as any} color={color} mr={2} />
           {text}
         </Box>
-        {!visible ? <Icon as={IconMap[icon] as any} color="black" /> : null}
+        {!visible ? (
+          <Icon as={IconMap[icon] as any} color="black" />
+        ) : null}
       </Flex>
     </Button>
   )
