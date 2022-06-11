@@ -10,6 +10,7 @@ import time
 from collections import deque
 from typing import Dict, List
 
+
 class MultiCommand:
     """
     Runs all components of Chroma under a single parent process.
@@ -22,7 +23,7 @@ class MultiCommand:
 
         # commands to run in parellel
         self.threaded_subcommands = {}
-        
+
         # log queue
         self.output_queue = deque()
 
@@ -46,10 +47,10 @@ class MultiCommand:
     def run(self):
         """Main run loop"""
         self.print_output("Chroma", "Starting ")
-        
+
         # Silence built-in logging at INFO
         logging.getLogger("").setLevel(logging.WARNING)
-        
+
         # TODO: add serial command execution
         for command in self.serial_subcommands.values():
             command()
@@ -91,8 +92,8 @@ class MultiCommand:
     def update_output(self):
         """Drains the output queue and prints its contents to the screen"""
         while self.output_queue:
-            name, line = self.output_queue.popleft() # Extract info
-            line_str = line.decode("utf8").strip() # Make line printable
+            name, line = self.output_queue.popleft()  # Extract info
+            line_str = line.decode("utf8").strip()  # Make line printable
             self.print_output(name, line_str)
 
     def print_output(self, name: str, output):
@@ -115,9 +116,7 @@ class MultiCommand:
         Detects when all Chroma components are ready to serve.
         For now, it's simply time-based.
         """
-        return (
-            self.port_open(self.web_server_port)
-        )
+        return self.port_open(self.web_server_port)
 
     def port_open(self, port):
         """
@@ -129,7 +128,7 @@ class MultiCommand:
             sock.settimeout(1)
             sock.connect(("127.0.0.1", port))
             sock.close()
-        except (OSError, ValueError): # Any exception means the socket is not available
+        except (OSError, ValueError):  # Any exception means the socket is not available
             return False
         return True
 
@@ -153,7 +152,9 @@ class SubCommand(threading.Thread):
     complex logic that brings doing line buffering.
     """
 
-    def __init__(self, parent, name: str, command: List[str], env: Dict[str, str] = None, cwd:str = None):
+    def __init__(
+        self, parent, name: str, command: List[str], env: Dict[str, str] = None, cwd: str = None
+    ):
         super().__init__()
         self.parent = parent
         self.name = name
@@ -167,7 +168,7 @@ class SubCommand(threading.Thread):
             self.command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            cwd = self.cwd,
+            cwd=self.cwd,
             env=self.env,
             shell=True,
         )

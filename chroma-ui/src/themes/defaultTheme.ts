@@ -9,32 +9,32 @@ const defaultTheme = extendTheme({
   },
   colors: {
     ch_gray: {
-      light: "#F3F5F6", 
-      medium: "#E3E4DF", 
-      medium_dark: "#C2C5B9", 
+      light: "#F3F5F6",
+      medium: "#E3E4DF",
+      medium_dark: "#C2C5B9",
       dark: "#272622",
       black: "#0c0c0b"
     },
-    ch_blue: "#3A76E5",
-    ch_orange: "#EA5412",
-    ch_red: "#EB4026",
-    ch_yellow: "#EBB125",
-    ch_green: "#2FB874"
+    ch_blue: '#3A76E5',
+    ch_orange: '#EA5412',
+    ch_red: '#EB4026',
+    ch_yellow: '#EBB125',
+    ch_green: '#2FB874',
   },
   components: {
     Button: {
       baseStyle: {
-        borderRadius: "sm",
+        borderRadius: 'sm',
         _focus: {
-          boxShadow: 'none'
-      }
-    }
+          boxShadow: 'none',
+        },
+      },
     },
     Modal: {
       baseStyle: {
-        borderRadius: "sm"
-      }
-    }
+        borderRadius: 'sm',
+      },
+    },
   },
   // useful for reference
   // styles: {
@@ -45,6 +45,5 @@ const defaultTheme = extendTheme({
   //   }),
   // },
 })
-
 
 export default defaultTheme

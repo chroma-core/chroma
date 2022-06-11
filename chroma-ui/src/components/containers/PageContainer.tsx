@@ -7,7 +7,6 @@ interface PageContainerProps {
 }
 
 const PageContainer: React.FC<PageContainerProps> = ({ children }) => {
-
   return (
     <>
       <Flex minHeight="100vh">

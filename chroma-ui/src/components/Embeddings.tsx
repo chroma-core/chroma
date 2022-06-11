@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import React, { useEffect, useState } from 'react';
-import { useTheme } from '@chakra-ui/react'
+import { useTheme, Spinner, Center } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -12,9 +12,9 @@ import chroma from "chroma-js" // nothing to do with us! a color library
 
 function getEmbeddings(cb) {
   fetch(`/graphql`, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       query: `query fetchAllEmbeddings {
@@ -24,21 +24,21 @@ function getEmbeddings(cb) {
       }`,
     }),
   })
-    .then(res => res.json())
-    .then(res => cb(res.data.embeddings.data))
+    .then((res) => res.json())
+    .then((res) => cb(res.data.embeddings.data))
     .catch(console.error)
 }
 
 // first we want to find the unique values in our metadata
 // and create sets of them
-var generateMetadataSets = function(testData) {
+var generateMetadataSets = function (testData) {
   var metadataSets = {}
-  testData.forEach(data => {
+  testData.forEach((data) => {
     // metadata stored in the third place in the array
     for (const [k, v] of Object.entries(data[2])) {
       if (metadataSets[k] === undefined) {
         metadataSets[k] = new Set()
-      } 
+      }
       metadataSets[k].add(v)
     }
   })
@@ -48,12 +48,12 @@ var generateMetadataSets = function(testData) {
 // then we want to build a multi-layered object that we will
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
-var generateLeftSidebarObject = function(metadataSets) {
-  var numberOfColors = metadataSets['class'].size
+var generateLeftSidebarObject = function (metadataSets) {
+  var numberOfColors = metadataSets.class.size
 
   // https://medialab.github.io/iwanthue/
   let colorsOpts = distinctColors({
-    "count": numberOfColors, 
+    "count": numberOfColors,
     "lightMin": 20,
     "lightMax": 80,
     "chromaMin": 80
@@ -63,14 +63,14 @@ var generateLeftSidebarObject = function(metadataSets) {
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
   var classTypeDict = []
-  var classOptions = metadataSets['class']
-  var typeOptions = metadataSets['type']
+  var classOptions = metadataSets.class
+  var typeOptions = metadataSets.type
   var i = 0;
   classOptions.forEach(option => {
     classTypeDict.push({
-      'class': option,
-      title: option, 
-      'subtypes': [],
+      class: option,
+      title: option,
+      subtypes: [],
       visible: true,
       color: chroma(colorsOpts[i]).hex()
     })
@@ -90,8 +90,8 @@ var generateLeftSidebarObject = function(metadataSets) {
       colors.push(color)
 
       cClass.subtypes.push({
-        'type': option,
-        title: option, 
+        type: option,
+        title: option,
         visible: true,
         color: color
       })
@@ -102,14 +102,14 @@ var generateLeftSidebarObject = function(metadataSets) {
 
 // then we take the data format that were given by the server for points
 // and get it into the format that we can pass to regl-scatterplot
-var dataToPlotter = function(testData, classTypeDict) {
+var dataToPlotter = function (testData, classTypeDict) {
   var dataToPlot = []
-  testData.forEach(data => {
+  testData.forEach((data) => {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    var objectIndex = classTypeDict.findIndex((t, index)=>t.title === data[2]['class']);
-    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index)=>t.title === data[2]['type'])
+    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data[2].class);
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data[2].type)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
 
@@ -119,14 +119,14 @@ var dataToPlotter = function(testData, classTypeDict) {
     } else if (!classVisible) {
       opacity = 0
     }
-    
-    dataToPlot.push([data[0], data[1], opacity, (objectIndex*3) + typeIndexOffset])
+
+    dataToPlot.push([data[0], data[1], opacity, (objectIndex * 3) + typeIndexOffset])
   })
   return dataToPlot
 }
 
 function Embeddings() {
-  const theme = useTheme();
+  const theme = useTheme()
 
   let [serverData, setServerData] = useState<any>([]);
   let [points, setPoints] = useState<any>(null);
@@ -146,19 +146,19 @@ function Embeddings() {
       var classTypeDict = response[0]
       var colors = response[1]
       setColorsUsed(colors)
-      
+
       var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
       setPoints(dataToPlot)
       setServerData(dataFromServer)
-    } )
+    })
   }, []);
 
   // Callback functions that are fired by regl-scatterplot
-  const selectHandler = ({ points: selectedPoints }) => {
+  const selectHandler = ({ points: newSelectedPoints }) => {
     setUnselectedPoints([])
-    setSelectedPoints(selectedPoints)
-  };
+    setSelectedPoints(newSelectedPoints)
+  }
   const deselectHandler = () => {
     console.log('deselected points')
     setSelectedPoints([])
@@ -176,16 +176,16 @@ function Embeddings() {
 
   // Left sidebar functions passed down
   // - these trigger the classes to be hidden or shown
-  function classClicked(returnObject: string): void { 
-    var objectIndex = classDict.findIndex((t, index)=>t.title == returnObject.text);
+  function classClicked(returnObject: string): void {
+    var objectIndex = classDict.findIndex((t, index) => t.title == returnObject.text)
     var currentVisibility = classDict[objectIndex].visible
     classDict[objectIndex].visible = !currentVisibility
-    classDict[objectIndex].subtypes.forEach((subtype) => subtype.visible = !currentVisibility)
+    classDict[objectIndex].subtypes.forEach((subtype) => (subtype.visible = !currentVisibility))
     setClassDict([...classDict])
     updatePointVisiblity()
   }
-  function typeClicked(returnObject: string): void { 
-    var objectIndex = classDict.findIndex((t, index)=>t.title === returnObject.classTitle);
+  function typeClicked(returnObject: string): void {
+    var objectIndex = classDict.findIndex((t, index) => t.title === returnObject.classTitle)
     var subTypeIndex = classDict[objectIndex].subtypes.findIndex((subtype) => subtype.title === returnObject.text)
     var currentVisibility = classDict[objectIndex].subtypes[subTypeIndex].visible
     classDict[objectIndex].subtypes[subTypeIndex].visible = !currentVisibility
@@ -198,9 +198,9 @@ function Embeddings() {
   }
 
   // Right sidebar functions passed down
-  function clearSelected(points) {
-    if (points !== undefined) {
-      setUnselectedPoints(points)
+  function clearSelected(pointsToUnselect) {
+    if (pointsToUnselect !== undefined) {
+      setUnselectedPoints(pointsToUnselect)
     } else {
       setUnselectedPoints(selectedPoints)
     }
@@ -211,35 +211,33 @@ function Embeddings() {
 
   return (
     <div>
-      <PageContainer>
-        <Header
-          toolSelected={toolSelected}
-          moveClicked={moveClicked}
-          lassoClicked={lassoClicked}>
-        </Header>
-        <LeftSidebar 
-          classDict={classDict} 
-          classClicked={classClicked} 
-          typeClicked={typeClicked}>
-        </LeftSidebar>
-        <EmbeddingsContainer 
-          points={points} 
-          toolSelected={toolSelected}
-          selectHandler={selectHandler}
-          deselectHandler={deselectHandler}
-          unselectedPoints={unselectedPoints}
-          cursor={cursor}
-          colors={colorsUsed}
+      {(points === null) ?
+        <Center height="100vh">
+          <Spinner size='xl' />
+        </Center>
+        :
+        <PageContainer>
+          <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
+          <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+          <EmbeddingsContainer
+            points={points}
+            toolSelected={toolSelected}
+            selectHandler={selectHandler}
+            deselectHandler={deselectHandler}
+            unselectedPoints={unselectedPoints}
+            cursor={cursor}
+            colors={colorsUsed}
           ></EmbeddingsContainer>
-        <RightSidebar 
-          selectedPoints={selectedPoints}
-          clearSelected={clearSelected}
-          tagSelected={tagSelected}
-          serverData={serverData}
-        ></RightSidebar>
-      </PageContainer>
+          <RightSidebar
+            selectedPoints={selectedPoints}
+            clearSelected={clearSelected}
+            tagSelected={tagSelected}
+            serverData={serverData}
+          ></RightSidebar>
+        </PageContainer>
+      }
     </div>
-  );
+  )
 }
 
-export default Embeddings;
+export default Embeddings

@@ -5,12 +5,12 @@ import ChromaRouter from './themes/Routes';
 function App() {
   return (
     <div>
-       <HelmetProvider>
+      <HelmetProvider>
         <Helmet defaultTitle="Chroma" />
       </HelmetProvider>
       <ChromaRouter />
     </div>
-  );
+  )
 }
 
-export default App;
+export default App

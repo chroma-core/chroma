@@ -5,3 +5,49 @@ requires = [
     "gql"
 ]
 build-backend = "setuptools.build_meta"
+
+
+# ########################
+# ##### BLACK
+# ########################
+
+# [Docs root]
+#   https://black.readthedocs.io/en/stable/
+# [Config option reference]
+#   https://black.readthedocs.io/en/stable/usage_and_configuration/the_basics.html#command-line-options
+
+[tool.black]
+line-length = 100
+
+# Black will refuse to run if it's not this version.
+required-version = "22.3.0"
+
+# Ensure black's output will be compatible with all listed versions.
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+
+# ########################
+# ##### ISORT
+# ########################
+
+# [Docs root]
+#   https://pycqa.github.io/isort/
+# [Config option reference]
+#   https://pycqa.github.io/isort/docs/configuration/options.html
+
+# NOTE: File inclusion//exclusion/skip options are set at the invocation site
+# and shouldn't be set in this config file.
+
+[tool.isort]
+
+# Ensures isort classifies imports from `chroma` as first-party in all environments. Without this
+# there can be differences between buildkite and local dev.
+known_first_party = ['chroma']
+
+# Sets a variety of default options for parentheses etc that are compatible with black.
+profile = "black"
+
+# Sorts uppercase imports before lowercase improts.
+case_sensitive=true
+
+# profile=black just sets defaults, it won't read our line-length override in black's config
+line_length=120
