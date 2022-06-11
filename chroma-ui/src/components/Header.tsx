@@ -1,11 +1,8 @@
 // @ts-nocheck
 import React, { useCallback, useEffect } from 'react'
 import { Flex, Button, useTheme, Tooltip, useColorModeValue, IconButton } from '@chakra-ui/react'
-import { ArrowForwardIcon } from '@chakra-ui/icons'
 import { BsCursorFill, BsBoundingBox } from 'react-icons/bs'
-import { BiSelection } from 'react-icons/bi'
-import { MdOutlineDraw } from 'react-icons/md'
-import { FaRegHandPaper } from 'react-icons/fa'
+import { TbLasso } from 'react-icons/tb'
 import ColorToggle from './ColorToggle'
 
 interface HeaderProps {
@@ -71,7 +68,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
         </Tooltip>
         <Tooltip label='Lasso'>
           <IconButton
-            icon={<BsBoundingBox />}
+            icon={<TbLasso />}
             variant='ghost'
             borderRadius={0}
             height="100%"
