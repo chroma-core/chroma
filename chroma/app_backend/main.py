@@ -1,5 +1,6 @@
 import os
-from os.path import isfile, getsize
+from os.path import getsize, isfile
+
 from api import app, db
 from flask import request, jsonify, render_template
 from ariadne.constants import PLAYGROUND_HTML
@@ -12,19 +13,20 @@ def isSQLite3(filename):
     print(filename)
     if not isfile(filename):
         return False
-    if getsize(filename) < 100: # SQLite database file header is 100 bytes
+    if getsize(filename) < 100:  # SQLite database file header is 100 bytes
         return False
 
-    with open(filename, 'rb') as fd:
+    with open(filename, "rb") as fd:
         header = fd.read(100)
 
-    return header[:16].decode("utf-8") == 'SQLite format 3\x00'
+    return header[:16].decode("utf-8") == "SQLite format 3\x00"
 
-if not isSQLite3('chroma.db'):
-  db.create_all()
-  print('No DB existed. Created DB.')
+
+if not isSQLite3("chroma.db"):
+    db.create_all()
+    print("No DB existed. Created DB.")
 else:
-  print('DB in place')
+    print("DB in place")
 
 # setting up graphql "routes"
 query = ObjectType("Query")
@@ -42,22 +44,19 @@ schema = make_executable_schema(
 def my_index():
     return render_template("index.html", flask_token="Hello world")
 
+
 # graphql playground
 @app.route("/graphql", methods=["GET"])
 def graphql_playground():
     return PLAYGROUND_HTML, 200
+
 
 # the one api endpoint for graphql
 @app.route("/graphql", methods=["POST"])
 def graphql_server():
     data = request.get_json()
 
-    success, result = graphql_sync(
-        schema,
-        data,
-        context_value=request,
-        debug=app.debug
-    )
+    success, result = graphql_sync(schema, data, context_value=request, debug=app.debug)
 
     status_code = 200 if success else 400
     return jsonify(result), status_code

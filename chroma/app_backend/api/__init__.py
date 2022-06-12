@@ -6,8 +6,8 @@ from flask_sqlalchemy import SQLAlchemy
 from chroma.app_backend.utils import fetch_datapoints
 
 # setup the app and database
-template_dir = os.path.abspath('chroma-ui/build')
-static_dir = os.path.abspath('chroma-ui/build/static')
+template_dir = os.path.abspath("chroma-ui/build")
+static_dir = os.path.abspath("chroma-ui/build/static")
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 
 CHROMA_APP_DB_NAME = "chroma_app.db"
