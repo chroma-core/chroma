@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { Flex, Text, Box, CloseButton, IconButton, useTheme, Divider, Badge, Spacer, useColorMode, useColorModeValue } from '@chakra-ui/react'
 import { GiExpand } from 'react-icons/gi';
@@ -58,7 +59,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
       </Flex>
       <Divider w="100%" />
       {selectedPoints.map(function (point) {
-        let metadata: Hash<string> = serverData[point][2]
+        let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
         return (
           <Box
             mt={3}
