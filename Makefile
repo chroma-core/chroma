@@ -12,9 +12,9 @@ install_dev_python_modules:
 install_dev_python_modules_verbose:
 	python scripts/install_dev_python_modules.py
 
-dev_install: install_dev_python_modules_verbose rebuild_chroma_ui
+dev_install: install_dev_python_modules_verbose fetch_deps_and_rebuild_chroma_ui
 
-dev_install_quiet: install_dev_python_modules rebuild_chroma_ui
+dev_install_quiet: install_dev_python_modules fetch_deps_and_rebuild_chroma_ui
 
 black:
 	black --fast chroma examples
