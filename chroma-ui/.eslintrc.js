@@ -65,6 +65,7 @@ module.exports = {
     ],
     // to get this thing to freaking build
     'prefer-template': 'off',
+    'import/no-extraneous-dependencies': 'off',
     'react/destructuring-assignment': 'off',
     'react/self-closing-comp': 'off',
     'no-else-return': 'off',
