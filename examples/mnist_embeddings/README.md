@@ -1,5 +1,27 @@
 # Basic Example of extracting embeddings from a simple MNIST classifier
 
+<!-- ### Example
+
+TODO: make sure this works... gives a pretty result ... and is better documented
+```
+pip install chroma-core
+chroma application run
+cd chroma-core/examples
+pip install -r requirements.txt
+python main_training.py --save-model
+python3 main_embeddings.py --input-model mnist_cnn.pt
+```
+
+### Integrating into your code
+
+TODO: lots obviously
+```
+import chroma
+embedding_store = data_manager.ChromaDataManager()
+embedding_store.store_batch_embeddings()
+``` -->
+
+
 # Install Requirements
 
 ```bash
