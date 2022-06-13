@@ -109,6 +109,12 @@ var generateLeftSidebarObject = function (metadataSets) {
 // then we take the data format that were given by the server for points
 // and get it into the format that we can pass to regl-scatterplot
 var dataToPlotter = function (testData, classTypeDict) {
+
+  var minX = Infinity
+  var minY = Infinity
+  var maxX = -Infinity
+  var maxY = -Infinity
+
   var dataToPlot = []
   testData.forEach((data) => {
     // x is in pos 0, and y in pos 1
@@ -127,9 +133,32 @@ var dataToPlotter = function (testData, classTypeDict) {
       opacity = 0
     }
 
+    if (data.y < minY) minY = data.y
+    if (data.y > maxY) maxY = data.y
+    if (data.x < minX) minX = data.x
+    if (data.x > maxX) maxX = data.x
+
     dataToPlot.push([data.x, data.y, opacity, (objectIndex * 3) + typeIndexOffset])
   })
-  return dataToPlot
+
+  var centerX = (maxX + minX) / 2
+  var centerY = (maxY + minY) / 2
+
+  var sizeX = (maxX - minX) / 2
+  var sizeY = (maxY - minY) / 2
+
+  return {
+    dataToPlot: dataToPlot,
+    dataBounds: {
+      minX: minX,
+      maxX: maxX,
+      minY: minY,
+      maxY: maxY,
+      centerX: centerX,
+      centerY: centerY,
+      maxSize: (sizeX > sizeY) ? sizeX : sizeY
+    }
+  }
 }
 
 function Embeddings() {
@@ -143,6 +172,8 @@ function Embeddings() {
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
   let [classDict, setClassDict] = useState(undefined) // object that renders the left sidebar
   let [colorsUsed, setColorsUsed] = useState([])
+  let [target, setTarget] = useState([])
+  let [maxSize, setMaxSize] = useState(1)
 
   // set up data onload
   useEffect(() => {
@@ -153,10 +184,14 @@ function Embeddings() {
       var colors = response[1]
       setColorsUsed(colors)
 
-      var dataToPlot = dataToPlotter(dataFromServer, classTypeDict)
+      var dataAndCamera = dataToPlotter(dataFromServer, classTypeDict)
       setClassDict(classTypeDict)
-      console.log('dataToPlot', dataToPlot)
-      setPoints(dataToPlot)
+
+      setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
+      setMaxSize(dataAndCamera.dataBounds.maxSize)
+
+      // needs to be run last
+      setPoints(dataAndCamera.dataToPlot)
       setServerData(dataFromServer)
     })
   }, []);
@@ -234,6 +269,8 @@ function Embeddings() {
             unselectedPoints={unselectedPoints}
             cursor={cursor}
             colors={colorsUsed}
+            target={target}
+            maxSize={maxSize}
           ></EmbeddingsContainer>
           <RightSidebar
             selectedPoints={selectedPoints}

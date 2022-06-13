@@ -10,10 +10,12 @@ interface EmbeddingsContainerProps {
   selectHandler: () => void
   unselectedPoints: []
   cursor: string
-  colors: []
+  colors: [],
+  maxSize: number,
+  target: []
 }
 
-const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor, colors }) => {
+const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor, colors, maxSize, target }) => {
   let [reglInitialized, setReglInitialized] = useState(false);
   let [config, setConfig] = useState({})
 
@@ -61,7 +63,9 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
           pixelRatio: Math.min(1.5, window.devicePixelRatio),
           canvas: ref,
           deselectHandler: deselectHandler,
-          selectHandler: selectHandler
+          selectHandler: selectHandler,
+          target: target,
+          distance: maxSize
         }
       ).then(scatterplotConfig => {
         setReglInitialized(true)
