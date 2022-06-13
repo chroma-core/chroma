@@ -1,5 +1,10 @@
-rebuild_chroma-ui:
+fetch_js_dev_dependencies:
+	sh scripts/fetch_js_dev_dependencies.sh
+
+rebuild_chroma_ui:
 	cd chroma-ui/; yarn install && yarn build
+
+fetch_deps_and_rebuild_chroma_ui: fetch_js_dev_dependencies rebuild_chroma_ui
 
 install_dev_python_modules:
 	python scripts/install_dev_python_modules.py -qqq
@@ -7,9 +12,9 @@ install_dev_python_modules:
 install_dev_python_modules_verbose:
 	python scripts/install_dev_python_modules.py
 
-dev_install: install_dev_python_modules_verbose rebuild_chroma-ui
+dev_install: install_dev_python_modules_verbose rebuild_chroma_ui
 
-dev_install_quiet: install_dev_python_modules rebuild_chroma-ui
+dev_install_quiet: install_dev_python_modules rebuild_chroma_ui
 
 black:
 	black --fast chroma examples
