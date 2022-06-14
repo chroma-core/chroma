@@ -13,7 +13,7 @@ else
         yarn build
         cd ..
     fi
-  exit 1
+  exit 0
 fi
 
 DIR="regl-scatterplot"
@@ -29,7 +29,7 @@ else
         yarn build
         cd ..
     fi
-  exit 1
+  exit 0
 fi
 
 
