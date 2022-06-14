@@ -3813,6 +3813,13 @@ camelcase@^6.2.0, camelcase@^6.2.1:
   resolved "https://registry.npmjs.org/camelcase/-/camelcase-6.3.0.tgz"
   integrity sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==
 
+camera-2d-simple@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/camera-2d-simple/-/camera-2d-simple-3.0.0.tgz#03d5f5251f77eef3786d5b06362951723b38252d"
+  integrity sha512-hBeuUeerQ2Repi/61PGyFkuJ9jt6IKAny7pjQo2w8/8uZh+RKvNLZQy4xbQeDH8FrlnFxAJDjyM4/yuLdOV5vQ==
+  dependencies:
+    gl-matrix "~3.3.0"
+
 caniuse-api@^3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/caniuse-api/-/caniuse-api-3.0.0.tgz"
@@ -4563,6 +4570,14 @@ doctrine@^3.0.0:
   integrity sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==
   dependencies:
     esutils "^2.0.2"
+
+dom-2d-camera@~2.2.3:
+  version "2.2.3"
+  resolved "https://registry.yarnpkg.com/dom-2d-camera/-/dom-2d-camera-2.2.3.tgz#4ba2889d9c5fc2f23a0484bdf51b4068dfdb3606"
+  integrity sha512-oakGz91ABp1TrGmvv5+ogirbLZQv/9FFYkfGdEtYdFXbOQ3RfiHJC48NgWJkgs395n1ZNdp3WQ65/8wr2/SC/Q==
+  dependencies:
+    camera-2d-simple "^3.0.0"
+    gl-matrix "^3.3.0"
 
 dom-accessibility-api@^0.5.6, dom-accessibility-api@^0.5.9:
   version "0.5.14"
@@ -8933,6 +8948,7 @@ regl-line@~1.0.0:
   version "1.2.3"
   dependencies:
     "@flekschas/utils" "^0.29.0"
+    dom-2d-camera "~2.2.3"
     gl-matrix "~3.3.0"
     kdbush "~3.0.0"
     lodash-es "~4.17.21"
