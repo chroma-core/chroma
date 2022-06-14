@@ -1,7 +1,7 @@
 //@ts-nocheck
 import React, { useState, useEffect, useRef } from 'react'
 import scatterplot from './scatterplot'
-import { Box, useTheme, useColorModeValue } from '@chakra-ui/react'
+import { Box, useTheme, useColorModeValue, Center, Spinner } from '@chakra-ui/react'
 
 interface EmbeddingsContainerProps {
   points: any[][]
@@ -12,10 +12,11 @@ interface EmbeddingsContainerProps {
   cursor: string
   colors: [],
   maxSize: number,
-  target: []
+  target: [],
+  showLoading: boolean
 }
 
-const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor, colors, maxSize, target }) => {
+const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ showLoading, points, toolSelected, deselectHandler, selectHandler, unselectedPoints, cursor, colors, maxSize, target }) => {
   let [reglInitialized, setReglInitialized] = useState(false);
   let [config, setConfig] = useState({})
 
@@ -83,11 +84,18 @@ const EmbeddingsContainer: React.FC<EmbeddingsContainerProps> = ({ points, toolS
   // and vice versa
   return (
     <Box flex='1' cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px">
-      <canvas
-        id="regl-canvas"
-        ref={getRef.bind(this)}
-        style={{ backgroundColor: bgColor, height: "100%", width: "100%" }}
-      ></canvas>
+      {
+        showLoading ?
+          <Center height="100vh" bgColor={bgColor} >
+            < Spinner size='xl' />
+          </Center >
+          :
+          <canvas
+            id="regl-canvas"
+            ref={getRef.bind(this)}
+            style={{ backgroundColor: bgColor, height: "100%", width: "100%" }}
+          ></canvas>
+      }
     </Box>
   )
 }
