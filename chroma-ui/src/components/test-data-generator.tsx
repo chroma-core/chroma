@@ -25,16 +25,19 @@ var randomValue = function (obj: { [key: string]: any }) {
 
 function smallNumPoints(num: number) {
   return new Array(num)
-		  .fill(0)
-		  .map(() => [
-        -1 + Math.random() * 2, 
-        -1 + Math.random() * 2, 
-        {
-          'class': randomProperty(classes), 
+    .fill(0)
+    .map(() => (
+      {
+        x: -1 + Math.random() * 2,
+        y: -1 + Math.random() * 2,
+        metadata: JSON.stringify({
+          'class': randomProperty(classes),
           'type': randomProperty(types),
           'ml_model_version': randomProperty(metadata_modelVersion)
-        }
-      ]);
+        })
+      }
+    )
+    );
 }
 
-export {smallNumPoints}
+export { smallNumPoints }

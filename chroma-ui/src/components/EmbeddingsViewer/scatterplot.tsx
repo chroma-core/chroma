@@ -5,6 +5,8 @@ export default function scatterplot(points, colorsScale, opts) {
 	var config = Object.assign({}, opts || {}, {
 		backgroundColor: opts.backgroundColor || [1, 1, 1, 0],
 		pixelRatio: opts.pixelRatio || Math.min(window.devicePixelRatio, 1.5),
+		distance: opts.distance || 1,
+		target: opts.target || [0, 0],
 	})
 
 	return new Promise(function (resolve, reject) {
@@ -25,6 +27,11 @@ export default function scatterplot(points, colorsScale, opts) {
 			scatterplotInstance.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, });
 			scatterplotInstance.subscribe('select', opts.selectHandler);
 			scatterplotInstance.subscribe('deselect', opts.deselectHandler);
+			scatterplotInstance.set({
+				cameraDistance: config.distance * 1.2,
+				cameraTarget: config.target,
+			})
+
 			config.scatterplot = scatterplotInstance
 			config.regl = scatterplotInstance.get('regl')
 
