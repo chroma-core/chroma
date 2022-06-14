@@ -4,6 +4,7 @@ import { Flex, Button, useTheme, Tooltip, useColorModeValue, IconButton } from '
 import { BsCursorFill, BsBoundingBox } from 'react-icons/bs'
 import { TbLasso } from 'react-icons/tb'
 import ColorToggle from './ColorToggle'
+import ShortcutsModal from './ShortcutsModal'
 
 interface HeaderProps {
   toolSelected: string
@@ -82,6 +83,7 @@ const Header: React.FC<HeaderProps> = ({ moveClicked, lassoClicked, toolSelected
         </Tooltip>
       </Flex>
       <Flex>
+        <ShortcutsModal />
         <ColorToggle />
       </Flex>
     </Flex>
