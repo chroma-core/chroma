@@ -138,7 +138,7 @@ function Embeddings() {
   let [serverData, setServerData] = useState<any>([]);
   let [points, setPoints] = useState<any>(null);
   let [toolSelected, setToolSelected] = useState<any>('cursor');
-  let [cursor, setCursor] = useState('pointer');
+  let [cursor, setCursor] = useState('select-cursor');
   let [selectedPoints, setSelectedPoints] = useState([]) // callback from regl-scatterplot
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
   let [classDict, setClassDict] = useState(undefined) // object that renders the left sidebar
@@ -174,7 +174,7 @@ function Embeddings() {
   // Topbar functions passed down
   function moveClicked() {
     setToolSelected('cursor')
-    setCursor('pointer')
+    setCursor('select-cursor')
   }
   function lassoClicked() {
     setToolSelected('lasso')

@@ -3,6 +3,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-family: 'Inter', sans-serif;
+
+  /* prevent double clicking on background selecting text on sidebar */
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
 
 code {
@@ -21,4 +27,8 @@ body {
   /* IE and Edge */
   scrollbar-width: none;
   /* Firefox */
+}
+
+.select-cursor {
+  cursor: url('../public/cursor-outline.svg'), auto;
 }
