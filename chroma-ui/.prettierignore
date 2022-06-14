@@ -5,4 +5,7 @@ node_modules
 .eslintrc.js
 .prettierrc.js
 *.css
-tsconfig.json 2ms
+tsconfig.json 
+
+package-lock.json
+yarn.lock
