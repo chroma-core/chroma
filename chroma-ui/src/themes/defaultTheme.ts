@@ -20,6 +20,7 @@ const defaultTheme = extendTheme({
     ch_red: '#EB4026',
     ch_yellow: '#EBB125',
     ch_green: '#2FB874',
+    ch_light_blue: '#9ad1f6'
   },
   components: {
     Button: {
@@ -35,7 +36,36 @@ const defaultTheme = extendTheme({
         borderRadius: 'sm',
       },
     },
+    Drawer: {
+      variants: {
+        alwaysOpen: {
+          parts: ['dialog, dialogContainer', 'dialogOverlay'],
+          dialog: {
+            pointerEvents: 'auto',
+          },
+          dialogContainer: {
+            pointerEvents: 'none',
+          },
+          dialogOverlay: {
+            pointerEvents: 'none',
+          },
+        },
+      },
+    },
+    Tag: {
+
+      variants: {
+        darkMode: {
+          container: {
+            color: "#111",
+            bg: 'ch_light_blue',
+            borderColor: 'ch_light_blue'
+          }
+        }
+      }
+    }
   },
+
   // useful for reference
   // styles: {
   //   global: (props:any) => ({
