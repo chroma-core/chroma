@@ -96,6 +96,10 @@ function ShortcutsDrawer() {
                                                     <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
                                                     <Text><Tag variant="darkMode">L</Tag></Text>
                                                 </Flex>
+                                                <Flex justifyContent="space-between" mb={3}>
+                                                    <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
+                                                    <Text><Tag variant="darkMode">Shift</Tag> + <Tag variant="darkMode">Drag</Tag></Text>
+                                                </Flex>
                                             </GridItem>
                                         </Grid>
                                     </TabPanel>

@@ -174,6 +174,7 @@ function Embeddings() {
   let [colorsUsed, setColorsUsed] = useState([])
   let [target, setTarget] = useState([])
   let [maxSize, setMaxSize] = useState(1)
+  let [toolWhenShiftPressed, setToolWhenShiftPressed] = useState(false)
 
   // set up data onload
   useEffect(() => {
@@ -252,10 +253,31 @@ function Embeddings() {
     console.log('tagSelected')
   }
 
+  function handleKeyDown(event) {
+    if (event.keyCode === 16) { // SHIFT
+      setToolSelected('lasso')
+      setToolWhenShiftPressed(toolSelected)
+    }
+  }
+
+  function handleKeyUp(event) {
+    if (event.keyCode === 16) { // SHIFT
+      if (toolWhenShiftPressed !== 'lasso') {
+        setToolSelected(toolWhenShiftPressed)
+        setToolWhenShiftPressed('')
+      }
+    }
+  }
+
   var gotPointData = (points === null)
 
   return (
-    <div>
+    // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
+    <div
+      onKeyDown={(e) => handleKeyDown(e)}
+      onKeyUp={(e) => handleKeyUp(e)}
+      tabIndex="0"
+    >
       <PageContainer>
         <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
         <LeftSidebar showSkeleton={gotPointData} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
