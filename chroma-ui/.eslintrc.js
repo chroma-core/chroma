@@ -88,6 +88,7 @@ module.exports = {
     eqeqeq: 'off',
     'no-lonely-if': 'off',
     'consistent-return': 'off',
+    'no-useless-escape': 'off'
     //"camelcase": [2, {"properties": "always"}]
   },
 }
