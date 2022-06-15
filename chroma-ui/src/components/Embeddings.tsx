@@ -251,35 +251,32 @@ function Embeddings() {
     console.log('tagSelected')
   }
 
+  var gotPointData = (points === null)
+
   return (
     <div>
-      {(points === null) ?
-        <Center height="100vh">
-          <Spinner size='xl' />
-        </Center>
-        :
-        <PageContainer>
-          <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
-          <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
-          <EmbeddingsContainer
-            points={points}
-            toolSelected={toolSelected}
-            selectHandler={selectHandler}
-            deselectHandler={deselectHandler}
-            unselectedPoints={unselectedPoints}
-            cursor={cursor}
-            colors={colorsUsed}
-            target={target}
-            maxSize={maxSize}
-          ></EmbeddingsContainer>
-          <RightSidebar
-            selectedPoints={selectedPoints}
-            clearSelected={clearSelected}
-            tagSelected={tagSelected}
-            serverData={serverData}
-          ></RightSidebar>
-        </PageContainer>
-      }
+      <PageContainer>
+        <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
+        <LeftSidebar showSkeleton={gotPointData} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+        <EmbeddingsContainer
+          points={points}
+          toolSelected={toolSelected}
+          selectHandler={selectHandler}
+          deselectHandler={deselectHandler}
+          unselectedPoints={unselectedPoints}
+          cursor={cursor}
+          colors={colorsUsed}
+          target={target}
+          maxSize={maxSize}
+          showLoading={gotPointData}
+        ></EmbeddingsContainer>
+        <RightSidebar
+          selectedPoints={selectedPoints}
+          clearSelected={clearSelected}
+          tagSelected={tagSelected}
+          serverData={serverData}
+        ></RightSidebar>
+      </PageContainer>
     </div>
   )
 }
