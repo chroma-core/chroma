@@ -87,7 +87,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
                   <Tbody>
                     {Object.entries(metadata).map(([key, val]) => {
                       return (
-                        <Tr>
+                        <Tr key={key}>
                           <Td width="50%" p={0} pl={0} fontSize="xs">{key}</Td>
                           <Td p={0} fontSize="xs">{val}</Td>
                         </Tr>

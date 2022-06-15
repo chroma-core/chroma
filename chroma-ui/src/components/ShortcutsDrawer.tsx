@@ -8,9 +8,14 @@ function ShortcutsDrawer() {
     const { isOpen, onOpen, onClose } = useDisclosure()
     const theme = useTheme()
 
+    const toggleOpen = () => {
+        if (!isOpen) onOpen()
+        if (isOpen) onClose()
+    }
+
     return (
         <>
-            <Button onClick={onOpen} variant="ghost" borderRadius={0} height="100%" >
+            <Button onClick={toggleOpen} variant="ghost" borderRadius={0} height="100%" >
                 <TbKeyboard />
             </Button>
             <Drawer

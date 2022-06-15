@@ -237,7 +237,8 @@ function Embeddings() {
   }
 
   function updatePointVisiblity() {
-    setPoints(dataToPlotter(serverData, classDict))
+    var dataAndCamera = dataToPlotter(serverData, classDict)
+    setPoints(dataAndCamera.dataToPlot)
   }
 
   // Right sidebar functions passed down
@@ -268,42 +269,37 @@ function Embeddings() {
     }
   }
 
+  var gotPointData = (points === null)
+
   return (
-    <div>
-      {(points === null) ?
-        <Center height="100vh">
-          <Spinner size='xl' />
-        </Center>
-        :
-        // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
-        <div 
-          onKeyDown={(e) => handleKeyDown(e)} 
-          onKeyUp={(e) => handleKeyUp(e)} 
-          tabIndex="0"
-          >
-          <PageContainer>
-            <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
-            <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
-            <EmbeddingsContainer
-              points={points}
-              toolSelected={toolSelected}
-              selectHandler={selectHandler}
-              deselectHandler={deselectHandler}
-              unselectedPoints={unselectedPoints}
-              cursor={cursor}
-              colors={colorsUsed}
-              target={target}
-              maxSize={maxSize}
-            ></EmbeddingsContainer>
-            <RightSidebar
-              selectedPoints={selectedPoints}
-              clearSelected={clearSelected}
-              tagSelected={tagSelected}
-              serverData={serverData}
-            ></RightSidebar>
-          </PageContainer>
-        </div>
-      }
+    // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
+    <div
+      onKeyDown={(e) => handleKeyDown(e)}
+      onKeyUp={(e) => handleKeyUp(e)}
+      tabIndex="0"
+    >
+      <PageContainer>
+        <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
+        <LeftSidebar showSkeleton={gotPointData} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+        <EmbeddingsContainer
+          points={points}
+          toolSelected={toolSelected}
+          selectHandler={selectHandler}
+          deselectHandler={deselectHandler}
+          unselectedPoints={unselectedPoints}
+          cursor={cursor}
+          colors={colorsUsed}
+          target={target}
+          maxSize={maxSize}
+          showLoading={gotPointData}
+        ></EmbeddingsContainer>
+        <RightSidebar
+          selectedPoints={selectedPoints}
+          clearSelected={clearSelected}
+          tagSelected={tagSelected}
+          serverData={serverData}
+        ></RightSidebar>
+      </PageContainer>
     </div>
   )
 }
