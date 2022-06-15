@@ -236,7 +236,8 @@ function Embeddings() {
   }
 
   function updatePointVisiblity() {
-    setPoints(dataToPlotter(serverData, classDict))
+    var dataAndCamera = dataToPlotter(serverData, classDict)
+    setPoints(dataAndCamera.dataToPlot)
   }
 
   // Right sidebar functions passed down
