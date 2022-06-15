@@ -21,8 +21,6 @@ from chroma.data_manager.api.queries import resolve_embedding, resolve_embedding
 
 
 def isSQLite3(filename):
-    print(os.getcwd())
-    print(filename)
     if not isfile(filename):
         return False
     if getsize(filename) < 100:  # SQLite database file header is 100 bytes
@@ -36,9 +34,9 @@ def isSQLite3(filename):
 
 if not isSQLite3(CHROMA_DATAMANAGER_DB_NAME):
     db.create_all()
-    print("No DB existed. Created DB.")
+    print(" * No DB existed. Created DB.")
 else:
-    print("DB in place")
+    print(" * DB in place")
 
 
 query = ObjectType("Query")

@@ -1,7 +1,8 @@
 {
-    "git.ignoreLimitWarning": true,
-    "editor.rulers": [
-      120
-    ],
-    "editor.formatOnSave": true
-  }
+  "git.ignoreLimitWarning": true,
+  "editor.rulers": [
+    120
+  ],
+  "editor.formatOnSave": true,
+  "python.formatting.provider": "black"
+}

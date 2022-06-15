@@ -36,3 +36,19 @@ check_isort:
 
 pytest:
 	pytest
+
+# run_app_backend:
+# 	cd chroma/app_backend; FLASK_APP=main.py FLASK_ENV=development flask run --port 4000
+
+# run_data_manager:
+# 	cd chroma/data_manager; FLASK_APP=main.py FLASK_ENV=development flask run 
+
+# run_frontend: 
+# 	cd chroma-ui; yarn start
+
+# run_backend: run_data_manager run_app_backend
+
+# run22: run_data_manager run_app_backend run_frontend
+
+# # run:
+# #     $(MAKE) -j2 run_data_manager run_app_backend

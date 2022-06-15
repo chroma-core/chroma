@@ -1,25 +1,30 @@
 # Chroma
 
-Embeddings, Projections, and more.
+## Tool selection
 
-## Tech decisions
+React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. 
 
-React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
+We will get fancier with tooling when the occasion arises. 
 
 The folder structure is:
 - `chroma-ui`: react app
 - `chroma`: contains all python code, the core library and flask apps
-- `examples`: example script that uses the pip package
+- `examples`: example scripts that uses the Chroma pip package
 
 # Setup 
 
 ### The frontend
-The frontend uses (see all boilerplate dependencies in chroma-ui/package.json):
-- React via Create React App
+- The frontend uses React via Create React App. 
+- We use [Chakra](https://chakra-ui.com/) for UI elements. 
+- This is a typescript app!
+- Linting (eslint, `yarn lint`) and code formatting (prettier, `yarn format`) have been setup. This is not autorun right now.
+- Jest has also been setup for testing, `yarn test`. This is not autorun right now.
+- When the app is built with `yarn build`, it copies it's built artifacts to the `app_backend` which serves it. 
+ - Right now graphql queries are handwritten. This can be changed over to a number of libraries.
 
-Right now graphql queries are handwritten. This can be changed over to a number of libraries.
+One command up to install everything `make dev_install`.
 
-We use a custom build of `regl-scatterplot`. Here is how to configure that
+We use a custom build of `regl-scatterplot` and the supporting camera `dom-2d-camera`. Here is how to configure that
 
 ```
 # if you need node, follow these instructions https://formulae.brew.sh/formula/node
@@ -31,12 +36,26 @@ nvm install 16
  
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
 
+
+# simple setup
+make fetch_deps_and_rebuild_chroma_ui
+
+# OR step by step setup
+
+# cd to your source where you have chroma and clone the repo
+git clone git@github.com:chroma-core/dom-2d-camera.git
+
+# build it
+cd dom-2d-camera
+yarn install
+yarn build
+
 # cd to your source where you have chroma and clone the repo
 git clone git@github.com:chroma-core/regl-scatterplot.git
 
 # build it
 cd regl-scatterplot
-npm install .
+yarn install
 yarn build
 
 # cd into chroma ui
@@ -44,27 +63,26 @@ cd ../chroma/chroma-ui
 
 # optional cleanup if you have built regl-scatterplot before
 rm -rf node_modules
-rm package-lock.json
 
 # install dependencies
 yarn install
 
 # run - this will load http://localhost:3000 in the browser
+# to run the frontend, you will want the data manager and app backend running as well
 yarn start
 ```
 
-To build the frontend to deploy with the pip package, run `yarn build`. This will copy the built artifact into the backend/frontend folder. 
-
 ### The backend
-The backend uses:
+The 2 backend apps use:
 - Flask
 - Araidne (graphql)
 
-It runs on port 5000. You can view a graphql playground at http://127.0.0.1:5000/graphql.
+- `app_backend` runs on port 4000. `app_backend` serves a graphql playground at [http://127.0.0.1:5000/graphql](http://127.0.0.1:5000/graphql)
+- `data_manager` runs on port 5000
 
 ```
 # cd into directory
-cd chroma/backend
+cd chroma/chroma/app_backend
 
 # Create the virtual environment.
 python3 -m venv chroma_env
@@ -73,6 +91,7 @@ python3 -m venv chroma_env
 source chroma_env/bin/activate
 
 # install dependencies
+TODO: upate this
 pip install flask ariadne flask-sqlalchemy
 
 # set up db if chroma.db doesn not exist
@@ -83,14 +102,16 @@ pip install flask ariadne flask-sqlalchemy
 # The pip bundled flask app now handles the DB creation through checking to see if the DB exists at runtime, and if not, it creates it.
 
 # run the app, development gives you hot reloading
-FLASK_APP=main.py FLASK_ENV=development flask run
+FLASK_APP=main.py FLASK_ENV=development flask run --port 4000
 
 # Verify it works
-open http://127.0.0.1:5000/graphql
-# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:5000
+open http://127.0.0.1:4000/graphql
+# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:4000
 ```
 
 The pip bundled flask app installs these above dependencies through `setup.cfg`. 
+
+TODO: black, isort, pytest
 
 ### The data manager
 The data manager is a seperate flask app that only fetches and writes data.
@@ -98,7 +119,8 @@ The data manager is a seperate flask app that only fetches and writes data.
 TODO: write more
 
 ### The pip package
-This demonstrates how to send data to the flask backend via a library. It also demonstrates how to monkey patch a function, in this case pprint. 
+`pip install chroma-core` (or whatever we end up naming it)
+- We use Gorilla for monkey-patching
 
 Run the example to see it in action! (make sure to have the backend running)
 
@@ -146,14 +168,14 @@ python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
-Sqlite saves it's db to `chroma.db` in the backend directory.
+Sqlite saves it's db to `chroma_datamanager.db` and `chroma_app.db` in the backend directory.
 
-You can view this directly in terminal if you want to. 
+You can view this directly in terminal if you want to. For example:
 ```
-cd backend
+cd chroma/app_backend
 sqlite3
-.open chroma.db
-select * from chroma;
+.open chroma_app.db
+select * from datapoint;
 .exit
 ```
 
@@ -161,7 +183,7 @@ select * from chroma;
 - Test setup on linux
 
 # Reference URLs
-Tutorials I referneced lashing this up:
+Tutorials I referenced lashing this up:
 - https://www.twilio.com/blog/graphql-api-python-flask-ariadne
 - https://blog.sethcorker.com/how-to-create-a-react-flask-graphql-project/
 - https://www.youtube.com/watch?v=JkeNVaiUq_c
@@ -169,8 +191,7 @@ Tutorials I referneced lashing this up:
 - https://github.com/mlflow/mlflow/blob/adb0a1142f90ad2832df643cb7b13e1ef5d5c536/tests/utils/test_gorilla.py#L40
 
 
-# Test flow
-
+# Test flow for pip package
 ```
 cd chroma
 rm -rf dist && rm -rf chroma.egg-info && python -m build && cd dist && tar -xzf chroma-0.0.1.tar.gz && cd ..

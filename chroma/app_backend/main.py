@@ -4,13 +4,17 @@ from os.path import getsize, isfile
 from api import app, db
 from flask import request, jsonify, render_template
 from ariadne.constants import PLAYGROUND_HTML
-from ariadne import load_schema_from_path, make_executable_schema, \
-    graphql_sync, snake_case_fallback_resolvers, ObjectType
+from ariadne import (
+    load_schema_from_path,
+    make_executable_schema,
+    graphql_sync,
+    snake_case_fallback_resolvers,
+    ObjectType,
+)
 from api.queries import resolve_datapoints
 
+
 def isSQLite3(filename):
-    print(os.getcwd())
-    print(filename)
     if not isfile(filename):
         return False
     if getsize(filename) < 100:  # SQLite database file header is 100 bytes
@@ -24,9 +28,9 @@ def isSQLite3(filename):
 
 if not isSQLite3("chroma.db"):
     db.create_all()
-    print("No DB existed. Created DB.")
+    print(" * No DB existed. Created DB.")
 else:
-    print("DB in place")
+    print(" * DB in place")
 
 # setting up graphql "routes"
 query = ObjectType("Query")
@@ -39,6 +43,7 @@ app_backend_type_defs = load_schema_from_path("schema.graphql")
 schema = make_executable_schema(
     app_backend_type_defs, query, mutation, snake_case_fallback_resolvers
 )
+
 
 @app.route("/")
 def my_index():
