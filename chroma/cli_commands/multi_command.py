@@ -29,7 +29,8 @@ class MultiCommand:
 
     def __init__(self):
         # commands to run in serial
-        self.serial_subcommands = {}
+        # deprecated for now, but may want to bring back
+        # self.serial_subcommands = {}
 
         # commands to run in parellel
         self.threaded_subcommands = {}
@@ -44,14 +45,12 @@ class MultiCommand:
         # settings
         self.web_server_port = 5000
 
-    def append_serial_command(self, name, command):
-        """Add a serial command before runnning run"""
-        # self.print_output("alert", "appending serial command")
-        self.serial_subcommands[name] = command
+    # def append_serial_command(self, name, command):
+    #     """Add a serial command before runnning run"""
+    #     self.serial_subcommands[name] = command
 
     def append_threaded_command(self, name, command):
         """Add a threaded command before runnning run"""
-        # self.print_output("alert", "appending threaded command")
         self.threaded_subcommands[name] = command
 
     def run(self):
@@ -67,10 +66,6 @@ class MultiCommand:
         # for command in self.serial_subcommands.values():
         #     command()
 
-        # Run subcommand threads
-        # for command in self.threaded_subcommands.values():
-        #     command.start()
-
         # start first command
         currentCommand = 0
         commandList = list(self.threaded_subcommands.values())
@@ -81,7 +76,7 @@ class MultiCommand:
         shown_ready = False
         while True:
             try:
-                # Print all the current lines onto the screen
+                # self.print_ all the current lines onto the screen
                 self.update_output()
 
                 # if we have finished our current command and there is a next command
