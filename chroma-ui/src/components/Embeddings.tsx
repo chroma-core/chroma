@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import React, { useEffect, useState } from 'react';
-import { useTheme, Spinner, Center } from '@chakra-ui/react'
+import { Text, useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -32,7 +32,10 @@ function getEmbeddings(cb) {
     .then(res => {
       cb(res.data.datapoints.datapoints)
     })
-    .catch(console.error)
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
 }
 
 // first we want to find the unique values in our metadata
@@ -175,17 +178,31 @@ function Embeddings() {
   let [target, setTarget] = useState([])
   let [maxSize, setMaxSize] = useState(1)
   let [toolWhenShiftPressed, setToolWhenShiftPressed] = useState(false)
+  let [fetchError, setFetchError] = useState(false)
 
   // set up data onload
   useEffect(() => {
-    getEmbeddings(dataFromServer => {
-      var metadataSets = generateMetadataSets(dataFromServer)
+    fetchEmbeddings()
+  }, []);
+
+  const fetchEmbeddings = () => {
+    setFetchError(false)
+    getEmbeddings(data => {
+
+      console.log('data', data)
+      if (data.error === true) {
+        console.error(data.message)
+        setFetchError(true)
+        return
+      }
+
+      var metadataSets = generateMetadataSets(data)
       var response = generateLeftSidebarObject(metadataSets)
       var classTypeDict = response[0]
       var colors = response[1]
       setColorsUsed(colors)
 
-      var dataAndCamera = dataToPlotter(dataFromServer, classTypeDict)
+      var dataAndCamera = dataToPlotter(data, classTypeDict)
       setClassDict(classTypeDict)
 
       setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
@@ -193,9 +210,9 @@ function Embeddings() {
 
       // needs to be run last
       setPoints(dataAndCamera.dataToPlot)
-      setServerData(dataFromServer)
+      setServerData(data)
     })
-  }, []);
+  }
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: newSelectedPoints }) => {
@@ -269,7 +286,9 @@ function Embeddings() {
     }
   }
 
-  var gotPointData = (points === null)
+  const { isOpen, onOpen, onClose } = useDisclosure()
+
+  var gotPointData = (points === null) && !fetchError
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
@@ -300,6 +319,22 @@ function Embeddings() {
           serverData={serverData}
         ></RightSidebar>
       </PageContainer>
+
+      <Modal isCentered isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
+        <ModalOverlay
+          bg='blackAlpha.300'
+          backdropFilter='blur(2px)'
+        />
+        <ModalContent>
+          <ModalHeader>Fetch error</ModalHeader>
+          <ModalBody>
+            <Text>Unable to retrieve embeddings from the backend.</Text>
+            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={fetchEmbeddings} my={3}>
+              Retry
+            </Button>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }
