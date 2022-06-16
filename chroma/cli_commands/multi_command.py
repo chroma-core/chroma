@@ -9,13 +9,14 @@ import threading
 import time
 from collections import deque
 from typing import Dict, List
+import inspect
 
 chroma_logo = """
  ______     __  __     ______     ______     __    __     ______       
 /\  ___\   /\ \_\ \   /\  == \   /\  __ \   /\ "-./  \   /\  __ \      
 \ \ \____  \ \  __ \  \ \  __<   \ \ \/\ \  \ \ \-./\ \  \ \  __ \     
- \ \_____\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \ \_\  \ \_\ \_\    
-  \/_____/   \/_/\/_/   \/_/ /_/   \/_____/   \/_/  \/_/   \/_/\/_/    
+  \ \_____\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \ \_\  \ \_\ \_\    
+   \/_____/   \/_/\/_/   \/_/ /_/   \/_____/   \/_/  \/_/   \/_/\/_/    
                                                                        
 """
 
@@ -56,7 +57,7 @@ class MultiCommand:
     def run(self):
         """Main run loop"""
 
-        self.print_output("Chroma", chroma_logo)
+        self.print_output_no_strip("Chroma", chroma_logo)
         self.print_output("Chroma", "Starting ")
 
         # Silence built-in logging at INFO
@@ -115,7 +116,6 @@ class MultiCommand:
         """Drains the output queue and prints its contents to the screen"""
         while self.output_queue:
             name, line_str, isReady = self.output_queue.popleft()  # Extract info
-            # print("isReady" + str(isReady))
             self.print_output(name, line_str)
 
     def print_output(self, name: str, output):
@@ -125,6 +125,15 @@ class MultiCommand:
         """
         for line in output.split("\n"):
             print(f"{name} | {line.strip()}")
+
+    def print_output_no_strip(self, name: str, output):
+        """
+        Prints an output line with name and colouring. You can pass multiple
+        lines to output if you wish; it will be split for you. This variant
+        does not remove whitespace, which we want to display our ASCII correctly
+        """
+        for line in output.split("\n"):
+            print(f"{name} | {line}")
 
     def print_error(self, name: str, output):
         """
@@ -162,7 +171,7 @@ class MultiCommand:
         self.print_output("Chroma", "Chroma is ready")
         self.print_output(
             "Chroma",
-            "Chroma threaded is for development purposes only. Do not use this in production!",
+            "Please open http://localhost:4000 (Command + Click on Mac)",
         )
         self.print_output("Chroma", "")
 

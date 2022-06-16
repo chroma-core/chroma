@@ -1,6 +1,8 @@
 fetch_js_dev_dependencies:
 	sh scripts/fetch_js_dev_dependencies.sh
 
+build_prod: rebuild_chroma_ui
+
 rebuild_chroma_ui:
 	cd chroma-ui/; yarn install && yarn build
 
@@ -37,18 +39,19 @@ check_isort:
 pytest:
 	pytest
 
-# run_app_backend:
-# 	cd chroma/app_backend; FLASK_APP=main.py FLASK_ENV=development flask run --port 4000
+# convenience
+run_app:
+	python scripts/run_app_backend_frontend.py
 
-# run_data_manager:
-# 	cd chroma/data_manager; FLASK_APP=main.py FLASK_ENV=development flask run 
+run_data_manager:
+	python scripts/run_data_manager.py
 
-# run_frontend: 
-# 	cd chroma-ui; yarn start
+run_app_backend:
+	python scripts/run_app_backend.py
 
-# run_backend: run_data_manager run_app_backend
+run_frontend: 
+	python scripts/run_frontend.py
 
-# run22: run_data_manager run_app_backend run_frontend
+run:
+	python scripts/run_all.py
 
-# # run:
-# #     $(MAKE) -j2 run_data_manager run_app_backend
