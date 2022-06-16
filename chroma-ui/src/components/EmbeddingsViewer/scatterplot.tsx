@@ -27,8 +27,13 @@ export default function scatterplot(points, colorsScale, opts) {
 			scatterplotInstance.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, });
 			scatterplotInstance.subscribe('select', opts.selectHandler);
 			scatterplotInstance.subscribe('deselect', opts.deselectHandler);
+
+			var defaultDistance = config.distance * 1.2
+
 			scatterplotInstance.set({
-				cameraDistance: config.distance * 1.2,
+				cameraDistance: defaultDistance,
+				minCameraDistance: defaultDistance * (1 / 20),
+				maxCameraDistance: defaultDistance * 3,
 				cameraTarget: config.target,
 			})
 

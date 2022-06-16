@@ -1,42 +1,48 @@
 schema {
-    query: Query
-    mutation: Mutation
+  query: Query
+  mutation: Mutation
 }
 
 type Embedding {
-    id: ID!
-    data: [Float!]!
+  id: ID!
+  data: [Float!]!
+  identifier: String!
+  label: String!
 }
 
 type EmbeddingResult {
-    success: Boolean!
-    errors: [String]
-    embedding: Embedding
+  success: Boolean!
+  errors: [String]
+  embedding: Embedding
 }
 
 type EmbeddingsResult {
-    success: Boolean!
-    errors: [String]
-    embeddings: [Embedding]
+  success: Boolean!
+  errors: [String]
+  embeddings: [Embedding]
 }
 
 type Query {
-    embeddings: EmbeddingsResult!
-    embedding(embeddingId: ID!): EmbeddingResult!
+  embeddings: EmbeddingsResult!
+  embedding(embeddingId: ID!): EmbeddingResult!
 }
 
 type DeleteEmbeddingResult {
-    success: Boolean!
-    errors: [String]
+  success: Boolean!
+  errors: [String]
 }
 
 type BatchCreateEmbeddingResult {
-    success: Boolean!
-    errors: [String]
+  success: Boolean!
+  errors: [String]
 }
 
 type Mutation {
-    createEmbedding(data: [Float!]!): EmbeddingResult!
-    batchCreateEmbeddings(data: [[Float!]!]): BatchCreateEmbeddingResult!
-    deleteEmbedding(EmbeddingId: ID!): DeleteEmbeddingResult!
+  createEmbedding(
+   data: [Float!]! 
+   identifier: String!
+   label: String!
+   ): EmbeddingResult!
+  batchCreateEmbeddings(data: [[Float!]!]!, identifiers: [String!]!, labels: [String!]!): BatchCreateEmbeddingResult!
+  deleteEmbedding(EmbeddingId: ID!): DeleteEmbeddingResult!
 }

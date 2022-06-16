@@ -12,6 +12,7 @@ from ariadne.constants import PLAYGROUND_HTML
 from flask import jsonify, request
 
 from chroma.data_manager.api import CHROMA_DATAMANAGER_DB_NAME, app, db
+from chroma.data_manager.api.models import Embedding
 from chroma.data_manager.api.mutations import (
     resolve_batch_create_embeddings,
     resolve_create_embedding,
@@ -37,7 +38,10 @@ if not isSQLite3(CHROMA_DATAMANAGER_DB_NAME):
     print(" * No DB existed. Created DB.")
 else:
     print(" * DB in place")
-
+    if app.env == "dev_from_scratch":
+        print(" * Starting from scratch - clearing DB")
+        deletion = Embedding.query.delete()
+        db.session.commit()
 
 query = ObjectType("Query")
 

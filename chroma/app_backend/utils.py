@@ -20,16 +20,16 @@ def fetch_datapoints():
     print(" * app utils: projecting to datapoints", flush=True)
     projections = umap_project(vectors)
 
-    print(" * app utils: packing datapoints", flush=True)
+    print("app utils: packing datapoints")
+    annotated_projections = zip(projections, raw_embeddings["embeddings"]["embeddings"])
     datapoints = [
         {
             "x": proj[0],
             "y": proj[1],
             "metadata": json.dumps(
-                {"class": "forest", "type": "production", "ml_model_version": "v2"}
+                {"class": raw_emb["label"], "type": "production", "ml_model_version": "v2"}
             ),
         }
-        for proj in projections
+        for proj, raw_emb in annotated_projections
     ]
-    print(" * app utils: finished processing datapoints", flush=True)
     return datapoints

@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import React, { useEffect, useState } from 'react';
-import { useTheme, Spinner, Center } from '@chakra-ui/react'
+import { Text, useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -32,7 +32,10 @@ function getEmbeddings(cb) {
     .then(res => {
       cb(res.data.datapoints.datapoints)
     })
-    .catch(console.error)
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
 }
 
 // first we want to find the unique values in our metadata
@@ -99,7 +102,8 @@ var generateLeftSidebarObject = function (metadataSets) {
         type: option,
         title: option,
         visible: true,
-        color: color
+        color: color,
+        globalColorIndex: (colors.length - 1)
       })
     })
   })
@@ -125,6 +129,7 @@ var dataToPlotter = function (testData, classTypeDict) {
     var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === metadata.type)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
+    var colorIndex = classTypeDict[objectIndex].subtypes[typeIndexOffset].globalColorIndex
 
     var opacity = 1
     if (!typeVisble) {
@@ -138,7 +143,7 @@ var dataToPlotter = function (testData, classTypeDict) {
     if (data.x < minX) minX = data.x
     if (data.x > maxX) maxX = data.x
 
-    dataToPlot.push([data.x, data.y, opacity, (objectIndex * 3) + typeIndexOffset])
+    dataToPlot.push([data.x, data.y, opacity, colorIndex])
   })
 
   var centerX = (maxX + minX) / 2
@@ -174,17 +179,32 @@ function Embeddings() {
   let [colorsUsed, setColorsUsed] = useState([])
   let [target, setTarget] = useState([])
   let [maxSize, setMaxSize] = useState(1)
+  let [toolWhenShiftPressed, setToolWhenShiftPressed] = useState(false)
+  let [fetchError, setFetchError] = useState(false)
 
   // set up data onload
   useEffect(() => {
-    getEmbeddings(dataFromServer => {
-      var metadataSets = generateMetadataSets(dataFromServer)
+    fetchEmbeddings()
+  }, []);
+
+  const fetchEmbeddings = () => {
+    setFetchError(false)
+    getEmbeddings(data => {
+
+      console.log('data', data)
+      if (data.error === true) {
+        console.error(data.message)
+        setFetchError(true)
+        return
+      }
+
+      var metadataSets = generateMetadataSets(data)
       var response = generateLeftSidebarObject(metadataSets)
       var classTypeDict = response[0]
       var colors = response[1]
       setColorsUsed(colors)
 
-      var dataAndCamera = dataToPlotter(dataFromServer, classTypeDict)
+      var dataAndCamera = dataToPlotter(data, classTypeDict)
       setClassDict(classTypeDict)
 
       setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
@@ -192,9 +212,9 @@ function Embeddings() {
 
       // needs to be run last
       setPoints(dataAndCamera.dataToPlot)
-      setServerData(dataFromServer)
+      setServerData(data)
     })
-  }, []);
+  }
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: newSelectedPoints }) => {
@@ -236,7 +256,8 @@ function Embeddings() {
   }
 
   function updatePointVisiblity() {
-    setPoints(dataToPlotter(serverData, classDict))
+    var dataAndCamera = dataToPlotter(serverData, classDict)
+    setPoints(dataAndCamera.dataToPlot)
   }
 
   // Right sidebar functions passed down
@@ -251,35 +272,71 @@ function Embeddings() {
     console.log('tagSelected')
   }
 
-  return (
-    <div>
-      {(points === null) ?
-        <Center height="100vh">
-          <Spinner size='xl' />
-        </Center>
-        :
-        <PageContainer>
-          <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
-          <LeftSidebar classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
-          <EmbeddingsContainer
-            points={points}
-            toolSelected={toolSelected}
-            selectHandler={selectHandler}
-            deselectHandler={deselectHandler}
-            unselectedPoints={unselectedPoints}
-            cursor={cursor}
-            colors={colorsUsed}
-            target={target}
-            maxSize={maxSize}
-          ></EmbeddingsContainer>
-          <RightSidebar
-            selectedPoints={selectedPoints}
-            clearSelected={clearSelected}
-            tagSelected={tagSelected}
-            serverData={serverData}
-          ></RightSidebar>
-        </PageContainer>
+  function handleKeyDown(event) {
+    if (event.keyCode === 16) { // SHIFT
+      setToolSelected('lasso')
+      setToolWhenShiftPressed(toolSelected)
+    }
+  }
+
+  function handleKeyUp(event) {
+    if (event.keyCode === 16) { // SHIFT
+      if (toolWhenShiftPressed !== 'lasso') {
+        setToolSelected(toolWhenShiftPressed)
+        setToolWhenShiftPressed('')
       }
+    }
+  }
+
+  const { isOpen, onOpen, onClose } = useDisclosure()
+
+  var gotPointData = (points === null) && !fetchError
+
+  return (
+    // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
+    <div
+      onKeyDown={(e) => handleKeyDown(e)}
+      onKeyUp={(e) => handleKeyUp(e)}
+      tabIndex="0"
+    >
+      <PageContainer>
+        <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
+        <LeftSidebar showSkeleton={gotPointData} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+        <EmbeddingsContainer
+          points={points}
+          toolSelected={toolSelected}
+          selectHandler={selectHandler}
+          deselectHandler={deselectHandler}
+          unselectedPoints={unselectedPoints}
+          cursor={cursor}
+          colors={colorsUsed}
+          target={target}
+          maxSize={maxSize}
+          showLoading={gotPointData}
+        ></EmbeddingsContainer>
+        <RightSidebar
+          selectedPoints={selectedPoints}
+          clearSelected={clearSelected}
+          tagSelected={tagSelected}
+          serverData={serverData}
+        ></RightSidebar>
+      </PageContainer>
+
+      <Modal isCentered isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
+        <ModalOverlay
+          bg='blackAlpha.300'
+          backdropFilter='blur(2px)'
+        />
+        <ModalContent>
+          <ModalHeader>Fetch error</ModalHeader>
+          <ModalBody>
+            <Text>Unable to retrieve embeddings from the backend.</Text>
+            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={fetchEmbeddings} my={3}>
+              Retry
+            </Button>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

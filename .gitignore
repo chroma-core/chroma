@@ -30,3 +30,6 @@ examples/data/
 
 # ignore python notebooks
 *.ipynb
+
+# ignore vscode 
+.vscode/

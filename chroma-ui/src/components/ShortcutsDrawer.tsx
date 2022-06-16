@@ -8,9 +8,14 @@ function ShortcutsDrawer() {
     const { isOpen, onOpen, onClose } = useDisclosure()
     const theme = useTheme()
 
+    const toggleOpen = () => {
+        if (!isOpen) onOpen()
+        if (isOpen) onClose()
+    }
+
     return (
         <>
-            <Button onClick={onOpen} variant="ghost" borderRadius={0} height="100%" >
+            <Button onClick={toggleOpen} variant="ghost" borderRadius={0} height="100%" >
                 <TbKeyboard />
             </Button>
             <Drawer
@@ -78,6 +83,12 @@ function ShortcutsDrawer() {
                                                     <Text><Tag variant="darkMode">⌘</Tag> + <Tag variant="darkMode">Scroll</Tag></Text>
                                                 </Flex>
                                             </GridItem>
+                                            <GridItem>
+                                                <Flex justifyContent="space-between" mb={3}>
+                                                    <Text>Reset</Text>
+                                                    <Text><Tag variant="darkMode">Shift</Tag> + <Tag variant="darkMode">1</Tag></Text>
+                                                </Flex>
+                                            </GridItem>
                                         </Grid>
                                     </TabPanel>
                                     <TabPanel pt={2}>
@@ -90,6 +101,10 @@ function ShortcutsDrawer() {
                                                 <Flex justifyContent="space-between" mb={3}>
                                                     <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
                                                     <Text><Tag variant="darkMode">L</Tag></Text>
+                                                </Flex>
+                                                <Flex justifyContent="space-between" mb={3}>
+                                                    <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
+                                                    <Text><Tag variant="darkMode">Shift</Tag> + <Tag variant="darkMode">Drag</Tag></Text>
                                                 </Flex>
                                             </GridItem>
                                         </Grid>
