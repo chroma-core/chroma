@@ -3,6 +3,7 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
+from PIL import Image
 
 # Use the model as defined in training
 from main_training import Net
@@ -10,16 +11,27 @@ from torchvision import datasets, transforms
 
 from chroma import data_manager
 
+# We modify the MNIST dataset to expose some information about the source data
+# to allow us to uniquely identify an input in a way that we can recover it later
+class CustomDataset(datasets.MNIST):
+    def __getitem__(self, index):
+        img, target = super().__getitem__(index)
+        identifier = f"{'train' if self.train else 't10k'}-images-idx3-ubyte-{index}"
+        return img, target, identifier
+
 
 def get_and_store_layer_outputs(self, input, output, storage):
     storage.store_batch_embeddings(output.data.detach().tolist())
 
 
-def infer(model, device, data_loader):
+def infer(model, device, data_loader, embedding_store):
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data, target in data_loader:
+        for data, target, identifier in data_loader:
+
+            embedding_store.set_metadata(labels=target.data.detach().tolist(), identifiers=list(identifier))
+            
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(output, target, reduction="sum").item()  # sum up batch loss
@@ -79,11 +91,11 @@ def main():
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
-    dataset = datasets.MNIST("../data", train=False, transform=transform, download=True)
+    dataset = CustomDataset("../data", train=False, transform=transform, download=True)
     data_loader = torch.utils.data.DataLoader(dataset, **inference_kwargs)
 
     # Run inference over the test set
-    infer(model, device, data_loader)
+    infer(model, device, data_loader, embedding_store)
 
     # Output stored embeddings
     print(str(embedding_store.get_embeddings()))

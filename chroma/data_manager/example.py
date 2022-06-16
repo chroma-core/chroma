@@ -3,6 +3,9 @@ from data_manager import ChromaDataManager
 
 manager = ChromaDataManager()
 
+# Set some attributes
+manager.set_metadata(identifiers="identifier", labels="label")
+
 # Generate a random 1000 element float vector
 embedding = np.random.rand(
     1000,

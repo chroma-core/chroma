@@ -102,7 +102,8 @@ var generateLeftSidebarObject = function (metadataSets) {
         type: option,
         title: option,
         visible: true,
-        color: color
+        color: color,
+        globalColorIndex: (colors.length - 1)
       })
     })
   })
@@ -128,6 +129,7 @@ var dataToPlotter = function (testData, classTypeDict) {
     var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === metadata.type)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
+    var colorIndex = classTypeDict[objectIndex].subtypes[typeIndexOffset].globalColorIndex
 
     var opacity = 1
     if (!typeVisble) {
@@ -141,7 +143,7 @@ var dataToPlotter = function (testData, classTypeDict) {
     if (data.x < minX) minX = data.x
     if (data.x > maxX) maxX = data.x
 
-    dataToPlot.push([data.x, data.y, opacity, (objectIndex * 3) + typeIndexOffset])
+    dataToPlot.push([data.x, data.y, opacity, colorIndex])
   })
 
   var centerX = (maxX + minX) / 2
