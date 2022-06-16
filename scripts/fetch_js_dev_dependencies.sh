@@ -9,7 +9,7 @@ else
     else
         echo "Fetched dom-2d-camera"
         cd dom-2d-camera
-        yarn install
+        yarn install --frozen-lockfile
         yarn build
         cd ..
     fi
@@ -25,7 +25,7 @@ else
     else
         echo "Fetched regl-scatterplot"
         cd regl-scatterplot
-        yarn install
+        yarn install --frozen-lockfile
         yarn build
         cd ..
     fi

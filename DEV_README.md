@@ -54,7 +54,7 @@ git clone git@github.com:chroma-core/dom-2d-camera.git
 
 # build it
 cd dom-2d-camera
-yarn install
+yarn install --frozen-lockfile
 yarn build
 
 # cd to your source where you have chroma and clone the repo
@@ -62,7 +62,7 @@ git clone git@github.com:chroma-core/regl-scatterplot.git
 
 # build it
 cd regl-scatterplot
-yarn install
+yarn install --frozen-lockfile
 yarn build
 
 # cd into chroma ui
@@ -72,7 +72,7 @@ cd ../chroma/chroma-ui
 rm -rf node_modules
 
 # install dependencies
-yarn install
+yarn install --frozen-lockfile
 
 # run - this will load http://localhost:3000 in the browser
 # to run the frontend, you will want the data manager and app backend running as well

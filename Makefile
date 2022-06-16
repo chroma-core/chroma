@@ -4,7 +4,7 @@ fetch_js_dev_dependencies:
 build_prod: rebuild_chroma_ui
 
 rebuild_chroma_ui:
-	cd chroma-ui/; yarn install && yarn build
+	cd chroma-ui/; yarn install --frozen-lockfile && yarn build
 
 fetch_deps_and_rebuild_chroma_ui: fetch_js_dev_dependencies rebuild_chroma_ui
 
