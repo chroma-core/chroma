@@ -20,7 +20,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({ classClicked, typeClicked, cl
     classDict = [
       {
         title: 'no data',
-        color: 'red',
+        color: '#e5e5e5',
         visible: true,
         subtypes: [],
       },
