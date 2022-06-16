@@ -29,7 +29,7 @@ Make makes it easy to do stuff:
 - When the app is built with `yarn build`, it copies it's built artifacts to the `app_backend` which serves it. 
  - Right now graphql queries are handwritten. This can be changed over to a number of libraries.
 
-One command up to install everything `make dev_install`.
+One command up to install everything `make install`.
 
 We use a custom build of `regl-scatterplot` and the supporting camera `dom-2d-camera`. Here is how to configure that
 
@@ -42,7 +42,6 @@ We use a custom build of `regl-scatterplot` and the supporting camera `dom-2d-ca
 nvm install 16
  
 # if you need yarn, follow these instructions: https://classic.yarnpkg.com/lang/en/docs/install/#mac-stable
-
 
 # simple setup
 make fetch_deps_and_rebuild_chroma_ui
@@ -99,7 +98,7 @@ source chroma_env/bin/activate
 
 # install dependencies
 TODO: upate this
-pip install flask ariadne flask-sqlalchemy
+pip install .
 
 # set up db if chroma.db doesn not exist
 # python
