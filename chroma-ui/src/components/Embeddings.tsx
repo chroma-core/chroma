@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import React, { useEffect, useState } from 'react';
-import { useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
+import { Text, useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
 import PageContainer from './containers/PageContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
@@ -320,18 +320,19 @@ function Embeddings() {
         ></RightSidebar>
       </PageContainer>
 
-      <Modal isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose}>
-        <ModalOverlay />
+      <Modal isCentered isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
+        <ModalOverlay
+          bg='blackAlpha.300'
+          backdropFilter='blur(2px)'
+        />
         <ModalContent>
           <ModalHeader>Fetch error</ModalHeader>
           <ModalBody>
-            Unable to retrieve embeddings from the backend.
-          </ModalBody>
-          <ModalFooter>
-            <Button colorScheme='blue' mr={3} onClick={fetchEmbeddings}>
+            <Text>Unable to retrieve embeddings from the backend.</Text>
+            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={fetchEmbeddings} my={3}>
               Retry
             </Button>
-          </ModalFooter>
+          </ModalBody>
         </ModalContent>
       </Modal>
     </div>
