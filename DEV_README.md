@@ -11,6 +11,13 @@ The folder structure is:
 - `chroma`: contains all python code, the core library and flask apps
 - `examples`: example scripts that uses the Chroma pip package
 
+# Using Make
+Make makes it easy to do stuff:
+- `make install` will install all python and js dependencies for you
+- `make run` will run the whole app for you. You can also use `make run_data_manager`/`make run_app` and more. 
+- `make build_prod` will set up a production build for you
+- `pip install .` and `chroma application run` will run the full stack
+
 # Setup 
 
 ### The frontend
