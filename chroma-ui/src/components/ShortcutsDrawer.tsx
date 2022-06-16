@@ -83,6 +83,12 @@ function ShortcutsDrawer() {
                                                     <Text><Tag variant="darkMode">⌘</Tag> + <Tag variant="darkMode">Scroll</Tag></Text>
                                                 </Flex>
                                             </GridItem>
+                                            <GridItem>
+                                                <Flex justifyContent="space-between" mb={3}>
+                                                    <Text>Reset</Text>
+                                                    <Text><Tag variant="darkMode">Shift</Tag> + <Tag variant="darkMode">1</Tag></Text>
+                                                </Flex>
+                                            </GridItem>
                                         </Grid>
                                     </TabPanel>
                                     <TabPanel pt={2}>
