@@ -16,8 +16,9 @@ from chroma import data_manager
 class CustomDataset(datasets.MNIST):
     def __getitem__(self, index):
         img, target = super().__getitem__(index)
-        identifier = f"{'train' if self.train else 't10k'}-images-idx3-ubyte-{index}"
-        return img, target, identifier
+        input_identifier = f"{'train' if self.train else 't10k'}-images-idx3-ubyte-{index}"
+        inference_identifier = f"MNIST_{'train' if self.train else 'test'}"
+        return img, target, input_identifier, inference_identifier
 
 
 def get_and_store_layer_outputs(self, input, output, storage):
@@ -28,10 +29,14 @@ def infer(model, device, data_loader, embedding_store):
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data, target, identifier in data_loader:
+        for data, target, input_identifier, inference_identifier in data_loader:
 
-            embedding_store.set_metadata(labels=target.data.detach().tolist(), identifiers=list(identifier))
-            
+            embedding_store.set_metadata(
+                labels=target.data.detach().tolist(),
+                input_identifiers=list(input_identifier),
+                inference_identifiers=list(inference_identifier),
+            )
+
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(output, target, reduction="sum").item()  # sum up batch loss
@@ -91,14 +96,19 @@ def main():
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
-    dataset = CustomDataset("../data", train=False, transform=transform, download=True)
-    data_loader = torch.utils.data.DataLoader(dataset, **inference_kwargs)
+    test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
+    train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
 
     # Run inference over the test set
+    data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
+    infer(model, device, data_loader, embedding_store)
+
+    # Run inference over the training set
+    data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
     infer(model, device, data_loader, embedding_store)
 
     # Output stored embeddings
-    print(str(embedding_store.get_embeddings()))
+    print(str(embedding_store.get_embeddings_pages()))
 
 
 if __name__ == "__main__":
