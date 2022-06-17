@@ -65,3 +65,6 @@ def graphql_server():
 
     status_code = 200 if success else 400
     return jsonify(result), status_code
+
+
+print("app backend ready", flush=True)

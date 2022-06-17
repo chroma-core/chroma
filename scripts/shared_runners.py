@@ -31,7 +31,7 @@ def app_backend_subcommand(base_dir, multicommand):
         command=["flask run --port 4000"],
         env=app_backend_env,
         cwd=app_backend_directory,
-        ready_string="finished processing datapoints",
+        ready_string="app backend ready",
     )
     return subcommand
 
