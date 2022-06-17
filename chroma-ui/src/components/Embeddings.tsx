@@ -107,6 +107,11 @@ var generateLeftSidebarObject = function (metadataSets) {
       })
     })
   })
+
+  classTypeDict.sort(function (a, b) {
+    return a.class.localeCompare(b.class);
+  });
+
   return [classTypeDict, colors]
 }
 
