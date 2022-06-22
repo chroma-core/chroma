@@ -104,11 +104,11 @@ def main():
     infer(model, device, data_loader, embedding_store)
 
     # Run inference over the training set
-    data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
-    infer(model, device, data_loader, embedding_store)
+    # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+    # infer(model, device, data_loader, embedding_store)
 
     # Output stored embeddings
-    print(str(embedding_store.get_embeddings_pages()))
+    # print(str(embedding_store.get_embeddings_pages()))
 
 
 if __name__ == "__main__":

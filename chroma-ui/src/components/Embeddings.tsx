@@ -9,47 +9,70 @@ import LeftSidebar from './LeftSidebar';
 import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
 import distinctColors from 'distinct-colors'
 import chroma from "chroma-js" // nothing to do with us! a color library
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from 'urql';
 
-function getEmbeddings(cb) {
-  fetch(`/graphql`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      query: `query fetchAllEmbeddings {
-        datapoints {
-          datapoints {
-            x,
-            y,
-            metadata
-          }
+const FetchEmbeddingSetandProjectionSets = `
+query getProjectionSet($id: ID!) {
+    projectionSet(id: $id) {
+      id
+      projections {
+        id
+        x
+        y
+        embedding {
+          label
+          inputIdentifier
+          inferenceIdentifier
         }
-      }`,
-    }),
-  })
-    .then(res => res.json())
-    .then(res => {
-      cb(res.data.datapoints.datapoints)
-    })
-    .catch((error) => {
-      cb({ error: true, message: error })
-      // Only network error comes here
-    });
-}
+      }
+    }
+  }
+`;
+
+// function getEmbeddings(cb) {
+//   fetch(`/graphql`, {
+//     method: 'POST',
+//     headers: {
+//       'Content-Type': 'application/json',
+//     },
+//     body: JSON.stringify({
+//       query: `query fetchAllEmbeddings {
+//         datapoints {
+//           datapoints {
+//             x,
+//             y,
+//             metadata
+//           }
+//         }
+//       }`,
+//     }),
+//   })
+//     .then(res => res.json())
+//     .then(res => {
+//       cb(res.data.datapoints.datapoints)
+//     })
+//     .catch((error) => {
+//       cb({ error: true, message: error })
+//       // Only network error comes here
+//     });
+// }
+
+// embedding: {
+  // label: '7', 
+  // inputIdentifier: 't10k-images-idx3-ubyte-0', 
+  // inferenceIdentifier: 'MNIST_test', 
+  // __typename: 'Embedding'}
 
 // first we want to find the unique values in our metadata
 // and create sets of them
-var generateMetadataSets = function (testData) {
+var generateMetadataSets = function (data) {
   var metadataSets = {}
-  testData.forEach((data) => {
-    // metadata stored in the third place in the array
-    for (const [k, v] of Object.entries(JSON.parse(data.metadata))) {
-      if (metadataSets[k] === undefined) {
-        metadataSets[k] = new Set()
-      }
-      metadataSets[k].add(v)
-    }
+  metadataSets.label = new Set()
+  metadataSets.inferenceIdentifier = new Set()
+  data.forEach((item) => {
+    metadataSets.label.add(item.embedding.label)
+    metadataSets.inferenceIdentifier.add(item.embedding.inferenceIdentifier)
   })
   return metadataSets
 }
@@ -58,7 +81,7 @@ var generateMetadataSets = function (testData) {
 // use to render the left sidebar
 // currently this is opinionated as classes -> types
 var generateLeftSidebarObject = function (metadataSets) {
-  var numberOfColors = metadataSets.class.size
+  var numberOfColors = metadataSets.label.size
 
   // https://medialab.github.io/iwanthue/
   let colorsOpts = distinctColors({
@@ -72,8 +95,8 @@ var generateLeftSidebarObject = function (metadataSets) {
   // right now the ordering of these is very sensitive to the
   // order of the colors passed to scatterplot in scatterplot.tsx
   var classTypeDict = []
-  var classOptions = metadataSets.class
-  var typeOptions = metadataSets.type
+  var classOptions = metadataSets.label
+  var typeOptions = metadataSets.inferenceIdentifier
   var i = 0;
   classOptions.forEach(option => {
     classTypeDict.push({
@@ -129,9 +152,10 @@ var dataToPlotter = function (testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    var metadata = JSON.parse(data.metadata)
-    var objectIndex = classTypeDict.findIndex((t, index) => t.title === metadata.class);
-    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === metadata.type)
+    // var metadata = JSON.parse(data.metadata)
+    // var metadata = {JSON.parse(data.metadata)}
+    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data.embedding.label);
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data.embedding.inferenceIdentifier)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
     var colorIndex = classTypeDict[objectIndex].subtypes[typeIndexOffset].globalColorIndex
@@ -173,7 +197,7 @@ var dataToPlotter = function (testData, classTypeDict) {
 
 function Embeddings() {
   const theme = useTheme()
-
+  let params = useParams();
   let [serverData, setServerData] = useState<any>([]);
   let [points, setPoints] = useState<any>(null);
   let [toolSelected, setToolSelected] = useState<any>('cursor');
@@ -185,41 +209,44 @@ function Embeddings() {
   let [target, setTarget] = useState([])
   let [maxSize, setMaxSize] = useState(1)
   let [toolWhenShiftPressed, setToolWhenShiftPressed] = useState(false)
-  let [fetchError, setFetchError] = useState(false)
+  const { isOpen, onOpen, onClose } = useDisclosure()
+
+  const [result, reexecuteQuery] = useQuery({
+    query: FetchEmbeddingSetandProjectionSets, 
+    variables: {id: (params.projection_set_id!).toString()}
+  })
 
   // set up data onload
   useEffect(() => {
-    fetchEmbeddings()
-  }, []);
+    
+    if (result.data === undefined) {
+      return
+    }
+    console.log('data useeffect', result.data.proj)
+    var data = result.data.projectionSet.projections
 
-  const fetchEmbeddings = () => {
-    setFetchError(false)
-    getEmbeddings(data => {
+    var metadataSets = generateMetadataSets(data)
+    console.log('metadataSets', metadataSets)
+    var response = generateLeftSidebarObject(metadataSets)
+    var classTypeDict = response[0]
+    var colors = response[1]
+    console.log('classTypeDict', classTypeDict)
+    console.log('colors', colors)
+    setColorsUsed(colors)
 
-      console.log('data', data)
-      if (data.error === true) {
-        console.error(data.message)
-        setFetchError(true)
-        return
-      }
+    var dataAndCamera = dataToPlotter(data, classTypeDict)
+    console.log('dataAndCamera', dataAndCamera)
+    setClassDict(classTypeDict)
 
-      var metadataSets = generateMetadataSets(data)
-      var response = generateLeftSidebarObject(metadataSets)
-      var classTypeDict = response[0]
-      var colors = response[1]
-      setColorsUsed(colors)
+    setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
+    setMaxSize(dataAndCamera.dataBounds.maxSize)
 
-      var dataAndCamera = dataToPlotter(data, classTypeDict)
-      setClassDict(classTypeDict)
-
-      setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
-      setMaxSize(dataAndCamera.dataBounds.maxSize)
-
-      // needs to be run last
-      setPoints(dataAndCamera.dataToPlot)
-      setServerData(data)
-    })
-  }
+    // needs to be run last
+    setPoints(dataAndCamera.dataToPlot)
+    setServerData(data)
+  }, [result]);
+  
+  const { data, fetching, error } = result;
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: newSelectedPoints }) => {
@@ -293,9 +320,7 @@ function Embeddings() {
     }
   }
 
-  const { isOpen, onOpen, onClose } = useDisclosure()
-
-  var gotPointData = (points === null) && !fetchError
+  var isError = !(error === undefined)
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
@@ -304,9 +329,18 @@ function Embeddings() {
       onKeyUp={(e) => handleKeyUp(e)}
       tabIndex="0"
     >
+       {/* <>
+        <ul>
+            {data?.projectionSet.projections.map(projection => (
+              <>
+                <p>{projection.x}-{projection.y}</p>
+              </>
+            ))}
+        </ul>
+      </> */}
       <PageContainer>
         <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
-        <LeftSidebar showSkeleton={gotPointData} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
+        <LeftSidebar showSkeleton={fetching} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
         <EmbeddingsContainer
           points={points}
           toolSelected={toolSelected}
@@ -317,7 +351,7 @@ function Embeddings() {
           colors={colorsUsed}
           target={target}
           maxSize={maxSize}
-          showLoading={gotPointData}
+          showLoading={fetching}
         ></EmbeddingsContainer>
         <RightSidebar
           selectedPoints={selectedPoints}
@@ -327,7 +361,7 @@ function Embeddings() {
         ></RightSidebar>
       </PageContainer>
 
-      <Modal isCentered isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
+      <Modal isCentered isOpen={isError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
         <ModalOverlay
           bg='blackAlpha.300'
           backdropFilter='blur(2px)'
@@ -336,7 +370,8 @@ function Embeddings() {
           <ModalHeader>Fetch error</ModalHeader>
           <ModalBody>
             <Text>Unable to retrieve embeddings from the backend.</Text>
-            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={fetchEmbeddings} my={3}>
+            <Text>{}</Text>
+            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={reexecuteQuery} my={3}>
               Retry
             </Button>
           </ModalBody>

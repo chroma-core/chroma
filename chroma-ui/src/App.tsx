@@ -1,14 +1,14 @@
 import './App.css';
 import { Helmet, HelmetProvider } from 'react-helmet-async'
-import ChromaRouter from './themes/Routes';
+import ChromaRouter from './Routes';
 
 function App() {
   return (
     <div>
-      <HelmetProvider>
+      {/* <HelmetProvider>
         <Helmet defaultTitle="Chroma" />
       </HelmetProvider>
-      <ChromaRouter />
+      <ChromaRouter /> */}
     </div>
   )
 }

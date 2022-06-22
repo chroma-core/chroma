@@ -1,0 +1,203 @@
+## Base Types
+
+# Projection
+fragment ProjectionFields on Projection {
+  id
+  x
+  y
+}
+
+query getProjections {
+  projections {
+    ...ProjectionFields
+  }
+}
+
+query getProjection($id: ID!) {
+  projection(id: $id) {
+    ...ProjectionFields
+  }
+}
+
+input ProjectionInput {
+  x: Float
+  y: Float
+  projectionSetId: Int
+  embeddingId: Int
+}
+
+mutation AddProjection($projectionInput: ProjectionInput!) {
+  addProjection(projectionInput: $projectionInput) {
+      __typename
+    ... on Projection {
+      __typename
+      ...ProjectionFields
+    }
+  }
+}
+
+# ProjectionSet
+fragment ProjectionSetFields on ProjectionSet {
+  id
+  projections {
+    id
+    x
+    y
+  }
+}
+
+query getProjectionSets {
+  projectionSets {
+    ...ProjectionSetFields
+  }
+}
+
+query getProjectionSet($id: ID!) {
+  projectionSet(id: $id) {
+    ...ProjectionSetFields
+  }
+}
+
+input ProjectionSetInput {
+  embeddingSetId: Int
+}
+
+mutation AddProjectionSet($projectionSetInput: ProjectionSetInput!) {
+  addProjectionSet(projectionSetInput: $projectionSetInput) {
+    __typename
+    ... on ProjectionSet {
+      __typename
+      ...ProjectionSetFields
+    }
+  }
+}
+
+# Embeddings
+
+fragment EmbeddingFields on Embedding {
+  id
+  label
+  inputIdentifier
+  inferenceIdentifier
+}
+
+query getEmbeddings {
+  embeddings {
+    ...EmbeddingFields
+  }
+}
+
+query getEmbedding($id: ID!) {
+  embedding(id: $id) {
+    ...EmbeddingFields
+  }
+}
+
+# TODO: add get by page
+
+# type Connection {
+
+# }
+
+
+input PageInput {
+  first: Int
+  after: String
+}
+
+type PageInfo {
+  hasNextPage: Boolean
+  hasPreviousPage: Boolean
+  startCursor: String
+  endCursor: String
+}
+
+fragment PageInfoFields on PageInfo {
+  hasNextPage
+  hasPreviousPage
+  startCursor
+  endCursor
+}
+
+query embeddingsByPage ($pageInput: PageInput!) {
+    embeddingsByPage(pageInput: $pageInput) {
+        pageInfo {
+          ...PageInfoFields
+        }
+        edges {
+            node {
+                id
+                data
+            }
+            cursor
+        }
+    }
+}
+
+input EmbeddingInput {
+  data: String
+  inferenceIdentifier: String
+  label: String
+  inputIdentifier: String
+  embeddingSetId: Int
+}
+
+input EmbeddingsInput {
+    embeddings: [EmbeddingInput!]! 
+}
+
+mutation AddEmbedding($embeddingInput: EmbeddingInput!) {
+  addEmbedding(embeddingInput: $embeddingInput) {
+    __typename
+    ... on EmbeddingExists {
+      __typename
+      message
+    }
+    ... on Embedding {
+      __typename
+      ...EmbeddingFields
+    }
+  }
+}
+
+mutation AddEmbeddings($embeddingsInput: EmbeddingsInput!) {
+    addEmbeddings(embeddingsInput: $embeddingsInput) {
+        id
+        data
+        embeddingSet {
+            id
+        }
+    }
+}
+
+# EmbeddingSet
+
+fragment EmbeddingSetFields on EmbeddingSet {
+  id
+}
+
+query getEmbeddingSets {
+  embeddingSets {
+    ...EmbeddingSetFields
+  }
+}
+
+query getEmbeddingSet($id: ID!) {
+  embeddingSet(id: $id) {
+    ...EmbeddingSetFields
+  }
+}
+
+mutation AddEmbeddingSet {
+  addEmbeddingSet {
+    __typename
+    ... on EmbeddingSet {
+      __typename
+      ...EmbeddingSetFields
+    }
+  }
+}
+
+# subscription getCounter {
+#   count(target: 50)
+# }

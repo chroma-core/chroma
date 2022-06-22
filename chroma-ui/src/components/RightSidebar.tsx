@@ -59,7 +59,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
       </Flex>
       <Divider w="100%" />
       {selectedPoints.map(function (point) {
-        let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
+        // let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
         return (
           <Box
             mt={3}
@@ -85,7 +85,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
               <TableContainer>
                 <Table variant='unstyled' size="sm">
                   <Tbody>
-                    {Object.entries(metadata).map(([key, val]) => {
+                    {/* {Object.entries(metadata).map(([key, val]) => {
                       return (
                         <Tr key={key}>
                           <Td width="50%" p={0} pl={0} fontSize="xs">{key}</Td>
@@ -93,7 +93,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
                         </Tr>
                       )
                     })
-                    }
+                    } */}
                   </Tbody>
                 </Table>
               </TableContainer>

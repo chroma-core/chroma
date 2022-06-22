@@ -34,6 +34,7 @@ type Query {
   embeddings: EmbeddingsResult!
   embeddingsPage(index: Int!): embeddingsPageResult! 
   embedding(embeddingId: ID!): EmbeddingResult!
+  # embeddingsByPage(index: Int!): embeddingsPageResult! 
 }
 
 type DeleteEmbeddingResult {
@@ -60,4 +61,16 @@ type Mutation {
    labels: [String!]!
   ): BatchCreateEmbeddingResult!
   deleteEmbedding(EmbeddingId: ID!): DeleteEmbeddingResult!
+}
+
+type EmbeddingInput {
+    data: String!
+    label: String!
+    inferenceIdentifier: String!
+    inputIdentifier: String!
+    embeddingSetId: int!
+}
+
+type EmbeddingsInput {
+    embeddings: [EmbeddingInput]
 }
