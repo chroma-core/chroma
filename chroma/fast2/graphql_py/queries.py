@@ -7,8 +7,9 @@ from graphql_py.types import (
     Embedding, 
     EmbeddingSet, 
     ProjectionSet, 
-    Projection
- ) #, get_embeddings
+    Projection,
+    get_embeddings
+ ) 
 from strawberry.dataloader import DataLoader
 from sqlalchemy import select
 from strawberry import UNSET
@@ -29,7 +30,7 @@ class Query:
         async with models.get_session() as s:
             sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == id)
             val = (await s.execute(sql)).scalars().first()
-        return EmbeddingSet.marshal(val)
+        return EmbeddingSet.marshal(val)  
 
     # ProjectionSet
     @strawberry.field
@@ -79,4 +80,4 @@ class Query:
         
 
     # pagination
-    # embeddings: List[Embedding] = strawberry.field(resolver=get_embeddings)
+    embeddings_by_page: List[Embedding] = strawberry.field(resolver=get_embeddings)

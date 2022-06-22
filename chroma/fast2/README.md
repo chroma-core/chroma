@@ -80,3 +80,11 @@ uvicorn data_manager:app --reload --host '::' --port 5001
 ```
 
 https://medium.com/thelorry-product-tech-data/celery-asynchronous-task-queue-with-fastapi-flower-monitoring-tool-e7135bd0479f
+
+sqlite - db
+alembic - migrations 
+fast api - python framework 
+uvicorn - webserver 
+strawberry - graphql backend 
+urql - frontend 
+react - js framework

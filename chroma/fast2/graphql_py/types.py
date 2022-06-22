@@ -6,6 +6,7 @@ import datetime
 from typing import Optional,  List, Generic, TypeVar
 from strawberry.types import Info
 from strawberry import UNSET
+from sqlalchemy import select
 
 GenericType = TypeVar("GenericType")
 
@@ -19,7 +20,7 @@ class EmbeddingSet:
         projection_sets = await info.context["projection_sets_by_embedding_set"].load(self.id)
         return [ProjectionSet.marshal(projection_set) for projection_set in projection_sets]
 
-    # has_many embeddings
+    # # has_many embeddings
     @strawberry.field
     async def embeddings(self, info: Info) -> list["Embedding"]:
         embeddings = await info.context["embeddings_by_embedding_set"].load(self.id)
@@ -52,6 +53,10 @@ class ProjectionSet:
 @strawberry.type
 class Embedding:
     id: strawberry.ID
+    data: Optional[str]
+    label: Optional[str]
+    inference_identifier: str
+    input_identifier: str
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
 
     # has_many projections
@@ -64,12 +69,18 @@ class Embedding:
     def marshal(cls, model: models.Embedding) -> "Embedding":
         return cls(
             id=strawberry.ID(str(model.id)), 
+            data=model.data if model.data else None,
+            label=model.label if model.label else None,
+            inference_identifier=model.inference_identifier,
+            input_identifier=model.input_identifier,
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
         )
 
 @strawberry.type
 class Projection:
     id: strawberry.ID
+    x: float
+    y: float
     embedding: Optional[Embedding] = None # belongs_to embedding
     projection_set: Optional[ProjectionSet] = None # belongs_to projection_set
 
@@ -77,6 +88,8 @@ class Projection:
     def marshal(cls, model: models.Projection) -> "Projection":
         return cls(
             id=strawberry.ID(str(model.id)),
+            x=model.x,
+            y=model.y,
             embedding=Embedding.marshal(model.embedding) if model.embedding else None,
             projection_set=ProjectionSet.marshal(model.projection_set) if model.projection_set else None,
         )
@@ -101,92 +114,90 @@ AddProjectionResponse = Projection
 # Pagination
 # https://strawberry.rocks/docs/guides/pagination
 
+@strawberry.type
+class Connection(Generic[GenericType]):
+    """Represents a paginated relationship between two entities
+
+    This pattern is used when the relationship itself has attributes.
+    In a Facebook-based domain example, a friendship between two people
+    would be a connection that might have a `friendshipStartTime`
+    """
+    page_info: "PageInfo"
+    edges: list["Edge[GenericType]"]
+
+@strawberry.type
+class PageInfo:
+    """Pagination context to navigate objects with cursor-based pagination
+
+    Instead of classic offset pagination via `page` and `limit` parameters,
+    here we have a cursor of the last object and we fetch items starting from that one
+
+    Read more at:
+        - https://graphql.org/learn/pagination/#pagination-and-edges
+        - https://relay.dev/graphql/connections.htm
+    """
+    has_next_page: bool
+    has_previous_page: bool
+    start_cursor: Optional[str]
+    end_cursor: Optional[str]
+
+@strawberry.type
+class Edge(Generic[GenericType]):
+    """An edge may contain additional information of the relationship. This is the trivial case"""
+    node: GenericType
+    cursor: str
+
+
+def build_embedding_cursor(embedding: Embedding):
+    """Adapt this method to build an *opaque* ID from an instance"""
+    embeddingid = f"{(embedding.id)}".encode("utf-8")
+    return base64.b64encode(embeddingid).decode()
+
+Cursor = str
+
 # @strawberry.type
-# class Connection(Generic[GenericType]):
-#     """Represents a paginated relationship between two entities
-
-#     This pattern is used when the relationship itself has attributes.
-#     In a Facebook-based domain example, a friendship between two people
-#     would be a connection that might have a `friendshipStartTime`
-#     """
-#     page_info: "PageInfo"
-#     edges: list["Edge[GenericType]"]
-
-# @strawberry.type
-# class PageInfo:
-#     """Pagination context to navigate objects with cursor-based pagination
-
-#     Instead of classic offset pagination via `page` and `limit` parameters,
-#     here we have a cursor of the last object and we fetch items starting from that one
-
-#     Read more at:
-#         - https://graphql.org/learn/pagination/#pagination-and-edges
-#         - https://relay.dev/graphql/connections.htm
-#     """
-#     has_next_page: bool
-#     has_previous_page: bool
-#     start_cursor: Optional[str]
-#     end_cursor: Optional[str]
-
-# @strawberry.type
-# class Edge(Generic[GenericType]):
-#     """An edge may contain additional information of the relationship. This is the trivial case"""
-#     node: GenericType
-#     cursor: str
+# class PageInput:
+#     first: int = 5
+#     after: Optional[Cursor] = UNSET
 
 
-# def build_embedding_cursor(embedding: Embedding):
-#     """Adapt this method to build an *opaque* ID from an instance"""
-#     #embeddingid = f"{id(embedding)}".encode("utf-8")
-#     embeddingid = f"{(embedding.id)}".encode("utf-8")
-#     print("embeddingid " + str(embeddingid))
-#     return base64.b64encode(embeddingid).decode()
+@strawberry.input
+class PageInput:
+    first: int 
+    after: Optional[Cursor]
 
+async def get_embeddings_from_db(after_id, range):
+     async with models.get_session() as s:
+        sql = select(models.Embedding).offset(after_id).limit(range)
+        db_embeddings = (await s.execute(sql)).scalars().unique().all()
+        return db_embeddings
 
-# Cursor = str
+async def get_embeddings(pageInput: PageInput) -> Connection[Embedding]:
+    """
+    A non-trivial implementation should efficiently fetch only
+    the necessary embeddings after the offset.
+    For simplicity, here we build the list and then slice it accordingly
+    """
+    after = pageInput.after
+    first = pageInput.first
+    if after is not UNSET:
+        after = int(base64.b64decode(after).decode())
+    else:   
+        after = None
 
+    embeddings = await get_embeddings_from_db(after, first)
 
-# def get_embeddings(first: int = 10, after: Optional[Cursor] = UNSET) -> Connection[Embedding]:
-#     """
-#     A non-trivial implementation should efficiently fetch only
-#     the necessary embeddings after the offset.
-#     For simplicity, here we build the list and then slice it accordingly
-#     """
-#     if after is not UNSET:
-#         after = int(base64.b64decode(after).decode())
-#     else:   
-#         after = None
+    edges = [
+        Edge(node=Embedding.marshal(embedding), cursor=build_embedding_cursor(embedding))
+        for embedding in embeddings
+    ]
 
-#     print("after " + str(after) + " first+1 ", str(first + 1))
-
-#     # async with models.get_session() as s:
-#     #     sql = select(models.Embedding).order_by(models.Embedding.name)
-#     #     db_embeddings = (await s.execute(sql)).scalars().unique().all()
-#     # return [Embedding.marshal(loc) for loc in db_embeddings]
-
-#     # Fetch the requested embeddings plus one, just to calculate `has_next_page`
-#     embeddings = [
-#         Embedding(
-#             name=f"Name {x}",
-#             id=f"{x}",
-#             data=f"Data {x}",
-#             label=f"Label {x}",
-#             identifier=f"Identifier {x}"
-#         )
-#         for x in range(20)
-#     ][after:first+1]
-
-#     edges = [
-#         Edge(node=Embedding.marshal(embedding), cursor=build_embedding_cursor(embedding))
-#         for embedding in embeddings
-#     ]
-
-#     return Connection(
-#         page_info=PageInfo(
-#             has_previous_page=False,
-#             has_next_page=len(embeddings) > first,
-#             start_cursor=edges[0].cursor if edges else None,
-#             end_cursor=edges[-2].cursor if len(edges) > 1 else None,
-#         ),
-#         edges=edges[:-1]  # exclude last one as it was fetched to know if there is a next page
-#     )
+    return Connection(
+        page_info=PageInfo(
+            has_previous_page=False,
+            has_next_page=len(embeddings) > first,
+            start_cursor=edges[0].cursor if edges else None,
+            end_cursor=edges[-2].cursor if len(edges) > 1 else None,
+        ),
+        edges=edges[:-1]  # exclude last one as it was fetched to know if there is a next page
+    )

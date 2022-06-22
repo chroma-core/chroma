@@ -11,8 +11,9 @@ from graphql_py.queries import Query
 from graphql_py.mutations import Mutation, get_context
 from graphql_py.subscriptions import Subscription
 
-from celery_worker import create_order
-from celery.result import AsyncResult
+# from celery_worker import create_order
+# from celery.result import AsyncResult
+# from tasks.tasks import process_embeddings
 
 from strawberry.subscriptions import GRAPHQL_TRANSPORT_WS_PROTOCOL, GRAPHQL_WS_PROTOCOL
 
@@ -25,9 +26,11 @@ app.add_middleware(
     CORSMiddleware, allow_headers=["*"], allow_origins=["http://localhost:3000"], allow_methods=["*"]
 )
 
-task = create_order.delay("asdf", 5)
-task_id = task.task_id
-print("CELERY OBJECT " + task_id)
+# process_embeddings(1)
+
+# task = create_order.delay("asdf", 5)
+# task_id = task.task_id
+# print("CELERY OBJECT " + task_id)
 
 # result = AsyncResult(task_id)
 # print(result.get())
