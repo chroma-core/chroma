@@ -20,20 +20,35 @@ def run():
 
     multicommand = MultiCommand()
 
-    backend_env = os.environ.copy()
-    backend_env["FLASK_APP"] = "main.py"
-    backend_env["FLASK_ENV"] = "development"
-    backend_directory = "/".join((base_dir, "app_backend"))
-    multicommand.append_threaded_command(
-        "webserver",
-        SubCommand(
-            multicommand,
-            name="webserver",
-            command=["flask run"],
-            env=backend_env,
-            cwd=backend_directory,
-        ),
+    data_manager_env = os.environ.copy()
+    data_manager_env["FLASK_APP"] = "main.py"
+    data_manager_env["FLASK_ENV"] = "production"
+    data_manager_directory = "/".join((base_dir, "data_manager"))
+
+    subcommand = SubCommand(
+        multicommand,
+        name="Data Manager",
+        command=["flask run --port 5000"],
+        env=data_manager_env,
+        cwd=data_manager_directory,
+        ready_string="Running on http://127.0.0.1:5000/",
     )
+    multicommand.append_threaded_command(subcommand.name, subcommand)
+
+    app_backend_env = os.environ.copy()
+    app_backend_env["FLASK_APP"] = "main.py"
+    app_backend_env["FLASK_ENV"] = "production"
+    app_backend_directory = "/".join((base_dir, "app_backend"))
+
+    subcommand = SubCommand(
+        multicommand,
+        name="App Backend",
+        command=["flask run --port 4000"],
+        env=app_backend_env,
+        cwd=app_backend_directory,
+        ready_string="Running on http://127.0.0.1:4000/",
+    )
+    multicommand.append_threaded_command(subcommand.name, subcommand)
 
     multicommand.run()
 
