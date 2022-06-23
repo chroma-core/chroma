@@ -9,6 +9,16 @@ import threading
 import time
 from collections import deque
 from typing import Dict, List
+import inspect
+
+chroma_logo = """
+ ______     __  __     ______     ______     __    __     ______       
+/\  ___\   /\ \_\ \   /\  == \   /\  __ \   /\ "-./  \   /\  __ \      
+\ \ \____  \ \  __ \  \ \  __<   \ \ \/\ \  \ \ \-./\ \  \ \  __ \     
+\ \_____\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \ \_\  \ \_\ \_\    
+  \/_____/   \/_/\/_/   \/_/ /_/   \/_____/   \/_/  \/_/   \/_/\/_/    
+                                                                       
+"""
 
 
 class MultiCommand:
@@ -19,7 +29,8 @@ class MultiCommand:
 
     def __init__(self):
         # commands to run in serial
-        self.serial_subcommands = {}
+        # deprecated for now, but may want to bring back
+        # self.serial_subcommands = {}
 
         # commands to run in parellel
         self.threaded_subcommands = {}
@@ -34,50 +45,57 @@ class MultiCommand:
         # settings
         self.web_server_port = 5000
 
-    def append_serial_command(self, name, command):
-        """Add a serial command before runnning run"""
-        self.print_output("alert", "appending serial command")
-        self.serial_subcommands[name] = command
+    # def append_serial_command(self, name, command):
+    #     """Add a serial command before runnning run"""
+    #     self.serial_subcommands[name] = command
 
     def append_threaded_command(self, name, command):
         """Add a threaded command before runnning run"""
-        self.print_output("alert", "appending threaded command")
         self.threaded_subcommands[name] = command
 
     def run(self):
         """Main run loop"""
+
+        self.print_output_no_strip("Chroma", chroma_logo)
         self.print_output("Chroma", "Starting ")
 
         # Silence built-in logging at INFO
         logging.getLogger("").setLevel(logging.WARNING)
 
-        # TODO: add serial command execution
-        for command in self.serial_subcommands.values():
-            command()
+        # # TODO: add serial command execution
+        # for command in self.serial_subcommands.values():
+        #     command()
 
-        # Run subcommand threads
-        for command in self.threaded_subcommands.values():
-            command.start()
+        # start first command
+        currentCommand = 0
+        commandList = list(self.threaded_subcommands.values())
+        commandListLength = len(commandList)
+        commandList[currentCommand].start()
 
         # Run output loop
         shown_ready = False
         while True:
             try:
-                # Print all the current lines onto the screen
+                # self.print_ all the current lines onto the screen
                 self.update_output()
-                # Print info banner when all components are ready and the
-                # delay has passed
-                if not self.ready_time and self.is_ready():
-                    self.ready_time = time.monotonic()
+
+                # if we have finished our current command and there is a next command
+                if commandList[currentCommand].isReady and (
+                    (currentCommand + 1) < commandListLength
+                ):
+                    currentCommand = currentCommand + 1
+                    commandList[currentCommand].start()
+
+                # print done info banner when everything is ready
                 if (
-                    not shown_ready
-                    and self.ready_time
-                    and time.monotonic() - self.ready_time > self.ready_delay
+                    commandList[currentCommand].isReady
+                    and ((currentCommand + 1) == commandListLength)
+                    and not shown_ready
                 ):
                     self.print_ready()
                     shown_ready = True
                 # Ensure we idle-sleep rather than fast-looping
-                time.sleep(0.1)
+                # time.sleep(0.1)
             except KeyboardInterrupt:
                 break
 
@@ -92,8 +110,7 @@ class MultiCommand:
     def update_output(self):
         """Drains the output queue and prints its contents to the screen"""
         while self.output_queue:
-            name, line = self.output_queue.popleft()  # Extract info
-            line_str = line.decode("utf8").strip()  # Make line printable
+            name, line_str, isReady = self.output_queue.popleft()  # Extract info
             self.print_output(name, line_str)
 
     def print_output(self, name: str, output):
@@ -103,6 +120,15 @@ class MultiCommand:
         """
         for line in output.split("\n"):
             print(f"{name} | {line.strip()}")
+
+    def print_output_no_strip(self, name: str, output):
+        """
+        Prints an output line with name and colouring. You can pass multiple
+        lines to output if you wish; it will be split for you. This variant
+        does not remove whitespace, which we want to display our ASCII correctly
+        """
+        for line in output.split("\n"):
+            print(f"{name} | {line}")
 
     def print_error(self, name: str, output):
         """
@@ -138,10 +164,6 @@ class MultiCommand:
         """
         self.print_output("Chroma", "")
         self.print_output("Chroma", "Chroma is ready")
-        self.print_output(
-            "Chroma",
-            "Chroma threaded is for development purposes only. Do not use this in production!",
-        )
         self.print_output("Chroma", "")
 
 
@@ -153,7 +175,13 @@ class SubCommand(threading.Thread):
     """
 
     def __init__(
-        self, parent, name: str, command: List[str], env: Dict[str, str] = None, cwd: str = None
+        self,
+        parent,
+        name: str,
+        command: List[str],
+        env: Dict[str, str] = None,
+        cwd: str = None,
+        ready_string: str = None,
     ):
         super().__init__()
         self.parent = parent
@@ -161,6 +189,8 @@ class SubCommand(threading.Thread):
         self.command = command
         self.env = env if env else os.environ.copy()
         self.cwd = cwd if cwd else os.getcwd()
+        self.ready_string = ready_string if ready_string else None
+        self.isReady = False
 
     def run(self):
         """Runs the actual process and captures it output to a queue"""
@@ -173,7 +203,10 @@ class SubCommand(threading.Thread):
             shell=True,
         )
         for line in self.process.stdout:
-            self.parent.output_queue.append((self.name, line))
+            line_str = line.decode("utf8").strip()
+            if self.ready_string in line_str:
+                self.isReady = True
+            self.parent.output_queue.append((self.name, line_str, self.isReady))
 
     def stop(self):
         """Call to stop this process (and thus this thread)"""
