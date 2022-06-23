@@ -233,6 +233,11 @@ async def _async_main():
         await conn.run_sync(Base.metadata.create_all)
     await engine.dispose()
 
+async def create_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    await engine.dispose()
+
 if __name__ == "__main__":
     print("Dropping and creating tables")
     asyncio.run(_async_main())

@@ -21,7 +21,6 @@ def isSQLite3(filename):
 
     return header[:16].decode("utf-8") == "SQLite format 3\x00"
 
-
 if not isSQLite3("chroma.db"):
     db.create_all()
     print("No DB existed. Created DB.")
