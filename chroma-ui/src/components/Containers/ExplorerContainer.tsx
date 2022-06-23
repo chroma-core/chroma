@@ -1,12 +1,12 @@
 import React, { useEffect } from 'react'
 import { Flex } from '@chakra-ui/react'
 
-interface PageContainerProps {
+interface ExplorerContainerProps {
   children: React.ReactNode
   includeMessages?: boolean
 }
 
-const PageContainer: React.FC<PageContainerProps> = ({ children }) => {
+const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ children }) => {
   return (
     <>
       <Flex minHeight="100vh">
@@ -16,4 +16,4 @@ const PageContainer: React.FC<PageContainerProps> = ({ children }) => {
   )
 }
 
-export default PageContainer
+export default ExplorerContainer

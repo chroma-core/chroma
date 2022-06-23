@@ -1,5 +1,58 @@
 ## Base Types
 
+# Project
+fragment ProjectFields on Project {
+  id
+  name
+}
+
+query getProjects {
+  projects {
+    ...ProjectFields
+  }
+}
+
+query getProject($id: ID!) {
+  project(id: $id) {
+    ...ProjectFields
+  }
+}
+
+# Job
+fragment JobFields on Job {
+  id
+}
+
+query getJobs {
+  jobs {
+    ...JobFields
+  }
+}
+
+query getJob($id: ID!) {
+  job(id: $id) {
+    ...JobFields
+  }
+}
+
+# Dataset
+# fragment DatasetFields on Dataset {
+#   id
+#   name
+# }
+
+# query getDatasets {
+#   projects {
+#     ...ProjectFields
+#   }
+# }
+
+# query getProject($id: ID!) {
+#   project(id: $id) {
+#     ...ProjectFields
+#   }
+# }
+
 # Projection
 fragment ProjectionFields on Projection {
   id

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Text, useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
-import PageContainer from './containers/PageContainer';
+import ExplorerContainer from './Containers/ExplorerContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
@@ -338,7 +338,7 @@ function Embeddings() {
             ))}
         </ul>
       </> */}
-      <PageContainer>
+      <ExplorerContainer>
         <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
         <LeftSidebar showSkeleton={fetching} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>
         <EmbeddingsContainer
@@ -359,7 +359,7 @@ function Embeddings() {
           tagSelected={tagSelected}
           serverData={serverData}
         ></RightSidebar>
-      </PageContainer>
+      </ExplorerContainer>
 
       <Modal isCentered isOpen={isError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>
         <ModalOverlay

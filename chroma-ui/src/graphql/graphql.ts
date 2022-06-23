@@ -17,6 +17,24 @@ export type Scalars = {
 
 export type AddEmbeddingResponse = Embedding | EmbeddingExists;
 
+export type CreateProjectInput = {
+  name: Scalars['String'];
+};
+
+export type Datapoint = {
+  __typename?: 'Datapoint';
+  id: Scalars['ID'];
+  slices: Array<Slice>;
+  tags: Array<Tag>;
+};
+
+export type Dataset = {
+  __typename?: 'Dataset';
+  datapoints: Array<Datapoint>;
+  id: Scalars['ID'];
+  slices: Array<Slice>;
+};
+
 export type Embedding = {
   __typename?: 'Embedding';
   data?: Maybe<Scalars['String']>;
@@ -64,6 +82,39 @@ export type EmbeddingsInput = {
   embeddings: Array<EmbeddingInput>;
 };
 
+export type Inference = {
+  __typename?: 'Inference';
+  id: Scalars['ID'];
+};
+
+export type Job = {
+  __typename?: 'Job';
+  id: Scalars['ID'];
+};
+
+export type Label = {
+  __typename?: 'Label';
+  id: Scalars['ID'];
+};
+
+export type Layer = {
+  __typename?: 'Layer';
+  embeddings: Array<Embedding>;
+  id: Scalars['ID'];
+};
+
+export type LayerSet = {
+  __typename?: 'LayerSet';
+  id: Scalars['ID'];
+  layers: Array<Layer>;
+};
+
+export type ModelArchitecture = {
+  __typename?: 'ModelArchitecture';
+  id: Scalars['ID'];
+  trainedModels: Array<TrainedModel>;
+};
+
 export type Mutation = {
   __typename?: 'Mutation';
   addEmbedding: AddEmbeddingResponse;
@@ -71,6 +122,9 @@ export type Mutation = {
   addEmbeddings: Array<Embedding>;
   addProjection: Projection;
   addProjectionSet: ProjectionSet;
+  createProject: Project;
+  deleteProject: ObjectDeleted;
+  updateProject: Project;
 };
 
 
@@ -93,6 +147,26 @@ export type MutationAddProjectionSetArgs = {
   projectionSetInput: ProjectionSetInput;
 };
 
+
+export type MutationCreateProjectArgs = {
+  project: CreateProjectInput;
+};
+
+
+export type MutationDeleteProjectArgs = {
+  project: UpdateProjectInput;
+};
+
+
+export type MutationUpdateProjectArgs = {
+  project: UpdateProjectInput;
+};
+
+export type ObjectDeleted = {
+  __typename?: 'ObjectDeleted';
+  message: Scalars['String'];
+};
+
 export type PageInfo = {
   __typename?: 'PageInfo';
   endCursor?: Maybe<Scalars['String']>;
@@ -104,6 +178,14 @@ export type PageInfo = {
 export type PageInput = {
   after?: InputMaybe<Scalars['String']>;
   first: Scalars['Int'];
+};
+
+export type Project = {
+  __typename?: 'Project';
+  datasets: Array<Dataset>;
+  id: Scalars['ID'];
+  modelArchitectures: Array<ModelArchitecture>;
+  name?: Maybe<Scalars['String']>;
 };
 
 export type Projection = {
@@ -133,17 +215,60 @@ export type ProjectionSetInput = {
   projectionSetId: Scalars['Int'];
 };
 
+export type Projector = {
+  __typename?: 'Projector';
+  id: Scalars['ID'];
+};
+
 export type Query = {
   __typename?: 'Query';
+  datapoint: Datapoint;
+  datapoints: Array<Datapoint>;
+  dataset: Dataset;
+  datasets: Array<Dataset>;
   embedding: Embedding;
   embeddingSet: EmbeddingSet;
   embeddingSets: Array<EmbeddingSet>;
   embeddings: Array<Embedding>;
   embeddingsByPage: EmbeddingConnection;
+  inference: Inference;
+  inferences: Array<Inference>;
+  job: Job;
+  jobs: Array<Job>;
+  label: Label;
+  labels: Array<Label>;
+  layer: Layer;
+  layerSet: LayerSet;
+  layerSets: Array<LayerSet>;
+  layers: Array<Layer>;
+  modelArchitecture: ModelArchitecture;
+  modelArchitectures: Array<ModelArchitecture>;
+  project: Project;
   projection: Projection;
   projectionSet: ProjectionSet;
   projectionSets: Array<ProjectionSet>;
   projections: Array<Projection>;
+  projector: Projector;
+  projectors: Array<Projector>;
+  projects: Array<Project>;
+  resource: Resource;
+  resources: Array<Resource>;
+  slice: Slice;
+  slices: Array<Slice>;
+  tag: Tag;
+  tags: Array<Tag>;
+  trainedModel: TrainedModel;
+  trainedModels: Array<TrainedModel>;
+};
+
+
+export type QueryDatapointArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryDatasetArgs = {
+  id: Scalars['ID'];
 };
 
 
@@ -162,12 +287,84 @@ export type QueryEmbeddingsByPageArgs = {
 };
 
 
+export type QueryInferenceArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryJobArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryLabelArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryLayerArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryLayerSetArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryModelArchitectureArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryProjectArgs = {
+  id: Scalars['ID'];
+};
+
+
 export type QueryProjectionArgs = {
   id: Scalars['ID'];
 };
 
 
 export type QueryProjectionSetArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryProjectorArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryResourceArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QuerySliceArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryTagArgs = {
+  id: Scalars['ID'];
+};
+
+
+export type QueryTrainedModelArgs = {
+  id: Scalars['ID'];
+};
+
+export type Resource = {
+  __typename?: 'Resource';
+  datapoints: Array<Datapoint>;
+  id: Scalars['ID'];
+};
+
+export type Slice = {
+  __typename?: 'Slice';
+  datapoints: Array<Datapoint>;
   id: Scalars['ID'];
 };
 
@@ -180,6 +377,51 @@ export type Subscription = {
 export type SubscriptionCountArgs = {
   target?: Scalars['Int'];
 };
+
+export type Tag = {
+  __typename?: 'Tag';
+  datapoints: Array<Datapoint>;
+  id: Scalars['ID'];
+};
+
+export type TrainedModel = {
+  __typename?: 'TrainedModel';
+  id: Scalars['ID'];
+  layerSets: Array<LayerSet>;
+};
+
+export type UpdateProjectInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
+};
+
+export type ProjectFieldsFragment = { __typename?: 'Project', id: string, name?: string | null };
+
+export type GetProjectsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetProjectsQuery = { __typename?: 'Query', projects: Array<{ __typename?: 'Project', id: string, name?: string | null }> };
+
+export type GetProjectQueryVariables = Exact<{
+  id: Scalars['ID'];
+}>;
+
+
+export type GetProjectQuery = { __typename?: 'Query', project: { __typename?: 'Project', id: string, name?: string | null } };
+
+export type JobFieldsFragment = { __typename?: 'Job', id: string };
+
+export type GetJobsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetJobsQuery = { __typename?: 'Query', jobs: Array<{ __typename?: 'Job', id: string }> };
+
+export type GetJobQueryVariables = Exact<{
+  id: Scalars['ID'];
+}>;
+
+
+export type GetJobQuery = { __typename?: 'Query', job: { __typename?: 'Job', id: string } };
 
 export type ProjectionFieldsFragment = { __typename?: 'Projection', id: string, x: number, y: number };
 
@@ -279,6 +521,17 @@ export type AddEmbeddingSetMutationVariables = Exact<{ [key: string]: never; }>;
 
 export type AddEmbeddingSetMutation = { __typename?: 'Mutation', addEmbeddingSet: { __typename: 'EmbeddingSet', id: string } };
 
+export const ProjectFieldsFragmentDoc = gql`
+    fragment ProjectFields on Project {
+  id
+  name
+}
+    `;
+export const JobFieldsFragmentDoc = gql`
+    fragment JobFields on Job {
+  id
+}
+    `;
 export const ProjectionFieldsFragmentDoc = gql`
     fragment ProjectionFields on Projection {
   id
@@ -317,6 +570,50 @@ export const EmbeddingSetFieldsFragmentDoc = gql`
   id
 }
     `;
+export const GetProjectsDocument = gql`
+    query getProjects {
+  projects {
+    ...ProjectFields
+  }
+}
+    ${ProjectFieldsFragmentDoc}`;
+
+export function useGetProjectsQuery(options?: Omit<Urql.UseQueryArgs<GetProjectsQueryVariables>, 'query'>) {
+  return Urql.useQuery<GetProjectsQuery>({ query: GetProjectsDocument, ...options });
+};
+export const GetProjectDocument = gql`
+    query getProject($id: ID!) {
+  project(id: $id) {
+    ...ProjectFields
+  }
+}
+    ${ProjectFieldsFragmentDoc}`;
+
+export function useGetProjectQuery(options: Omit<Urql.UseQueryArgs<GetProjectQueryVariables>, 'query'>) {
+  return Urql.useQuery<GetProjectQuery>({ query: GetProjectDocument, ...options });
+};
+export const GetJobsDocument = gql`
+    query getJobs {
+  jobs {
+    ...JobFields
+  }
+}
+    ${JobFieldsFragmentDoc}`;
+
+export function useGetJobsQuery(options?: Omit<Urql.UseQueryArgs<GetJobsQueryVariables>, 'query'>) {
+  return Urql.useQuery<GetJobsQuery>({ query: GetJobsDocument, ...options });
+};
+export const GetJobDocument = gql`
+    query getJob($id: ID!) {
+  job(id: $id) {
+    ...JobFields
+  }
+}
+    ${JobFieldsFragmentDoc}`;
+
+export function useGetJobQuery(options: Omit<Urql.UseQueryArgs<GetJobQueryVariables>, 'query'>) {
+  return Urql.useQuery<GetJobQuery>({ query: GetJobDocument, ...options });
+};
 export const GetProjectionsDocument = gql`
     query getProjections {
   projections {
