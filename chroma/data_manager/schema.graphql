@@ -6,7 +6,8 @@ schema {
 type Embedding {
   id: ID!
   data: [Float!]!
-  identifier: String!
+  input_identifier: String!
+  inference_identifier: String! 
   label: String!
 }
 
@@ -22,8 +23,16 @@ type EmbeddingsResult {
   embeddings: [Embedding]
 }
 
+type embeddingsPageResult {
+  success: Boolean!
+  errors: [String]
+  embeddings: [Embedding]
+  at_end: Boolean
+}
+
 type Query {
   embeddings: EmbeddingsResult!
+  embeddingsPage(index: Int!): embeddingsPageResult! 
   embedding(embeddingId: ID!): EmbeddingResult!
 }
 
@@ -40,9 +49,15 @@ type BatchCreateEmbeddingResult {
 type Mutation {
   createEmbedding(
    data: [Float!]! 
-   identifier: String!
+   input_identifier: String!
+   inference_identifier: String!
    label: String!
-   ): EmbeddingResult!
-  batchCreateEmbeddings(data: [[Float!]!]!, identifiers: [String!]!, labels: [String!]!): BatchCreateEmbeddingResult!
+  ): EmbeddingResult!
+  batchCreateEmbeddings(
+   data: [[Float!]!]! 
+   input_identifiers: [String!]!
+   inference_identifiers: [String!]!
+   labels: [String!]!
+  ): BatchCreateEmbeddingResult!
   deleteEmbedding(EmbeddingId: ID!): DeleteEmbeddingResult!
 }

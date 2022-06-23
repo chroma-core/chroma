@@ -7,9 +7,14 @@ from chroma.data_manager.api.models import Embedding
 
 
 @convert_kwargs_to_snake_case
-def resolve_create_embedding(obj, info, data, identifier, label):
+def resolve_create_embedding(obj, info, data, input_identifier, inference_identifier, label):
     try:
-        emb = Embedding(data=json.dumps(data), identifier=identifier, label=label)
+        emb = Embedding(
+            data=json.dumps(data),
+            input_identifier=input_identifier,
+            inference_identifier=inference_identifier,
+            label=label,
+        )
         db.session.add(emb)
         db.session.commit()
         payload = {"success": True, "embedding": emb.to_dict()}
@@ -20,13 +25,13 @@ def resolve_create_embedding(obj, info, data, identifier, label):
 
 
 @convert_kwargs_to_snake_case
-def resolve_batch_create_embeddings(obj, info, data, identifiers, labels):
+def resolve_batch_create_embeddings(obj, info, data, input_identifiers, inference_identifiers, labels):
     try:
-        annotated_data = zip(data, identifiers, labels)
+        annotated_data = zip(data, input_identifiers, inference_identifiers, labels)
 
         batch_embs = [
-            Embedding(data=json.dumps(datum), identifier=identifier, label=label)
-            for datum, identifier, label in annotated_data
+            Embedding(data=json.dumps(datum), input_identifier=input_identifier, inference_identifier=inference_identifier, label=label)
+            for datum, input_identifier, inference_identifier, label in annotated_data
         ]
         db.session.bulk_save_objects(batch_embs)
         db.session.commit()

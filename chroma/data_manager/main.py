@@ -18,7 +18,7 @@ from chroma.data_manager.api.mutations import (
     resolve_create_embedding,
     resolve_delete_embedding,
 )
-from chroma.data_manager.api.queries import resolve_embedding, resolve_embeddings
+from chroma.data_manager.api.queries import resolve_embedding, resolve_embeddings, resolve_embeddings_page
 
 
 def isSQLite3(filename):
@@ -47,6 +47,7 @@ query = ObjectType("Query")
 
 query.set_field("embeddings", resolve_embeddings)
 query.set_field("embedding", resolve_embedding)
+query.set_field("embeddingsPage", resolve_embeddings_page)
 
 mutation = ObjectType("Mutation")
 mutation.set_field("createEmbedding", resolve_create_embedding)
