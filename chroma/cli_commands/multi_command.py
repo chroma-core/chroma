@@ -164,10 +164,6 @@ class MultiCommand:
         """
         self.print_output("Chroma", "")
         self.print_output("Chroma", "Chroma is ready")
-        self.print_output(
-            "Chroma",
-            "Please open http://localhost:4000 (Command + Click on Mac)",
-        )
         self.print_output("Chroma", "")
 
 
