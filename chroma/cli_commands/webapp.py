@@ -20,33 +20,16 @@ def run():
 
     multicommand = MultiCommand()
 
-    data_manager_env = os.environ.copy()
-    data_manager_env["FLASK_APP"] = "main.py"
-    data_manager_env["FLASK_ENV"] = "production"
-    data_manager_directory = "/".join((base_dir, "data_manager"))
+    app_env = os.environ.copy()
+    app_directory = "/".join((base_dir, "app"))
 
     subcommand = SubCommand(
         multicommand,
-        name="Data Manager",
-        command=["flask run --port 5000"],
-        env=data_manager_env,
-        cwd=data_manager_directory,
-        ready_string="Running on http://127.0.0.1:5000/",
-    )
-    multicommand.append_threaded_command(subcommand.name, subcommand)
-
-    app_backend_env = os.environ.copy()
-    app_backend_env["FLASK_APP"] = "main.py"
-    app_backend_env["FLASK_ENV"] = "production"
-    app_backend_directory = "/".join((base_dir, "app_backend"))
-
-    subcommand = SubCommand(
-        multicommand,
-        name="App Backend",
-        command=["flask run --port 4000"],
-        env=app_backend_env,
-        cwd=app_backend_directory,
-        ready_string="Running on http://127.0.0.1:4000/",
+        name="App",
+        command=["uvicorn app:app --reload --host '::'"],
+        env=app_env,
+        cwd=app_directory,
+        ready_string="Application startup complete",
     )
     multicommand.append_threaded_command(subcommand.name, subcommand)
 

@@ -41,13 +41,7 @@ pytest:
 
 # convenience
 run_app:
-	python scripts/run_app_backend_frontend.py
-
-run_data_manager:
-	python scripts/run_data_manager.py
-
-run_app_backend:
-	python scripts/run_app_backend.py
+	python scripts/run_app.py
 
 run_frontend: 
 	python scripts/run_frontend.py

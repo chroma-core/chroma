@@ -1,5 +1,4 @@
-recursive-include chroma/app_backend *
-recursive-include chroma/data_manager *
+recursive-include chroma/app *
 recursive-include chroma/cli_commands *
 
 global-exclude __pycache__
