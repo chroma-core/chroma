@@ -10,6 +10,7 @@ from typing import Optional,  List, Generic, TypeVar
 from strawberry.types import Info
 from strawberry import UNSET
 from sqlalchemy import select
+from strawberry.scalars import JSON # TODO - get this working with COCO
 
 GenericType = TypeVar("GenericType")
 
@@ -17,6 +18,8 @@ GenericType = TypeVar("GenericType")
 class Project:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     # has_many datasets
     @strawberry.field
@@ -35,15 +38,19 @@ class Project:
         return cls(
             id=strawberry.ID(str(model.id)), 
             name=model.name if model.name else None,
+            created_at=model.created_at,# if model.created_at else None,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
 class Dataset:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     project: Optional[Project] = None
 
-     # has_many slices
+    # has_many slices
     @strawberry.field
     async def slices(self, info: Info) -> list["Slice"]:
         slices = await info.context["slices_by_dataset"].load(self.id)
@@ -61,6 +68,8 @@ class Dataset:
             id=strawberry.ID(str(model.id)), 
             project=Project.marshal(model.project) if model.project else None,
             name=model.name if model.name else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at
         )   
 
 @strawberry.type

@@ -1,5 +1,5 @@
 import os
-from chroma.cli_commands.multi_command import SubCommand
+from chroma.cli.multi_command import SubCommand
 
 def app_subcommand(base_dir, multicommand):
     app_env = os.environ.copy()

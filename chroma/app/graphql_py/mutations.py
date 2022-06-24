@@ -243,6 +243,7 @@ class Mutation:
             await s.flush()
             final_project = select(models.Project).where(models.Project.id == project.id)
             val = (await s.execute(final_project)).scalars().first()
+            await s.commit()
         return Project.marshal(val)
 
     @strawberry.mutation

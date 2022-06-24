@@ -1,9 +1,11 @@
 import typer
 
-from chroma.cli_commands.webapp import typer_app as application
+from chroma.cli.webapp import typer_app as application
+from chroma.cli.sdk import typer_app as sdk
 
 typer_app = typer.Typer()
 typer_app.add_typer(application, name="application")
+typer_app.add_typer(sdk, name="sdk")
 
 # for being called directly
 if __name__ == "__main__":

@@ -28,7 +28,6 @@ def run_projections(embedding_set_id):
     datapoints = [{"x": proj[0], "y": proj[1], "metadata": json.dumps({ "class": raw_emb["label"], "type": raw_emb["inference_identifier"],"ml_model_version": "v2"})} for proj, raw_emb in annotated_projections]
     return datapoints
 
-
     # Display log    
     celery_log.info(f"Order Complete!")
     return {"message": f"Projections completed"}

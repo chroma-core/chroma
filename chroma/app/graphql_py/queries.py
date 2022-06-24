@@ -44,7 +44,6 @@ class Query:
         async with models.get_session() as s:
             sql = select(models.Project).where(models.Project.id == int(id))
             val = (await s.execute(sql)).scalars().first()
-            print(val)
         return Project.marshal(val)  
     
     # Dataset

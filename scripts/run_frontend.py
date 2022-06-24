@@ -3,7 +3,7 @@ import pathlib
 import subprocess
 import time
 
-from chroma.cli_commands.multi_command import MultiCommand, SubCommand
+from chroma.cli.multi_command import MultiCommand, SubCommand
 from shared_runners import frontend_subcommand
 
 if __name__ == "__main__":

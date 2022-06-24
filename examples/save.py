@@ -1,7 +1,7 @@
 import pprint
 
 import chroma
-from chroma import data_manager
+from chroma.sdk.api import data_manager
 
 # chroma = data_manager.ChromaDataManager()
 

@@ -1,5 +1,6 @@
 recursive-include chroma/app *
-recursive-include chroma/cli_commands *
+recursive-include chroma/cli *
+recursive-include chroma/sdk *
 
 global-exclude __pycache__
 global-exclude *.py[co]

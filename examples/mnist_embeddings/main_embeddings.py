@@ -9,7 +9,8 @@ from PIL import Image
 from main_training import Net
 from torchvision import datasets, transforms
 
-from chroma import data_manager
+from chroma.sdk import data_manager_old
+from chroma.sdk import chroma_manager
 
 # We modify the MNIST dataset to expose some information about the source data
 # to allow us to uniquely identify an input in a way that we can recover it later
@@ -32,9 +33,9 @@ def infer(model, device, data_loader, embedding_store):
         for data, target, input_identifier, inference_identifier in data_loader:
 
             embedding_store.set_metadata(
-                labels=target.data.detach().tolist(),
-                input_identifiers=list(input_identifier),
-                inference_identifiers=list(inference_identifier),
+                labels=target.data.detach().tolist(), # 7 <-- this is the class
+                input_identifiers=list(input_identifier), # t10k-images-idx3-ubyte-24 <-- this is the uri
+                inference_identifiers=list(inference_identifier), # MNIST_test <-- this is the dataset?
             )
 
             data, target = data.to(device), target.to(device)
@@ -69,6 +70,8 @@ def main():
 
     args = parser.parse_args()
 
+    # upsert project
+
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -81,7 +84,8 @@ def main():
     model.to(device)
 
     # Define somewhere to store the embeddings
-    embedding_store = data_manager.ChromaDataManager()
+    embedding_store_old = data_manager_old.ChromaDataManager()
+    embedding_store = chroma_manager.ChromaSDK()
 
     # Attach the hook
     get_layer_outputs = partial(get_and_store_layer_outputs, storage=embedding_store)

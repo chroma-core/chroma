@@ -4,5 +4,8 @@
     120
   ],
   "editor.formatOnSave": true,
-  "python.formatting.provider": "black"
+  "python.formatting.provider": "black",
+  "files.exclude": {
+    "**/__pycache__": true
+  }
 }

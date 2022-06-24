@@ -5,7 +5,7 @@ import time
 
 import typer
 
-from chroma.cli_commands.multi_command import MultiCommand, SubCommand
+from chroma.cli.multi_command import MultiCommand, SubCommand
 
 typer_app = typer.Typer()
 

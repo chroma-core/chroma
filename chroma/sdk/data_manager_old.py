@@ -17,21 +17,6 @@ class ChromaDataManager:
 
     # Don't access these directly
     class Queries:
-        # _gql_get_all_embeddings = gql(
-        #     """
-        #     query getAllEmbeddings {
-        #         embeddings {
-        #             embeddings {
-        #                 id
-        #                 data
-        #                 inputIdentifier
-        #                 inferenceIdentifier
-        #                 label
-        #             }
-        #         }
-        #     }
-        #     """
-        # )
 
         _gql_get_embeddings_page = gql(
             """
@@ -54,47 +39,6 @@ class ChromaDataManager:
             }
             """
         )
-
-        # _gql_create_embedding = gql(
-        #     """
-        #     mutation newEmbedding ($data: [Float!]! $input_identifier: String!, $inference_identifier: String!, $label: String! ) {
-        #             createEmbedding(data: $data, input_identifier: $input_identifier, inference_identifier: $inference_identifier, label: $label) {
-        #                 success
-        #                 errors
-        #                 embedding {
-        #                     id
-        #                     data
-        #                     input_identifier
-        #                     inference_identifier
-        #                     label
-        #                 }
-        #             }
-        #         }
-        #     """
-        # )
-
-        # [
-        #     {
-        #         data: "data", 
-        #         label: "label", 
-        #         inferenceIdentifier: "inference_identifier",
-        #         inputIdentifier: "asdfasdfasdfasdf",
-        #         embeddingSetId: 1
-        #     }
-        # ]
-
-        # type EmbeddingInput {
-        #     data: String!
-        #     label: String!
-        #     inference_identifier: String!
-        #     input_identifier: String!
-        #     embedding_set_id: int!
-        # }
-
-        # type EmbeddingsInput {
-        #     embeddings: [EmbeddingInput!]! 
-        # }
-
         _gql_batch_create_embeddings = gql(
             """
             mutation batchCreateEmbeddings($embeddingsInput: EmbeddingsInput!) {
@@ -191,6 +135,18 @@ class ChromaDataManager:
 
         new_embeddings = []
         for index, data in enumerate(dataset):
+
+            label_data = {
+                "categories": [
+                    {
+                        "id": int(self._metadata_buffer["labels"][index]),
+                        "name": str(self._metadata_buffer["labels"][index]),
+                        "supercategory": "none"
+                    },
+                ]
+            }
+            print(label_data)
+
             new_embeddings.append({
                 "data": json.dumps(dataset[index]),
                 "inputIdentifier": self._metadata_buffer["input_identifiers"][index],
@@ -199,11 +155,11 @@ class ChromaDataManager:
                 "embeddingSetId": 1
             })
 
-        params = {
-            "embeddingsInput": {"embeddings": new_embeddings}
-        }
-        result = self._client.execute(
-            self.Queries._gql_batch_create_embeddings, variable_values=params
-        )
+        # params = {
+        #     "embeddingsInput": {"embeddings": new_embeddings}
+        # }
+        # result = self._client.execute(
+        #     self.Queries._gql_batch_create_embeddings, variable_values=params
+        # )
         self._clear_metadata()
         return result

@@ -1,0 +1,368 @@
+import imp
+from gql import Client, gql
+from gql.transport.aiohttp import AIOHTTPTransport
+from chroma.sdk.api.mutations import (
+    create_project_mutation, 
+    update_project_mutation, 
+    delete_project_mutation,
+    create_model_architecture_mutation, 
+    update_model_architecture_mutation,
+    delete_model_architecture_mutation,
+    create_dataset_mutation,
+    update_dataset_mutation,
+    delete_dataset_mutation,
+    create_slice_mutation,
+    update_slice_mutation,
+    delete_slice_mutation,
+    create_tag_mutation,
+    update_tag_mutation,
+    delete_tag_mutation,
+    # create_resource_mutation,
+    # update_resource_mutation,
+    # delete_resource_mutation,
+    create_trained_model_mutation,
+    update_trained_model_mutation,
+    delete_trained_model_mutation,
+    create_layer_set_mutation,
+    update_layer_set_mutation,
+    delete_layer_set_mutation,
+    create_layer_mutation,
+    update_layer_mutation,
+    delete_layer_mutation,
+    create_job_mutation,
+    update_job_mutation,
+    delete_job_mutation,
+    create_projector_mutation,
+    update_projector_mutation,
+    delete_projector_mutation
+    )
+from chroma.sdk.api.queries import (
+    projects_query, 
+    project_query,
+    model_architecture_query, 
+    model_architectures_query,
+    trained_model_query, 
+    trained_models_query, 
+    layer_set_query, 
+    layer_sets_query,
+    layer_query,
+    layers_query,
+    dataset_query, 
+    datasets_query, 
+    label_query, 
+    labels_query, 
+    resource_query, 
+    resources_query, 
+    datapoint_query,
+    datapoints_query, 
+    inference_query, 
+    inferences_query, 
+    slice_query, 
+    slices_query, 
+    embedding_query, 
+    embeddingsByPage_query,
+    projection_query,
+    projections_query, 
+    projector_query,
+    projectors_query,
+    job_query, 
+    jobs_query, 
+    tag_query, 
+    tags_query
+)
+
+class ChromaSDK:
+
+    # Internal
+    def __init__(self) -> None:
+        transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
+        self._client = Client(transport=transport, fetch_schema_from_transport=True)
+        self._metadata_buffer = {}
+    
+    # def _set_metadata(self):
+    #     # do things 
+    #     asdf
+
+    # def _clear_metadata(self):
+    #     # do things 
+    #     asdf
+
+    # # External
+    # def store_embeddings(self):
+    #     # do things 
+    #     asdf
+
+    # Project    
+    def get_projects(self):
+        result = self._client.execute(projects_query)
+        return result 
+
+    def get_project(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(project_query, variable_values=params)
+        return result 
+
+    def create_project(self, name: str):
+        params = {"project": {"name": name}}
+        result = self._client.execute(create_project_mutation, variable_values=params)
+        return result 
+
+    def update_project(self, id: int, name: str):
+        params = {"project": {"id": id, "name": name}}
+        result = self._client.execute(update_project_mutation, variable_values=params)
+        return result 
+    
+    def delete_project(self, id: int):
+        params = {"project": {"id": id}}
+        result = self._client.execute(delete_project_mutation, variable_values=params)
+        return result 
+
+    # model architecture
+    def get_model_architectures(self):
+        result = self._client.execute(model_architectures_query)
+        return result 
+
+    def get_model_architecture(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(model_architecture_query, variable_values=params)
+        return result 
+
+    def create_model_architecture(self, name: str, project_id: int):
+        params = {"modelArchitecture": {"name": name, "projectId": project_id}}
+        result = self._client.execute(create_model_architecture_mutation, variable_values=params)
+        return result 
+
+    def update_model_architecture(self, id: int, name: str):
+        params = {"modelArchitecture": {"id": id, "name": name}}
+        result = self._client.execute(update_model_architecture_mutation, variable_values=params)
+        return result 
+    
+    def delete_model_architecture(self, id: int):
+        params = {"modelArchitecture": {"id": id}}
+        result = self._client.execute(delete_model_architecture_mutation, variable_values=params)
+        return result 
+
+    # model architecture
+    def get_datasets(self):
+        result = self._client.execute(datasets_query)
+        return result 
+
+    def get_dataset(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(dataset_query, variable_values=params)
+        return result 
+
+    def create_dataset(self, name: str, project_id: int):
+        params = {"dataset": {"name": name, "projectId": project_id}}
+        result = self._client.execute(create_dataset_mutation, variable_values=params)
+        return result 
+
+    def update_dataset(self, id: int, name: str):
+        params = {"dataset": {"id": id, "name": name}}
+        result = self._client.execute(update_dataset_mutation, variable_values=params)
+        return result 
+    
+    def delete_dataset(self, id: int):
+        params = {"dataset": {"id": id}}
+        result = self._client.execute(delete_dataset_mutation, variable_values=params)
+        return result 
+
+    # slice
+    def get_slices(self):
+        result = self._client.execute(slices_query)
+        return result 
+
+    def get_slice(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(slice_query, variable_values=params)
+        return result 
+
+    def create_slice(self, name: str, dataset_id: int):
+        params = {"slice": {"name": name, "datasetId": dataset_id}}
+        result = self._client.execute(create_slice_mutation, variable_values=params)
+        return result 
+
+    def update_slice(self, id: int, name: str):
+        params = {"slice": {"id": id, "name": name}}
+        result = self._client.execute(update_slice_mutation, variable_values=params)
+        return result 
+    
+    def delete_slice(self, id: int):
+        params = {"slice": {"id": id}}
+        result = self._client.execute(delete_slice_mutation, variable_values=params)
+        return result 
+
+    # tag
+    def get_tags(self):
+        result = self._client.execute(tags_query)
+        return result 
+
+    def get_tag(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(tag_query, variable_values=params)
+        return result 
+
+    def create_tag(self, name: str):
+        params = {"tag": {"name": name}}
+        result = self._client.execute(create_tag_mutation, variable_values=params)
+        return result 
+
+    def update_tag(self, id: int, name: str):
+        params = {"tag": {"id": id, "name": name}}
+        result = self._client.execute(update_tag_mutation, variable_values=params)
+        return result 
+    
+    def delete_tag(self, id: int):
+        params = {"tag": {"id": id}}
+        result = self._client.execute(delete_tag_mutation, variable_values=params)
+        return result 
+
+    # resource
+    # def get_resources(self):
+    #     result = self._client.execute(resources_query)
+    #     return result 
+
+    # def get_resource(self, id: int):
+    #     params = {"id": id}
+    #     result = self._client.execute(resource_query, variable_values=params)
+    #     return result 
+
+    # def create_resource(self):
+    #     params = {}
+    #     result = self._client.execute(create_resource_mutation, variable_values=params)
+    #     return result 
+
+    # def update_resource(self, id: int, name: str):
+    #     params = {}
+    #     result = self._client.execute(update_resource_mutation, variable_values=params)
+    #     return result 
+    
+    # def delete_resource(self, id: int):
+    #     params = {"resource": {"id": id}}
+    #     result = self._client.execute(delete_resource_mutation, variable_values=params)
+    #     return result 
+
+    # trained model
+    def get_trained_models(self):
+        result = self._client.execute(trained_models_query)
+        return result 
+
+    def get_trained_model(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(trained_model_query, variable_values=params)
+        return result 
+
+    def create_trained_model(self, model_architecture_id: int):
+        params = {"trainedModel": {"modelArchitectureId": model_architecture_id}}
+        result = self._client.execute(create_trained_model_mutation, variable_values=params)
+        return result 
+
+    # def update_trained_model(self, id: int, name: str):
+    #     params = {"trained_model": {"id": id, "name": name}}
+    #     result = self._client.execute(update_trained_model_mutation, variable_values=params)
+    #     return result 
+    
+    def delete_trained_model(self, id: int):
+        params = {"trainedModel": {"id": id}}
+        result = self._client.execute(delete_trained_model_mutation, variable_values=params)
+        return result 
+
+    # layer set
+    def get_layer_sets(self):
+        result = self._client.execute(layer_sets_query)
+        return result 
+
+    def get_layer_set(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(layer_set_query, variable_values=params)
+        return result 
+
+    def create_layer_set(self, trained_model_id: int):
+        params = {"layerSet": {"trainedModelId": trained_model_id}}
+        result = self._client.execute(create_layer_set_mutation, variable_values=params)
+        return result 
+
+    # def update_layer_set(self, id: int, name: str):
+    #     params = {"layer_set": {"id": id, "name": name}}
+    #     result = self._client.execute(update_layer_set_mutation, variable_values=params)
+    #     return result 
+    
+    def delete_layer_set(self, id: int):
+        params = {"layerSet": {"id": id}}
+        result = self._client.execute(delete_layer_set_mutation, variable_values=params)
+        return result 
+
+  # layer
+    def get_layers(self):
+        result = self._client.execute(layers_query)
+        return result 
+
+    def get_layer(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(layer_query, variable_values=params)
+        return result 
+
+    def create_layer(self, layer_set_id: int):
+        params = {"layer": {"layerSetId": layer_set_id}}
+        result = self._client.execute(create_layer_mutation, variable_values=params)
+        return result 
+
+    # def update_layer(self, id: int, name: str):
+    #     params = {"layer": {"id": id, "name": name}}
+    #     result = self._client.execute(update_layer_mutation, variable_values=params)
+    #     return result 
+    
+    def delete_layer(self, id: int):
+        params = {"layer": {"id": id}}
+        result = self._client.execute(delete_layer_mutation, variable_values=params)
+        return result 
+
+    # job    
+    def get_jobs(self):
+        result = self._client.execute(jobs_query)
+        return result 
+
+    def get_job(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(job_query, variable_values=params)
+        return result 
+
+    def create_job(self, name: str):
+        params = {"job": {"name": name}}
+        result = self._client.execute(create_job_mutation, variable_values=params)
+        return result 
+
+    def update_job(self, id: int, name: str):
+        params = {"job": {"id": id, "name": name}}
+        result = self._client.execute(update_job_mutation, variable_values=params)
+        return result 
+    
+    def delete_job(self, id: int):
+        params = {"job": {"id": id}}
+        result = self._client.execute(delete_job_mutation, variable_values=params)
+        return result 
+
+    # projector    
+    def get_projectors(self):
+        result = self._client.execute(projectors_query)
+        return result 
+
+    def get_projector(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(projector_query, variable_values=params)
+        return result 
+
+    def create_projector(self):
+        params = {"projector": {}}
+        result = self._client.execute(create_projector_mutation, variable_values=params)
+        return result 
+
+    # def update_projector(self, id: int, name: str):
+    #     params = {"projector": {"id": id, "name": name}}
+    #     result = self._client.execute(update_projector_mutation, variable_values=params)
+    #     return result 
+    
+    def delete_projector(self, id: int):
+        params = {"projector": {"id": id}}
+        result = self._client.execute(delete_projector_mutation, variable_values=params)
+        return result 
