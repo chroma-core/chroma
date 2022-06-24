@@ -38,7 +38,7 @@ class Project:
         return cls(
             id=strawberry.ID(str(model.id)), 
             name=model.name if model.name else None,
-            created_at=model.created_at,# if model.created_at else None,
+            created_at=model.created_at,
             updated_at=model.updated_at,
         )
 
@@ -76,6 +76,8 @@ class Dataset:
 class Slice:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     dataset: Optional[Dataset] = None
 
     # has_many datapoints
@@ -90,11 +92,15 @@ class Slice:
             id=strawberry.ID(str(model.id)), 
             dataset=Dataset.marshal(model.dataset) if model.dataset else None,
             name=model.name if model.name else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )  
 
 @strawberry.type
 class Datapoint:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     dataset: Optional[Dataset] = None
     # resource: Optional[Resource] = None
     # label: Optional[Label] = None
@@ -120,11 +126,15 @@ class Datapoint:
             resource=Resource.marshal(model.resource) if model.resource else None,
             label=Label.marshal(model.label) if model.label else None,
             inference=Inference.marshal(model.inference) if model.inference else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
 class Resource:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     # has_many datapoints
     @strawberry.field
@@ -136,11 +146,15 @@ class Resource:
     def marshal(cls, model: models.Resource) -> "Resource":
         return cls(
             id=strawberry.ID(str(model.id)), 
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class Label:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     datapoint: Optional[Datapoint] = None
 
     @classmethod
@@ -148,12 +162,16 @@ class Label:
         return cls(
             id=strawberry.ID(str(model.id)), 
             datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class Tag:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     # has_many datapoints
     @strawberry.field
@@ -166,11 +184,15 @@ class Tag:
         return cls(
             id=strawberry.ID(str(model.id)), 
             name=model.name if model.name else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
 class Inference:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     datapoint: Optional[Datapoint] = None
     # trained_model: Optional[TrainedModel] = None
 
@@ -180,12 +202,16 @@ class Inference:
             id=strawberry.ID(str(model.id)), 
             datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             trained_model=TrainedModel.marshal(model.trained_model) if model.trained_model else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class ModelArchitecture:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     project: Optional[Project] = None
 
     # has_many trained models
@@ -200,11 +226,15 @@ class ModelArchitecture:
             id=strawberry.ID(str(model.id)), 
             project=Project.marshal(model.project) if model.project else None,
             name=model.name if model.name else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )  
 
 @strawberry.type
 class TrainedModel:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     model_architecture: Optional[ModelArchitecture] = None
 
     # has_many layer_sets
@@ -218,11 +248,15 @@ class TrainedModel:
         return cls(
             id=strawberry.ID(str(model.id)), 
             model_architecture=ModelArchitecture.marshal(model.model_architecture) if model.model_architecture else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
 class LayerSet:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     trained_model: Optional[TrainedModel] = None
 
     # has_many layers
@@ -236,11 +270,15 @@ class LayerSet:
         return cls(
             id=strawberry.ID(str(model.id)), 
             trained_model=TrainedModel.marshal(model.trained_model) if model.trained_model else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class Layer:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     layer_set: Optional[LayerSet] = None
 
     # has_many embeddings
@@ -254,33 +292,45 @@ class Layer:
         return cls(
             id=strawberry.ID(str(model.id)), 
             layer_set=LayerSet.marshal(model.layer_set) if model.layer_set else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class Projector:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     @classmethod
     def marshal(cls, model: models.Projector) -> "Projector":
         return cls(
             id=strawberry.ID(str(model.id)), 
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )   
 
 @strawberry.type
 class Job:
     id: strawberry.ID
     name: Optional[str]
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     @classmethod
     def marshal(cls, model: models.Job) -> "Job":
         return cls(
             id=strawberry.ID(str(model.id)), 
             name=model.name if model.name else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )  
 
 @strawberry.type
 class EmbeddingSet:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
 
     # has_many projection_sets
     @strawberry.field
@@ -298,11 +348,15 @@ class EmbeddingSet:
     def marshal(cls, model: models.EmbeddingSet) -> "EmbeddingSet":
         return cls(
             id=strawberry.ID(str(model.id)), 
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
 class ProjectionSet:
     id: strawberry.ID
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
 
     # has_many projections
@@ -316,6 +370,8 @@ class ProjectionSet:
         return cls(
             id=strawberry.ID(str(model.id)), 
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
@@ -325,6 +381,8 @@ class Embedding:
     label: Optional[str]
     inference_identifier: str
     input_identifier: str
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
 
     # has_many projections
@@ -343,6 +401,8 @@ class Embedding:
             input_identifier=model.input_identifier,
             layer=Layer.marshal(model.layer) if model.layer else None,
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
@@ -350,6 +410,8 @@ class Projection:
     id: strawberry.ID
     x: float
     y: float
+    created_at: Optional[datetime.datetime]
+    updated_at: Optional[datetime.datetime]
     embedding: Optional[Embedding] = None # belongs_to embedding
     projection_set: Optional[ProjectionSet] = None # belongs_to projection_set
 
@@ -361,6 +423,8 @@ class Projection:
             y=model.y,
             embedding=Embedding.marshal(model.embedding) if model.embedding else None,
             projection_set=ProjectionSet.marshal(model.projection_set) if model.projection_set else None,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
         )
 
 @strawberry.type
