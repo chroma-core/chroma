@@ -73,36 +73,6 @@ class Slice(Base):
     datapoints = relationship('Slice_Datapoint', backref='slice',  primaryjoin=id == Slice_Datapoint.slice_id)
     trained_models: list["TrainedModel"] = relationship("TrainedModel", lazy="select", back_populates="slice")
 
-# assocation table
-# class Tag_Datapoint(Base):
-#     __mapper_args__ = {'eager_defaults': True}
-#     __tablename__ = 'tag_datapoints'
-    # id = Column(Integer, primary_key=True)
-    # created_at = Column(DateTime(timezone=True), server_default=func.now())
-    # updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-# class Association(Base):
-#     datapoint = relationship("Datapoint", back_populates="tags")
-#     tag = relationship("Tag", back_populates="datapoints")
-
-# class Tag_Datapoint(Base):
-#     __mapper_args__ = {'eager_defaults': True}
-#     __tablename__ = 'tag_datapoints'
-#     # id = Column(Integer, primary_key=True)
-#     created_at = Column(DateTime(timezone=True), server_default=func.now())
-#     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-#     # id: int = Column(Integer, primary_key=True, index=True)
-#     tag_id = Column(Integer, ForeignKey('tags.id'), primary_key=True)
-#     tag = relationship("Tag", back_populates="datapoints")
-
-#     datapoint_id = Column(Integer, ForeignKey('datapoints.id'), primary_key=True)
-#     datapoint = relationship("Datapoint", back_populates="tags")
-#     # tag = relationship("Tag", backref=backref("tag_datapoints"))
-
-#     # def __init__(self, tag=None, datapoint=None):
-#     #     self.tag = tag
-#     #     self.datapoint = datapoint
-
 class Association(Base):
     __tablename__ = "association"
     left_id = Column(ForeignKey("tags.id"), primary_key=True)
@@ -123,14 +93,8 @@ class Datapoint(Base):
     resource_id: Optional[int] = Column(Integer, ForeignKey(Resource.id), nullable=True)
     resource: Optional[Resource] = relationship("Resource", lazy="joined", back_populates="datapoints")
     slices = relationship('Slice_Datapoint', backref='datapoint', primaryjoin=id == Slice_Datapoint.datapoint_id)
-    # tags = relationship('Tag_Datapoint', backref='datapoint', primaryjoin=id == Tag_Datapoint.datapoint_id)
     label = relationship("Label", back_populates="datapoint", uselist=False)
     inference = relationship("Inference", back_populates="datapoint", uselist=False)
-    # tags = relationship(
-    #     "Tag", secondary=Tag_Datapoint, back_populates="datapoints"
-    # )
-    # tags = relationship("Association", back_populates="datapoint")
-    # tags = relationship("Tag_Datapoint", back_populates="datapoint", primaryjoin=id == Tag_Datapoint.datapoint_id)
     tags = relationship("Association", back_populates="datapoint")
 
 class Tag(Base):
@@ -141,12 +105,6 @@ class Tag(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     name = Column(String)
     # habtm datapoints
-    # datapoints = relationship('Tag_Datapoint', backref='tag',  primaryjoin=id == Tag_Datapoint.tag_id)
-    # datapoints = relationship(
-    #     "Datapoint", secondary=Tag_Datapoint, back_populates="tags"
-    # )
-    # datapoints = relationship("Tag_Datapoint", back_populates="tag", primaryjoin=id == Tag_Datapoint.tag_id)
-    # datapoints = association_proxy("tag_datapoints", "datapoint")
     datapoints = relationship("Association", back_populates="tag")
 
 class Label(Base):
@@ -171,7 +129,6 @@ class Inference(Base):
     datapoint = relationship("Datapoint", back_populates="inference", uselist=False)
     trained_model_id: Optional[int] = Column(Integer, ForeignKey("trained_models.id"), nullable=True)
     trained_model = relationship("TrainedModel", back_populates="inferences", uselist=False)
-
 
 class ModelArchitecture(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -292,7 +249,6 @@ class Projection(Base):
     embedding: Optional[Embedding] = relationship("Embedding", lazy="joined", back_populates="projections")
     projection_set_id: Optional[int] = Column(Integer, ForeignKey(ProjectionSet.id), nullable=True)
     projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="joined", back_populates="projections")
-
 
 engine = create_async_engine(
     "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}

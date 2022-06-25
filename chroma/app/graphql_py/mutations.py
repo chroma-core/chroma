@@ -263,19 +263,12 @@ class Mutation:
             # you have to explicitly delete this via the association
             # there has to be a better way of doing this......
             query = delete(models.Association).where(models.Association.tag == tag).where(models.Association.datapoint == datapoint)
-            # assocation = (await s.execute(sql)).scalar_one()
-            # s.delete(assocation)
-            
-            # query = delete(models.Dataset).where(models.Dataset.id == dataset.id)
             await s.execute(query)
             try:
                 await s.commit()
             except Exception:
                 await s.rollback()
                 raise
-            
-            # await s.flush()
-            # await s.commit()
         return ObjectDeleted
 
     @strawberry.mutation
