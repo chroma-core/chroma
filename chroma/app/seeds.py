@@ -1,18 +1,49 @@
-import models
-import inspect
-import asyncio
+import resource
+from venv import create
+from chroma.cli.sdk import chroma_manager
+from types import SimpleNamespace
 
-async def seed_the_database():
-    async with models.get_session() as s:
-        project = models.Project()
-        s.add(project)
-        await s.flush()
-        print("adding project, here is the id: " + str(project.id))
+# move to utils
+class nn(SimpleNamespace):
+    def __init__(self, dictionary, **kwargs):
+        super().__init__(**kwargs)
+        for key, value in dictionary.items():
+            if isinstance(value, dict):
+                self.__setattr__(key, nn(value))
+            else:
+                self.__setattr__(key, value)
 
+print("running seeds.py")
 
-if __name__ == "__main__":
-    print("Seeding chroma.db with test data")
-    
-    if inspect.iscoroutinefunction(seed_the_database):
-        task = seed_the_database()
-        res = asyncio.get_event_loop().run_until_complete(task)
+chroma = chroma_manager.ChromaSDK()
+
+project = nn(chroma.create_project("my first project"))
+
+# data stuff
+dataset1 = nn(chroma.create_dataset("training", int(project.createProject.id)))
+dataset2 = nn(chroma.create_dataset("production", int(project.createProject.id)))
+slice1 = nn(chroma.create_slice("favorites", int(dataset1.createDataset.id)))
+slice2 = nn(chroma.create_slice("bad labels", int(dataset1.createDataset.id)))
+
+label = nn(chroma.create_label('{"asdf":"1234"}'))
+resource = nn(chroma.create_resource('file://123.png'))
+datapoint = nn(chroma.create_datapoint(int(dataset1.createDataset.id), int(resource.createResource.id), int(label.createLabel.id)))
+tag = nn(chroma.create_tag("im a tag!")) # how to attach this to datapoint?
+
+create_datapoint_set = nn(chroma.create_datapoint_set(1, '{"asdf":"1234"}', 'file://123.png'))
+append_tag = nn(chroma.append_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
+remove_tag = nn(chroma.remove_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
+append_tag = nn(chroma.append_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
+
+# add how to associate a tag with a datapoint
+
+# ML stuff
+mlarch1 = nn(chroma.create_model_architecture("yolov3", int(project.createProject.id)))
+trainedmodel1 = nn(chroma.create_trained_model(int(mlarch1.createModelArchitecture.id)))
+layerset1 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
+layerset2 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
+layer1 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+layer2 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+
+print("seeded database")

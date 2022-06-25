@@ -300,10 +300,83 @@ def delete_projector(id: str = typer.Argument(...)):
     chroma_sdk = chroma_manager.ChromaSDK()
     _print(chroma_sdk.delete_projector(id=id))
 
+# resource cli
+@typer_app.command()
+def get_resource(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_resource(id=id))
 
+@typer_app.command()
+def get_resources():
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_resources())
 
+@typer_app.command()
+def create_resource(uri: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.create_resource(uri=uri))
 
+@typer_app.command()
+def update_resource(id: str = typer.Argument(...), uri: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.update_resource(id=id, uri=uri))
 
+@typer_app.command()
+def delete_resource(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.delete_resource(id=id))
+
+# label cli
+@typer_app.command()
+def get_label(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_label(id=id))
+
+@typer_app.command()
+def get_labels():
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_labels())
+
+@typer_app.command()
+def create_label(data: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.create_label(data=data))
+
+@typer_app.command()
+def update_label(id: str = typer.Argument(...), data: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.update_label(id=id, data=data))
+
+@typer_app.command()
+def delete_label(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.delete_label(id=id))
+
+# datapoint cli
+@typer_app.command()
+def get_datapoint(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_datapoint(id=id))
+
+@typer_app.command()
+def get_datapoints():
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.get_datapoints())
+
+@typer_app.command()
+def create_datapoint(dataset_id: int = typer.Argument(...), resource_id: int = typer.Argument(...), label_id: int = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.create_datapoint(dataset_id=dataset_id, resource_id=resource_id, label_id=label_id))
+
+@typer_app.command()
+def update_datapoint(id: str = typer.Argument(...), resource_id: int = typer.Argument(...), label_id: int = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.update_datapoint(id=id, resource_id=resource_id, label_id=label_id))
+
+@typer_app.command()
+def delete_datapoint(id: str = typer.Argument(...)):
+    chroma_sdk = chroma_manager.ChromaSDK()
+    _print(chroma_sdk.delete_datapoint(id=id))
 
 
 

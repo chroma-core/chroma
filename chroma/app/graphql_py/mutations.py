@@ -1,5 +1,9 @@
+from h11 import Data
 import strawberry
+from yaml import load
+from chroma.app.graphql_py.types import ResourceDoesntExist
 import models
+from sqlalchemy.orm import selectinload
 
 from typing import Optional, List, Annotated
 from graphql_py.types import (
@@ -23,6 +27,7 @@ from graphql_py.types import (
     TrainedModel,
     LayerSet,
     Job,
+    Inference,
     Layer,
     Tag,
     Projector,
@@ -40,11 +45,15 @@ from graphql_py.types import (
     AddLayerSetResponse,
     AddLayerResponse,
     # AddProjectorResponse,
-    # AddLayerResponse,
-    # AddDatapointResponse,
+    AddDatapointResponse,
     # AddInferenceResponse,
-    # AddLabelResponse,
-    # AddResourceResponse
+    AddLabelResponse,
+    AddResourceResponse,
+    Resource,
+    Label,
+    Datapoint,
+    LabelDoesntExist,
+    ResourceDoesntExist
 )
 from strawberry.dataloader import DataLoader
 from sqlalchemy import select, update, delete
@@ -114,29 +123,36 @@ class UpdateSliceInput:
 @strawberry.input
 class CreateDatapointInput:
     dataset_id: int
-    id: Optional[strawberry.ID] = None # remove this later
+    resource_id: int
+    label_id: Optional[int] = None
+    inference_id: Optional[int] = None
 
 @strawberry.input
 class UpdateDatapointInput:
     id: strawberry.ID
+    resource_id: int
+    label_id: Optional[int] = None
+    inference_id: Optional[int] = None
 
 # Resource Inputs
 @strawberry.input
 class CreateResourceInput:
-    id: Optional[strawberry.ID] = None # remove this later
+    uri: str 
 
 @strawberry.input
 class UpdateResourceInput:
     id: strawberry.ID
+    uri: str
 
 # Label Inputs
 @strawberry.input
 class CreateLabelInput:
-    id: Optional[strawberry.ID] = None # remove this later
+    data: str
 
 @strawberry.input
 class UpdateLabelInput:
     id: strawberry.ID
+    data: str
 
 # Tag Inputs
 @strawberry.input
@@ -216,9 +232,91 @@ class CreateJobInput:
 class UpdateJobInput:
     id: strawberry.ID
     name: Optional[str] = None
+
+# Abstract Inputs
+@strawberry.input
+class CreateDatapointSetInput:
+    datasetId: int
+    label_data: str
+    resource_uri: str
+
+@strawberry.input
+class TagToDataPointInput:
+    tagId: int
+    datapointId: int
     
 @strawberry.type
 class Mutation:
+
+    #
+    # Abstract
+    #
+
+    @strawberry.mutation
+    async def remove_tag_to_datapoint(self, data: TagToDataPointInput) -> ObjectDeleted:
+        async with models.get_session() as s:
+            sql = select(models.Tag).where(models.Tag.id == data.tagId)
+            tag = (await s.execute(sql)).scalar_one()
+            sql = select(models.Datapoint).where(models.Datapoint.id == data.datapointId).options(selectinload(models.Datapoint.tags))
+            datapoint = (await s.execute(sql)).scalar_one()
+            
+            # you have to explicitly delete this via the association
+            # there has to be a better way of doing this......
+            query = delete(models.Association).where(models.Association.tag == tag).where(models.Association.datapoint == datapoint)
+            # assocation = (await s.execute(sql)).scalar_one()
+            # s.delete(assocation)
+            
+            # query = delete(models.Dataset).where(models.Dataset.id == dataset.id)
+            await s.execute(query)
+            try:
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+            
+            # await s.flush()
+            # await s.commit()
+        return ObjectDeleted
+
+    @strawberry.mutation
+    async def append_tag_to_datapoint(self, data: TagToDataPointInput) -> Datapoint:
+        async with models.get_session() as s:
+            sql = select(models.Tag).where(models.Tag.id == data.tagId)
+            tag = (await s.execute(sql)).scalar_one()
+            
+            sql = select(models.Datapoint).where(models.Datapoint.id == data.datapointId).options(selectinload(models.Datapoint.tags))
+            datapoint = (await s.execute(sql)).scalar_one()
+            
+            # you have to explicitly add this via the association
+            # there has to be a better way of doing this......
+            datapoint.tags.append(models.Association(tag=tag))
+            
+            s.add(datapoint)
+            
+            await s.flush()
+            await s.commit()
+        return Datapoint.marshal(datapoint)
+
+    @strawberry.mutation
+    async def create_datapoint_set(self, data: CreateDatapointSetInput) -> Datapoint:
+        async with models.get_session() as s:
+            label = models.Label(data=data.label_data)
+            s.add(label)
+            resource = models.Resource(uri=data.resource_uri)
+            s.add(resource)
+            await s.flush()
+
+            sql = select(models.Dataset).where(models.Dataset.id == data.datasetId)
+            dataset = (await s.execute(sql)).scalars().first()
+
+            datapoint = models.Datapoint(
+                label=label,
+                dataset=dataset,
+                resource=resource
+            )
+            s.add(datapoint)
+            await s.commit()
+        return Datapoint.marshal(datapoint)
 
     #
     # Project
@@ -749,7 +847,146 @@ class Mutation:
             await s.commit()
         return [Embedding.marshal(loc) for loc in objects]
 
+    #
+    # Resource
+    #
+    @strawberry.mutation
+    async def create_resource(self, resource: CreateResourceInput) -> AddResourceResponse:
+        async with models.get_session() as s:
+            res = models.Resource(
+                uri=resource.uri
+            )
+            s.add(res)
+            await s.commit()
+        return Resource.marshal(res)
 
+    @strawberry.mutation
+    async def update_resource(self, resource: UpdateResourceInput) -> Resource:
+        async with models.get_session() as s:
+            query = update(models.Resource).where(models.Resource.id == resource.id)
+            if resource.uri:
+                query = query.values(uri=resource.uri)
+
+            await s.execute(query)
+            await s.flush()
+
+            final_resource = select(models.Resource).where(models.Resource.id == resource.id)
+            val = (await s.execute(final_resource)).scalars().first()
+            await s.commit()
+        return Resource.marshal(val)
+
+    @strawberry.mutation
+    async def delete_resource(self, resource: UpdateResourceInput) -> ObjectDeleted:
+        async with models.get_session() as s:
+            query = delete(models.Resource).where(models.Resource.id == resource.id)
+            await s.execute(query)
+            try:
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+        return ObjectDeleted
+
+    #
+    # Label
+    #
+    @strawberry.mutation
+    async def create_label(self, label: CreateLabelInput) -> AddLabelResponse:
+        async with models.get_session() as s:
+            res = models.Label(
+                data=label.data
+            )
+            s.add(res)
+            await s.commit()
+        return Label.marshal(res)
+
+    @strawberry.mutation
+    async def update_label(self, label: UpdateLabelInput) -> Label:
+        async with models.get_session() as s:
+            query = update(models.Label).where(models.Label.id == label.id)
+            if label.data:
+                query = query.values(data=label.data)
+
+            await s.execute(query)
+            await s.flush()
+
+            final_label = select(models.Label).where(models.Label.id == label.id)
+            val = (await s.execute(final_label)).scalars().first()
+            await s.commit()
+        return Label.marshal(val)
+
+    @strawberry.mutation
+    async def delete_label(self, label: UpdateLabelInput) -> ObjectDeleted:
+        async with models.get_session() as s:
+            query = delete(models.Label).where(models.Label.id == label.id)
+            await s.execute(query)
+            try:
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+        return ObjectDeleted
+
+    #
+    # Datapoint
+    #
+    @strawberry.mutation
+    async def create_datapoint(self, datapoint: CreateDatapointInput) -> AddDatapointResponse:
+        async with models.get_session() as s:
+
+            sql = select(models.Dataset).where(models.Dataset.id == datapoint.dataset_id)
+            dataset = (await s.execute(sql)).scalars().first()
+    
+            if dataset is None: 
+                return LabelDoesntExist
+
+            sql = select(models.Label).where(models.Label.id == datapoint.label_id)
+            label = (await s.execute(sql)).scalars().first()
+
+            if label is None: 
+                return LabelDoesntExist
+
+            sql = select(models.Resource).where(models.Resource.id == datapoint.resource_id)
+            resource = (await s.execute(sql)).scalars().first()
+
+            if resource is None: 
+                return ResourceDoesntExist
+            
+            res = models.Datapoint(
+                dataset=dataset,
+                resource=resource, 
+                label=label
+            )
+            s.add(res)
+            await s.commit()
+        return Datapoint.marshal(res)
+
+    @strawberry.mutation
+    async def update_datapoint(self, datapoint: UpdateDatapointInput) -> Datapoint:
+        async with models.get_session() as s:
+            query = update(models.Datapoint).where(models.Datapoint.id == datapoint.id)
+            if datapoint.data:
+                query = query.values(data=datapoint.data)
+
+            await s.execute(query)
+            await s.flush()
+
+            final_datapoint = select(models.Datapoint).where(models.Datapoint.id == datapoint.id)
+            val = (await s.execute(final_datapoint)).scalars().first()
+            await s.commit()
+        return Datapoint.marshal(val)
+
+    @strawberry.mutation
+    async def delete_datapoint(self, datapoint: UpdateDatapointInput) -> ObjectDeleted:
+        async with models.get_session() as s:
+            query = delete(models.Datapoint).where(models.Datapoint.id == datapoint.id)
+            await s.execute(query)
+            try:
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+        return ObjectDeleted
 
 # TODO: move these to a different file I think....... they are used in types, and not in this file
 
@@ -809,8 +1046,10 @@ async def load_slices_by_datapoints(keys: list) -> list[Slice]:
 
 async def load_tags_by_datapoints(keys: list) -> list[Tag]:
     async with models.get_session() as s:
-        all_queries = [select(models.Tag).where(models.Tag.datapoint_id == key) for key in keys]
-        data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+        # you have to preload tags through the association
+        # there has to be a better way of doing this......
+        all_queries = [select(models.Association).where(models.Association.right_id == key).options(selectinload(models.Association.tag)) for key in keys]
+        data = [(await s.execute(sql)).scalars().all() for sql in all_queries]
     return data
 
 async def load_datapoints_by_resource(keys: list) -> list[Datapoint]:
@@ -855,6 +1094,18 @@ async def load_datasets_by_project(keys: list) -> list[Dataset]:
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
 
+async def load_label_by_datapoint(keys: list) -> list[Label]:
+    async with models.get_session() as s:
+        all_queries = [select(models.Label).where(models.Label.datapoint_id == key) for key in keys]
+        data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+    return data
+
+async def load_inference_by_datapoint(keys: list) -> list[Inference]:
+    async with models.get_session() as s:
+        all_queries = [select(models.Inference).where(models.Inference.datapoint_id == key) for key in keys]
+        data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+    return data
+
 async def get_context() -> dict:
     return {
         "projections_by_embedding": DataLoader(load_fn=load_projections_by_embedding),
@@ -874,5 +1125,7 @@ async def get_context() -> dict:
         "layers_by_layer_set": DataLoader(load_fn=load_layers_by_layer_set),
         "embeddings_by_layer": DataLoader(load_fn=load_embeddings_by_layer),
         "datasets_by_project": DataLoader(load_fn=load_datasets_by_project),
+        "label_by_datapoint": DataLoader(load_fn=load_label_by_datapoint),
+        "inference_by_datapoint": DataLoader(load_fn=load_inference_by_datapoint),
     }
 

@@ -5,12 +5,13 @@ import strawberry
 import base64
 import models
 import datetime
+import json
 
 from typing import Optional,  List, Generic, TypeVar
 from strawberry.types import Info
 from strawberry import UNSET
 from sqlalchemy import select
-from strawberry.scalars import JSON # TODO - get this working with COCO
+from strawberry.scalars import JSON 
 
 GenericType = TypeVar("GenericType")
 
@@ -102,15 +103,13 @@ class Datapoint:
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
     dataset: Optional[Dataset] = None
-    # resource: Optional[Resource] = None
-    # label: Optional[Label] = None
-    # inference: Optional[Inference] = None
+    resource: Optional["Resource"] = None
 
     # has_many tag
     @strawberry.field
     async def tags(self, info: Info) -> list["Tag"]:
-        tags = await info.context["tags_by_datapoints"].load(self.id)
-        return [Tag.marshal(tag) for tag in tags]
+        associations = await info.context["tags_by_datapoints"].load(self.id)
+        return [Tag.marshal(association.tag) for association in associations]
 
     # has_many slices
     @strawberry.field
@@ -118,14 +117,24 @@ class Datapoint:
         slices = await info.context["slices_by_datapoints"].load(self.id)
         return [Slice.marshal(slice) for slice in slices]
 
+    # has_one label
+    @strawberry.field
+    async def label(self, info: Info) -> "Label":
+        labels = await info.context["label_by_datapoint"].load(self.id)
+        return Label.marshal(labels[0]) 
+
+    # has_one inference
+    # @strawberry.field
+    # async def inference(self, info: Info) -> "Inference":
+    #     inferences = await info.context["inference_by_datapoint"].load(self.id)
+    #     return Inference.marshal(inferences[0]) if inferences[0] != None : None
+
     @classmethod
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
         return cls(
             id=strawberry.ID(str(model.id)),
             dataset=Dataset.marshal(model.dataset) if model.dataset else None,
             resource=Resource.marshal(model.resource) if model.resource else None,
-            label=Label.marshal(model.label) if model.label else None,
-            inference=Inference.marshal(model.inference) if model.inference else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -133,6 +142,7 @@ class Datapoint:
 @strawberry.type
 class Resource:
     id: strawberry.ID
+    uri: str
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
 
@@ -148,22 +158,25 @@ class Resource:
             id=strawberry.ID(str(model.id)), 
             created_at=model.created_at,
             updated_at=model.updated_at,
+            uri=model.uri
         )   
 
 @strawberry.type
 class Label:
     id: strawberry.ID
+    data: JSON
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
-    datapoint: Optional[Datapoint] = None
+    # datapoint: Optional[Datapoint] = None
 
     @classmethod
     def marshal(cls, model: models.Label) -> "Label":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
+            # datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            data=json.loads(model.data)
         )   
 
 @strawberry.type
@@ -463,6 +476,14 @@ class TrainedModelDoesntExist:
 class LayerSetDoesntExist:
     message: str = "No Layer Set by this ID exists, Object not created"
 
+@strawberry.type
+class LabelDoesntExist:
+    message: str = "No Label by this ID exists, Object not created"
+
+@strawberry.type
+class ResourceDoesntExist:
+    message: str = "No Resource by this ID exists, Object not created"
+
 AddEmbeddingResponse = strawberry.union("AddEmbeddingResponse", (Embedding, EmbeddingExists))
 AddEmbeddingSetResponse = EmbeddingSet
 AddProjectionSetResponse = ProjectionSet
@@ -475,6 +496,10 @@ AddModelArchitectureResponse = strawberry.union("AddModelArchitectureResponse", 
 AddTrainedModelResponse = strawberry.union("AddTrainedModelResponse", (TrainedModel, ModelArchitectureDoesntExist))
 AddLayerSetResponse = strawberry.union("AddLayerSetResponse", (LayerSet, TrainedModelDoesntExist))
 AddLayerResponse = strawberry.union("AddLayerResponse", (Layer, LayerSetDoesntExist))
+
+AddResourceResponse = Resource
+AddLabelResponse = Label
+AddDatapointResponse = strawberry.union("AddDatapointResponse", (Datapoint, LabelDoesntExist, ResourceDoesntExist))
 
 # Pagination
 # https://strawberry.rocks/docs/guides/pagination

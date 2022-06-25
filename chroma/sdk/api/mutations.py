@@ -2,6 +2,51 @@
 
 from gql import gql
 
+# Abstract mutations
+remove_tag_to_datapoint_mutation = gql(
+    """
+    mutation removeTagToDatapoint($data: TagToDataPointInput!) {
+        removeTagToDatapoint(data: $data) {
+            ... on ObjectDeleted {
+                __typename
+                message
+            }
+        }
+    }
+    """
+)
+
+append_tag_to_datapoint_mutation = gql(
+    """
+    mutation appendTagToDatapoint($data: TagToDataPointInput!) {
+        appendTagToDatapoint(data: $data) {
+            id
+        }
+    }
+    """
+)
+
+create_datapoint_set_mutation = gql(
+    """
+    mutation createDatapointSet($data: CreateDatapointSetInput!) {
+        createDatapointSet(data: $data) {
+            id
+            label {
+                id
+                data
+            }
+            resource {
+                id
+                uri
+            }
+            dataset {
+                id
+                name
+            }
+        }
+    }
+    """
+)
 
 # Project mutations
 create_project_mutation = gql(
@@ -464,6 +509,144 @@ delete_projector_mutation = gql(
     """
     mutation deleteProjector($projector: UpdateProjectorInput!) {
         deleteProjector(projector: $projector) {
+            ... on ObjectDeleted {
+                __typename
+                message
+            }
+        }
+    }
+    """
+)
+
+# Resource mutations
+create_resource_mutation = gql(
+    """
+    mutation createResource($resource: CreateResourceInput!) {
+        createResource(resource: $resource) {
+            id
+            uri
+            createdAt
+            updatedAt
+        }
+    }
+    """
+)
+
+update_resource_mutation = gql(
+    """
+    mutation updateResource($resource: UpdateResourceInput!) {
+        updateResource(resource: $resource) {
+            id
+            uri
+        }
+    }
+    """
+)
+
+delete_resource_mutation = gql(
+    """
+    mutation deleteResource($Resource: UpdateResourceInput!) {
+        deleteResource(Resource: $Resource) {
+            ... on ObjectDeleted {
+                __typename
+                message
+            }
+        }
+    }
+    """
+)
+
+# Label mutations
+create_label_mutation = gql(
+    """
+    mutation createLabel($label: CreateLabelInput!) {
+        createLabel(label: $label) {
+            id
+            data
+            createdAt
+            updatedAt
+        }
+    }
+    """
+)
+
+update_label_mutation = gql(
+    """
+    mutation updateLabel($label: UpdateLabelInput!) {
+        updateLabel(label: $label) {
+            id
+            data
+        }
+    }
+    """
+)
+
+delete_label_mutation = gql(
+    """
+    mutation deleteLabel($label: UpdateLabelInput!) {
+        deleteLabel(label: $label) {
+            ... on ObjectDeleted {
+                __typename
+                message
+            }
+        }
+    }
+    """
+)
+
+# datapoint mutations
+create_datapoint_mutation = gql(
+    """
+    mutation createDatapoint($datapoint: CreateDatapointInput!) {
+        createDatapoint(datapoint: $datapoint) {
+            ... on Datapoint {
+                id
+                resource {
+                    id
+                }
+                label {
+                    id
+                }
+                dataset {
+                    id
+                }
+                createdAt
+                updatedAt
+            }
+            ... on LabelDoesntExist {
+                message
+            }
+             ... on ResourceDoesntExist {
+                message
+            } 
+        }
+    }
+    """
+)
+
+update_datapoint_mutation = gql(
+    """
+    mutation updateDatapoint($datapoint: UpdateDatapointInput!) {
+        updateDatapoint(datapoint: $datapoint) {
+            id
+            resource {
+                id
+            }
+            label {
+                id
+            }
+            dataset {
+                id
+            }
+        }
+    }
+    """
+)
+
+delete_datapoint_mutation = gql(
+    """
+    mutation deleteDatapoint($datapoint: UpdateDatapointInput!) {
+        deleteDatapoint(datapoint: $datapoint) {
             ... on ObjectDeleted {
                 __typename
                 message

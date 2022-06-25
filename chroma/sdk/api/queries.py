@@ -1,23 +1,3 @@
-# query all the things
-
-# create project
-# find project
-
-# create dataset
-# create datapoints
-# create labels
-# create resources
-# create inferences
-# create tags
-# create embeddings 
-
-# create model architectures
-# create trained models
-# create layer sets
-# create layers
-
-# kick off projection tasks
-
 from gql import gql
 
 # project
@@ -40,6 +20,8 @@ project_query = gql(
         project(id: $id) {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -52,6 +34,8 @@ model_architectures_query = gql(
         modelArchitectures {
             id
             name
+            createdAt
+            updatedAt
             project {
                 id
             }
@@ -66,6 +50,8 @@ model_architecture_query = gql(
         modelArchitecture(id: $id) {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -77,6 +63,8 @@ trained_model_query = gql(
     query trainedModelQuery($id: ID!) {
         trainedModel(id: $id) {
             id
+            createdAt
+            updatedAt
             modelArchitecture {
                 id
             }
@@ -89,6 +77,8 @@ trained_models_query = gql(
     query trainedModelsQuery {
         trainedModels {
             id
+            createdAt
+            updatedAt
             modelArchitecture {
                 id
             }
@@ -103,6 +93,8 @@ layer_set_query = gql(
     query layerSetQuery($id: ID!) {
         layerSet(id: $id) {
             id
+            createdAt
+            updatedAt
             trainedModel {
                 id
             }
@@ -115,6 +107,8 @@ layer_sets_query = gql(
     query layerSetsQuery {
         layerSets {
             id
+            createdAt
+            updatedAt
             trainedModel {
                 id
             }
@@ -129,6 +123,8 @@ layer_query = gql(
     query layerQuery($id: ID!) {
         layer(id: $id) {
             id
+            createdAt
+            updatedAt
             layerSet {
                 id
             }
@@ -141,6 +137,8 @@ layers_query = gql(
     query layersQuery {
         layers {
             id
+            createdAt
+            updatedAt
             layerSet {
                 id
             }
@@ -155,6 +153,8 @@ dataset_query = gql(
         dataset(id: $id) {
             id
             name
+            createdAt
+            updatedAt
             project {
                 id
             }
@@ -184,6 +184,9 @@ label_query = gql(
     query labelQuery($id: ID!) {
         label(id: $id) {
             id
+            data
+            createdAt
+            updatedAt
         }
     }
     """
@@ -193,6 +196,9 @@ labels_query = gql(
     query labelsQuery {
         labels {
             id
+            data
+            createdAt
+            updatedAt
         }
     }
     """
@@ -204,6 +210,9 @@ resource_query = gql(
     query resourceQuery($id: ID!) {
         resource(id: $id) {
             id
+            uri
+            createdAt
+            updatedAt
         }
     }
     """
@@ -213,6 +222,9 @@ resources_query = gql(
     query resourcesQuery {
         resources {
             id
+            uri
+            createdAt
+            updatedAt
         }
     }
     """
@@ -225,6 +237,24 @@ datapoint_query = gql(
     query datapointQuery($id: ID!) {
         datapoint(id: $id) {
             id
+            label {
+                id
+                data
+            }
+            tags {
+                id
+                name
+            }
+            resource {
+                id
+                uri
+            }
+            dataset {
+                id
+                name
+            }
+            createdAt
+            updatedAt
         }
     }
     """
@@ -234,6 +264,16 @@ datapoints_query = gql(
     query datapointsQuery {
         datapoints {
             id
+            label {
+                id
+                data
+            }
+            resource {
+                id
+                uri
+            }
+            createdAt
+            updatedAt
         }
     }
     """
@@ -246,6 +286,8 @@ inference_query = gql(
     query inferenceQuery($id: ID!) {
         inference(id: $id) {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -255,6 +297,8 @@ inferences_query = gql(
     query inferencesQuery {
         inferences {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -268,6 +312,8 @@ slice_query = gql(
         slice(id: $id) {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -278,6 +324,8 @@ slices_query = gql(
         slices {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -290,6 +338,8 @@ embedding_query = gql(
     query embeddingQuery($id: ID!) {
         embedding(id: $id) {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -308,6 +358,8 @@ embeddingsByPage_query = gql(
                 node {
                     id
                     data
+                    createdAt
+                    updatedAt
                 }
                 cursor
             }
@@ -323,6 +375,8 @@ projection_query = gql(
     query projectionQuery($id: ID!) {
         projection(id: $id) {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -332,6 +386,8 @@ projections_query = gql(
     query projectionsQuery {
         projections {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -344,6 +400,8 @@ projector_query = gql(
     query projectorQuery($id: ID!) {
         projector(id: $id) {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -353,6 +411,8 @@ projectors_query = gql(
     query projectorsQuery {
         projectors {
             id
+            createdAt
+            updatedAt
         }
     }
     """
@@ -366,6 +426,8 @@ job_query = gql(
         job(id: $id) {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -376,6 +438,8 @@ jobs_query = gql(
         jobs {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -388,6 +452,8 @@ tag_query = gql(
         tag(id: $id) {
             id
             name
+            createdAt
+            updatedAt
         }
     }
     """
@@ -398,6 +464,11 @@ tags_query = gql(
         tags {
             id
             name
+            createdAt
+            updatedAt
+            datapoints {
+                id
+            }
         }
     }
     """

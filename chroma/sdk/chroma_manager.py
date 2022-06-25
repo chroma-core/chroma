@@ -17,9 +17,6 @@ from chroma.sdk.api.mutations import (
     create_tag_mutation,
     update_tag_mutation,
     delete_tag_mutation,
-    # create_resource_mutation,
-    # update_resource_mutation,
-    # delete_resource_mutation,
     create_trained_model_mutation,
     update_trained_model_mutation,
     delete_trained_model_mutation,
@@ -34,7 +31,19 @@ from chroma.sdk.api.mutations import (
     delete_job_mutation,
     create_projector_mutation,
     update_projector_mutation,
-    delete_projector_mutation
+    delete_projector_mutation,
+    create_resource_mutation,
+    update_resource_mutation,
+    delete_label_mutation,
+    create_label_mutation,
+    update_label_mutation,
+    delete_resource_mutation,
+    create_datapoint_mutation,
+    update_datapoint_mutation,
+    delete_datapoint_mutation,
+    create_datapoint_set_mutation,
+    append_tag_to_datapoint_mutation,
+    remove_tag_to_datapoint_mutation
     )
 from chroma.sdk.api.queries import (
     projects_query, 
@@ -91,6 +100,22 @@ class ChromaSDK:
     # def store_embeddings(self):
     #     # do things 
     #     asdf
+
+    # Abstract  
+    def remove_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
+        params = {"data": {"tagId": tagId, "datapointId":datapointId}}
+        result = self._client.execute(remove_tag_to_datapoint_mutation, variable_values=params)
+        return result
+
+    def append_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
+        params = {"data": {"tagId": tagId, "datapointId":datapointId}}
+        result = self._client.execute(append_tag_to_datapoint_mutation, variable_values=params)
+        return result
+
+    def create_datapoint_set(self, datasetId:int, labelData: str, resourceUri: str):
+        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri}}
+        result = self._client.execute(create_datapoint_set_mutation, variable_values=params)
+        return result 
 
     # Project    
     def get_projects(self):
@@ -365,4 +390,79 @@ class ChromaSDK:
     def delete_projector(self, id: int):
         params = {"projector": {"id": id}}
         result = self._client.execute(delete_projector_mutation, variable_values=params)
+        return result 
+
+    # Resource    
+    def get_resources(self):
+        result = self._client.execute(resources_query)
+        return result 
+
+    def get_resource(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(resource_query, variable_values=params)
+        return result 
+
+    def create_resource(self, uri: str):
+        params = {"resource": {"uri": uri}}
+        result = self._client.execute(create_resource_mutation, variable_values=params)
+        return result 
+
+    def update_resource(self, id: int, uri: str):
+        params = {"resource": {"id": id, "uri": uri}}
+        result = self._client.execute(update_resource_mutation, variable_values=params)
+        return result 
+    
+    def delete_resource(self, id: int):
+        params = {"resource": {"id": id}}
+        result = self._client.execute(delete_resource_mutation, variable_values=params)
+        return result 
+
+    # Label    
+    def get_labels(self):
+        result = self._client.execute(labels_query)
+        return result 
+
+    def get_label(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(label_query, variable_values=params)
+        return result 
+
+    def create_label(self, data: str):
+        params = {"label": {"data": data}}
+        result = self._client.execute(create_label_mutation, variable_values=params)
+        return result 
+
+    def update_label(self, id: int, data: str):
+        params = {"label": {"id": id, "data": data}}
+        result = self._client.execute(update_label_mutation, variable_values=params)
+        return result 
+    
+    def delete_label(self, id: int):
+        params = {"label": {"id": id}}
+        result = self._client.execute(delete_label_mutation, variable_values=params)
+        return result 
+
+    # Datapoint    
+    def get_datapoints(self):
+        result = self._client.execute(datapoints_query)
+        return result 
+
+    def get_datapoint(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(datapoint_query, variable_values=params)
+        return result 
+
+    def create_datapoint(self, dataset_id: int, resource_id: int, label_id: int):
+        params = {"datapoint": {"datasetId": dataset_id, "resourceId": resource_id, "labelId": label_id}}
+        result = self._client.execute(create_datapoint_mutation, variable_values=params)
+        return result 
+
+    def update_datapoint(self, id: int, resource_id: int, label_id: int):
+        params = {"datapoint": {"id": id, "resourceId": resource_id, "labelId": label_id}}
+        result = self._client.execute(update_datapoint_mutation, variable_values=params)
+        return result 
+    
+    def delete_datapoint(self, id: int):
+        params = {"datapoint": {"id": id}}
+        result = self._client.execute(delete_datapoint_mutation, variable_values=params)
         return result 
