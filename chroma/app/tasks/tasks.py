@@ -30,20 +30,14 @@ class SqlAlchemyTask(celery.Task):
 
 @celery_instance.task(base=SqlAlchemyTask, max_retries=3, default_retry_delay=60)
 def process_embeddings(embedding_set_id):
-    try:
-        # embedding_set = db_session.query(EmbeddingSet).filter(EmbeddingSet.id==embedding_set_id).one()
-        sql = select(models.Embedding).where(models.Embedding.embedding_set_id == embedding_set_id)
-        print("sql" + str(sql))
-        embeddings = (db_session.execute(sql)).scalars().unique().all()
-    except NoResultFound as exc:
-        raise get_from_db.retry(exc=exc)
+
+    sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == embedding_set_id)
+    embedding_set = (db_session.execute(sql)).scalars().first()
+    sql = select(models.Embedding).where(models.Embedding.embedding_set == embedding_set)
+    embeddings = (db_session.execute(sql)).scalars().unique().all()
 
     vectors = [json.loads(emb.data) for emb in embeddings]
     projections = umap_project(vectors)
-
-    # fetch the embedding set
-    sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == embedding_set_id)
-    embedding_set = (db_session.execute(sql)).scalars().first()
 
     # create the projection set
     projection_set = models.ProjectionSet(embedding_set=embedding_set)

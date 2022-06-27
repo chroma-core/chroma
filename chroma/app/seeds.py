@@ -22,6 +22,12 @@ project = nn(chroma.create_project("my first project"))
 # data stuff
 dataset1 = nn(chroma.create_dataset("training", int(project.createProject.id)))
 dataset2 = nn(chroma.create_dataset("production", int(project.createProject.id)))
+
+dataset3 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id)))
+dataset4 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id)))
+
+embedding_set = nn(chroma.create_embedding_set(int(dataset1.createDataset.id)))
+
 slice1 = nn(chroma.create_slice("favorites", int(dataset1.createDataset.id)))
 slice2 = nn(chroma.create_slice("bad labels", int(dataset1.createDataset.id)))
 
@@ -46,4 +52,8 @@ layer1 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 layer2 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 
+create_project_dedupe = nn(chroma.create_or_get_project("one project one project"))
+
+datapointembeddingset = nn(chroma.create_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]'))
+datapointembeddingset = nn(chroma.create_batch_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]'))
 print("seeded database")

@@ -3,6 +3,43 @@
 from gql import gql
 
 # Abstract mutations
+
+gql_batch_create_embeddings = gql(
+    """
+    mutation batchCreateEmbeddings($embeddingsInput: EmbeddingsInput!) {
+        addEmbeddings(embeddingsInput: $embeddingsInput) {
+            id
+            data
+            embeddingSet {
+                id
+            }
+        }
+    }
+    """
+)
+
+create_or_get_dataset_mutation = gql(
+    """
+    mutation createOrGetDataset($dataset: CreateDatasetInput!) {
+        createOrGetDataset(dataset: $dataset) {
+            id
+            name
+        }
+    }
+    """
+)
+
+create_or_get_project_mutation = gql(
+    """
+    mutation createOrGetProject($project: CreateProjectInput!) {
+        createOrGetProject(project: $project) {
+            id
+            name
+        }
+    }
+    """
+)
+
 remove_tag_to_datapoint_mutation = gql(
     """
     mutation removeTagToDatapoint($data: TagToDataPointInput!) {
@@ -42,6 +79,56 @@ create_datapoint_set_mutation = gql(
             dataset {
                 id
                 name
+            }
+        }
+    }
+    """
+)
+
+create_batch_datapoint_embedding_set_mutation = gql(
+    """
+    mutation createBatchDatapointEmbeddingSet($batchData: CreateBatchDatapointEmbeddingSetInput!) {
+        createBatchDatapointEmbeddingSet(batchData: $batchData) {
+            id
+            label {
+                id
+                data
+            }
+            resource {
+                id
+                uri
+            }
+            dataset {
+                id
+                name
+            }
+            embeddings {
+                id
+            }
+        }
+    }
+    """
+)
+
+create_datapoint_embedding_set_mutation = gql(
+    """
+    mutation createDatapointEmbeddingSet($data: CreateDatapointEmbeddingSetInput!) {
+        createDatapointEmbeddingSet(data: $data) {
+            id
+            label {
+                id
+                data
+            }
+            resource {
+                id
+                uri
+            }
+            dataset {
+                id
+                name
+            }
+            embeddings {
+                id
             }
         }
     }
@@ -651,6 +738,17 @@ delete_datapoint_mutation = gql(
                 __typename
                 message
             }
+        }
+    }
+    """
+)
+
+# embedding set mutations
+create_embedding_set_mutation = gql(
+    """
+    mutation createEmbeddingSet($embeddingSet: EmbeddingSetInput!) {
+        createEmbeddingSet(embeddingSet: $embeddingSet) {
+            id
         }
     }
     """

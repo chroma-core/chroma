@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { Text, useTheme, Spinner, Center, Button, useDisclosure, Modal, ModalBody, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalCloseButton } from '@chakra-ui/react'
-import ExplorerContainer from './Containers/ExplorerContainer';
+import ExplorerContainer from '../Containers/ExplorerContainer';
 import Header from './Header';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
-import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer';
+import EmbeddingsContainer from './EmbeddingsViewer/EmbeddingsContainer'
 import distinctColors from 'distinct-colors'
 import chroma from "chroma-js" // nothing to do with us! a color library
 import { Link, useParams } from 'react-router-dom';
@@ -21,48 +21,31 @@ query getProjectionSet($id: ID!) {
         x
         y
         embedding {
-          label
-          inputIdentifier
-          inferenceIdentifier
+          id
+          datapoint {
+            dataset {
+              id
+              name
+            }
+            tags {
+              id
+              name
+            }
+            id
+            label {
+              id
+              data
+            }
+            resource {
+              id
+              uri
+            }
+          }
         }
       }
     }
   }
 `;
-
-// function getEmbeddings(cb) {
-//   fetch(`/graphql`, {
-//     method: 'POST',
-//     headers: {
-//       'Content-Type': 'application/json',
-//     },
-//     body: JSON.stringify({
-//       query: `query fetchAllEmbeddings {
-//         datapoints {
-//           datapoints {
-//             x,
-//             y,
-//             metadata
-//           }
-//         }
-//       }`,
-//     }),
-//   })
-//     .then(res => res.json())
-//     .then(res => {
-//       cb(res.data.datapoints.datapoints)
-//     })
-//     .catch((error) => {
-//       cb({ error: true, message: error })
-//       // Only network error comes here
-//     });
-// }
-
-// embedding: {
-  // label: '7', 
-  // inputIdentifier: 't10k-images-idx3-ubyte-0', 
-  // inferenceIdentifier: 'MNIST_test', 
-  // __typename: 'Embedding'}
 
 // first we want to find the unique values in our metadata
 // and create sets of them
@@ -71,8 +54,8 @@ var generateMetadataSets = function (data) {
   metadataSets.label = new Set()
   metadataSets.inferenceIdentifier = new Set()
   data.forEach((item) => {
-    metadataSets.label.add(item.embedding.label)
-    metadataSets.inferenceIdentifier.add(item.embedding.inferenceIdentifier)
+    metadataSets.label.add(item.embedding.datapoint.label.data.categories[0].name)
+    metadataSets.inferenceIdentifier.add(item.embedding.datapoint.dataset.name)
   })
   return metadataSets
 }
@@ -152,10 +135,10 @@ var dataToPlotter = function (testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    // var metadata = JSON.parse(data.metadata)
-    // var metadata = {JSON.parse(data.metadata)}
-    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data.embedding.label);
-    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data.embedding.inferenceIdentifier)
+    // console.log('categories', data.embedding.datapoint.label.data.categories[0])
+    // console.log('type', data.embedding.datapoint.dataset)
+    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data.embedding.datapoint.label.data.categories[0].name);
+    var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data.embedding.datapoint.dataset.name)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
     var colorIndex = classTypeDict[objectIndex].subtypes[typeIndexOffset].globalColorIndex
@@ -212,17 +195,17 @@ function Embeddings() {
   const { isOpen, onOpen, onClose } = useDisclosure()
 
   const [result, reexecuteQuery] = useQuery({
-    query: FetchEmbeddingSetandProjectionSets, 
-    variables: {id: (params.projection_set_id!).toString()}
+    query: FetchEmbeddingSetandProjectionSets,
+    variables: { id: (params.projection_set_id!).toString() }
   })
 
   // set up data onload
   useEffect(() => {
-    
+
     if (result.data === undefined) {
       return
     }
-    console.log('data useeffect', result.data.proj)
+    console.log('data', result.data)
     var data = result.data.projectionSet.projections
 
     var metadataSets = generateMetadataSets(data)
@@ -245,7 +228,7 @@ function Embeddings() {
     setPoints(dataAndCamera.dataToPlot)
     setServerData(data)
   }, [result]);
-  
+
   const { data, fetching, error } = result;
 
   // Callback functions that are fired by regl-scatterplot
@@ -329,7 +312,7 @@ function Embeddings() {
       onKeyUp={(e) => handleKeyUp(e)}
       tabIndex="0"
     >
-       {/* <>
+      {/* <>
         <ul>
             {data?.projectionSet.projections.map(projection => (
               <>
@@ -370,7 +353,7 @@ function Embeddings() {
           <ModalHeader>Fetch error</ModalHeader>
           <ModalBody>
             <Text>Unable to retrieve embeddings from the backend.</Text>
-            <Text>{}</Text>
+            <Text>{ }</Text>
             <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={reexecuteQuery} my={3}>
               Retry
             </Button>

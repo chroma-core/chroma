@@ -5,9 +5,10 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float, Table
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker, backref
+from sqlalchemy.orm import relationship, sessionmaker, backref, scoped_session
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.sql import func
+from sqlalchemy import create_engine
 
 # Note to developer
 # - has_many should have lazy="select"
@@ -39,6 +40,7 @@ class Dataset(Base):
     datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="dataset")
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
     project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datasets")
+    embedding_sets: list["EmbeddingSet"] = relationship("EmbeddingSet", lazy="select", back_populates="dataset") # has_many embedding_sets
 
 class Resource(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -96,6 +98,7 @@ class Datapoint(Base):
     label = relationship("Label", back_populates="datapoint", uselist=False)
     inference = relationship("Inference", back_populates="datapoint", uselist=False)
     tags = relationship("Association", back_populates="datapoint")
+    embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="datapoint")
 
 class Tag(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -207,6 +210,9 @@ class EmbeddingSet(Base):
     embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="embedding_set") # has_many embeddings
     projection_sets: list["ProjectionSet"] = relationship("ProjectionSet", lazy="select", back_populates="embedding_set") # has_many projection_sets
 
+    dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
+    dataset: Optional[Dataset] = relationship("Dataset", lazy="joined", back_populates="embedding_sets")
+
 class ProjectionSet(Base):
     __mapper_args__ = {'eager_defaults': True}
     __tablename__ = "projection_sets"
@@ -235,6 +241,8 @@ class Embedding(Base):
     embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="joined", back_populates="embeddings")
     layer_id: Optional[int] = Column(Integer, ForeignKey(Layer.id), nullable=True)
     layer: Optional[Layer] = relationship("Layer", lazy="joined", back_populates="embeddings")
+    datapoint_id: Optional[int] = Column(Integer, ForeignKey(Datapoint.id), nullable=True)
+    datapoint: Optional[Datapoint] = relationship("Datapoint", lazy="joined", back_populates="embeddings")
 
 class Projection(Base):
     __mapper_args__ = {'eager_defaults': True}

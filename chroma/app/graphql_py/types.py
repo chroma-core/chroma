@@ -105,6 +105,12 @@ class Datapoint:
     dataset: Optional[Dataset] = None
     resource: Optional["Resource"] = None
 
+    # has_many embeddings
+    @strawberry.field
+    async def embeddings(self, info: Info) -> list["Embedding"]:
+        embeddings = await info.context["embeddings_by_datapoint"].load(self.id)
+        return [Embedding.marshal(embedding) for embedding in embeddings]
+
     # has_many tag
     @strawberry.field
     async def tags(self, info: Info) -> list["Tag"]:
@@ -344,6 +350,7 @@ class EmbeddingSet:
     id: strawberry.ID
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
+    dataset: Optional[Dataset] = None # belongs_to embedding_set
 
     # has_many projection_sets
     @strawberry.field
@@ -363,6 +370,7 @@ class EmbeddingSet:
             id=strawberry.ID(str(model.id)), 
             created_at=model.created_at,
             updated_at=model.updated_at,
+            dataset=Dataset.marshal(model.dataset) if model.dataset else None,
         )
 
 @strawberry.type
@@ -397,6 +405,7 @@ class Embedding:
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
+    datapoint: Optional[Datapoint] = None # belongs_to projection_set
 
     # has_many projections
     @strawberry.field
@@ -412,8 +421,9 @@ class Embedding:
             label=model.label if model.label else None,
             inference_identifier=model.inference_identifier,
             input_identifier=model.input_identifier,
-            layer=Layer.marshal(model.layer) if model.layer else None,
+            # layer=Layer.marshal(model.layer) if model.layer else None,
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
+            datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

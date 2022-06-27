@@ -1,5 +1,6 @@
 import argparse
 from functools import partial
+import imp
 
 import torch
 import torch.nn.functional as F
@@ -11,6 +12,7 @@ from torchvision import datasets, transforms
 
 from chroma.sdk import data_manager_old
 from chroma.sdk import chroma_manager
+from chroma.sdk.utils import nn
 
 # We modify the MNIST dataset to expose some information about the source data
 # to allow us to uniquely identify an input in a way that we can recover it later
@@ -26,16 +28,18 @@ def get_and_store_layer_outputs(self, input, output, storage):
     storage.store_batch_embeddings(output.data.detach().tolist())
 
 
-def infer(model, device, data_loader, embedding_store):
+def infer(model, device, data_loader, chroma_sdk, dataset, embedding_set):
     test_loss = 0
     correct = 0
     with torch.no_grad():
         for data, target, input_identifier, inference_identifier in data_loader:
 
-            embedding_store.set_metadata(
+            chroma_sdk.set_metadata(
                 labels=target.data.detach().tolist(), # 7 <-- this is the class
                 input_identifiers=list(input_identifier), # t10k-images-idx3-ubyte-24 <-- this is the uri
                 inference_identifiers=list(inference_identifier), # MNIST_test <-- this is the dataset?
+                dataset_id=dataset.createOrGetDataset.id,
+                embedding_set_id=embedding_set.createEmbeddingSet.id
             )
 
             data, target = data.to(device), target.to(device)
@@ -59,9 +63,9 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=1000,
+        default=500,
         metavar="N",
-        help="input batch size for inference (default: 1000)",
+        help="input batch size for inference (default: 500)",
     )
     parser.add_argument(
         "--no-cuda", action="store_true", default=False, help="disables CUDA inference"
@@ -70,7 +74,20 @@ def main():
 
     args = parser.parse_args()
 
-    # upsert project
+    # Define somewhere to store the embeddings
+    embedding_store_old = data_manager_old.ChromaDataManager()
+    chroma_sdk = chroma_manager.ChromaSDK()
+
+    # set up chroma workspace - these are consistent across runs?
+    project = nn(chroma_sdk.create_or_get_project("Mnist Demo"))
+    print(project)
+    training_dataset = nn(chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id)))
+    test_dataset = chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id))
+    
+    # change across runs
+    test_embedding_set = nn(chroma_sdk.create_embedding_set(int(training_dataset.createOrGetDataset.id)))
+
+    # TODO: create model arch, trained model, layer sets, layer here...
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -83,12 +100,8 @@ def main():
     model.eval()
     model.to(device)
 
-    # Define somewhere to store the embeddings
-    embedding_store_old = data_manager_old.ChromaDataManager()
-    embedding_store = chroma_manager.ChromaSDK()
-
     # Attach the hook
-    get_layer_outputs = partial(get_and_store_layer_outputs, storage=embedding_store)
+    get_layer_outputs = partial(get_and_store_layer_outputs, storage=chroma_sdk)
     model.fc1.register_forward_hook(get_layer_outputs)
 
     # Use the MNIST test set
@@ -104,8 +117,10 @@ def main():
     train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
 
     # Run inference over the test set
+    print("running inference over the test set")
     data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
-    infer(model, device, data_loader, embedding_store)
+    infer(model, device, data_loader, chroma_sdk, training_dataset, test_embedding_set)
+    print("completed running inference over the test set")
 
     # Run inference over the training set
     # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
@@ -113,7 +128,7 @@ def main():
 
     # Output stored embeddings
     # print(str(embedding_store.get_embeddings_pages()))
-
+    print("all done!!!!!!!!!")
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect } from 'react'
 import { Flex, Button, useTheme, Tooltip, useColorModeValue, IconButton } from '@chakra-ui/react'
 import { BsCursorFill, BsBoundingBox } from 'react-icons/bs'
 import { TbLasso } from 'react-icons/tb'
-import ColorToggle from './ColorToggle'
+import ColorToggle from '../ColorToggle'
 import ShortcutsDrawer from './ShortcutsDrawer'
 
 interface HeaderProps {

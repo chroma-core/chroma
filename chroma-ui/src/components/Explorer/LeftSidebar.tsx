@@ -2,7 +2,7 @@
 import React from 'react';
 import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, Tabs, TabList, Tab, Stack, Skeleton } from '@chakra-ui/react'
 import { BsFillSquareFill } from 'react-icons/bs';
-import SidebarButton from './Shared/SidebarButton';
+import SidebarButton from '../Shared/SidebarButton';
 
 interface LeftSidebarProps {
   classClicked: (classtring: string) => void

@@ -1,9 +1,14 @@
+from xmlrpc.client import Boolean
 from h11 import Data
 import strawberry
 from yaml import load
 from chroma.app.graphql_py.types import ResourceDoesntExist
 import models
 from sqlalchemy.orm import selectinload
+
+# from celery_worker import run_projections
+from celery.result import AsyncResult
+from tasks.tasks import process_embeddings
 
 from typing import Optional, List, Annotated
 from graphql_py.types import (
@@ -70,6 +75,10 @@ class EmbeddingInput:
 @strawberry.input
 class EmbeddingsInput:
     embeddings: list[EmbeddingInput]
+
+@strawberry.input
+class EmbeddingSetInput:
+    dataset_id: int
 
 # EmbeddingsInput = Annotated[
 #     _EmbeddingsInput,
@@ -240,10 +249,28 @@ class CreateDatapointSetInput:
     label_data: str
     resource_uri: str
 
+# Abstract Inputs
+@strawberry.input
+class CreateDatapointEmbeddingSetInput:
+    datasetId: int
+    label_data: str
+    resource_uri: str
+    embedding_data: str
+    embedding_set_id: int
+
+@strawberry.input
+class CreateBatchDatapointEmbeddingSetInput:
+    batch_data: list[CreateDatapointEmbeddingSetInput]
+
 @strawberry.input
 class TagToDataPointInput:
     tagId: int
     datapointId: int
+
+@strawberry.input
+class TagToDataPointsInput:
+    tagId: int
+    datapointIds: Optional[int] 
     
 @strawberry.type
 class Mutation:
@@ -251,6 +278,11 @@ class Mutation:
     #
     # Abstract
     #
+
+    @strawberry.mutation
+    def run_projector_on_embedding_set(self, embedding_set_id: int) -> Boolean:
+        process_embeddings(embedding_set_id)
+        return True
 
     @strawberry.mutation
     async def remove_tag_to_datapoint(self, data: TagToDataPointInput) -> ObjectDeleted:
@@ -270,6 +302,26 @@ class Mutation:
                 await s.rollback()
                 raise
         return ObjectDeleted
+
+    @strawberry.mutation
+    async def append_tag_to_datapoints(self, data: TagToDataPointsInput) -> Datapoint:
+        async with models.get_session() as s:
+            sql = select(models.Tag).where(models.Tag.id == data.tagId)
+            tag = (await s.execute(sql)).scalar_one()
+
+            for datapointId in data.datapointIds:
+                sql = select(models.Datapoint).where(models.Datapoint.id == datapointId).options(selectinload(models.Datapoint.tags))
+                datapoint = (await s.execute(sql)).scalar_one()
+                
+                # you have to explicitly add this via the association
+                # there has to be a better way of doing this......
+                datapoint.tags.append(models.Association(tag=tag))
+                
+                s.add(datapoint)
+            
+            await s.flush()
+            await s.commit()
+        return Datapoint.marshal(datapoint)
 
     @strawberry.mutation
     async def append_tag_to_datapoint(self, data: TagToDataPointInput) -> Datapoint:
@@ -311,6 +363,63 @@ class Mutation:
             await s.commit()
         return Datapoint.marshal(datapoint)
 
+    @strawberry.mutation
+    async def create_datapoint_embedding_set(self, data: CreateDatapointEmbeddingSetInput) -> Datapoint:
+        async with models.get_session() as s:
+            label = models.Label(data=data.label_data)
+            s.add(label)
+            resource = models.Resource(uri=data.resource_uri)
+            s.add(resource)
+            embedding = models.Embedding(data=data.embedding_data)
+            s.add(embedding)
+            await s.flush()
+
+            sql = select(models.Dataset).where(models.Dataset.id == data.datasetId)
+            dataset = (await s.execute(sql)).scalars().first()
+
+            datapoint = models.Datapoint(
+                label=label,
+                dataset=dataset,
+                resource=resource,
+            )
+            datapoint.embeddings.append(embedding)
+            s.add(datapoint)
+            await s.commit()
+        return Datapoint.marshal(datapoint)
+
+    @strawberry.mutation
+    async def create_batch_datapoint_embedding_set(self, batch_data: CreateBatchDatapointEmbeddingSetInput) -> list[Datapoint]:
+        async with models.get_session() as s:
+            datapoints = []
+
+            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == batch_data.batch_data[0].embedding_set_id)
+            embedding_set = (await s.execute(sql)).scalars().first()
+
+            sql = select(models.Dataset).where(models.Dataset.id == batch_data.batch_data[0].datasetId)
+            dataset = (await s.execute(sql)).scalars().first()
+
+            for datapoint_embedding_set in batch_data.batch_data:
+
+                label = models.Label(data=datapoint_embedding_set.label_data)
+                s.add(label)
+                resource = models.Resource(uri=datapoint_embedding_set.resource_uri)
+                s.add(resource)
+                embedding = models.Embedding(data=datapoint_embedding_set.embedding_data, embedding_set=embedding_set)
+                s.add(embedding)
+                await s.flush()
+
+                datapoint = models.Datapoint(
+                    label=label,
+                    dataset=dataset,
+                    resource=resource,
+                )
+                datapoint.embeddings.append(embedding)
+                s.add(datapoint)
+                datapoints.append(datapoint)
+
+            await s.commit()
+        return [Datapoint.marshal(loc) for loc in datapoints]
+
     #
     # Project
     #
@@ -323,6 +432,25 @@ class Mutation:
             s.add(res)
             await s.commit()
         return Project.marshal(res)
+
+    # this is used to create or return a project
+    @strawberry.mutation
+    async def create_or_get_project(self, project: CreateProjectInput) -> Project:
+        async with models.get_session() as s:
+
+            sql = select(models.Project).where(models.Project.name == project.name)
+            result = (await s.execute(sql)).scalars().first()
+
+            if result is None: 
+                ret = models.Project(
+                    name=project.name 
+                )
+                s.add(ret)
+                await s.commit()
+            else: 
+                ret = result
+            
+        return Project.marshal(ret)
 
     @strawberry.mutation
     async def update_project(self, project: UpdateProjectInput) -> Project:
@@ -368,6 +496,28 @@ class Mutation:
             s.add(res)
             await s.commit()
         return Dataset.marshal(res)
+
+    @strawberry.mutation
+    async def create_or_get_dataset(self, dataset: CreateDatasetInput) -> Dataset:
+        async with models.get_session() as s:
+
+            sql = select(models.Project).where(models.Project.id == dataset.project_id)
+            project = (await s.execute(sql)).scalars().first()
+
+            sql = select(models.Dataset).where(models.Dataset.name == dataset.name).where(models.Dataset.project==project)
+            result = (await s.execute(sql)).scalars().first()
+
+            if result is None: 
+                ret = models.Dataset(
+                    name=dataset.name,
+                    project=project
+                )
+                s.add(ret)
+                await s.commit()
+            else: 
+                ret = result
+            
+        return Dataset.marshal(ret)
 
     @strawberry.mutation
     async def update_dataset(self, dataset: UpdateDatasetInput) -> Dataset:
@@ -778,7 +928,6 @@ class Mutation:
     @strawberry.mutation
     async def add_projection_set(self, projection_set_input: ProjectionSetInput) -> AddProjectionSetResponse:
         async with models.get_session() as s:
-
             sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == projection_set_input.embedding_set_id)
             embedding_set = (await s.execute(sql)).scalars().first()
 
@@ -791,9 +940,12 @@ class Mutation:
     # Embedding Set
     #
     @strawberry.mutation
-    async def add_embedding_set(self) -> AddEmbeddingSetResponse:
+    async def create_embedding_set(self, embedding_set: EmbeddingSetInput) -> AddEmbeddingSetResponse:
         async with models.get_session() as s:
-            res = models.EmbeddingSet()
+            sql = select(models.Dataset).where(models.Dataset.id == embedding_set.dataset_id)
+            dataset = (await s.execute(sql)).scalars().first()
+
+            res = models.EmbeddingSet(dataset=dataset)
             s.add(res)
             await s.commit()
         return EmbeddingSet.marshal(res)
@@ -1099,6 +1251,12 @@ async def load_inference_by_datapoint(keys: list) -> list[Inference]:
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
 
+async def load_embeddings_by_datapoint(keys: list) -> list[Embedding]:
+    async with models.get_session() as s:
+        all_queries = [select(models.Embedding).where(models.Embedding.datapoint_id == key) for key in keys]
+        data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+    return data
+
 async def get_context() -> dict:
     return {
         "projections_by_embedding": DataLoader(load_fn=load_projections_by_embedding),
@@ -1120,5 +1278,6 @@ async def get_context() -> dict:
         "datasets_by_project": DataLoader(load_fn=load_datasets_by_project),
         "label_by_datapoint": DataLoader(load_fn=load_label_by_datapoint),
         "inference_by_datapoint": DataLoader(load_fn=load_inference_by_datapoint),
+        "embeddings_by_datapoint": DataLoader(load_fn=load_embeddings_by_datapoint),
     }
 

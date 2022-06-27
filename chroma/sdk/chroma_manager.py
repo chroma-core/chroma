@@ -1,4 +1,5 @@
-import imp
+import json
+import time
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 from chroma.sdk.api.mutations import (
@@ -43,7 +44,12 @@ from chroma.sdk.api.mutations import (
     delete_datapoint_mutation,
     create_datapoint_set_mutation,
     append_tag_to_datapoint_mutation,
-    remove_tag_to_datapoint_mutation
+    remove_tag_to_datapoint_mutation,
+    create_or_get_project_mutation,
+    create_or_get_dataset_mutation,
+    create_embedding_set_mutation,
+    create_datapoint_embedding_set_mutation,
+    create_batch_datapoint_embedding_set_mutation
     )
 from chroma.sdk.api.queries import (
     projects_query, 
@@ -77,8 +83,11 @@ from chroma.sdk.api.queries import (
     job_query, 
     jobs_query, 
     tag_query, 
-    tags_query
+    tags_query,
+    embedding_set_query,
+    embedding_sets_query
 )
+from .utils import hoist_to_list
 
 class ChromaSDK:
 
@@ -88,18 +97,94 @@ class ChromaSDK:
         self._client = Client(transport=transport, fetch_schema_from_transport=True)
         self._metadata_buffer = {}
     
-    # def _set_metadata(self):
-    #     # do things 
-    #     asdf
+    # Storing embeddings requires the metadata to already be available
+    def set_metadata(self, input_identifiers, inference_identifiers, labels, dataset_id, embedding_set_id):
+        self._clear_metadata()
 
-    # def _clear_metadata(self):
-    #     # do things 
-    #     asdf
+        input_identifiers = hoist_to_list(input_identifiers)
+        inference_identifiers = hoist_to_list(inference_identifiers)
+        labels = hoist_to_list(labels)
 
-    # # External
-    # def store_embeddings(self):
-    #     # do things 
-    #     asdf
+        input_identifiers = [str(i) for i in input_identifiers]
+        inference_identifiers = [str(n) for n in inference_identifiers]
+        labels = [str(l) for l in labels]
+
+        # Sanity check that we have the right number of things
+        assert len(input_identifiers) == len(labels)
+        assert len(inference_identifiers) == len(labels)
+
+        self._metadata_buffer["input_identifiers"] = input_identifiers
+        self._metadata_buffer["inference_identifiers"] = inference_identifiers
+        self._metadata_buffer["labels"] = labels
+        self._metadata_buffer["dataset_id"] = dataset_id
+        self._metadata_buffer["embedding_set_id"] = embedding_set_id
+
+    def _clear_metadata(self):
+        self._metadata_buffer = {}
+
+    def store_batch_embeddings(self, dataset):
+        # Sanity check
+        assert len(dataset) == len(self._metadata_buffer["input_identifiers"])
+
+        new_embeddings = []
+        for index, data in enumerate(dataset):
+
+            label_data = {
+                "categories": [
+                    {
+                        "id": int(self._metadata_buffer["labels"][index]),
+                        "name": str(self._metadata_buffer["labels"][index]),
+                        "supercategory": "none"
+                    },
+                ]
+            }
+
+            new_embeddings.append({
+                "embeddingData": json.dumps(dataset[index]),
+                "resourceUri": self._metadata_buffer["input_identifiers"][index],
+                #"inferenceIdentifier": self._metadata_buffer["inference_identifiers"][index],
+                "labelData": json.dumps(label_data),
+                # "embeddingSetId": 1, # think more about this
+                "datasetId": int(self._metadata_buffer["dataset_id"]),
+                "embeddingSetId": int(self._metadata_buffer["embedding_set_id"]),
+            })
+
+        print("writing a batch! length: " + str(len(new_embeddings)))
+        start = time.process_time()
+        result = self.create_batch_datapoint_embedding_set(new_embeddings)
+        elapsedtime = time.process_time() - start
+        print("completed writing a batch in " + str(elapsedtime*1000) + " seconds")
+        self._clear_metadata()
+        return result
+
+    # def get_embeddings(self):
+    #     result = self._client.execute(self.Queries._gql_get_all_embeddings)
+    #     return result
+
+    # async def get_embeddings_async(self):
+    #     result = await self._client.execute_async(self.Queries._gql_get_all_embeddings)
+    #     return result
+    
+    # def get_embeddings_page(self, after):
+    #     params = {"first": 100, "after": after}
+    #     result = self._client.execute(self.Queries._gql_get_embeddings_page, variable_values=params)
+    #     return result 
+    
+    # def get_embeddings_pages(self):
+    #     after = None
+    #     all_results = []
+    #     while True:
+    #         result = self.get_embeddings_page(after)
+    #         page = result["embeddingsByPage"]
+    #         all_results.extend(page["edges"])
+
+    #         page_info = page["pageInfo"]
+    #         has_next_page = page_info["hasNextPage"]
+    #         end_cursor = page_info["endCursor"]
+    #         if has_next_page:
+    #             break
+    #         after = end_cursor
+    #     return all_results
 
     # Abstract  
     def remove_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
@@ -117,6 +202,16 @@ class ChromaSDK:
         result = self._client.execute(create_datapoint_set_mutation, variable_values=params)
         return result 
 
+    def create_datapoint_embedding_set(self, datasetId:int, labelData: str, resourceUri: str, embeddingData):
+        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri, "embeddingData": embeddingData }}
+        result = self._client.execute(create_datapoint_embedding_set_mutation, variable_values=params)
+        return result 
+
+    def create_batch_datapoint_embedding_set(self, new_datapoint_embedding_sets):
+        params = {"batchData": {"batchData": new_datapoint_embedding_sets}}
+        result = self._client.execute(create_batch_datapoint_embedding_set_mutation, variable_values=params)
+        return result 
+
     # Project    
     def get_projects(self):
         result = self._client.execute(projects_query)
@@ -130,6 +225,11 @@ class ChromaSDK:
     def create_project(self, name: str):
         params = {"project": {"name": name}}
         result = self._client.execute(create_project_mutation, variable_values=params)
+        return result 
+
+    def create_or_get_project(self, name: str):
+        params = {"project": {"name": name}}
+        result = self._client.execute(create_or_get_project_mutation, variable_values=params)
         return result 
 
     def update_project(self, id: int, name: str):
@@ -167,7 +267,7 @@ class ChromaSDK:
         result = self._client.execute(delete_model_architecture_mutation, variable_values=params)
         return result 
 
-    # model architecture
+    # dataset
     def get_datasets(self):
         result = self._client.execute(datasets_query)
         return result 
@@ -180,6 +280,11 @@ class ChromaSDK:
     def create_dataset(self, name: str, project_id: int):
         params = {"dataset": {"name": name, "projectId": project_id}}
         result = self._client.execute(create_dataset_mutation, variable_values=params)
+        return result 
+
+    def create_or_get_dataset(self, name: str, project_id: int):
+        params = {"dataset": {"name": name, "projectId": project_id}}
+        result = self._client.execute(create_or_get_dataset_mutation, variable_values=params)
         return result 
 
     def update_dataset(self, id: int, name: str):
@@ -465,4 +570,19 @@ class ChromaSDK:
     def delete_datapoint(self, id: int):
         params = {"datapoint": {"id": id}}
         result = self._client.execute(delete_datapoint_mutation, variable_values=params)
+        return result 
+
+    # embedding sets
+    def get_embedding_sets(self):
+        result = self._client.execute(embedding_sets_query)
+        return result 
+
+    def get_embedding_set(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(embedding_set_query, variable_values=params)
+        return result 
+
+    def create_embedding_set(self, dataset_id: int):
+        params = {"embeddingSet": {"datasetId": dataset_id}}
+        result = self._client.execute(create_embedding_set_mutation, variable_values=params)
         return result 

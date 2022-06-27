@@ -17,10 +17,6 @@ from graphql_py.mutations import Mutation, get_context
 from graphql_py.subscriptions import Subscription
 from strawberry.subscriptions import GRAPHQL_TRANSPORT_WS_PROTOCOL, GRAPHQL_WS_PROTOCOL
 
-# from celery_worker import create_order
-# from celery.result import AsyncResult
-# from tasks.tasks import process_embeddings
-
 def isSQLite3(filename):
     if not isfile(filename):
         return False
@@ -51,16 +47,3 @@ app.add_middleware(
 )
 
 app.mount("/", StaticFiles(directory="static/", html=True), name="static")
-
-# process_embeddings(1)
-# task = create_order.delay("asdf", 5)
-# task_id = task.task_id
-# print("CELERY OBJECT " + task_id)
-
-# result = AsyncResult(task_id)
-# print(result.get())
-# # result = AsyncResult(result.task_id)
-# # print(result.task_id)
-# # print(result.status)
-# # print(results.result)
-
