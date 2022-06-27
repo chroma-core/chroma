@@ -1,6 +1,5 @@
 import argparse
 from functools import partial
-import imp
 
 import torch
 import torch.nn.functional as F
@@ -10,7 +9,7 @@ from PIL import Image
 from main_training import Net
 from torchvision import datasets, transforms
 
-from chroma.sdk import data_manager_old
+# from chroma.sdk import data_manager_old
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 
@@ -63,9 +62,9 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=500,
+        default=1000,
         metavar="N",
-        help="input batch size for inference (default: 500)",
+        help="input batch size for inference (default: 1000)",
     )
     parser.add_argument(
         "--no-cuda", action="store_true", default=False, help="disables CUDA inference"
@@ -75,17 +74,16 @@ def main():
     args = parser.parse_args()
 
     # Define somewhere to store the embeddings
-    embedding_store_old = data_manager_old.ChromaDataManager()
+    # embedding_store_old = data_manager_old.ChromaDataManager()
     chroma_sdk = chroma_manager.ChromaSDK()
 
     # set up chroma workspace - these are consistent across runs?
     project = nn(chroma_sdk.create_or_get_project("Mnist Demo"))
-    print(project)
-    training_dataset = nn(chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id)))
-    test_dataset = chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id))
+    training_dataset_chroma = nn(chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id)))
+    test_dataset_chroma = nn(chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id)))
     
     # change across runs
-    test_embedding_set = nn(chroma_sdk.create_embedding_set(int(training_dataset.createOrGetDataset.id)))
+    test_embedding_set = nn(chroma_sdk.create_embedding_set(int(training_dataset_chroma.createOrGetDataset.id)))
 
     # TODO: create model arch, trained model, layer sets, layer here...
 
@@ -119,16 +117,14 @@ def main():
     # Run inference over the test set
     print("running inference over the test set")
     data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
-    infer(model, device, data_loader, chroma_sdk, training_dataset, test_embedding_set)
+    infer(model, device, data_loader, chroma_sdk, training_dataset_chroma, test_embedding_set)
     print("completed running inference over the test set")
 
     # Run inference over the training set
     # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
-    # infer(model, device, data_loader, embedding_store)
+    # infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
 
-    # Output stored embeddings
-    # print(str(embedding_store.get_embeddings_pages()))
-    print("all done!!!!!!!!!")
+    print("Completed")
 
 if __name__ == "__main__":
     main()

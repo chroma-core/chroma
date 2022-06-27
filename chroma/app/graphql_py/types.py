@@ -1,3 +1,4 @@
+from curses.ascii import EM
 from re import A, L
 from h11 import Data
 from numpy import Inf
@@ -379,20 +380,28 @@ class ProjectionSet:
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
+    prefetchedProjections: Optional[list["Projection"]] = None
 
     # has_many projections
     @strawberry.field
     async def projections(self, info: Info) -> list["Projection"]:
-        projections = await info.context["projections_by_projection_set"].load(self.id)
+        # raise Exception("this shouldnt fire first......." + str(self) + " info: " + str(info))
+        projections = []
+        if self.prefetchedProjections is None:
+            projections = await info.context["projections_by_projection_set"].load(self.id)
+        else:
+            projections = self.prefetchedProjections
         return [Projection.marshal(projection) for projection in projections]
 
     @classmethod
     def marshal(cls, model: models.ProjectionSet) -> "ProjectionSet":
+        # raise Exception(str(model.projections))
         return cls(
             id=strawberry.ID(str(model.id)), 
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            prefetchedProjections=model.projections
         )
 
 @strawberry.type
@@ -400,8 +409,8 @@ class Embedding:
     id: strawberry.ID
     data: Optional[str]
     label: Optional[str]
-    inference_identifier: str
-    input_identifier: str
+    inference_identifier: Optional[str]
+    input_identifier: Optional[str]
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
@@ -440,6 +449,7 @@ class Projection:
 
     @classmethod
     def marshal(cls, model: models.Projection) -> "Projection":
+        # raise Exception("projection model...... " + str(model.projection_set_id))
         return cls(
             id=strawberry.ID(str(model.id)),
             x=model.x,
@@ -554,12 +564,6 @@ def build_embedding_cursor(embedding: Embedding):
     return base64.b64encode(embeddingid).decode()
 
 Cursor = str
-
-# @strawberry.type
-# class PageInput:
-#     first: int = 5
-#     after: Optional[Cursor] = UNSET
-
 
 @strawberry.input
 class PageInput:

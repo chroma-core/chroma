@@ -1,15 +1,36 @@
-# from __future__ import absolute_import
-import celery
-
-from .db import db_session
+from time import sleep
+from celery import Celery
+from celery.utils.log import get_task_logger
 from celery.utils.log import get_task_logger
 from models import EmbeddingSet, Embedding
-from .celery_agent import celery_instance
 from sqlalchemy import select
 import models
 import json
-
+from celery import Celery
 import umap
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session
+from sqlalchemy.orm import sessionmaker
+
+# Initialize celery
+celery = Celery('tasks', broker='amqp://guest:guest@127.0.0.1:5672//')
+
+# Create logger - enable to display messages on task logger
+celery_log = get_task_logger(__name__)
+
+engine = create_engine(
+    "sqlite:///./chroma.db", 
+    # convert_unicode=True,
+    # pool_recycle=3600, 
+    # pool_size=10
+)
+db_session = scoped_session(
+    sessionmaker(
+        autocommit=False, 
+        autoflush=False, 
+        bind=engine
+    )
+)
 
 # Project high-dimensional vectors to 2-D via UMAP (https://umap-learn.readthedocs.io)
 def umap_project(vectors):
@@ -17,8 +38,6 @@ def umap_project(vectors):
     reducer.fit(vectors)
     projection = reducer.transform(vectors)
     return projection
-
-celery_log = get_task_logger(__name__)
 
 class SqlAlchemyTask(celery.Task):
     """An abstract Celery Task that ensures that the connection the the
@@ -28,7 +47,7 @@ class SqlAlchemyTask(celery.Task):
     def after_return(self, status, retval, task_id, args, kwargs, einfo):
         db_session.remove()
 
-@celery_instance.task(base=SqlAlchemyTask, max_retries=3, default_retry_delay=60)
+@celery.task(base=SqlAlchemyTask, max_retries=3, default_retry_delay=60)
 def process_embeddings(embedding_set_id):
 
     sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == embedding_set_id)
@@ -57,7 +76,5 @@ def process_embeddings(embedding_set_id):
     db_session.add_all(new_projections)
     db_session.commit()
 
-    # print("app utils: packing datapoints")
-    # annotated_projections = zip(projections, raw_embeddings)
-    # datapoints = [{"x": proj[0], "y": proj[1], "metadata": json.dumps({ "class": raw_emb["label"], "type": raw_emb["inference_identifier"],"ml_model_version": "v2"})} for proj, raw_emb in annotated_projections]
-    # print("datapoints!" + str(datapoints))
+    celery_log.info(f"Processing embeddings complete")
+    return {"message": f"Projections completed"}

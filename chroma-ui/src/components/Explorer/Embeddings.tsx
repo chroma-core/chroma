@@ -12,6 +12,19 @@ import chroma from "chroma-js" // nothing to do with us! a color library
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 
+// const FetchEmbeddingSetandProjectionSets = `
+// query getProjectionSet($id: ID!) {
+//     projectionSet(id: $id) {
+//       id
+//       projections {
+//         id
+//         x
+//         y
+//       }
+//     }
+//   }
+// `;
+
 const FetchEmbeddingSetandProjectionSets = `
 query getProjectionSet($id: ID!) {
     projectionSet(id: $id) {
@@ -53,8 +66,9 @@ var generateMetadataSets = function (data) {
   var metadataSets = {}
   metadataSets.label = new Set()
   metadataSets.inferenceIdentifier = new Set()
+  console.log('data in generatemetadatasets', data)
   data.forEach((item) => {
-    metadataSets.label.add(item.embedding.datapoint.label.data.categories[0].name)
+    metadataSets.label.add(JSON.parse(item.embedding.datapoint.label.data).categories[0].name)
     metadataSets.inferenceIdentifier.add(item.embedding.datapoint.dataset.name)
   })
   return metadataSets
@@ -137,7 +151,7 @@ var dataToPlotter = function (testData, classTypeDict) {
     // color map for the classes are set in scatterplot
     // console.log('categories', data.embedding.datapoint.label.data.categories[0])
     // console.log('type', data.embedding.datapoint.dataset)
-    var objectIndex = classTypeDict.findIndex((t, index) => t.title === data.embedding.datapoint.label.data.categories[0].name);
+    var objectIndex = classTypeDict.findIndex((t, index) => t.title === JSON.parse(data.embedding.datapoint.label.data).categories[0].name);
     var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data.embedding.datapoint.dataset.name)
     var classVisible = classTypeDict[objectIndex].visible
     var typeVisble = classTypeDict[objectIndex].subtypes[typeIndexOffset].visible
@@ -208,6 +222,7 @@ function Embeddings() {
     console.log('data', result.data)
     var data = result.data.projectionSet.projections
 
+    console.log('data', data)
     var metadataSets = generateMetadataSets(data)
     console.log('metadataSets', metadataSets)
     var response = generateLeftSidebarObject(metadataSets)

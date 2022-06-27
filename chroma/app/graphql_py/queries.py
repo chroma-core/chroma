@@ -1,6 +1,11 @@
+import resource
 import strawberry
 import models
+import json
+import time
 import base64
+from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
+from strawberry.scalars import JSON 
 
 from typing import Optional, List
 from graphql_py.types import (
@@ -27,6 +32,51 @@ from graphql_py.types import (
 from strawberry.dataloader import DataLoader
 from sqlalchemy import select
 from strawberry import UNSET
+
+@strawberry.type
+class LabelLight:
+    id: int
+    data: JSON
+
+@strawberry.type
+class ResourceLight:
+    id: int
+    uri: str
+
+@strawberry.type
+class TagLight:
+    id: int
+    name: str
+
+@strawberry.type
+class DatasetLight:
+    id: int
+    name: str
+
+@strawberry.type
+class DatapointLight:
+    id: int
+    label: LabelLight
+    resource: ResourceLight
+    tags: list[TagLight]
+    dataset: DatasetLight
+
+@strawberry.type
+class EmbeddingLight:
+    id: int
+    datapoint: DatapointLight
+
+@strawberry.type
+class ProjectionLight:
+    id: int
+    x: float
+    y: float
+    embedding: EmbeddingLight
+
+@strawberry.type
+class ProjectionSetLight:
+    id: int
+    projections: list[ProjectionLight]
 
 @strawberry.type
 class Query:
@@ -264,12 +314,34 @@ class Query:
             result = (await s.execute(sql)).scalars().unique().all()
         return [ProjectionSet.marshal(loc) for loc in result]
 
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
     @strawberry.field
-    async def projection_set(self, id: strawberry.ID) -> ProjectionSet:
+    async def projection_set(self, id: strawberry.ID) -> ProjectionSetLight:
         async with models.get_session() as s:
-            sql = select(models.ProjectionSet).where(models.ProjectionSet.id == id)
+
+            start = time.process_time()
+            # benchmark difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
+            sql = (select(models.ProjectionSet).where(models.ProjectionSet.id == id)
+                .options(joinedload(models.ProjectionSet.projections).load_only("id", "x", "y", "embedding_id")
+                    .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
+                        .options(joinedload(models.Embedding.datapoint)
+                            .options(
+                                joinedload(models.Datapoint.tags), 
+                                joinedload(models.Datapoint.label), 
+                                joinedload(models.Datapoint.resource),
+                                joinedload(models.Datapoint.dataset)
+                                )
+                        )
+                    )
+                )
+            )
             val = (await s.execute(sql)).scalars().first()
-        return ProjectionSet.marshal(val)  
+            elapsedtime = time.process_time() - start
+            print("got records in " + str(elapsedtime) + " seconds")
+            # raise Exception(str(val.projections[0].embedding.datapoint.tags))
+        return val
 
     # Projection
     @strawberry.field

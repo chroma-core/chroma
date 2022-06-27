@@ -85,27 +85,11 @@ create_datapoint_set_mutation = gql(
     """
 )
 
+# returns true or false for now
 create_batch_datapoint_embedding_set_mutation = gql(
     """
     mutation createBatchDatapointEmbeddingSet($batchData: CreateBatchDatapointEmbeddingSetInput!) {
-        createBatchDatapointEmbeddingSet(batchData: $batchData) {
-            id
-            label {
-                id
-                data
-            }
-            resource {
-                id
-                uri
-            }
-            dataset {
-                id
-                name
-            }
-            embeddings {
-                id
-            }
-        }
+        createBatchDatapointEmbeddingSet(batchData: $batchData) 
     }
     """
 )
@@ -305,7 +289,11 @@ delete_tag_mutation = gql(
     """
 )
 
-# TODO: resources
+# these are not added individually typically and instead are added a set in batch
+# resources
+# datapoints
+# labels
+# inferences
 # create_resource_mutation = gql(
 #     """
 #     mutation createResource($resource: CreateResourceInput!) {
@@ -341,9 +329,7 @@ delete_tag_mutation = gql(
 #     """
 # )
 
-# TODO: datapoints
-# TODO: labels
-# TODO: inferences
+
 
 
 # model architecture mutations

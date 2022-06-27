@@ -80,9 +80,11 @@ yarn start
 
 ### The backend
 The backend uses:
+- uvirocn (webserver)
 - FastAPI
 - Strawberry (graphql)
 - Alembic (migrations)
+- Sqlite (db)
 
 - `app_backend` runs on port 4000. `app_backend` serves a graphql playground at [http://127.0.0.1:5000/graphql](http://127.0.0.1:5000/graphql)
 - `data_manager` runs on port 5000

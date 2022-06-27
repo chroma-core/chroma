@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 # from celery_worker import run_projections
 from celery.result import AsyncResult
-from tasks.tasks import process_embeddings
+from tasks import process_embeddings
 
 from typing import Optional, List, Annotated
 from graphql_py.types import (
@@ -278,10 +278,9 @@ class Mutation:
     #
     # Abstract
     #
-
     @strawberry.mutation
     def run_projector_on_embedding_set(self, embedding_set_id: int) -> Boolean:
-        process_embeddings(embedding_set_id)
+        process_embeddings.delay(embedding_set_id)
         return True
 
     @strawberry.mutation
@@ -388,37 +387,31 @@ class Mutation:
         return Datapoint.marshal(datapoint)
 
     @strawberry.mutation
-    async def create_batch_datapoint_embedding_set(self, batch_data: CreateBatchDatapointEmbeddingSetInput) -> list[Datapoint]:
+    async def create_batch_datapoint_embedding_set(self, batch_data: CreateBatchDatapointEmbeddingSetInput) -> Boolean:
         async with models.get_session() as s:
-            datapoints = []
-
-            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == batch_data.batch_data[0].embedding_set_id)
-            embedding_set = (await s.execute(sql)).scalars().first()
+            objs_to_add = []
 
             sql = select(models.Dataset).where(models.Dataset.id == batch_data.batch_data[0].datasetId)
             dataset = (await s.execute(sql)).scalars().first()
 
+            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == batch_data.batch_data[0].embedding_set_id)
+            embedding_set = (await s.execute(sql)).scalars().first()
+
             for datapoint_embedding_set in batch_data.batch_data:
-
                 label = models.Label(data=datapoint_embedding_set.label_data)
-                s.add(label)
                 resource = models.Resource(uri=datapoint_embedding_set.resource_uri)
-                s.add(resource)
                 embedding = models.Embedding(data=datapoint_embedding_set.embedding_data, embedding_set=embedding_set)
-                s.add(embedding)
-                await s.flush()
+                objs_to_add.extend([label, resource, embedding])
 
-                datapoint = models.Datapoint(
-                    label=label,
-                    dataset=dataset,
-                    resource=resource,
-                )
+                datapoint = models.Datapoint(label=label, dataset=dataset, resource=resource)
                 datapoint.embeddings.append(embedding)
-                s.add(datapoint)
-                datapoints.append(datapoint)
+                objs_to_add.append(datapoint)
 
+            # add all is very important for speed! 
+            s.add_all(objs_to_add)
             await s.commit()
-        return [Datapoint.marshal(loc) for loc in datapoints]
+
+        return True
 
     #
     # Project
@@ -699,7 +692,7 @@ class Mutation:
             await s.commit()
         return TrainedModel.marshal(res)
 
-    # TODO: implement when we have actual fields
+    # we dont have any fields to update on this object yet
     # @strawberry.mutation
     # async def update_trained_model(self, trained_model: UpdateTrainedModelInput) -> TrainedModel:
     #     async with models.get_session() as s:
@@ -746,7 +739,7 @@ class Mutation:
             await s.commit()
         return LayerSet.marshal(res)
 
-    # TODO: implement when we have actual fields
+    # we dont have any fields to update on this object yet
     # @strawberry.mutation
     # async def update_layer_set(self, layer_set: UpdateLayerSetInput) -> LayerSet:
     #     async with models.get_session() as s:
@@ -793,7 +786,7 @@ class Mutation:
             await s.commit()
         return Layer.marshal(res)
 
-    # TODO: implement when we have actual fields
+    # we dont have any fields to update on this object yet
     # @strawberry.mutation
     # async def update_layer(self, layer: UpdateLayerInput) -> Layer:
     #     async with models.get_session() as s:
@@ -832,6 +825,7 @@ class Mutation:
             await s.commit()
         return Projector.marshal(res)
 
+    # we dont have any fields to update on this object yet
     # @strawberry.mutation
     # async def update_projector(self, layer: UpdateLayerInput) -> Layer:
     #     async with models.get_session() as s:
@@ -971,26 +965,27 @@ class Mutation:
             await s.commit()
         return Embedding.marshal(db_embedding)
 
-    @strawberry.mutation
-    async def add_embeddings(self, embeddings_input: EmbeddingsInput) -> list[Embedding]: # batch query example
-        async with models.get_session() as s:
-            objects = []
+    # TODO: fix this function so it doesn't hard code the embedding set
+    # @strawberry.mutation
+    # async def add_embeddings(self, embeddings_input: EmbeddingsInput) -> list[Embedding]: # batch query example
+    #     async with models.get_session() as s:
+    #         objects = []
 
-            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == 1)
-            embedding_set = (await s.execute(sql)).scalars().first()
+    #         sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == 1)
+    #         embedding_set = (await s.execute(sql)).scalars().first()
 
-            for em in embeddings_input.embeddings:
-                objects.append(models.Embedding(
-                    data=em.data,
-                    label=em.label,
-                    inference_identifier=em.inference_identifier,
-                    input_identifier=em.input_identifier,
-                    embedding_set=embedding_set,
-                ))
+    #         for em in embeddings_input.embeddings:
+    #             objects.append(models.Embedding(
+    #                 data=em.data,
+    #                 label=em.label,
+    #                 inference_identifier=em.inference_identifier,
+    #                 input_identifier=em.input_identifier,
+    #                 embedding_set=embedding_set,
+    #             ))
 
-            s.add_all(objects)
-            await s.commit()
-        return [Embedding.marshal(loc) for loc in objects]
+    #         s.add_all(objects)
+    #         await s.commit()
+    #     return [Embedding.marshal(loc) for loc in objects]
 
     #
     # Resource
@@ -1256,6 +1251,18 @@ async def load_embeddings_by_datapoint(keys: list) -> list[Embedding]:
         all_queries = [select(models.Embedding).where(models.Embedding.datapoint_id == key) for key in keys]
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
+
+# async def load_embedding_by_projection(keys: list) -> list[Label]:
+#     async with models.get_session() as s:
+#         all_queries = [select(models.Embedding).where(models.Embedding.id == key) for key in keys]
+#         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+#     return data
+
+# async def load_projection_sets_by_projection(keys: list) -> list[Label]:
+#     async with models.get_session() as s:
+#         all_queries = [select(models.Label).where(models.Label.datapoint_id == key) for key in keys]
+#         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+#     return data
 
 async def get_context() -> dict:
     return {

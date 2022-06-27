@@ -367,28 +367,6 @@ embeddingsByPage_query = gql(
     }
     """
 )
-# get_embedings_by_page_query = gql(
-#             """
-#     query embeddingsByPage ($first: Int, $after: String) {
-#         embeddingsByPage(first: $first, after: $after) {
-#             pageInfo {
-#                 hasNextPage
-#                 hasPreviousPage
-#                 startCursor
-#                 endCursor
-#             }
-#             edges {
-#                 node {
-#                     id
-#                     data
-#                 }
-#                 cursor
-#             }
-#         }
-#     }
-#     """
-# )
-
 
 # embedding set
 embedding_set_query = gql(

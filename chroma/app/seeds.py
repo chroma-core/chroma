@@ -1,17 +1,7 @@
 import resource
 from venv import create
 from chroma.cli.sdk import chroma_manager
-from types import SimpleNamespace
-
-# move to utils
-class nn(SimpleNamespace):
-    def __init__(self, dictionary, **kwargs):
-        super().__init__(**kwargs)
-        for key, value in dictionary.items():
-            if isinstance(value, dict):
-                self.__setattr__(key, nn(value))
-            else:
-                self.__setattr__(key, value)
+from chroma.sdk.utils import nn
 
 print("running seeds.py")
 

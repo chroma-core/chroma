@@ -14,7 +14,7 @@ from strawberry.fastapi import GraphQLRouter
 
 from graphql_py.queries import Query
 from graphql_py.mutations import Mutation, get_context
-from graphql_py.subscriptions import Subscription
+# from graphql_py.subscriptions import Subscription
 from strawberry.subscriptions import GRAPHQL_TRANSPORT_WS_PROTOCOL, GRAPHQL_WS_PROTOCOL
 
 def isSQLite3(filename):
@@ -37,7 +37,7 @@ if not isSQLite3("chroma.db"):
 else:
     print("DB in place")
 
-schema = strawberry.Schema(query=Query, mutation=Mutation, subscription=Subscription)
+schema = strawberry.Schema(query=Query, mutation=Mutation)
 graphql_app = GraphQLRouter(schema, context_getter=get_context)
 
 app = FastAPI(title="AppBackend")

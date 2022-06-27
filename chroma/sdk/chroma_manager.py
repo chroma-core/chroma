@@ -94,7 +94,7 @@ class ChromaSDK:
     # Internal
     def __init__(self) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
-        self._client = Client(transport=transport, fetch_schema_from_transport=True)
+        self._client = Client(transport=transport, fetch_schema_from_transport=True, execute_timeout=30)
         self._metadata_buffer = {}
     
     # Storing embeddings requires the metadata to already be available
@@ -153,10 +153,11 @@ class ChromaSDK:
         start = time.process_time()
         result = self.create_batch_datapoint_embedding_set(new_embeddings)
         elapsedtime = time.process_time() - start
-        print("completed writing a batch in " + str(elapsedtime*1000) + " seconds")
+        print("completed writing a batch in " + str(elapsedtime*100) + " seconds")
         self._clear_metadata()
         return result
 
+    # TODO: make sure that we can update these queries for use in other projects
     # def get_embeddings(self):
     #     result = self._client.execute(self.Queries._gql_get_all_embeddings)
     #     return result
@@ -347,6 +348,7 @@ class ChromaSDK:
         result = self._client.execute(delete_tag_mutation, variable_values=params)
         return result 
 
+    # while these work, they are handled in batch right now and not created directly
     # resource
     # def get_resources(self):
     #     result = self._client.execute(resources_query)
@@ -387,6 +389,7 @@ class ChromaSDK:
         result = self._client.execute(create_trained_model_mutation, variable_values=params)
         return result 
 
+    # we dont have any fields on this object to update yet
     # def update_trained_model(self, id: int, name: str):
     #     params = {"trained_model": {"id": id, "name": name}}
     #     result = self._client.execute(update_trained_model_mutation, variable_values=params)
@@ -412,6 +415,7 @@ class ChromaSDK:
         result = self._client.execute(create_layer_set_mutation, variable_values=params)
         return result 
 
+    # we dont have any fields on this object to update yet
     # def update_layer_set(self, id: int, name: str):
     #     params = {"layer_set": {"id": id, "name": name}}
     #     result = self._client.execute(update_layer_set_mutation, variable_values=params)
@@ -437,6 +441,7 @@ class ChromaSDK:
         result = self._client.execute(create_layer_mutation, variable_values=params)
         return result 
 
+    # we dont have any fields on this object to update yet
     # def update_layer(self, id: int, name: str):
     #     params = {"layer": {"id": id, "name": name}}
     #     result = self._client.execute(update_layer_mutation, variable_values=params)
@@ -487,6 +492,7 @@ class ChromaSDK:
         result = self._client.execute(create_projector_mutation, variable_values=params)
         return result 
 
+    # we dont have any fields on this object to update yet
     # def update_projector(self, id: int, name: str):
     #     params = {"projector": {"id": id, "name": name}}
     #     result = self._client.execute(update_projector_mutation, variable_values=params)
