@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Iterable
 
 # enables dot notation for python objects
+# so project["dataset"]["id"] -> project.dataset.id
 class nn(SimpleNamespace):
     def __init__(self, dictionary, **kwargs):
         super().__init__(**kwargs)

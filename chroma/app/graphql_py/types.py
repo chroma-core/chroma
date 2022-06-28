@@ -380,28 +380,20 @@ class ProjectionSet:
     created_at: Optional[datetime.datetime]
     updated_at: Optional[datetime.datetime]
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
-    prefetchedProjections: Optional[list["Projection"]] = None
 
     # has_many projections
     @strawberry.field
     async def projections(self, info: Info) -> list["Projection"]:
-        # raise Exception("this shouldnt fire first......." + str(self) + " info: " + str(info))
-        projections = []
-        if self.prefetchedProjections is None:
-            projections = await info.context["projections_by_projection_set"].load(self.id)
-        else:
-            projections = self.prefetchedProjections
+        projections = await info.context["projections_by_projection_set"].load(self.id)
         return [Projection.marshal(projection) for projection in projections]
 
     @classmethod
     def marshal(cls, model: models.ProjectionSet) -> "ProjectionSet":
-        # raise Exception(str(model.projections))
         return cls(
             id=strawberry.ID(str(model.id)), 
             embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            prefetchedProjections=model.projections
         )
 
 @strawberry.type
@@ -449,7 +441,6 @@ class Projection:
 
     @classmethod
     def marshal(cls, model: models.Projection) -> "Projection":
-        # raise Exception("projection model...... " + str(model.projection_set_id))
         return cls(
             id=strawberry.ID(str(model.id)),
             x=model.x,

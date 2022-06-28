@@ -1,4 +1,7 @@
 ## Base Types
+##   Not all types, queries, and mutations are listed here
+##   These are *mostly* only the things we need to use nicely on the frontend
+##   Some queries are still "hand typed" like in Embeddings.tsx
 
 # Project
 fragment ProjectFields on Project {
@@ -34,24 +37,6 @@ query getJob($id: ID!) {
     ...JobFields
   }
 }
-
-# Dataset
-# fragment DatasetFields on Dataset {
-#   id
-#   name
-# }
-
-# query getDatasets {
-#   projects {
-#     ...ProjectFields
-#   }
-# }
-
-# query getProject($id: ID!) {
-#   project(id: $id) {
-#     ...ProjectFields
-#   }
-# }
 
 # Projection
 fragment ProjectionFields on Projection {
@@ -126,7 +111,6 @@ mutation AddProjectionSet($projectionSetInput: ProjectionSetInput!) {
 }
 
 # Embeddings
-
 fragment EmbeddingFields on Embedding {
   id
   label
@@ -145,13 +129,6 @@ query getEmbedding($id: ID!) {
     ...EmbeddingFields
   }
 }
-
-# TODO: add get by page
-
-# type Connection {
-
-# }
-
 
 input PageInput {
   first: Int
@@ -224,7 +201,6 @@ mutation AddEmbeddings($embeddingsInput: EmbeddingsInput!) {
 }
 
 # EmbeddingSet
-
 fragment EmbeddingSetFields on EmbeddingSet {
   id
 }
@@ -251,6 +227,7 @@ mutation AddEmbeddingSet {
   }
 }
 
+# leave in as part of subscription example
 # subscription getCounter {
 #   count(target: 50)
 # }

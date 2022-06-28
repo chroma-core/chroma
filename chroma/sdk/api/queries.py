@@ -333,6 +333,18 @@ slices_query = gql(
 
 
 # embedding
+embeddings_query = gql(
+    """
+    query embeddingsQuery {
+        embeddings {
+            id
+            createdAt
+            updatedAt
+            data
+        }
+    }
+    """
+)
 embedding_query = gql(
     """
     query embeddingQuery($id: ID!) {
@@ -340,6 +352,7 @@ embedding_query = gql(
             id
             createdAt
             updatedAt
+            data
         }
     }
     """

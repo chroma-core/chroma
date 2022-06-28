@@ -38,7 +38,7 @@ export default function Header() {
     >
       <Container maxWidth={1200}>
         <Link to={"/"}>
-        <Button
+          <Button
             borderRadius={0}
             height="100%"
             pr={4}
@@ -47,14 +47,14 @@ export default function Header() {
             color="white"
             borderBottomStyle="solid"
             borderBottom="4px solid"
-            borderColor={(pathSelected==HeaderRouteOptions.PROJECT) ? theme.colors.ch_blue : "rgba(0,0,0,0)"}
+            borderColor={(pathSelected == HeaderRouteOptions.PROJECT) ? theme.colors.ch_blue : "rgba(0,0,0,0)"}
             _hover={{ bg: theme.colors.ch_gray.black, color: "white" }}
             _active={{ bg: theme.colors.ch_gray.black, color: "white" }}
           >
             Projects
-        </Button>
+          </Button>
         </Link>
-        <Link to={"/jobs"}>
+        {/* <Link to={"/jobs"}>
         <Button
             borderRadius={0}
             height="100%"
@@ -70,7 +70,7 @@ export default function Header() {
           >
             Jobs
         </Button>
-        </Link>
+        </Link> */}
       </Container>
     </Flex>
   )

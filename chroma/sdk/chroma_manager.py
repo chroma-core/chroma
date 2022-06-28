@@ -76,6 +76,7 @@ from chroma.sdk.api.queries import (
     slice_query, 
     slices_query, 
     embedding_query, 
+    embeddings_query,
     embeddingsByPage_query,
     projection_query,
     projections_query, 
@@ -156,35 +157,40 @@ class ChromaSDK:
         self._clear_metadata()
         return result
 
-    # TODO: make sure that we can update these queries for use in other projects
-    # def get_embeddings(self):
-    #     result = self._client.execute(self.Queries._gql_get_all_embeddings)
-    #     return result
-
-    # async def get_embeddings_async(self):
-    #     result = await self._client.execute_async(self.Queries._gql_get_all_embeddings)
-    #     return result
+    def get_embeddings_page(self, after):
+        params = {"first": 100, "after": after}
+        result = self._client.execute(embeddingsByPage_query, variable_values=params)
+        return result 
     
-    # def get_embeddings_page(self, after):
-    #     params = {"first": 100, "after": after}
-    #     result = self._client.execute(self.Queries._gql_get_embeddings_page, variable_values=params)
-    #     return result 
-    
-    # def get_embeddings_pages(self):
-    #     after = None
-    #     all_results = []
-    #     while True:
-    #         result = self.get_embeddings_page(after)
-    #         page = result["embeddingsByPage"]
-    #         all_results.extend(page["edges"])
+    def get_embeddings_pages(self):
+        after = None
+        all_results = []
+        while True:
+            result = self.get_embeddings_page(after)
+            page = result["embeddingsByPage"]
+            all_results.extend(page["edges"])
 
-    #         page_info = page["pageInfo"]
-    #         has_next_page = page_info["hasNextPage"]
-    #         end_cursor = page_info["endCursor"]
-    #         if has_next_page:
-    #             break
-    #         after = end_cursor
-    #     return all_results
+            page_info = page["pageInfo"]
+            has_next_page = page_info["hasNextPage"]
+            end_cursor = page_info["endCursor"]
+            if has_next_page:
+                break
+            after = end_cursor
+        return all_results
+
+    # embedding sets
+    async def get_embeddings_async(self):
+        result = await self._client.execute(embeddings_query)
+        return result
+
+    def get_embeddings(self):
+        result = self._client.execute(embeddings_query)
+        return result 
+
+    def get_embedding(self, id: int):
+        params = {"id": id}
+        result = self._client.execute(embedding_query, variable_values=params)
+        return result 
 
     # Abstract  
     def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):

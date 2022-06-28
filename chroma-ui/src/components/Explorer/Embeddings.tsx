@@ -53,7 +53,6 @@ var generateMetadataSets = function (data) {
   var metadataSets = {}
   metadataSets.label = new Set()
   metadataSets.inferenceIdentifier = new Set()
-  console.log('data in generatemetadatasets', data)
   data.forEach((item) => {
     metadataSets.label.add(JSON.parse(item.embedding.datapoint.label.data).categories[0].name)
     metadataSets.inferenceIdentifier.add(item.embedding.datapoint.dataset.name)
@@ -202,26 +201,18 @@ function Embeddings() {
 
   // set up data onload
   useEffect(() => {
-
-    console.log('result', result)
     if (result.data === undefined) {
       return
     }
-    console.log('data', result.data)
     var data = result.data.projectionSet.projections
 
-    console.log('data', data)
     var metadataSets = generateMetadataSets(data)
-    console.log('metadataSets', metadataSets)
     var response = generateLeftSidebarObject(metadataSets)
     var classTypeDict = response[0]
     var colors = response[1]
-    console.log('classTypeDict', classTypeDict)
-    console.log('colors', colors)
     setColorsUsed(colors)
 
     var dataAndCamera = dataToPlotter(data, classTypeDict)
-    console.log('dataAndCamera', dataAndCamera)
     setClassDict(classTypeDict)
 
     setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])

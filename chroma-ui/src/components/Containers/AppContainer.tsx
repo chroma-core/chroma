@@ -8,16 +8,15 @@ interface AppContainerProps {
   includeMessages?: boolean
 }
 
-export default function AppContainer({children, includeMessages}: AppContainerProps) {
-    let params = useParams();
-    console.log('params', params, children)
-    
-    return (
-      <Flex>
-        <AppHeader/>
-        <Container mt="48px">
+export default function AppContainer({ children, includeMessages }: AppContainerProps) {
+  let params = useParams();
+
+  return (
+    <Flex>
+      <AppHeader />
+      <Container mt="48px">
         {children}
-        </Container>
-      </Flex>
-    )
+      </Container>
+    </Flex>
+  )
 }

@@ -34,9 +34,9 @@ def infer(model, device, data_loader, chroma_sdk, dataset, embedding_set):
         for data, target, input_identifier, inference_identifier in data_loader:
 
             chroma_sdk.set_metadata(
-                labels=target.data.detach().tolist(), # 7 <-- this is the class
-                input_identifiers=list(input_identifier), # t10k-images-idx3-ubyte-24 <-- this is the uri
-                inference_identifiers=list(inference_identifier), # MNIST_test <-- this is the dataset?
+                labels=target.data.detach().tolist(), # eg  7 <-- this is the class
+                input_identifiers=list(input_identifier), # eg t10k-images-idx3-ubyte-24 <-- this is the uri
+                inference_identifiers=list(inference_identifier), # eg MNIST_test <-- this is the dataset
                 dataset_id=dataset.createOrGetDataset.id,
                 embedding_set_id=embedding_set.createEmbeddingSet.id
             )
@@ -74,7 +74,6 @@ def main():
     args = parser.parse_args()
 
     # Define somewhere to store the embeddings
-    # embedding_store_old = data_manager_old.ChromaDataManager()
     chroma_sdk = chroma_manager.ChromaSDK()
 
     # set up chroma workspace - these are consistent across runs?
@@ -115,14 +114,12 @@ def main():
     train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
 
     # Run inference over the test set
-    print("running inference over the test set")
     data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
     infer(model, device, data_loader, chroma_sdk, training_dataset_chroma, test_embedding_set)
-    print("completed running inference over the test set")
 
     # Run inference over the training set
-    # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
-    # infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
+    data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+    infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
 
     chroma_sdk.run_projector_on_embedding_set_mutation(test_embedding_set.createEmbeddingSet.id)
 

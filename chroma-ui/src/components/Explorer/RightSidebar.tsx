@@ -59,7 +59,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
       </Flex>
       <Divider w="100%" />
       {selectedPoints.map(function (point) {
-        // let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
+        console.log('serverdata point', serverData[point])
+        let category = JSON.parse(serverData[point].embedding.datapoint.label.data).categories[0].name
+        let dataset = serverData[point].embedding.datapoint.dataset.name
         return (
           <Box
             mt={3}
@@ -85,6 +87,14 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected
               <TableContainer>
                 <Table variant='unstyled' size="sm">
                   <Tbody>
+                    <Tr key="class">
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Class</Td>
+                      <Td p={0} fontSize="xs">{category}</Td>
+                    </Tr>
+                    <Tr key="dataset">
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
+                      <Td p={0} fontSize="xs">{dataset}</Td>
+                    </Tr>
                     {/* {Object.entries(metadata).map(([key, val]) => {
                       return (
                         <Tr key={key}>

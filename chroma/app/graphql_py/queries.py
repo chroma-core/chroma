@@ -317,12 +317,17 @@ class Query:
     def as_dict(self):
        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
+    # This returns a thin custom type to avoid the Strawberry type system
+    # Strawberry's type system will try to resolve things nicely so you don't have to prefetch
+    # all the data you want from the db. However in this query, we do want to prefetch everything
+    # and so we sidestep our normal types with these Lightweight types defined above. 
+    # Speeds things up by 2x
     @strawberry.field
     async def projection_set(self, id: strawberry.ID) -> ProjectionSetLight:
         async with models.get_session() as s:
 
             start = time.process_time()
-            # benchmark difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
+            # benchmarked difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
             sql = (select(models.ProjectionSet).where(models.ProjectionSet.id == id)
                 .options(joinedload(models.ProjectionSet.projections).load_only("id", "x", "y", "embedding_id")
                     .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
@@ -340,7 +345,7 @@ class Query:
             val = (await s.execute(sql)).scalars().first()
             elapsedtime = time.process_time() - start
             print("got records in " + str(elapsedtime) + " seconds")
-            # raise Exception(str(val.projections[0].embedding.datapoint.tags))
+
         return val
 
     # Projection

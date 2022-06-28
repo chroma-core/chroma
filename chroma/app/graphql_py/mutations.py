@@ -49,9 +49,7 @@ from graphql_py.types import (
     TrainedModelDoesntExist,
     AddLayerSetResponse,
     AddLayerResponse,
-    # AddProjectorResponse,
     AddDatapointResponse,
-    # AddInferenceResponse,
     AddLabelResponse,
     AddResourceResponse,
     Resource,
@@ -79,11 +77,6 @@ class EmbeddingsInput:
 @strawberry.input
 class EmbeddingSetInput:
     dataset_id: int
-
-# EmbeddingsInput = Annotated[
-#     _EmbeddingsInput,
-#     strawberry.argument("Input for creating a resource. Tags is list of global ids.") #example
-# ]
 
 @strawberry.input
 class ProjectionInput:
@@ -176,7 +169,7 @@ class UpdateTagInput:
 # Inference Inputs
 @strawberry.input
 class CreateInferenceInput:
-    id: Optional[strawberry.ID] = None # remove this later
+    id: Optional[strawberry.ID] = None # remove this later, placeholder for now
 
 @strawberry.input
 class UpdateInferenceInput:
@@ -197,7 +190,7 @@ class UpdateModelArchitectureInput:
 @strawberry.input
 class CreateTrainedModelInput:
     model_architecture_id: int
-    id: Optional[strawberry.ID] = None # remove this later
+    id: Optional[strawberry.ID] = None # remove this later, placeholder for now
 
 @strawberry.input
 class UpdateTrainedModelInput:
@@ -207,7 +200,7 @@ class UpdateTrainedModelInput:
 @strawberry.input
 class CreateLayerSetInput:
     trained_model_id: int
-    id: Optional[strawberry.ID] = None # remove this later
+    id: Optional[strawberry.ID] = None # remove this later, placeholder for now
 
 @strawberry.input
 class UpdateLayerSetInput:
@@ -217,7 +210,7 @@ class UpdateLayerSetInput:
 @strawberry.input
 class CreateLayerInput:
     layer_set_id: int
-    id: Optional[strawberry.ID] = None # remove this later
+    id: Optional[strawberry.ID] = None # remove this later, placeholder for now
 
 @strawberry.input
 class UpdateLayerInput:
@@ -226,7 +219,7 @@ class UpdateLayerInput:
 # Projector Inputs
 @strawberry.input
 class CreateProjectorInput:
-    id: Optional[strawberry.ID] = None # remove this later
+    id: Optional[strawberry.ID] = None # remove this later, placeholder for now
 
 @strawberry.input
 class UpdateProjectorInput:
@@ -1251,18 +1244,6 @@ async def load_embeddings_by_datapoint(keys: list) -> list[Embedding]:
         all_queries = [select(models.Embedding).where(models.Embedding.datapoint_id == key) for key in keys]
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
-
-# async def load_embedding_by_projection(keys: list) -> list[Label]:
-#     async with models.get_session() as s:
-#         all_queries = [select(models.Embedding).where(models.Embedding.id == key) for key in keys]
-#         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
-#     return data
-
-# async def load_projection_sets_by_projection(keys: list) -> list[Label]:
-#     async with models.get_session() as s:
-#         all_queries = [select(models.Label).where(models.Label.datapoint_id == key) for key in keys]
-#         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
-#     return data
 
 async def get_context() -> dict:
     return {

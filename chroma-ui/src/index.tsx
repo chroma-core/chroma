@@ -1,7 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './index.css'
-import App from './App'
 import reportWebVitals from './reportWebVitals'
 import defaultTheme from './themes/defaultTheme'
 import { BrowserRouter } from 'react-router-dom'
@@ -10,7 +9,7 @@ import { extendTheme, ChakraProvider, ColorModeScript } from '@chakra-ui/react'
 import { Global, css } from '@emotion/react';
 
 import { createClient, Provider, defaultExchanges, subscriptionExchange } from 'urql';
-import { SubscriptionClient } from 'subscriptions-transport-ws';
+// import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
 
@@ -29,15 +28,15 @@ console.log(`%c
   _____     __  __     ______     ______     __    __     ______    \r\n\/\\  ___\\   \/\\ \\_\\ \\   \/\\  == \\   \/\\  __ \\   \/\\ \"-.\/  \\   \/\\  __ \\   \r\n\\ \\ \\____  \\ \\  __ \\  \\ \\  __<   \\ \\ \\\/\\ \\  \\ \\ \\-.\/\\ \\  \\ \\  __ \\  \r\n \\ \\_____\\  \\ \\_\\ \\_\\  \\ \\_\\ \\_\\  \\ \\_____\\  \\ \\_\\ \\ \\_\\  \\ \\_\\ \\_\\ \r\n  \\\/_____\/   \\\/_\/\\\/_\/   \\\/_\/ \/_\/   \\\/_____\/   \\\/_\/  \\\/_\/   \\\/_\/\\\/_\/ 
 `, `font-family: monospace`);
 
-const subscriptionClient = new SubscriptionClient('ws://localhost:8000/graphql', { reconnect: true });
+// const subscriptionClient = new SubscriptionClient('ws://localhost:8000/graphql', { reconnect: true });
 
 const client = createClient({
   url: 'http://localhost:8000/graphql',
   exchanges: [
     ...defaultExchanges,
-    subscriptionExchange({
-      forwardSubscription: (operation) => subscriptionClient.request(operation)
-    }),
+    // subscriptionExchange({
+    //   forwardSubscription: (operation) => subscriptionClient.request(operation)
+    // }),
   ],
 });
 
