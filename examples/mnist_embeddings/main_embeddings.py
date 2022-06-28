@@ -121,7 +121,7 @@ def main():
     data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
     infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
 
-    chroma_sdk.run_projector_on_embedding_set_mutation(test_embedding_set.createEmbeddingSet.id)
+    chroma_sdk.run_projector_on_embedding_set_mutation(int(test_embedding_set.createEmbeddingSet.id))
 
     print("Completed")
 

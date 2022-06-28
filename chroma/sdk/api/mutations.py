@@ -6,7 +6,7 @@ from gql import gql
 
 run_projector_on_embedding_set_mtuation = gql(
     """
-    mutation runProjectorOnEmbeddingSet($embeddingSetId: Int){
+    mutation runProjectorOnEmbeddingSet($embeddingSetId: Int!){
         runProjectorOnEmbeddingSet(embeddingSetId: $embeddingSetId) 
     }
     """

@@ -135,8 +135,6 @@ var dataToPlotter = function (testData, classTypeDict) {
     // x is in pos 0, and y in pos 1
     // pos3 is opacity (0-1), pos4 is class (int)
     // color map for the classes are set in scatterplot
-    // console.log('categories', data.embedding.datapoint.label.data.categories[0])
-    // console.log('type', data.embedding.datapoint.dataset)
     var objectIndex = classTypeDict.findIndex((t, index) => t.title === JSON.parse(data.embedding.datapoint.label.data).categories[0].name);
     var typeIndexOffset = classTypeDict[objectIndex].subtypes.findIndex((t, index) => t.title === data.embedding.datapoint.dataset.name)
     var classVisible = classTypeDict[objectIndex].visible
@@ -306,15 +304,6 @@ function Embeddings() {
       onKeyUp={(e) => handleKeyUp(e)}
       tabIndex="0"
     >
-      {/* <>
-        <ul>
-            {data?.projectionSet.projections.map(projection => (
-              <>
-                <p>{projection.x}-{projection.y}</p>
-              </>
-            ))}
-        </ul>
-      </> */}
       <ExplorerContainer>
         <Header toolSelected={toolSelected} moveClicked={moveClicked} lassoClicked={lassoClicked}></Header>
         <LeftSidebar showSkeleton={fetching} classDict={classDict} classClicked={classClicked} typeClicked={typeClicked}></LeftSidebar>

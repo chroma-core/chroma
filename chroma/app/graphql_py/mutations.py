@@ -6,7 +6,6 @@ from chroma.app.graphql_py.types import ResourceDoesntExist
 import models
 from sqlalchemy.orm import selectinload
 
-# from celery_worker import run_projections
 from celery.result import AsyncResult
 from tasks import process_embeddings
 

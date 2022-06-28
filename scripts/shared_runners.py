@@ -37,7 +37,7 @@ def celery_subcommand(base_dir, multicommand):
     subcommand = SubCommand(
         multicommand,
         name="Celery",
-        command=["celery -A celery_worker.celery worker --loglevel=info"],
+        command=["celery -A task.celery worker --loglevel=info"],
         env=app_env,
         cwd=app_directory,
         ready_string="Connected to amqp://guest:**@127.0.0.1:5672//",
