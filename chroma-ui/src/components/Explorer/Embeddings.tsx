@@ -12,40 +12,59 @@ import chroma from "chroma-js" // nothing to do with us! a color library
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 
-const FetchEmbeddingSetandProjectionSets = `
-query getProjectionSet($id: ID!) {
-    projectionSet(id: $id) {
-      id
-      projections {
-        id
-        x
-        y
-        embedding {
-          id
-          datapoint {
-            dataset {
-              id
-              name
-            }
-            tags {
-              id
-              name
-            }
-            id
-            label {
-              id
-              data
-            }
-            resource {
-              id
-              uri
-            }
-          }
-        }
-      }
-    }
-  }
-`;
+function getProjections(projection_set_id, cb) {
+  fetch(`/projection_set_data/` + projection_set_id, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then(res => res.json())
+    .then(res => {
+      console.log('res!', res)
+      cb(res.projections)
+    })
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
+}
+
+// left in here so that you, the developer, know what to expect with what is being returned from the backend
+// const FetchEmbeddingSetandProjectionSets = `
+// query getProjectionSet($id: ID!) {
+//     projectionSet(id: $id) {
+//       id
+//       projections {
+//         id
+//         x
+//         y
+//         embedding {
+//           id
+//           datapoint {
+//             dataset {
+//               id
+//               name
+//             }
+//             tags {
+//               id
+//               name
+//             }
+//             id
+//             label {
+//               id
+//               data
+//             }
+//             resource {
+//               id
+//               uri
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+// `;
 
 // first we want to find the unique values in our metadata
 // and create sets of them
@@ -190,38 +209,42 @@ function Embeddings() {
   let [target, setTarget] = useState([])
   let [maxSize, setMaxSize] = useState(1)
   let [toolWhenShiftPressed, setToolWhenShiftPressed] = useState(false)
+  let [fetchError, setFetchError] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
-
-  const [result, reexecuteQuery] = useQuery({
-    query: FetchEmbeddingSetandProjectionSets,
-    variables: { id: (params.projection_set_id!).toString() }
-  })
 
   // set up data onload
   useEffect(() => {
-    if (result.data === undefined) {
-      return
-    }
-    var data = result.data.projectionSet.projections
+    fetchEmbeddings()
+  }, []);
 
-    var metadataSets = generateMetadataSets(data)
-    var response = generateLeftSidebarObject(metadataSets)
-    var classTypeDict = response[0]
-    var colors = response[1]
-    setColorsUsed(colors)
+  const fetchEmbeddings = () => {
+    setFetchError(false)
+    getProjections(params.projection_set_id!, data => {
 
-    var dataAndCamera = dataToPlotter(data, classTypeDict)
-    setClassDict(classTypeDict)
+      console.log('data', data)
+      if (data.error === true) {
+        console.error(data.message)
+        setFetchError(true)
+        return
+      }
 
-    setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
-    setMaxSize(dataAndCamera.dataBounds.maxSize)
+      var metadataSets = generateMetadataSets(data)
+      var response = generateLeftSidebarObject(metadataSets)
+      var classTypeDict = response[0]
+      var colors = response[1]
+      setColorsUsed(colors)
 
-    // needs to be run last
-    setPoints(dataAndCamera.dataToPlot)
-    setServerData(data)
-  }, [result]);
+      var dataAndCamera = dataToPlotter(data, classTypeDict)
+      setClassDict(classTypeDict)
 
-  const { data, fetching, error } = result;
+      setTarget([dataAndCamera.dataBounds.centerX, dataAndCamera.dataBounds.centerY])
+      setMaxSize(dataAndCamera.dataBounds.maxSize)
+
+      // needs to be run last
+      setPoints(dataAndCamera.dataToPlot)
+      setServerData(data)
+    })
+  }
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: newSelectedPoints }) => {
@@ -295,7 +318,8 @@ function Embeddings() {
     }
   }
 
-  var isError = !(error === undefined)
+  var fetching = (points === null) && !fetchError
+  var isError = fetchError
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
@@ -337,7 +361,7 @@ function Embeddings() {
           <ModalBody>
             <Text>Unable to retrieve embeddings from the backend.</Text>
             <Text>{ }</Text>
-            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} color="white" variant="solid" mr={3} onClick={reexecuteQuery} my={3}>
+            <Button colorScheme={"messenger"} backgroundColor={theme.colors.ch_blue} onClick={fetchEmbeddings} color="white" variant="solid" mr={3} my={3}>
               Retry
             </Button>
           </ModalBody>
