@@ -16,6 +16,35 @@ Make makes it easy to do stuff:
 - `make build_prod` will set up a production build for you
 - `pip install .` and `chroma application run` will run the full stack
 
+# Getting up and running
+You will need
+- `Docker`
+- `Python 3.9`
+
+```
+# get the code
+git clone git@github.com:chroma-core/chroma.git
+cd chroma
+
+# install python deps and js deps
+make install
+
+# run the service
+make run
+
+# or run via our sdk
+chroma application run
+
+# then you may want to set up background jobs running via celery
+
+# run rabbitmq
+docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3
+
+# run celery
+celery -A celery_worker.celery worker --loglevel=info
+
+```
+
 # Setup 
 
 ### The frontend
@@ -216,5 +245,29 @@ chroma application run
 
 
 
-to add
+# New commands
+Strawberry relies on `python 3.9` so we will need that. 
+
+This will export the schema from the graphql backend, it's not especially helpful to us though.
 `strawberry export-schema package.module:schema > schema.graphql`
+
+# Adding a new field. 
+
+Say you want to add a new field... like adding metadata to inference. You want to be able to write to that field via the python sdk and read it in the React frontend. Here is what you want to do step-by-step. 
+
+1. Add the field to `models.py` - these are the sqlalchemy definitions that represent our db schema. (If you are trying to preserve production data, don't do this and make a migration with alembic instead). Then run `python models.py` to drop the existing db and set up a fresh one with the schema you want. For adding one-to-one, one-to-many, or many-to-many, we have examples of all of those in our data model in place now to glean from. 
+2. Add the field to the class in the `strawberry` `types.py` definitions. `metadata` is not a relationship, but if it was you would also want to add a loader that helps minimize on the number of transactions. You can see examples of that in many of the one-to-many and many-to-many examples. 
+3. For adding metadata, you don't have to update `qeuries.py`, but if you want to write to it, you will need to update the mutations for creating and updates. In `mutations.py` add the field to the create and update methods and make sure to add them to the object creating/update. 
+4. Then we want to hook this new stuff up to the python sdk so we can use it in our python projects. Look at `sdk/api/queries` and `sdk/api/mutations`. In the queries, if you want to fetch that field, you will want to add it to the default `inferences` and `inference` get queries. You probably don't need to update the mutation because we are passing in a type that is defined by our backend. 
+5. That being said, you will want to update `chroma_manager.py` to pass the correct fields down to that mutation! Again, look for the create and update methods especially for the field/model you are updating. 
+6. Lastly you can optionally surface this via our rough cli in `cli/sdk.py` if you want to. 
+7. Now to the frontend. Inside `chroma-ui`, `src/graphql/operations.graphql` - you can see a bunch of queries and mutations that we want `urql` to generate hooks for us. If you want to, add your fields to those queries/mutations. Then run `npm run codegen` to create the hooks. If it fails, it is probably right and it will tell you what you need to fix. 
+8. Done! 
+
+# running background jobs
+
+1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery task. 
+2. `celery -A celery_worker.celery worker --loglevel=info` runs the celery service for processing offline jobs.
+3. Now commands can take a `.delay` to move them to a background queue. 
+
+

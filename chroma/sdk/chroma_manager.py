@@ -49,7 +49,8 @@ from chroma.sdk.api.mutations import (
     create_or_get_dataset_mutation,
     create_embedding_set_mutation,
     create_datapoint_embedding_set_mutation,
-    create_batch_datapoint_embedding_set_mutation
+    create_batch_datapoint_embedding_set_mutation,
+    run_projector_on_embedding_set_mtuation
     )
 from chroma.sdk.api.queries import (
     projects_query, 
@@ -149,11 +150,9 @@ class ChromaSDK:
                 "embeddingSetId": int(self._metadata_buffer["embedding_set_id"]),
             })
 
-        print("writing a batch! length: " + str(len(new_embeddings)))
         start = time.process_time()
         result = self.create_batch_datapoint_embedding_set(new_embeddings)
         elapsedtime = time.process_time() - start
-        print("completed writing a batch in " + str(elapsedtime*100) + " seconds")
         self._clear_metadata()
         return result
 
@@ -188,6 +187,11 @@ class ChromaSDK:
     #     return all_results
 
     # Abstract  
+    def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):
+        params = {"embeddingSetId": embeddingSetId}
+        result = self._client.execute(run_projector_on_embedding_set_mtuation, variable_values=params)
+        return result
+
     def remove_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
         params = {"data": {"tagId": tagId, "datapointId":datapointId}}
         result = self._client.execute(remove_tag_to_datapoint_mutation, variable_values=params)

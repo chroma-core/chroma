@@ -12,19 +12,6 @@ import chroma from "chroma-js" // nothing to do with us! a color library
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 
-// const FetchEmbeddingSetandProjectionSets = `
-// query getProjectionSet($id: ID!) {
-//     projectionSet(id: $id) {
-//       id
-//       projections {
-//         id
-//         x
-//         y
-//       }
-//     }
-//   }
-// `;
-
 const FetchEmbeddingSetandProjectionSets = `
 query getProjectionSet($id: ID!) {
     projectionSet(id: $id) {
@@ -216,6 +203,7 @@ function Embeddings() {
   // set up data onload
   useEffect(() => {
 
+    console.log('result', result)
     if (result.data === undefined) {
       return
     }

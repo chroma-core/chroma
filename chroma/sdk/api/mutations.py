@@ -4,6 +4,14 @@ from gql import gql
 
 # Abstract mutations
 
+run_projector_on_embedding_set_mtuation = gql(
+    """
+    mutation runProjectorOnEmbeddingSet($embeddingSetId: Int){
+        runProjectorOnEmbeddingSet(embeddingSetId: $embeddingSetId) 
+    }
+    """
+)
+
 gql_batch_create_embeddings = gql(
     """
     mutation batchCreateEmbeddings($embeddingsInput: EmbeddingsInput!) {
