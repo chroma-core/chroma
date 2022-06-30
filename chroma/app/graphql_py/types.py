@@ -20,8 +20,8 @@ GenericType = TypeVar("GenericType")
 class Project:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     # has_many datasets
     @strawberry.field
@@ -48,8 +48,8 @@ class Project:
 class Dataset:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     project: Optional[Project] = None
 
     # has_many slices
@@ -78,8 +78,8 @@ class Dataset:
 class Slice:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     dataset: Optional[Dataset] = None
 
     # has_many datapoints
@@ -101,8 +101,8 @@ class Slice:
 @strawberry.type
 class Datapoint:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     dataset: Optional[Dataset] = None
     resource: Optional["Resource"] = None
 
@@ -150,8 +150,8 @@ class Datapoint:
 class Resource:
     id: strawberry.ID
     uri: str
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     # has_many datapoints
     @strawberry.field
@@ -172,8 +172,8 @@ class Resource:
 class Label:
     id: strawberry.ID
     data: JSON
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     # datapoint: Optional[Datapoint] = None
 
     @classmethod
@@ -190,8 +190,8 @@ class Label:
 class Tag:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     # has_many datapoints
     @strawberry.field
@@ -211,8 +211,8 @@ class Tag:
 @strawberry.type
 class Inference:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     datapoint: Optional[Datapoint] = None
     # trained_model: Optional[TrainedModel] = None
 
@@ -230,8 +230,8 @@ class Inference:
 class ModelArchitecture:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     project: Optional[Project] = None
 
     # has_many trained models
@@ -253,8 +253,8 @@ class ModelArchitecture:
 @strawberry.type
 class TrainedModel:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     model_architecture: Optional[ModelArchitecture] = None
 
     # has_many layer_sets
@@ -275,8 +275,8 @@ class TrainedModel:
 @strawberry.type
 class LayerSet:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     trained_model: Optional[TrainedModel] = None
 
     # has_many layers
@@ -297,8 +297,8 @@ class LayerSet:
 @strawberry.type
 class Layer:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     layer_set: Optional[LayerSet] = None
 
     # has_many embeddings
@@ -319,8 +319,8 @@ class Layer:
 @strawberry.type
 class Projector:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     @classmethod
     def marshal(cls, model: models.Projector) -> "Projector":
@@ -334,8 +334,8 @@ class Projector:
 class Job:
     id: strawberry.ID
     name: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     @classmethod
     def marshal(cls, model: models.Job) -> "Job":
@@ -349,8 +349,8 @@ class Job:
 @strawberry.type
 class EmbeddingSet:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     dataset: Optional[Dataset] = None # belongs_to embedding_set
 
     # has_many projection_sets
@@ -377,8 +377,8 @@ class EmbeddingSet:
 @strawberry.type
 class ProjectionSet:
     id: strawberry.ID
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
 
     # has_many projections
@@ -403,8 +403,8 @@ class Embedding:
     label: Optional[str]
     inference_identifier: Optional[str]
     input_identifier: Optional[str]
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     embedding_set: Optional[EmbeddingSet] = None # belongs_to embedding_set
     datapoint: Optional[Datapoint] = None # belongs_to projection_set
 
@@ -434,8 +434,8 @@ class Projection:
     id: strawberry.ID
     x: float
     y: float
-    created_at: Optional[datetime.datetime]
-    updated_at: Optional[datetime.datetime]
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     embedding: Optional[Embedding] = None # belongs_to embedding
     projection_set: Optional[ProjectionSet] = None # belongs_to projection_set
 
