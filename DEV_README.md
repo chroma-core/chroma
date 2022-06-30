@@ -41,7 +41,7 @@ chroma application run
 docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3
 
 # run celery from within the app folder
-celery -A task.celery worker --loglevel=info
+celery -A tasks.celery worker --loglevel=info
 
 ```
 
@@ -267,8 +267,8 @@ Say you want to add a new field... like adding metadata to inference. You want t
 
 # running background jobs
 
-1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery task. 
-2. `celery -A task.celery worker --loglevel=info` runs the celery service for processing offline jobs.
+1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery tasks. 
+2. `celery -A tasks.celery worker --loglevel=info` runs the celery service for processing offline jobs.
 3. Now commands can take a `.delay` to move them to a background queue. 
 
 
