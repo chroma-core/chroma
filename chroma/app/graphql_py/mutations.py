@@ -38,7 +38,7 @@ from graphql_py.types import (
     Project,
     DeleteProjectResponse,
     AddDatasetResponse,
-    ProjectDoesntExist,
+    ProjectDoesNotExist,
     DatasetDoesntExist,
     AddSliceResponse,
     AddTagResponse,
@@ -472,7 +472,7 @@ class Mutation:
             project = (await s.execute(sql)).scalars().first()
 
             if project is None: 
-                return ProjectDoesntExist
+                return ProjectDoesNotExist
 
             res = models.Dataset(
                 name=dataset.name,
@@ -628,7 +628,7 @@ class Mutation:
             project = (await s.execute(sql)).scalars().first()
 
             if project is None: 
-                return ProjectDoesntExist
+                return ProjectDoesNotExist
 
             res = models.ModelArchitecture(
                 name=model_architecture.name,

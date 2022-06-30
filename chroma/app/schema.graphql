@@ -1,5 +1,4 @@
-DB in place
-union AddDatasetResponse = Dataset | ProjectDoesntExist
+union AddDatasetResponse = Dataset | ProjectDoesNotExist
 
 union AddEmbeddingResponse = Embedding | EmbeddingExists
 
@@ -7,7 +6,7 @@ union AddLayerResponse = Layer | LayerSetDoesntExist
 
 union AddLayerSetResponse = LayerSet | TrainedModelDoesntExist
 
-union AddModelArchitectureResponse = ModelArchitecture | ProjectDoesntExist
+union AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist
 
 union AddSliceResponse = Slice | DatasetDoesntExist
 
@@ -219,7 +218,7 @@ type Project {
   modelArchitectures: [ModelArchitecture!]!
 }
 
-type ProjectDoesntExist {
+type ProjectDoesNotExist {
   message: String!
 }
 

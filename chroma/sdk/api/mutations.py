@@ -177,7 +177,7 @@ create_dataset_mutation = gql(
                     id
                 }
             }
-            ... on ProjectDoesntExist {
+            ... on ProjectDoesNotExist {
                 message
             }
         }
@@ -352,7 +352,7 @@ create_model_architecture_mutation = gql(
                     id
                 }
             }
-            ... on ProjectDoesntExist {
+            ... on ProjectDoesNotExist {
                 message
             }
         }

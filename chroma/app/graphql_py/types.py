@@ -468,7 +468,7 @@ class ObjectDeleted:
     message: str = "This object has been deleted"
 
 @strawberry.type
-class ProjectDoesntExist:
+class ProjectDoesNotExist:
     message: str = "No Project by this ID exists, Object not created"
 
 @strawberry.type
@@ -500,10 +500,10 @@ AddEmbeddingSetResponse = EmbeddingSet
 AddProjectionSetResponse = ProjectionSet
 AddProjectionResponse = Projection
 DeleteProjectResponse = ObjectDeleted
-AddDatasetResponse = strawberry.union("AddDatasetResponse", (Dataset, ProjectDoesntExist))
+AddDatasetResponse = strawberry.union("AddDatasetResponse", (Dataset, ProjectDoesNotExist))
 AddSliceResponse = strawberry.union("AddSliceResponse", (Slice, DatasetDoesntExist))
 AddTagResponse = Tag
-AddModelArchitectureResponse = strawberry.union("AddModelArchitectureResponse", (ModelArchitecture, ProjectDoesntExist))
+AddModelArchitectureResponse = strawberry.union("AddModelArchitectureResponse", (ModelArchitecture, ProjectDoesNotExist))
 AddTrainedModelResponse = strawberry.union("AddTrainedModelResponse", (TrainedModel, ModelArchitectureDoesntExist))
 AddLayerSetResponse = strawberry.union("AddLayerSetResponse", (LayerSet, TrainedModelDoesntExist))
 AddLayerResponse = strawberry.union("AddLayerResponse", (Layer, LayerSetDoesntExist))
