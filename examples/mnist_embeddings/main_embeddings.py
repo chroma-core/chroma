@@ -9,7 +9,6 @@ from PIL import Image
 from main_training import Net
 from torchvision import datasets, transforms
 
-# from chroma.sdk import data_manager_old
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 

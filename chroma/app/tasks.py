@@ -18,6 +18,8 @@ celery = Celery('tasks', broker='amqp://guest:guest@127.0.0.1:5672//')
 # Create logger - enable to display messages on task logger
 celery_log = get_task_logger(__name__)
 
+# Celery maintians it's own sync connection to our database
+# instead of using the graphql API, it connects directly.
 engine = create_engine(
     "sqlite:///./chroma.db", 
     # convert_unicode=True,
