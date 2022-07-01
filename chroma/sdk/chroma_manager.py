@@ -50,7 +50,9 @@ from chroma.sdk.api.mutations import (
     create_embedding_set_mutation,
     create_datapoint_embedding_set_mutation,
     create_batch_datapoint_embedding_set_mutation,
-    run_projector_on_embedding_set_mtuation
+    run_projector_on_embedding_set_mutuation,
+    append_tag_by_name_to_datapoints_mutation,
+    remove_tag_by_name_from_datapoints_mutation
     )
 from chroma.sdk.api.queries import (
     projects_query, 
@@ -193,9 +195,19 @@ class ChromaSDK:
         return result 
 
     # Abstract  
+    def append_tag_by_name_to_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
+        params = {"tagName": tag_name, "datapointIds": datapointIds}
+        result = self._client.execute(append_tag_by_name_to_datapoints_mutation, variable_values=params)
+        return result
+
+    def remove_tag_by_name_from_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
+        params = {"tagName": tag_name, "datapointIds": datapointIds}
+        result = self._client.execute(remove_tag_by_name_from_datapoints_mutation, variable_values=params)
+        return result
+
     def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):
         params = {"embeddingSetId": embeddingSetId}
-        result = self._client.execute(run_projector_on_embedding_set_mtuation, variable_values=params)
+        result = self._client.execute(run_projector_on_embedding_set_mutuation, variable_values=params)
         return result
 
     def remove_tag_from_datapoint_mutation(self, tagId: int, datapointId: int):
