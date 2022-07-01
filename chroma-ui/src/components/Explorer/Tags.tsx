@@ -75,9 +75,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
         console.log('result', result)
       });
     })
-
-    // let intersection = arr1.filter(x => arr2.includes(x));
-    // setTagsArray()
+    setTagsArray(newTagsArray)
   }
 
   const callback = (data: any) => {
