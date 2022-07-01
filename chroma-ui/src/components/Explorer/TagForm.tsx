@@ -55,17 +55,12 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
     splitNewTags.map(tag => {
       const variables = { tagName: tag, datapointIds: selectedDatapointIds };
       addTag(variables).then(result => {
-        // The result is almost identical to `updateTodoResult` with the exception
-        // of `result.fetching` not being set.
-        // It is an OperationResult.
       });
     })
 
     selectedPoints.forEach((point, index) => {
       var pointTags = serverData[point].embedding.datapoint.tags.slice()
-      // console.log('pointTags', pointTags)
       splitNewTags.forEach(splitNewTag => {
-        // console.log('pointTags.indexOf(splitNewTag) < 0', pointTags.indexOf(splitNewTag) < 0, pointTags, splitNewTag)
         const indexOf = pointTags.findIndex(currentTag => {
           return currentTag.tag.name === splitNewTag.trim();
         });
@@ -75,7 +70,6 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
         }
       })
       serverData[point].embedding.datapoint.tags = pointTags
-      // console.log('serverData[point].embedding.datapoint.tags', serverData[point].embedding.datapoint.tags)
     })
 
     setServerData(serverData)
@@ -95,15 +89,11 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
     splitNewUnTags.map(tag => {
       const variables = { tagName: tag, datapointIds: selectedDatapointIds };
       unTag(variables).then(result => {
-        // The result is almost identical to `updateTodoResult` with the exception
-        // of `result.fetching` not being set.
-        // It is an OperationResult.
       });
     })
 
     selectedPoints.forEach(point => {
       var tags = serverData[point].embedding.datapoint.tags.slice()
-      // console.log('tags', tags)
 
       splitNewUnTags.forEach(splitNewTag => {
         const indexOf = tags.findIndex(currentTag => {

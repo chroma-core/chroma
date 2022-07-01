@@ -31,8 +31,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
 
   const deselectButtonOpacity = (selectedPoints.length > 0) ? 0.4 : 0
 
-  // console.log('right sidebar rerendering', serverData)
-
   return (
     <Flex
       direction="column"
@@ -66,11 +64,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
 
       <Divider w="100%" />
       {selectedPoints.map(function (point) {
-        // let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
         let datapointId = serverData[point].embedding.datapoint.id
         let category = JSON.parse(serverData[point].embedding.datapoint.label.data).categories[0].name
         let dataset = serverData[point].embedding.datapoint.dataset.name
-        // console.log('serverData[point]', serverData[point])
         return (
           <Box
             mt={3}
@@ -93,12 +89,17 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
                   my={0} />
               </Flex>
 
-              <Text>{category} - {dataset}</Text>
-
               <TableContainer>
                 <Table variant='unstyled' size="sm">
                   <Tbody>
-
+                    <Tr key={"category"}>
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Category</Td>
+                      <Td p={0} fontSize="xs">{category}</Td>
+                    </Tr>
+                    <Tr key={"dataset"}>
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
+                      <Td p={0} fontSize="xs">{dataset}</Td>
+                    </Tr>
                     {/* {Object.entries(metadata).map(([key, val]) => {
                       return (
                         <Tr key={key}>
