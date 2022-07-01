@@ -37,9 +37,9 @@ const client = createClient({
   exchanges: [...defaultExchanges, dedupExchange, cacheExchange({}), fetchExchange],
   // exchanges: [
   //   ...defaultExchanges,
-  //   // subscriptionExchange({
-  //   //   forwardSubscription: (operation) => subscriptionClient.request(operation)
-  //   // }),
+  //   subscriptionExchange({
+  //     forwardSubscription: (operation) => subscriptionClient.request(operation)
+  //   }),
   // ],
 });
 

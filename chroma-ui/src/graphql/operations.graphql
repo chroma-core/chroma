@@ -99,12 +99,6 @@ query getProjectionSets {
   }
 }
 
-# query getProjectionSet($id: ID!) {
-#   projectionSet(id: $id) {
-#     ...ProjectionSetFields
-#   }
-# }
-
 input ProjectionSetInput {
   embeddingSetId: Int
 }

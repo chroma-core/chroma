@@ -29,42 +29,6 @@ function getProjections(projection_set_id, cb) {
     });
 }
 
-// left in here so that you, the developer, know what to expect with what is being returned from the backend
-// const FetchEmbeddingSetandProjectionSets = `
-// query getProjectionSet($id: ID!) {
-//     projectionSet(id: $id) {
-//       id
-//       projections {
-//         id
-//         x
-//         y
-//         embedding {
-//           id
-//           datapoint {
-//             dataset {
-//               id
-//               name
-//             }
-//             tags {
-//               id
-//               name
-//             }
-//             id
-//             label {
-//               id
-//               data
-//             }
-//             resource {
-//               id
-//               uri
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-// `;
-
 // first we want to find the unique values in our metadata
 // and create sets of them
 var generateMetadataSets = function (data) {
@@ -211,13 +175,12 @@ function Embeddings() {
   let [fetchError, setFetchError] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
 
-  // console.log('Embeddings rerender')
-
   // set up data onload
   useEffect(() => {
     fetchEmbeddings()
   }, []);
 
+  // in order to force a re-render, we spread the data passed in
   const setServerDataSpread = (data) => {
     setServerData([...data])
   }
@@ -225,8 +188,6 @@ function Embeddings() {
   const fetchEmbeddings = () => {
     setFetchError(false)
     getProjections(params.projection_set_id!, data => {
-
-      // console.log('data', data)
       if (data.error === true) {
         console.error(data.message)
         setFetchError(true)

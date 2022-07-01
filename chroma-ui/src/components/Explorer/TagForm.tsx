@@ -1,63 +1,52 @@
-// @ts-nocheck
-
-import { EditIcon } from '@chakra-ui/icons'
 import {
-  FormControl,
-  FormLabel,
   Input,
-  Stack,
-  ButtonGroup,
-  Button,
-  useDisclosure,
-  Box,
-  Popover,
-  PopoverTrigger,
-  IconButton,
-  PopoverContent,
-  PopoverArrow,
-  PopoverCloseButton,
   InputGroup,
   InputLeftElement,
-  CloseButton,
   useTheme
 } from '@chakra-ui/react'
 import React, { useState } from 'react'
-import FocusLock from 'react-focus-lock'
-import { render } from 'react-dom'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
+import { ServerDataItem } from './RightSidebar'
 
 interface TagFormProps {
   selectedPoints: []
-  serverData: []
-  setServerData: () => void
+  serverData: ServerDataItem[]
+  setServerData: (serverData: ServerDataItem[]) => void
 }
 
 const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServerData }) => {
   const theme = useTheme();
   const noneSelected = selectedPoints.length === 0
 
+  // state for the inputs
   const [newTag, setNewTag] = useState("")
   const [newUnTag, setNewUnTag] = useState("")
 
+  // mutations
   const [addTagResult, addTag] = useAppendTagByNameToDatapointsMutation()
   const [unTagResult, unTag] = useRemoveTagFromDatapointsMutation()
 
+  // callback for a new tag
   const onSubmitTagAll = (e: any) => {
     e.preventDefault()
 
     let splitNewTags = newTag.split(",")
 
+    // get selected datapoint ids from selected projection ids
     var selectedDatapointIds = selectedPoints.map(selectedProjection => {
       return serverData[selectedProjection].embedding.datapoint.id
     })
 
+    // add the new tags to each datapoint
     splitNewTags.map(tag => {
       const variables = { tagName: tag, datapointIds: selectedDatapointIds };
-      addTag(variables).then(result => {
-      });
+      addTag(variables)
     })
 
+    // update our `serverData` data structure with the new tags, this is an optimistic update
+    // we handle this manually for now, since graphcache won't support it since the data was 
+    // fetched with rest
     selectedPoints.forEach((point, index) => {
       var pointTags = serverData[point].embedding.datapoint.tags.slice()
       splitNewTags.forEach(splitNewTag => {
@@ -66,17 +55,19 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
         });
 
         if (indexOf < 0) {
-          pointTags.push({ "right_id": null, "tag": { "name": splitNewTag.trim() } })
+          pointTags.push({ "right_id": undefined, "tag": { "name": splitNewTag.trim() } })
         }
       })
       serverData[point].embedding.datapoint.tags = pointTags
     })
 
+    // set new tag data which forces the rerender
     setServerData(serverData)
 
     setNewTag("")
   }
 
+  // callback for a new untag
   const onSubmitUntagAll = (e: any) => {
     e.preventDefault()
 
@@ -88,8 +79,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
 
     splitNewUnTags.map(tag => {
       const variables = { tagName: tag, datapointIds: selectedDatapointIds };
-      unTag(variables).then(result => {
-      });
+      unTag(variables)
     })
 
     selectedPoints.forEach(point => {
@@ -113,19 +103,14 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
     setNewUnTag("")
   }
 
+  // input sanitiziation, direct passthrough right now
   const checkAndSetTag = (e: React.ChangeEvent<HTMLInputElement>, name: string) => {
     setNewTag(e.currentTarget.value)
   }
 
+  // input sanitiziation, direct passthrough right now
   const checkAndSetUnTag = (e: React.ChangeEvent<HTMLInputElement>, name: string) => {
     setNewUnTag(e.currentTarget.value)
-  }
-
-  const clearTag = () => {
-    setNewTag("")
-  }
-  const clearUnTag = () => {
-    setNewUnTag("")
   }
 
   return (
@@ -137,7 +122,6 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
             mt={-1}
             children={<BsTagFill color='gray.900' />}
           />
-
           <Input
             borderColor={"rgba(0,0,0,0)"}
             borderRadius={1}

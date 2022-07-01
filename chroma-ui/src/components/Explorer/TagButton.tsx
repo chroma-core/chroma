@@ -1,8 +1,7 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Tag,
-  useTheme
 } from '@chakra-ui/react'
 
 interface TagButtonProps {
@@ -10,9 +9,6 @@ interface TagButtonProps {
 }
 
 const TagButton: React.FC<TagButtonProps> = ({ tag }) => {
-  const theme = useTheme();
-  const [isEditing, setIsEditing] = useState(false)
-
   return (
     <Tag key={tag} mr={1} mb={1} fontSize='0.6em' >{tag}</Tag>
   )

@@ -1,19 +1,17 @@
-// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import {
-  Button,
   useTheme,
-  Text,
   Textarea,
   Box,
   Spinner
 } from '@chakra-ui/react'
 import TagButton from './TagButton';
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
+import { TagItem } from './RightSidebar'
 
 interface TagsProps {
-  tags: string[]
-  datapointId: Int
+  tags: TagItem[]
+  datapointId: number
   setServerData: () => void
 }
 
@@ -63,17 +61,15 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
 
     add.map(tagToAdd => {
       const variables = { tagName: tagToAdd, datapointIds: [datapointId] };
-      addTag(variables).then(result => {
-        // console.log('result', result)
-      });
+      addTag(variables)
     })
 
     remove.map(tagToRemove => {
       const variables = { tagName: tagToRemove, datapointIds: [datapointId] };
-      unTag(variables).then(result => {
-        // console.log('result', result)
-      });
+      unTag(variables)
     })
+
+    // optimistic update
     setTagsArray(newTagsArray)
   }
 
@@ -88,6 +84,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     // I would like to catch ESC here, but it's getting caught elsewhere first.
   }
 
+  // clicking out of the input resets it
   const handleBlur = (e: any) => {
     setIsEditing(false)
     setTagString(originalTagString)
@@ -133,7 +130,6 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
             : null}
         </Box>
       }
-
     </>
   )
 }
