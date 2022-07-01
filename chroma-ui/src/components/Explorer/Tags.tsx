@@ -22,7 +22,6 @@ interface IOptions {
 }
 
 const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
-  console.log('tags', tags)
   const theme = useTheme();
   const [isEditing, setIsEditing] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -65,14 +64,14 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     add.map(tagToAdd => {
       const variables = { tagName: tagToAdd, datapointIds: [datapointId] };
       addTag(variables).then(result => {
-        console.log('result', result)
+        // console.log('result', result)
       });
     })
 
     remove.map(tagToRemove => {
       const variables = { tagName: tagToRemove, datapointIds: [datapointId] };
       unTag(variables).then(result => {
-        console.log('result', result)
+        // console.log('result', result)
       });
     })
     setTagsArray(newTagsArray)

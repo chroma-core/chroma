@@ -211,16 +211,22 @@ function Embeddings() {
   let [fetchError, setFetchError] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
 
+  // console.log('Embeddings rerender')
+
   // set up data onload
   useEffect(() => {
     fetchEmbeddings()
   }, []);
 
+  const setServerDataSpread = (data) => {
+    setServerData([...data])
+  }
+
   const fetchEmbeddings = () => {
     setFetchError(false)
     getProjections(params.projection_set_id!, data => {
 
-      console.log('data', data)
+      // console.log('data', data)
       if (data.error === true) {
         console.error(data.message)
         setFetchError(true)
@@ -347,6 +353,7 @@ function Embeddings() {
           clearSelected={clearSelected}
           tagSelected={tagSelected}
           serverData={serverData}
+          setServerData={setServerDataSpread}
         ></RightSidebar>
       </ExplorerContainer>
 

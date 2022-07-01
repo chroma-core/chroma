@@ -31,6 +31,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
 
   const deselectButtonOpacity = (selectedPoints.length > 0) ? 0.4 : 0
 
+  // console.log('right sidebar rerendering', serverData)
+
   return (
     <Flex
       direction="column"
@@ -68,7 +70,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
         let datapointId = serverData[point].embedding.datapoint.id
         let category = JSON.parse(serverData[point].embedding.datapoint.label.data).categories[0].name
         let dataset = serverData[point].embedding.datapoint.dataset.name
-        console.log('serverData[point]', serverData[point])
+        // console.log('serverData[point]', serverData[point])
         return (
           <Box
             mt={3}
@@ -110,7 +112,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
                 </Table>
               </TableContainer>
               <Flex mt={3}>
-                <Tags tags={serverData[point].embedding.datapoint.tags} datapointId={datapointId} />
+                <Tags setServerData={setServerData} tags={serverData[point].embedding.datapoint.tags} datapointId={datapointId} />
               </Flex>
             </Flex >
           </Box >
