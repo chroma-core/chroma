@@ -349,7 +349,7 @@ class Mutation:
             
             # we have to add things this way to avoid the key constraint
             # throwing an error if there is a duplicate. we just want to ignore that case
-            await s.execute(insert(models.Tagdatapoint, values=tagdatapoints_to_add))#, prefixes=['OR IGNORE']))
+            await s.execute(insert(models.Tagdatapoint, values=tagdatapoints_to_add, prefixes=['OR IGNORE']))
             await s.flush()
             await s.commit()
         return [Datapoint.marshal(loc) for loc in datapoints]

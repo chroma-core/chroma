@@ -78,6 +78,11 @@ class ProjectionSetLight:
     id: int
     projections: list[ProjectionLight]
 
+@strawberry.input
+class FilterDatapoints:
+    tag_name: Optional[str]
+    dataset_id: Optional[int]
+
 @strawberry.type
 class Query:
 
@@ -128,9 +133,16 @@ class Query:
     
     # Datapoint
     @strawberry.field
-    async def datapoints(self) -> list[Datapoint]:
+    async def datapoints(self, filter: FilterDatapoints = None) -> list[Datapoint]:
         async with models.get_session() as s:
             sql = select(models.Datapoint)
+            
+            if filter and filter.tag_name is not None:
+                sql = sql.join(models.Tagdatapoint).filter(models.Tagdatapoint.tag.has(name=filter.tag_name))
+
+            if filter and filter.dataset_id is not None:
+                sql = sql.where(models.Datapoint.dataset_id == filter.dataset_id)
+
             result = (await s.execute(sql)).scalars().unique().all()
         return [Datapoint.marshal(loc) for loc in result]
 

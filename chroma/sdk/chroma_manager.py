@@ -576,8 +576,9 @@ class ChromaSDK:
         return result 
 
     # Datapoint    
-    def get_datapoints(self):
-        result = self._client.execute(datapoints_query)
+    def get_datapoints(self, tagName: str = None, datasetId: int = None):
+        params = {"filter":{"tagName": tagName, "datasetId": datasetId}}
+        result = self._client.execute(datapoints_query, variable_values=params)
         return result 
 
     def get_datapoint(self, id: int):
