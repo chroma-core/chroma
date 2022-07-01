@@ -3,6 +3,8 @@ import {
   useTheme,
   Textarea,
   Box,
+  Text,
+  Tag,
   Spinner
 } from '@chakra-ui/react'
 import TagButton from './TagButton';
@@ -22,7 +24,6 @@ interface IOptions {
 const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
   const theme = useTheme();
   const [isEditing, setIsEditing] = useState(false)
-  const [isUpdating, setIsUpdating] = useState(false)
   const [originalTagString, setOriginalTagString] = useState('');
   const [tagString, setTagString] = useState('');
   const [tagsArray, setTagsArray] = React.useState<string[]>([]);
@@ -47,6 +48,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     setIsEditing(false)
 
     let newTagsArray = tagString.split(",").map(tag => tag.trim())
+    if ((newTagsArray.length == 1) && (newTagsArray[0] == '')) newTagsArray = []
     let originalTagsArray = originalTagString.split(",").map(tag => tag.trim())
     if (tagString === originalTagString) return
 
@@ -90,6 +92,8 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     setTagString(originalTagString)
   }
 
+  let noTags = (tagsArray.length == 0)
+
   return (
     <>
       {isEditing ?
@@ -107,7 +111,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
             onBlur={handleBlur}
-            placeholder='Untag selected' />
+            placeholder='Tags' />
         </form>
         :
         <Box
@@ -123,10 +127,9 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
             return (
               <TagButton key={tag} tag={tag} />
             )
-          })
-          }
-          {isUpdating ?
-            <Spinner size='xs' color="gray.200" />
+          })}
+          {noTags ?
+            <Text fontSize='0.6em' >No tags</Text>
             : null}
         </Box>
       }
