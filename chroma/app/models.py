@@ -105,7 +105,7 @@ class Tag(Base):
     id: int = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    name = Column(String)
+    name = Column(String, unique=True)
     # habtm datapoints
     datapoints = relationship("Tagdatapoint", back_populates="tag")
 
