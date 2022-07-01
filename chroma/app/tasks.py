@@ -52,14 +52,22 @@ class SqlAlchemyTask(celery.Task):
 @celery.task(base=SqlAlchemyTask, max_retries=3, default_retry_delay=60)
 def process_embeddings(embedding_set_id):
 
+    celery_log.info(f"Started processing embeddings for embedding set: " + str(embedding_set_id))
+
     sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == embedding_set_id)
     embedding_set = (db_session.execute(sql)).scalars().first()
     sql = select(models.Embedding).where(models.Embedding.embedding_set == embedding_set)
     embeddings = (db_session.execute(sql)).scalars().unique().all()
 
     vectors = [json.loads(emb.data) for emb in embeddings]
+
+    celery_log.info(f"Fetched data")
+
     projections = umap_project(vectors)
 
+    celery_log.info(f"Calculated projections")
+
+    # TODO: adding these records actually takes a quite a while, look for opps to speed up
     # create the projection set
     projection_set = models.ProjectionSet(embedding_set=embedding_set)
     db_session.add(projection_set)

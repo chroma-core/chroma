@@ -44,7 +44,7 @@ from chroma.sdk.api.mutations import (
     delete_datapoint_mutation,
     create_datapoint_set_mutation,
     append_tag_to_datapoint_mutation,
-    remove_tag_to_datapoint_mutation,
+    remove_tag_from_datapoint_mutation,
     create_or_get_project_mutation,
     create_or_get_dataset_mutation,
     create_embedding_set_mutation,
@@ -198,9 +198,9 @@ class ChromaSDK:
         result = self._client.execute(run_projector_on_embedding_set_mtuation, variable_values=params)
         return result
 
-    def remove_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
+    def remove_tag_from_datapoint_mutation(self, tagId: int, datapointId: int):
         params = {"data": {"tagId": tagId, "datapointId":datapointId}}
-        result = self._client.execute(remove_tag_to_datapoint_mutation, variable_values=params)
+        result = self._client.execute(remove_tag_from_datapoint_mutation, variable_values=params)
         return result
 
     def append_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):

@@ -21,7 +21,6 @@ function getProjections(projection_set_id, cb) {
   })
     .then(res => res.json())
     .then(res => {
-      console.log('res!', res)
       cb(res.projections)
     })
     .catch((error) => {

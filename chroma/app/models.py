@@ -75,11 +75,10 @@ class Slice(Base):
     datapoints = relationship('Slice_Datapoint', backref='slice',  primaryjoin=id == Slice_Datapoint.slice_id)
     trained_models: list["TrainedModel"] = relationship("TrainedModel", lazy="select", back_populates="slice")
 
-class Association(Base):
-    __tablename__ = "association"
+class Tagdatapoint(Base):
+    __tablename__ = "tagdatapoints"
     left_id = Column(ForeignKey("tags.id"), primary_key=True)
     right_id = Column(ForeignKey("datapoints.id"), primary_key=True)
-    extra_data = Column(String(50))
     tag = relationship("Tag", back_populates="datapoints")
     datapoint = relationship("Datapoint", back_populates="tags")
 
@@ -97,7 +96,7 @@ class Datapoint(Base):
     slices = relationship('Slice_Datapoint', backref='datapoint', primaryjoin=id == Slice_Datapoint.datapoint_id)
     label = relationship("Label", back_populates="datapoint", uselist=False)
     inference = relationship("Inference", back_populates="datapoint", uselist=False)
-    tags = relationship("Association", back_populates="datapoint")
+    tags = relationship("Tagdatapoint", back_populates="datapoint")
     embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="datapoint")
 
 class Tag(Base):
@@ -108,7 +107,7 @@ class Tag(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     name = Column(String)
     # habtm datapoints
-    datapoints = relationship("Association", back_populates="tag")
+    datapoints = relationship("Tagdatapoint", back_populates="tag")
 
 class Label(Base):
     __mapper_args__ = {'eager_defaults': True}

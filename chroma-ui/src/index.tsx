@@ -9,6 +9,8 @@ import { extendTheme, ChakraProvider, ColorModeScript } from '@chakra-ui/react'
 import { Global, css } from '@emotion/react';
 
 import { createClient, Provider, defaultExchanges, subscriptionExchange } from 'urql';
+import { dedupExchange, fetchExchange } from 'urql';
+import { cacheExchange } from '@urql/exchange-graphcache';
 // import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
@@ -32,12 +34,13 @@ console.log(`%c
 
 const client = createClient({
   url: 'http://localhost:8000/graphql',
-  exchanges: [
-    ...defaultExchanges,
-    // subscriptionExchange({
-    //   forwardSubscription: (operation) => subscriptionClient.request(operation)
-    // }),
-  ],
+  exchanges: [...defaultExchanges, dedupExchange, cacheExchange({}), fetchExchange],
+  // exchanges: [
+  //   ...defaultExchanges,
+  //   // subscriptionExchange({
+  //   //   forwardSubscription: (operation) => subscriptionClient.request(operation)
+  //   // }),
+  // ],
 });
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)

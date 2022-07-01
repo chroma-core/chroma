@@ -48,9 +48,9 @@ create_or_get_project_mutation = gql(
     """
 )
 
-remove_tag_to_datapoint_mutation = gql(
+remove_tag_from_datapoint_mutation = gql(
     """
-    mutation removeTagToDatapoint($data: TagToDataPointInput!) {
+    mutation removeTagFromDatapoint($data: TagToDataPointInput!) {
         removeTagToDatapoint(data: $data) {
             ... on ObjectDeleted {
                 __typename

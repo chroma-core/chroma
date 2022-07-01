@@ -1,28 +1,25 @@
 // @ts-nocheck
 import React from 'react';
-import { Tag, Flex, Text, Box, CloseButton, IconButton, useTheme, Divider, Badge, Spacer, useColorMode, useColorModeValue } from '@chakra-ui/react'
+import { Flex, Text, Box, CloseButton, IconButton, useTheme, Divider, Badge, Spacer, useColorMode, useColorModeValue } from '@chakra-ui/react'
 import { GiExpand } from 'react-icons/gi';
-import { BsTagFill, BsTag } from 'react-icons/bs';
+import { GrClose } from 'react-icons/gr';
 
-import { Button, Table, Thead, Tbody, Tfoot, Tr, Th, Td, TableCaption, TableContainer } from '@chakra-ui/react'
+import { Table, Thead, Tbody, Tfoot, Tr, Th, Td, TableCaption, TableContainer } from '@chakra-ui/react'
 import { render } from '@testing-library/react'
-import TagForm from './TagForm'
-import TagButton from './TagButton'
-import Tags from './Tags'
+import PopoverForm from './TagButton'
 
 interface RightSidebarProps {
   selectedPoints: []
   tagSelected: () => void
   clearSelected: any
   serverData: []
-  setServerData: () => void
 }
 
 interface Hash<T> {
   [key: string]: T;
 }
 
-const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoints, tagSelected, clearSelected, serverData }) => {
+const RightSidebar: React.FC<RightSidebarProps> = ({ selectedPoints, tagSelected, clearSelected, serverData }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const bgColorCard = useColorModeValue("#E5E5E5", '#222222')
@@ -35,7 +32,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
     <Flex
       direction="column"
       minWidth={300}
-      maxWidth={300}
       bg={bgColor}
       borderRight="1px"
       borderLeft="1px"
@@ -49,7 +45,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
         },
       }}
       pt={12}>
-      <Flex flex="row" wrap="wrap" width="100%" py={1} ml={3} pb={0}>
+      <Flex flex="row" wrap="wrap" width="100%" py={1}>
         <Text fontWeight={600} fontSize={14} lineHeight="2rem" mx={3}>{selectedPoints.length} selected</Text>
         <CloseButton
           size='sm'
@@ -58,17 +54,13 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
           onClick={() => clearSelected()}
           my={1} />
         <Flex>
+          {/* <PopoverForm tagSelected={tagSelected}></PopoverForm> */}
         </Flex>
       </Flex>
-      <TagForm setServerData={setServerData} selectedPoints={selectedPoints} serverData={serverData} />
-
       <Divider w="100%" />
       {selectedPoints.map(function (point) {
-        // let metadata: Hash<string> = JSON.parse(serverData[point].metadata)
-        let datapointId = serverData[point].embedding.datapoint.id
         let category = JSON.parse(serverData[point].embedding.datapoint.label.data).categories[0].name
         let dataset = serverData[point].embedding.datapoint.dataset.name
-        console.log('serverData[point]', serverData[point])
         return (
           <Box
             mt={3}
@@ -82,21 +74,26 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
             <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%" mb={3}>
 
               <Flex mb={2} direction="row" justify="space-between">
-                <Text fontSize='sm' fontWeight={600}>{datapointId}</Text>
+                <Text fontSize='sm' fontWeight={600}>{point}</Text>
                 <CloseButton
                   size='sm'
                   opacity={0.4}
                   _hover={{ opacity: 1 }}
                   onClick={() => clearSelected([point])}
                   my={0} />
+                {/* <IconButton aria-label='Clear' onClick={() => clearSelected([point])} icon={<GrClose />} variant='ghost'  /> */}
               </Flex>
-
-              <Text>{category} - {dataset}</Text>
-
               <TableContainer>
                 <Table variant='unstyled' size="sm">
                   <Tbody>
-
+                    <Tr key="class">
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Class</Td>
+                      <Td p={0} fontSize="xs">{category}</Td>
+                    </Tr>
+                    <Tr key="dataset">
+                      <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
+                      <Td p={0} fontSize="xs">{dataset}</Td>
+                    </Tr>
                     {/* {Object.entries(metadata).map(([key, val]) => {
                       return (
                         <Tr key={key}>
@@ -109,13 +106,12 @@ const RightSidebar: React.FC<RightSidebarProps> = ({ setServerData, selectedPoin
                   </Tbody>
                 </Table>
               </TableContainer>
-              <Flex mt={3}>
-                <Tags tags={serverData[point].embedding.datapoint.tags} datapointId={datapointId} />
-              </Flex>
             </Flex >
           </Box >
         )
       })}
+      {/*  */}
+
     </Flex >
   )
 }

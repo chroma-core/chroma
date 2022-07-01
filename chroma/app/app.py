@@ -65,11 +65,13 @@ async def get_projection_set_data(projection_set_id: str):
                 .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
                     .options(joinedload(models.Embedding.datapoint)
                         .options(
-                            joinedload(models.Datapoint.tags), 
                             joinedload(models.Datapoint.label), 
                             joinedload(models.Datapoint.resource),
                             joinedload(models.Datapoint.dataset)
-                            )
+                        )
+                        .options(joinedload(models.Datapoint.tags)
+                            .options(joinedload(models.Tagdatapoint.tag))
+                        )
                     )
                 )
             )
@@ -85,4 +87,8 @@ app.add_middleware(
     CORSMiddleware, allow_headers=["*"], allow_origins=["http://localhost:3000"], allow_methods=["*"]
 )
 
-app.mount("/", StaticFiles(directory="static/", html=True), name="static")
+# only mount the frontend if it is has been built
+if os.path.isdir('static/'):
+    app.mount("/", StaticFiles(directory="static/", html=True), name="static")
+else:
+    print("NOTICE: the frontend has not been built into the static directory. Serving frontend from localhost:8000 will be disabled.")
