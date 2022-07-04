@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flex, Center, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, Tabs, TabList, Tab, Stack, Skeleton } from '@chakra-ui/react'
+import { Flex, Text, Box, Button, useColorModeValue, useTheme, Divider, Square, Icon, Tabs, TabList, Tab, Stack, Skeleton } from '@chakra-ui/react'
 import { BsFillSquareFill } from 'react-icons/bs';
 import SidebarButton from '../Shared/SidebarButton';
 
@@ -7,9 +7,11 @@ interface FilterSidebarProps {
     filters: any[]
     setFilters: (filters: any) => void
     showSkeleton: boolean
+    numVisible: number
+    numTotal: number
 }
 
-const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, showSkeleton }) => {
+const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, showSkeleton, numVisible, numTotal }) => {
     const theme = useTheme();
     const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
     const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
@@ -38,13 +40,12 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, show
                 },
             }}
             pt={14}>
-            <Flex key="buttons" px={3}>
-                <Tabs size="sm" variant='unstyled'>
-                    <TabList>
-                        <Tab _selected={{ fontWeight: 600 }} px={1} isDisabled>Filter</Tab>
-                    </TabList>
-                </Tabs>
-            </Flex>
+            {!showSkeleton ?
+                <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
+                    <Text fontWeight={600}>Filter</Text>
+                    <Text fontSize="sm">{numVisible} / {numTotal} total</Text>
+                </Flex>
+                : null}
             <Divider w="100%" pt={2} />
             <Flex direction="column" mt={2}>
                 {showSkeleton ?
@@ -67,6 +68,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, show
                                     indent={0}
                                     classTitle={filter.name}
                                     keyName={filter.name}
+                                    key={filter.name}
                                 ></SidebarButton>
                                 {(filter.type == 'discrete') ?
                                     filter.optionsSet.map(function (option: any) {

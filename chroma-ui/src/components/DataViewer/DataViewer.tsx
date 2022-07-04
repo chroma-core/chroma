@@ -117,20 +117,20 @@ const DataViewer = () => {
 
   // Callback functions that are fired by regl-scatterplot
   const selectHandler = ({ points: newSelectedPoints }) => {
-    console.log('selectHandler', newSelectedPoints)
     setUnselectedPoints([])
     setSelectedPoints(newSelectedPoints)
   }
   const deselectHandler = () => {
-    console.log('deselected points')
     setSelectedPoints([])
   };
 
-  if (fetching) return <p>Loading...</p>;
-  if (error) return <p>Oh no... {error.message}</p>;
+  // if (fetching) return <p>Loading...</p>;
+  // if (error) return <p>Oh no... {error.message}</p>;
 
   const visibleDatapointsLength = datapoints?.filter(dp => dp.visible === true).length
   const loading = (datapoints == undefined)
+
+  let datapointsToRender = (datapoints !== undefined) ? datapoints.filter(dp => dp.visible == true) : 0
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
@@ -140,7 +140,6 @@ const DataViewer = () => {
       tabIndex={0}
     >
       <ExplorerContainer>
-
         <Header
           toolSelected={toolSelected}
           moveClicked={moveClicked}
@@ -150,6 +149,8 @@ const DataViewer = () => {
           showSkeleton={loading}
           filters={filters}
           setFilters={setFilters}
+          numVisible={datapointsToRender.length}
+          numTotal={datapoints?.length}
         ></FilterSidebar>
         <ProjectionPlotter
           datapoints={datapoints}
@@ -160,7 +161,10 @@ const DataViewer = () => {
           selectHandler={selectHandler}
           deselectHandler={deselectHandler}
         />
-        <DataPanel datapoints={datapoints} selectedPoints={selectedPoints} />
+        <DataPanel
+          datapoints={datapoints}
+          selectedPoints={selectedPoints}
+        />
       </ExplorerContainer>
 
       <Modal isCentered isOpen={fetchError} closeOnOverlayClick={false} onClose={onClose} autoFocus={true} closeOnEsc={false}>

@@ -63,7 +63,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
 
     // whenever datapoints changes, we want to regenerate out points and send them down to plotter
     useEffect(() => {
-        console.log('whenever datapoints changes,')
         if (insertedProjections !== true) return
         if (datapoints === undefined) return
 
@@ -94,7 +93,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
 
     // whenever points change, redraw
     useEffect(() => {
-        console.log('whenever points change, redraw')
         if (reglInitialized && points !== null) {
             config.scatterplot.set({ pointColor: colorByOptions });
             config.scatterplot.draw(points)
@@ -109,7 +107,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
     }, [colorByFilterString])
 
     const calculateColorsAndDrawPoints = () => {
-        console.log('calculateColorsAndDrawPoints')
         let colorByFilter = filters.find((a: any) => a.name == colorByFilterString)
         let colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
         setColorByOptions(colorByOptionsSave)
@@ -122,6 +119,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
             return [datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex]
         })
         setPoints(points)
+        console.log('setting points', points)
     }
 
     useEffect(() => {
@@ -138,7 +136,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
     }, [])
 
     function getRef(ref: any) {
-
         if (!ref) return;
         if (!reglInitialized && (points !== null)) {
             scatterplot(points,
@@ -165,24 +162,24 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
         setColorByFilterString(event.target.value)
     }
 
-    if (maxSize === undefined) return <>Loading</>
-
     // how we set the cursor is a bit of a hack. if we have a custom cursor name
     // the cursor setting will fail, but our class will succeed in setting it
     // and vice versa
     return (
-        <Box flex='1' cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px">
-            <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
-                {filters.map((filterb: any) => {
-                    return (
-                        <option key={filterb.name} value={filterb.name} >{filterb.name}</option>
-                    )
-                })}
-            </Select>
+        <Box flex='1' cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
+            {(filters !== undefined) ?
+                <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
+                    {filters.map((filterb: any) => {
+                        return (
+                            <option key={filterb.name} value={filterb.name} >{filterb.name}</option>
+                        )
+                    })}
+                </Select>
+                : null}
             {
                 showLoading ?
                     <Center height="100vh" bgColor={bgColor} >
-                        < Spinner size='xl' />
+                        <Spinner size='xl' />
                     </Center >
                     :
                     <canvas

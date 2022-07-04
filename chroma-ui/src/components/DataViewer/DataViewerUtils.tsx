@@ -161,7 +161,6 @@ export const buildFilters = (datapoints: any) => {
         "lightMax": 80,
         "chromaMin": 80
       })
-      console.log('colorsOpts', colorsOpts, filter)
       filter.optionsSet.map((option, index) => {
         option.color = colorsOpts[index].hex()
       })

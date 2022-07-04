@@ -17,7 +17,7 @@ export default function scatterplot(points, colorsScale, opts) {
 				canvas,
 				width: 'auto',
 				height: 'auto',
-				pointSize: 7,
+				pointSize: 10,
 				showReticle: true,
 				reticleColor: [1, 1, 0.878431373, 0],
 			});

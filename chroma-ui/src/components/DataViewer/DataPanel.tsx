@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState } from 'react';
-import { Tag, Flex, Text, Box, CloseButton, IconButton, useTheme, Divider, Badge, Spacer, useColorMode, useColorModeValue } from '@chakra-ui/react'
+import { Tag, Flex, Text, Box, Spinner, IconButton, useTheme, Divider, Spacer, useColorMode, useColorModeValue, Skeleton } from '@chakra-ui/react'
 import { GiExpand } from 'react-icons/gi';
 import { BsTagFill, BsTag } from 'react-icons/bs';
 import { Button, Table, Thead, Tbody, Tfoot, Tr, Th, Td, TableCaption, TableContainer } from '@chakra-ui/react'
@@ -12,6 +12,7 @@ import { Datapoint } from './DataViewTypes';
 import { Resizable } from 're-resizable';
 import { FixedSizeList as List, FixedSizeGrid as Grid } from "react-window";
 import AutoSizer from "react-virtualized-auto-sizer";
+import { useQuery } from 'urql';
 
 export interface TagItem {
   left_id?: number
@@ -56,41 +57,74 @@ interface Hash<T> {
   [key: string]: T;
 }
 
-const Row = ({ data, index, style }) => (
-  < div style={style} >
+interface DataPanelRowProps {
+  datapoint: any
+}
+
+const ImageBytesQuery = `
+  query getimage($identifer: String!) {
+    mnistImage(identifier: $identifer) 
+  }
+`;
+
+const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
+
+  const [result, reexecuteQuery] = useQuery({
+    query: ImageBytesQuery,
+    variables: { "identifer": datapoint.resource.uri },
+  });
+
+  const { data, fetching, error } = result;
+  if (error) return <p>Oh no... {error.message}</p>;
+
+  return (
     <Box
       mt={3}
       pr={4}
       pl={4}
       width="500px"
-      key={data[index].id}
-      borderWidth={1}
+      key={datapoint.id}
+      borderBottomWidth={1}
       borderColor="e5e5e5"
     >
       <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%" mb={3}>
         <Flex mb={2} direction="row" justify="space-between">
-          <Text fontSize='sm' fontWeight={600}>{data[index].id}</Text>
+          {(data === undefined) ?
+            <Skeleton width={100} height={100} />
+            :
+            <img width="100px" src={'data:image/jpeg;base64,' + data.mnistImage} />
+          }
         </Flex>
         <TableContainer>
           <Table variant='unstyled' size="sm">
             <Tbody>
+              <Tr key={"dpid"}>
+                <Td width="50%" p={0} pl={0} fontSize="xs">Datapoint ID</Td>
+                <Td p={0} fontSize="xs">{datapoint.id}</Td>
+              </Tr>
               <Tr key={"category"}>
                 <Td width="50%" p={0} pl={0} fontSize="xs">Category</Td>
-                <Td p={0} fontSize="xs">{data[index].label.data.categories[0].name}</Td>
+                <Td p={0} fontSize="xs">{datapoint.label.data.categories[0].name}</Td>
               </Tr>
               <Tr key={"dataset"}>
                 <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
-                <Td p={0} fontSize="xs">{data[index].dataset.name}</Td>
+                <Td p={0} fontSize="xs">{datapoint.dataset.name}</Td>
               </Tr>
             </Tbody>
           </Table>
         </TableContainer>
         <Flex mt={3}>
-          <Tags setServerData={() => { }} tags={data[index].tags} datapointId={data[index].id} />
+          <Tags setServerData={() => { }} tags={datapoint.tags} datapointId={datapoint.id} />
         </Flex>
       </Flex >
     </Box >
-  </div >
+  )
+}
+
+const Row = ({ data, index, style }) => (
+  <div style={style} >
+    <DataPanelRow datapoint={data[index]} />
+  </div>
 );
 
 const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => {
@@ -101,17 +135,16 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
 
   // const [resizeState, setResizeState] = useState({ width: 1200, height: '100vh' })
 
-  if (datapoints === undefined) {
-    return (<>Loading</>)
+  let datapointsToRender;
+  let reactWindowListLength
+  if (datapoints !== undefined) {
+    datapointsToRender = datapoints.filter(dp => dp.visible == true)
+    reactWindowListLength = datapointsToRender.length
   }
-
-  let datapointsToRender = datapoints.filter(dp => dp.visible == true)
-  let numDatapointsVisible = datapointsToRender.length
-  let reactWindowListLength = datapointsToRender.length
 
   if (selectedPoints.length > 0) {
     reactWindowListLength = selectedPoints.length
-    datapoints = datapoints.filter(dp => selectedPoints.includes(dp.id)) // i dont know where this 1 offset came from, but shipping it for now
+    datapointsToRender = datapoints.filter(dp => selectedPoints.includes(dp.id - 1)) // i dont know where this 1 offset came from, but shipping it for now
   }
 
   return (
@@ -127,6 +160,8 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
     <Flex
       direction="column"
       width={500}
+      minWidth={500}
+      maxWidth={500}
       bg={bgColor}
       borderRight="1px"
       borderLeft="1px"
@@ -139,28 +174,34 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
           width: '0px',
         },
       }}
-      pt={12}>
-      <p>{numDatapointsVisible} visible</p>
-      <p>{selectedPoints.length} selected</p>
-      <Divider w="100%" />
+      pt={14}>
+      <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
+        <Text fontWeight={600}>Inspect</Text>
+        <Text fontSize="sm">{selectedPoints.length} selected</Text>
+      </Flex>
+      <Divider w="100%" pt={2} />
 
-      <AutoSizer>
-        {({ height, width }) =>
-          <List
-            // columnCount={3}
-            itemData={datapointsToRender}
-            itemSize={100}
-            // columnWidth={resizeState.width / 3}
-            height={height}
-            itemCount={reactWindowListLength}
-            // rowCount={1000}
-            // rowHeight={35}
-            width={800}
-          >
-            {Row}
-          </List>
-        }
-      </AutoSizer>
+      {(datapoints !== undefined) ?
+
+        <AutoSizer>
+          {({ height, width }) =>
+            <List
+              // columnCount={3}
+              itemData={datapointsToRender}
+              itemSize={250}
+              // columnWidth={resizeState.width / 3}
+              height={height}
+              itemCount={reactWindowListLength}
+              // rowCount={1000}
+              // rowHeight={35}
+              width={800}
+            >
+              {Row}
+            </List>
+          }
+        </AutoSizer>
+
+        : null}
 
     </Flex >
     // </Resizable>
@@ -168,50 +209,3 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
 }
 
 export default DataPanel
-
-
-// {datapoints.map(function (datapoint) {
-//   let category = datapoint.label.data.categories[0].name
-//   let dataset = datapoint.dataset
-
-//   return (
-//     <Box
-//       mt={3}
-//       pr={4}
-//       pl={4}
-//       width="300px"
-//       key={datapoint.id}
-//       borderWidth={1}
-//       borderColor={borderColorCards}
-//     >
-//       <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%" mb={3}>
-//         <Flex mb={2} direction="row" justify="space-between">
-//           <Text fontSize='sm' fontWeight={600}>{datapoint.id}</Text>
-//           <CloseButton
-//             size='sm'
-//             opacity={0.4}
-//             _hover={{ opacity: 1 }}
-//             // onClick={() => clearSelected([point])}
-//             my={0} />
-//         </Flex>
-//         <TableContainer>
-//           <Table variant='unstyled' size="sm">
-//             <Tbody>
-//               <Tr key={"category"}>
-//                 <Td width="50%" p={0} pl={0} fontSize="xs">Category</Td>
-//                 <Td p={0} fontSize="xs">{category}</Td>
-//               </Tr>
-//               <Tr key={"dataset"}>
-//                 <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
-//                 <Td p={0} fontSize="xs">{dataset.name}</Td>
-//               </Tr>
-//             </Tbody>
-//           </Table>
-//         </TableContainer>
-//         {/* <Flex mt={3}>
-//           <Tags setServerData={setServerData} tags={serverData[point].embedding.datapoint.tags} datapointId={datapoint.id} />
-//         </Flex> */}
-// </Flex >
-//     </Box >
-//   )
-// })} 

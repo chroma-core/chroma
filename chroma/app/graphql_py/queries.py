@@ -7,6 +7,17 @@ import base64
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
 from strawberry.scalars import JSON 
 
+from io import BytesIO
+import io
+from torchvision.datasets.mnist import MNIST, read_image_file, torch
+from PIL import Image, ImageOps
+
+def image_to_byte_array(image: Image) -> bytes:
+  imgByteArr = io.BytesIO()
+  image.save(imgByteArr, format="png")
+  imgByteArr = imgByteArr.getvalue()
+  return imgByteArr
+
 from typing import Optional, List
 from graphql_py.types import (
     Embedding, 
@@ -89,6 +100,25 @@ class FilterProjectionSets:
 
 @strawberry.type
 class Query:
+
+    # Abstract
+    @strawberry.field
+    async def mnist_image(self, identifier: str) -> str:
+        test_data = read_image_file('../../examples/data/MNIST/raw/t10k-images-idx3-ubyte')
+        train_data = read_image_file('../../examples/data/MNIST/raw/train-images-idx3-ubyte')
+
+        # t10k-images-idx3-ubyte-7262
+
+        split_id = identifier.split('-')
+        dataset = split_id[0]
+        index = int(split_id[-1])
+
+        img = test_data[index] if dataset == 't10k' else train_data[index]
+        img = torch.Tensor.numpy(img)
+        image = Image.fromarray(img)
+        inverted_image = ImageOps.invert(image)
+        my_encoded_img = base64.encodebytes(image_to_byte_array(inverted_image)).decode('ascii')
+        return my_encoded_img
 
     # Project
     @strawberry.field

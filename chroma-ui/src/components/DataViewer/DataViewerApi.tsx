@@ -25,7 +25,6 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
     })
         .then(res => res.json())
         .then(res => {
-            // console.log('res', res)
             cb(res.projections)
         })
         .catch((error) => {
