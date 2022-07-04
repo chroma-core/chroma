@@ -127,7 +127,7 @@ class CreateDatapointInput:
     dataset_id: int
     resource_id: int
     label_id: Optional[int] = None
-    inference_id: Optional[int] = None
+    # inference_id: Optional[int] = None
 
 @strawberry.input
 class UpdateDatapointInput:
@@ -250,6 +250,7 @@ class CreateDatapointEmbeddingSetInput:
     resource_uri: str
     embedding_data: str
     embedding_set_id: int
+    metadata: Optional[str] = ""
 
 @strawberry.input
 class CreateBatchDatapointEmbeddingSetInput:
@@ -409,7 +410,8 @@ class Mutation:
             datapoint = models.Datapoint(
                 label=label,
                 dataset=dataset,
-                resource=resource
+                resource=resource,
+                project_id=dataset.project_id
             )
             s.add(datapoint)
             await s.commit()
@@ -433,6 +435,8 @@ class Mutation:
                 label=label,
                 dataset=dataset,
                 resource=resource,
+                metadata_=data.metadata,
+                project_id=dataset.project_id
             )
             datapoint.embeddings.append(embedding)
             s.add(datapoint)
@@ -456,7 +460,7 @@ class Mutation:
                 embedding = models.Embedding(data=datapoint_embedding_set.embedding_data, embedding_set=embedding_set)
                 objs_to_add.extend([label, resource, embedding])
 
-                datapoint = models.Datapoint(label=label, dataset=dataset, resource=resource)
+                datapoint = models.Datapoint(project_id=dataset.project_id, label=label, dataset=dataset, resource=resource, metadata_=datapoint_embedding_set.metadata)
                 datapoint.embeddings.append(embedding)
                 objs_to_add.append(datapoint)
 
@@ -1148,10 +1152,12 @@ class Mutation:
             res = models.Datapoint(
                 dataset=dataset,
                 resource=resource, 
-                label=label
+                label=label,
+                project_id=dataset.project_id
             )
             s.add(res)
             await s.commit()
+
         return Datapoint.marshal(res)
 
     @strawberry.mutation

@@ -1,10 +1,11 @@
+from termios import ECHOE
 import strawberry
 import os
 from os.path import getsize, isfile
 import models
 import asyncio, concurrent.futures
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
+from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload, load_only
 import time
 
 from typing import Optional
@@ -77,6 +78,62 @@ async def get_projection_set_data(projection_set_id: str):
             )
         )
         val = (await s.execute(sql)).scalars().first()
+        elapsedtime = time.process_time() - start
+        print("got records in " + str(elapsedtime) + " seconds")
+
+    return val
+
+# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
+# because it massively cuts down on the time to return data to the DOM 
+@app.get("/projection_set_data2/{projection_set_id}")
+async def get_projection_set_data2(projection_set_id: str):
+    async with models.get_session() as s:
+        start = time.process_time()
+
+        sql = (
+            select(models.ProjectionSet)
+                .where(models.ProjectionSet.id == int(projection_set_id))
+                .options(joinedload(models.ProjectionSet.projections)
+                    .options(
+                        load_only(models.Projection.x, models.Projection.y), 
+                        joinedload(models.Projection.embedding)
+                            .options(load_only(models.Embedding.id, models.Embedding.datapoint_id))
+                        )
+                )
+        )
+        val = (await s.execute(sql)).scalars().first()
+
+        elapsedtime = time.process_time() - start
+        print("got records in " + str(elapsedtime) + " seconds")
+
+    return val
+
+# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
+# because it massively cuts down on the time to return data to the DOM, by ~3x! 
+@app.get("/datapoints/{project_id}")
+async def get_projection_set_data2(project_id: str):
+    async with models.get_session() as s:
+        start = time.process_time()
+
+        sql = (
+            select(models.Project)
+                .where(models.Project.id == int(project_id))
+                .options(joinedload(models.Project.datapoints)
+                    .options(
+                        load_only(models.Datapoint.id, models.Datapoint.metadata_), 
+                        joinedload(models.Datapoint.dataset)
+                            .options(load_only(models.Dataset.id, models.Dataset.name)),
+                        joinedload(models.Datapoint.resource)
+                            .options(load_only(models.Resource.id, models.Resource.uri)),
+                        joinedload(models.Datapoint.label)
+                            .options(load_only(models.Label.id, models.Label.data)),
+                        joinedload(models.Datapoint.tags)
+                            .options(joinedload(models.Tagdatapoint.tag))#.options(load_only(models.Tagdatapoint.id, models.Tagdatapoint.data))
+                        )
+                    )
+                )
+        val = (await s.execute(sql)).scalars().first()
+
         elapsedtime = time.process_time() - start
         print("got records in " + str(elapsedtime) + " seconds")
 

@@ -69,7 +69,7 @@ def process_embeddings(embedding_set_id):
 
     # TODO: adding these records actually takes a quite a while, look for opps to speed up
     # create the projection set
-    projection_set = models.ProjectionSet(embedding_set=embedding_set)
+    projection_set = models.ProjectionSet(embedding_set=embedding_set, project=embedding_set.dataset.project)
     db_session.add(projection_set)
     db_session.commit()
 

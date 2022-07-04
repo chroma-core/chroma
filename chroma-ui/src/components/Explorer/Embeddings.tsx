@@ -207,6 +207,7 @@ function Embeddings() {
       setMaxSize(dataAndCamera.dataBounds.maxSize)
 
       // needs to be run last
+      console.log('dataAndCamera.dataToPlot', dataAndCamera.dataToPlot)
       setPoints(dataAndCamera.dataToPlot)
       setServerData(data)
     })

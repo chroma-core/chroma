@@ -26,6 +26,8 @@ class Project(Base):
     name = Column(String)
     # [x] has many datasets, has many model architectures
     datasets: list["Dataset"] = relationship("Dataset", lazy="select", back_populates="project")
+    datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="project")
+    projection_sets: list["ProjectionSet"] = relationship("ProjectionSet", lazy="select", back_populates="project")
     model_architectures: list["ModelArchitecture"] = relationship("ModelArchitecture", lazy="select", back_populates="project")
 
 class Dataset(Base):
@@ -39,7 +41,7 @@ class Dataset(Base):
     slices: list["Slice"] = relationship("Slice", lazy="select", back_populates="dataset")
     datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="dataset")
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
-    project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datasets")
+    project: Optional[Project] = relationship("Project", lazy="select", back_populates="datasets")
     embedding_sets: list["EmbeddingSet"] = relationship("EmbeddingSet", lazy="select", back_populates="dataset") # has_many embedding_sets
 
 class Resource(Base):
@@ -92,12 +94,15 @@ class Datapoint(Base):
     dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
     dataset: Optional[Dataset] = relationship("Dataset", lazy="joined", back_populates="datapoints")
     resource_id: Optional[int] = Column(Integer, ForeignKey(Resource.id), nullable=True)
-    resource: Optional[Resource] = relationship("Resource", lazy="joined", back_populates="datapoints")
+    resource: Optional[Resource] = relationship("Resource", lazy="select", back_populates="datapoints")
     slices = relationship('Slice_Datapoint', backref='datapoint', primaryjoin=id == Slice_Datapoint.datapoint_id)
     label = relationship("Label", back_populates="datapoint", uselist=False)
     inference = relationship("Inference", back_populates="datapoint", uselist=False)
     tags = relationship("Tagdatapoint", back_populates="datapoint")
     embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="datapoint")
+    metadata_ = Column("metadata", Integer)
+    project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
+    project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datapoints")
 
 class Tag(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -220,8 +225,11 @@ class ProjectionSet(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     # belongs_to embedding_set, has_many projections
     embedding_set_id: Optional[int] = Column(Integer, ForeignKey(EmbeddingSet.id), nullable=True)
-    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="joined", back_populates="projection_sets")
+    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="select", back_populates="projection_sets")
     projections: list["Projection"] = relationship("Projection", lazy="select", back_populates="projection_set")
+
+    project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
+    project: Optional[Project] = relationship("Project", lazy="select", back_populates="projection_sets")
 
 class Embedding(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -237,11 +245,11 @@ class Embedding(Base):
     # has_many projections, belongs_to embedding_set, belongs_to layer
     projections: list["Projection"] = relationship("Projection", lazy="select", back_populates="embedding")
     embedding_set_id: Optional[int] = Column(Integer, ForeignKey(EmbeddingSet.id), nullable=True)
-    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="joined", back_populates="embeddings")
+    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="select", back_populates="embeddings")
     layer_id: Optional[int] = Column(Integer, ForeignKey(Layer.id), nullable=True)
-    layer: Optional[Layer] = relationship("Layer", lazy="joined", back_populates="embeddings")
+    layer: Optional[Layer] = relationship("Layer", lazy="select", back_populates="embeddings")
     datapoint_id: Optional[int] = Column(Integer, ForeignKey(Datapoint.id), nullable=True)
-    datapoint: Optional[Datapoint] = relationship("Datapoint", lazy="joined", back_populates="embeddings")
+    datapoint: Optional[Datapoint] = relationship("Datapoint", lazy="select", back_populates="embeddings")
 
 class Projection(Base):
     __mapper_args__ = {'eager_defaults': True}
@@ -253,9 +261,9 @@ class Projection(Base):
     y: float = Column(Float)
     # belongs_to embedding, belongs_to projection_set
     embedding_id: Optional[int] = Column(Integer, ForeignKey(Embedding.id), nullable=True)
-    embedding: Optional[Embedding] = relationship("Embedding", lazy="joined", back_populates="projections")
+    embedding: Optional[Embedding] = relationship("Embedding", lazy="select", back_populates="projections")
     projection_set_id: Optional[int] = Column(Integer, ForeignKey(ProjectionSet.id), nullable=True)
-    projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="joined", back_populates="projections")
+    projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="select", back_populates="projections")
 
 engine = create_async_engine(
     "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}

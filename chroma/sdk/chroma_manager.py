@@ -1,4 +1,5 @@
 import json
+import random
 import time
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
@@ -151,6 +152,7 @@ class ChromaSDK:
                 # "embeddingSetId": 1, # think more about this
                 "datasetId": int(self._metadata_buffer["dataset_id"]),
                 "embeddingSetId": int(self._metadata_buffer["embedding_set_id"]),
+                "metadata": json.dumps({"quality": random.randint(0, 100)})
             })
 
         start = time.process_time()
@@ -225,8 +227,8 @@ class ChromaSDK:
         result = self._client.execute(create_datapoint_set_mutation, variable_values=params)
         return result 
 
-    def create_datapoint_embedding_set(self, datasetId:int, labelData: str, resourceUri: str, embeddingData):
-        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri, "embeddingData": embeddingData }}
+    def create_datapoint_embedding_set(self, datasetId:int, labelData: str, resourceUri: str, embeddingData, embedding_set_id: int):
+        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri, "embeddingData": embeddingData, "embeddingSetId": embedding_set_id }}
         result = self._client.execute(create_datapoint_embedding_set_mutation, variable_values=params)
         return result 
 

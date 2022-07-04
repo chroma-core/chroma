@@ -45,18 +45,18 @@ const client = createClient({
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)
 root.render(
-  <React.StrictMode>
-    <ChakraProvider theme={defaultTheme}>
-      <HelmetProvider>
-        <Helmet defaultTitle="Chroma" />
-      </HelmetProvider>
-      <Global styles={GlobalStyles} />
-      <ColorModeScript initialColorMode="light" />
-      <Provider value={client}>
-        <ChromaRouter />
-      </Provider>
-    </ChakraProvider>
-  </React.StrictMode>
+  // <React.StrictMode>
+  <ChakraProvider theme={defaultTheme}>
+    <HelmetProvider>
+      <Helmet defaultTitle="Chroma" />
+    </HelmetProvider>
+    <Global styles={GlobalStyles} />
+    <ColorModeScript initialColorMode="light" />
+    <Provider value={client}>
+      <ChromaRouter />
+    </Provider>
+  </ChakraProvider>
+  // </React.StrictMode>
 )
 
 // If you want to start measuring performance in your app, pass a function
