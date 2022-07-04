@@ -9,7 +9,6 @@ import TagForm from './TagForm'
 import TagButton from './TagButton'
 import Tags from './Tags'
 import { Datapoint } from './DataViewTypes';
-import { Resizable } from 're-resizable';
 import { FixedSizeList as List, FixedSizeGrid as Grid } from "react-window";
 import AutoSizer from "react-virtualized-auto-sizer";
 import { useQuery } from 'urql';
@@ -133,8 +132,6 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
   const borderColorCards = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
-  // const [resizeState, setResizeState] = useState({ width: 1200, height: '100vh' })
-
   let datapointsToRender;
   let reactWindowListLength
   if (datapoints !== undefined) {
@@ -148,15 +145,6 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
   }
 
   return (
-    // <Resizable
-    //   size={{ width: resizeState.width, height: resizeState.height }}
-    //   onResizeStop={(e, direction, re2f, d) => {
-    //     setResizeState({
-    //       width: resizeState.width + d.width,
-    //       height: resizeState.height + d.height,
-    //     });
-    //   }}
-    // >
     <Flex
       direction="column"
       width={500}
@@ -179,32 +167,27 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
         <Text fontWeight={600}>Inspect</Text>
         <Text fontSize="sm">{selectedPoints.length} selected</Text>
       </Flex>
+
+      <TagForm setServerData={() => { }} selectedPoints={selectedPoints} serverData={datapoints} />
+
       <Divider w="100%" pt={2} />
 
       {(datapoints !== undefined) ?
-
         <AutoSizer>
           {({ height, width }) =>
             <List
-              // columnCount={3}
               itemData={datapointsToRender}
               itemSize={250}
-              // columnWidth={resizeState.width / 3}
               height={height}
               itemCount={reactWindowListLength}
-              // rowCount={1000}
-              // rowHeight={35}
               width={800}
             >
               {Row}
             </List>
           }
         </AutoSizer>
-
         : null}
-
     </Flex >
-    // </Resizable>
   )
 }
 

@@ -116,7 +116,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
   return (
     <>
       <form onSubmit={onSubmitTagAll} style={{ width: "100%" }}>
-        <InputGroup ml={3} mr={3} width="auto" pt={0}>
+        <InputGroup ml={3} mt={2} mr={3} width="auto" pt={0}>
           <InputLeftElement
             pointerEvents='none'
             mt={-1}

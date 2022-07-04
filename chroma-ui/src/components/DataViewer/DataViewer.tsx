@@ -70,18 +70,6 @@ const DataViewer = () => {
     }
   }, [datapoints, projections])
 
-  // whenever datapoints changes, update our plotted points
-  // this could be in the plotter component?
-  // useEffect(() => {
-  //   if (datapoints !== undefined) {
-  //     // console.log('datapoints', datapoints)
-  //     let newPlottedPoints = datapoints!.map(dp => dp.projection)
-  //     // console.log('newPlottedPoints', newPlottedPoints)
-  //     setPlottedPoints(newPlottedPoints)
-  //   }
-
-  // }, [datapoints])
-
   // reapply filters
   useEffect(() => {
     if (filters === undefined) return
@@ -124,12 +112,7 @@ const DataViewer = () => {
     setSelectedPoints([])
   };
 
-  // if (fetching) return <p>Loading...</p>;
-  // if (error) return <p>Oh no... {error.message}</p>;
-
-  const visibleDatapointsLength = datapoints?.filter(dp => dp.visible === true).length
   const loading = (datapoints == undefined)
-
   let datapointsToRender = (datapoints !== undefined) ? datapoints.filter(dp => dp.visible == true) : 0
 
   return (
@@ -154,6 +137,7 @@ const DataViewer = () => {
         ></FilterSidebar>
         <ProjectionPlotter
           datapoints={datapoints}
+          cursor={cursor}
           filters={filters}
           toolSelected={toolSelected}
           showLoading={loading}

@@ -12,6 +12,7 @@ interface ProjectionPlotterProps {
     insertedProjections: boolean
     deselectHandler: () => void
     selectHandler: () => void
+    cursor: string
 }
 
 interface ConfigProps {
@@ -48,8 +49,9 @@ const getBounds = (datapoints: Datapoint[]) => {
     }
 }
 
-const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjections, datapoints, showLoading, toolSelected, filters, selectHandler, deselectHandler }) => {
+const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedProjections, datapoints, showLoading, toolSelected, filters, selectHandler, deselectHandler }) => {
     let [reglInitialized, setReglInitialized] = useState(false);
+    let [boundsSet, setBoundsSet] = useState(false);
     let [config, setConfig] = useState<ConfigProps>({})
     let [points, setPoints] = useState<any>(undefined)
     let [target, setTarget] = useState<any>(undefined)
@@ -58,8 +60,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
     let [colorByOptions, setColorByOptions] = useState([])
     const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
 
-    let cursor = 'pointer'
-    let colors = ["#333333", "#333333", "#333333", "#333333"]
+    // let cursor = 'pointer'
 
     // whenever datapoints changes, we want to regenerate out points and send them down to plotter
     useEffect(() => {
@@ -71,13 +72,17 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
         setMaxSize(bounds.maxSize)
         calculateColorsAndDrawPoints()
 
-    }, [insertedProjections, datapoints])
+        if (boundsSet == false) {
+            config.scatterplot.set({
+                cameraDistance: (bounds.maxSize * 1.4),
+                minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
+                maxCameraDistance: (bounds.maxSize * 1.4) * 3,
+                cameraTarget: [bounds.centerX, bounds.centerY],
+            })
+            setBoundsSet(true)
+        }
 
-    // whenever colorByConfig changes
-    // - we want to regenerate out points and send them down to plotter
-    // - we want to send a new color map down to the plotter
-    // useEffect(() => {
-    // }, [colorByConfig])
+    }, [insertedProjections, datapoints])
 
     if (reglInitialized && (points !== null)) {
         if (toolSelected == 'lasso') {
@@ -85,6 +90,14 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
         } else {
             config.scatterplot.setLassoOverride(false)
         }
+
+        // config.scatterplot.set({
+        //     cameraDistance: (maxSize * 1.4),
+        //     minCameraDistance: (maxSize * 1.4) * (1 / 20),
+        //     maxCameraDistance: (maxSize * 1.4) * 3,
+        //     cameraTarget: target,
+        // })
+
         // TODO: manage selection....
         // if (unselectedPoints.length !== 0) {
         //     config.scatterplot.deselectIds(unselectedPoints)
@@ -119,7 +132,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
             return [datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex]
         })
         setPoints(points)
-        console.log('setting points', points)
     }
 
     useEffect(() => {
@@ -161,6 +173,8 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ insertedProjectio
     const newColorBy = (event: any) => {
         setColorByFilterString(event.target.value)
     }
+
+    if (points === null) showLoading = true
 
     // how we set the cursor is a bit of a hack. if we have a custom cursor name
     // the cursor setting will fail, but our class will succeed in setting it
