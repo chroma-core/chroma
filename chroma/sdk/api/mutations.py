@@ -224,7 +224,7 @@ create_slice_mutation = gql(
                     id
                 }
             }
-            ... on DatasetDoesntExist {
+            ... on DatasetDoesNotExist {
                 message
             }
         }
@@ -398,7 +398,7 @@ create_trained_model_mutation = gql(
                     id
                 }
             }
-            ... on ModelArchitectureDoesntExist {
+            ... on ModelArchitectureDoesNotExist {
                 message
             }
         }
@@ -444,7 +444,7 @@ create_layer_set_mutation = gql(
                     id
                 }
             }
-            ... on TrainedModelDoesntExist {
+            ... on TrainedModelDoesNotExist {
                 message
             }
         }
@@ -490,7 +490,7 @@ create_layer_mutation = gql(
                     id
                 }
             }
-            ... on LayerSetDoesntExist {
+            ... on LayerSetDoesNotExist {
                 message
             }
         }
@@ -694,10 +694,10 @@ create_datapoint_mutation = gql(
                 createdAt
                 updatedAt
             }
-            ... on LabelDoesntExist {
+            ... on LabelDoesNotExist {
                 message
             }
-             ... on ResourceDoesntExist {
+             ... on ResourceDoesNotExist {
                 message
             } 
         }
