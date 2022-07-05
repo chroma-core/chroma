@@ -6,12 +6,13 @@ import SidebarButton from '../Shared/SidebarButton';
 interface FilterSidebarProps {
     filters: any[]
     setFilters: (filters: any) => void
+    selectByFilter: (filter: any, option: any) => void
     showSkeleton: boolean
     numVisible: number
     numTotal: number
 }
 
-const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, showSkeleton, numVisible, numTotal }) => {
+const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, showSkeleton, numVisible, numTotal, selectByFilter }) => {
     const theme = useTheme();
     const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
     const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
@@ -84,6 +85,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ filters, setFilters, show
                                                 indent={6}
                                                 keyName={option.name}
                                                 onClick={() => updateFilter(filter, option)}
+                                                onClick2={() => selectByFilter(filter, option)}
+
                                             />
                                         )
                                     })

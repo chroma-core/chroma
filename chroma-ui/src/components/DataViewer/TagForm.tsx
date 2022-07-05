@@ -8,16 +8,17 @@ import React, { useState } from 'react'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
 import { ServerDataItem } from './DataPanel'
+import { datapointIndexToPointIndex } from './DataViewerUtils'
 
 interface TagFormProps {
-  selectedPoints: []
-  serverData: ServerDataItem[]
-  setServerData: (serverData: ServerDataItem[]) => void
+  selectedDatapointsIds: []
+  datapoints: any[]
+  setDatapointsAndRebuildFilters: (datapoints: any[]) => void
 }
 
-const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServerData }) => {
+const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, setDatapointsAndRebuildFilters }) => {
   const theme = useTheme();
-  const noneSelected = selectedPoints.length === 0
+  const noneSelected = selectedDatapointsIds.length === 0
 
   // state for the inputs
   const [newTag, setNewTag] = useState("")
@@ -29,28 +30,29 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
 
   // callback for a new tag
   const onSubmitTagAll = (e: any) => {
+    console.log('onSubmitTagAll', onSubmitTagAll)
     e.preventDefault()
 
     let splitNewTags = newTag.split(",")
 
     // get selected datapoint ids from selected projection ids
-    var selectedDatapointIds = selectedPoints.map(selectedProjection => {
-      return serverData[selectedProjection].embedding.datapoint.id
+    var selectedPointsIds = selectedDatapointsIds.slice().map(selectedPointId => {
+      return datapointIndexToPointIndex(selectedPointId)
     })
 
     // add the new tags to each datapoint
     splitNewTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointIds };
+      const variables = { tagName: tag, datapointIds: selectedDatapointsIds };
       addTag(variables)
     })
 
-    // update our `serverData` data structure with the new tags, this is an optimistic update
+    // update our `datapoints` data structure with the new tags, this is an optimistic update
     // we handle this manually for now, since graphcache won't support it since the data was 
     // fetched with rest
-    selectedPoints.forEach((point, index) => {
-      var pointTags = serverData[point].embedding.datapoint.tags.slice()
+    selectedPointsIds.forEach((point, index) => {
+      var pointTags = datapoints[point].tags.slice()
       splitNewTags.forEach(splitNewTag => {
-        const indexOf = pointTags.findIndex(currentTag => {
+        const indexOf = pointTags.findIndex((currentTag: any) => {
           return currentTag.tag.name === splitNewTag.trim();
         });
 
@@ -58,11 +60,11 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
           pointTags.push({ "right_id": undefined, "tag": { "name": splitNewTag.trim() } })
         }
       })
-      serverData[point].embedding.datapoint.tags = pointTags
+      datapoints[point].tags = pointTags
     })
 
     // set new tag data which forces the rerender
-    setServerData(serverData)
+    setDatapointsAndRebuildFilters([...datapoints])
 
     setNewTag("")
   }
@@ -73,20 +75,20 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
 
     let splitNewUnTags = newUnTag.split(",")
 
-    var selectedDatapointIds = selectedPoints.map(selectedProjection => {
-      return serverData[selectedProjection].embedding.datapoint.id
+    var selectedPointsIds = selectedDatapointsIds.slice().map(selectedPointId => {
+      return datapointIndexToPointIndex(selectedPointId)
     })
 
     splitNewUnTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointIds };
+      const variables = { tagName: tag, datapointIds: selectedDatapointsIds };
       unTag(variables)
     })
 
-    selectedPoints.forEach(point => {
-      var tags = serverData[point].embedding.datapoint.tags.slice()
+    selectedPointsIds.forEach(point => {
+      var tags = datapoints[point].tags.slice()
 
       splitNewUnTags.forEach(splitNewTag => {
-        const indexOf = tags.findIndex(currentTag => {
+        const indexOf = tags.findIndex((currentTag: any) => {
           return currentTag.tag.name === splitNewTag.trim();
         });
 
@@ -95,10 +97,10 @@ const TagForm: React.FC<TagFormProps> = ({ selectedPoints, serverData, setServer
         }
       })
 
-      serverData[point].embedding.datapoint.tags = tags
+      datapoints[point].tags = tags
     })
 
-    setServerData(serverData)
+    setDatapointsAndRebuildFilters([...datapoints])
 
     setNewUnTag("")
   }

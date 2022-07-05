@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 import { GetProjectAndProjectionSets, getProjectionsForProjectionSet, getDatapointsForProject } from './DataViewerApi'
 import { ProjectionSet, Datapoint, ProjectionData } from './DataViewTypes'
-import { getMostRecentCreatedAt, jsonifyDatapoints, buildFilters, applyAllFilters, insertProjectionsOntoDatapoints } from './DataViewerUtils';
+import { getMostRecentCreatedAt, jsonifyDatapoints, buildFilters, applyAllFilters, insertProjectionsOntoDatapoints, rebuildFilters } from './DataViewerUtils';
 import ExplorerContainer from '../Containers/ExplorerContainer';
 import Header from './Header';
 import FilterSidebar from './FilterSidebar';
@@ -39,6 +39,7 @@ const DataViewer = () => {
   let [cursor, setCursor] = useState('select-cursor');
   let [selectedPoints, setSelectedPoints] = useState([]) // callback from regl-scatterplot
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
+  let [pointsToSelect, setPointsToSelect] = useState([]) // send down to regl-scatterplot
 
   // Onload Fetch projects and projection sets
   const [result, reexecuteQuery] = useQuery({
@@ -77,6 +78,19 @@ const DataViewer = () => {
     setDatapoints([...newVisibleDatapoints])
   }, [filters])
 
+  // remove datapoints from selection
+  useEffect(() => {
+    if (datapoints === undefined) return
+    let visibleDatapoints = datapoints.filter(dp => dp.visible == true)
+    let pointsToKeep = selectedPoints.filter(spId => (visibleDatapoints.some(dp => dp.id == spId)))
+    setPointsToSelect(pointsToKeep)
+  }, [datapoints])
+
+  // TODO: regenerate filters when datapoints change - was causing infinite loop
+  function setDatapointsAndRebuildFilters(newDatapoints: any) {
+    setDatapoints(newDatapoints)
+  }
+
   function handleKeyDown(event: any) {
     if (event.keyCode === 16) { // SHIFT
       setToolSelected('lasso')
@@ -110,7 +124,21 @@ const DataViewer = () => {
   }
   const deselectHandler = () => {
     setSelectedPoints([])
+    setPointsToSelect([])
   };
+
+  const selectByFilter = (passedFilter: any, passedOption: any) => {
+    let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
+    let optionIndex = filters[filterIndex].optionsSet.findIndex((option: any) => option.name === passedOption.name)
+
+    const datapointsToSelect = datapoints?.filter(dp => {
+      let filterOp = passedFilter.fetchFn(dp)
+      return (filterOp.includes(filters[filterIndex].optionsSet[optionIndex].name))
+    })
+    let datapointIdsToSelect = datapointsToSelect?.map(dp => dp.id)
+
+    setPointsToSelect(datapointIdsToSelect)
+  }
 
   const loading = (datapoints == undefined)
   let datapointsToRender = (datapoints !== undefined) ? datapoints.filter(dp => dp.visible == true) : 0
@@ -134,6 +162,7 @@ const DataViewer = () => {
           setFilters={setFilters}
           numVisible={datapointsToRender.length}
           numTotal={datapoints?.length}
+          selectByFilter={selectByFilter}
         ></FilterSidebar>
         <ProjectionPlotter
           datapoints={datapoints}
@@ -144,10 +173,12 @@ const DataViewer = () => {
           insertedProjections={insertedProjections}
           selectHandler={selectHandler}
           deselectHandler={deselectHandler}
+          pointsToSelect={pointsToSelect}
         />
         <DataPanel
           datapoints={datapoints}
-          selectedPoints={selectedPoints}
+          selectedDatapointsIds={selectedPoints}
+          setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters}
         />
       </ExplorerContainer>
 

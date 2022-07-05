@@ -49,7 +49,8 @@ export interface ServerDataItem {
 
 interface DataPanelProps {
   datapoints: Datapoint[]
-  selectedPoints: number[]
+  selectedDatapointsIds: number[]
+  setDatapointsAndRebuildFilters: (datapoints: ServerDataItem[]) => void
 }
 
 interface Hash<T> {
@@ -81,7 +82,7 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
       mt={3}
       pr={4}
       pl={4}
-      width="500px"
+      width={300}
       key={datapoint.id}
       borderBottomWidth={1}
       borderColor="e5e5e5"
@@ -98,15 +99,15 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
           <Table variant='unstyled' size="sm">
             <Tbody>
               <Tr key={"dpid"}>
-                <Td width="50%" p={0} pl={0} fontSize="xs">Datapoint ID</Td>
+                <Td width="20%" p={0} pl={0} fontSize="xs">Datapoint ID</Td>
                 <Td p={0} fontSize="xs">{datapoint.id}</Td>
               </Tr>
               <Tr key={"category"}>
-                <Td width="50%" p={0} pl={0} fontSize="xs">Category</Td>
+                <Td width="20%" p={0} pl={0} fontSize="xs">Category</Td>
                 <Td p={0} fontSize="xs">{datapoint.label.data.categories[0].name}</Td>
               </Tr>
               <Tr key={"dataset"}>
-                <Td width="50%" p={0} pl={0} fontSize="xs">Dataset</Td>
+                <Td width="20%" p={0} pl={0} fontSize="xs">Dataset</Td>
                 <Td p={0} fontSize="xs">{datapoint.dataset.name}</Td>
               </Tr>
             </Tbody>
@@ -126,7 +127,7 @@ const Row = ({ data, index, style }) => (
   </div>
 );
 
-const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => {
+const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds, setDatapointsAndRebuildFilters }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
@@ -139,17 +140,17 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
     reactWindowListLength = datapointsToRender.length
   }
 
-  if (selectedPoints.length > 0) {
-    reactWindowListLength = selectedPoints.length
-    datapointsToRender = datapoints.filter(dp => selectedPoints.includes(dp.id - 1)) // i dont know where this 1 offset came from, but shipping it for now
+  if (selectedDatapointsIds.length > 0) {
+    reactWindowListLength = selectedDatapointsIds.length
+    datapointsToRender = datapoints.filter(dp => selectedDatapointsIds.includes(dp.id))
   }
 
   return (
     <Flex
       direction="column"
-      width={500}
-      minWidth={500}
-      maxWidth={500}
+      width={300}
+      minWidth={300}
+      maxWidth={300}
       bg={bgColor}
       borderRight="1px"
       borderLeft="1px"
@@ -165,10 +166,10 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
       pt={14}>
       <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
         <Text fontWeight={600}>Inspect</Text>
-        <Text fontSize="sm">{selectedPoints.length} selected</Text>
+        <Text fontSize="sm">{selectedDatapointsIds.length} selected</Text>
       </Flex>
 
-      <TagForm setServerData={() => { }} selectedPoints={selectedPoints} serverData={datapoints} />
+      <TagForm selectedDatapointsIds={selectedDatapointsIds} datapoints={datapoints} setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters} />
 
       <Divider w="100%" pt={2} />
 
@@ -180,7 +181,7 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedPoints }) => 
               itemSize={250}
               height={height}
               itemCount={reactWindowListLength}
-              width={800}
+              width={300}
             >
               {Row}
             </List>

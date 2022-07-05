@@ -1,6 +1,17 @@
 // @ts-nocheck
 import distinctColors from 'distinct-colors'
 
+// our datapoints are 1 index
+// but our datastructures are 0 indexed
+// this function only exists to aid in sanity
+// eg datapoint 855 in the database, is 854 in our local arrays
+export const datapointIndexToPointIndex = (id: number) => {
+  return (id - 1)
+}
+export const pointIndexToDataPointIndex = (id: number) => {
+  return (id + 1)
+}
+
 export const getMostRecentCreatedAt = function (data: any) {
   return data.reduce((p1: any, p2: any) => {
     return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
@@ -125,7 +136,81 @@ let FILTERS = [
   },
 ]
 
+// export const rebuildFilters = (datapoints: any, existingFilters: any) => {
+//   // get existing filters if they exist, we do this primarily because we want to 
+//   // respect visiblility information! eg if class "4" is hidden, it should stay so
+//   let filters;
+//   if (existingFilters !== undefined) {
+//     filters = existingFilters.slice()
+//   } else {
+//     filters = FILTERS.slice()
+//   }
+//   console.log('existingFilters', existingFilters)
+//   console.log('filters', filters)
+//   console.log('FILTERS', FILTERS)
+//   console.log('equality', existingFilters === filters)
+
+//   datapoints = datapoints.slice()
+
+//   // get all available options for the various properties
+//   datapoints.map((datapoint: any) => {
+//     filters.map(filter => {
+//       let currentOptions = filter.optionsSet
+//       let newOptions = filter.fetchFn(datapoint)
+
+//       // options to remove
+//       let remove = currentOptions.filter(x => !newOptions.some(y => y === x.name));
+
+//       // options to add
+//       let add = newOptions.filter(x => !currentOptions.some(y => y.name === x));
+//       console.log('remove', remove)
+//       console.log('add', add)
+
+//       // if (filter.type == 'discrete') {
+//       //   newOptions.map(newOption => {
+//       //     filter.optionsSet!.push({
+//       //       name: newOption,
+//       //       visible: true,
+//       //       color: "#333333"
+//       //     })
+//       //   })
+
+//       // } else if (filter.type == 'continuous') {
+//       //   newOptions.map(newOption => {
+//       //     filter.optionsSet!.min! = (filter.optionsSet?.min! > newOption) ? newOption : filter.optionsSet!.min
+//       //     filter.optionsSet!.max! = (filter.optionsSet?.max! < newOption) ? newOption : filter.optionsSet!.max
+//       //   })
+//       // }
+
+//     })
+//   })
+
+//   // remove dupes and sort lexographically
+//   // filters.map(filter => {
+//   //   filter.optionsSet = filter.defaultSort(filter.removeDupes(filter.optionsSet))
+//   // })
+
+//   // // add color options
+//   // filters.map(filter => {
+//   //   if (filter.type == 'discrete') {
+//   //     let colorsOpts = distinctColors({
+//   //       "count": filter.optionsSet.length,
+//   //       "lightMin": 20,
+//   //       "lightMax": 80,
+//   //       "chromaMin": 80
+//   //     })
+//   //     filter.optionsSet.map((option, index) => {
+//   //       option.color = colorsOpts[index].hex()
+//   //     })
+//   //   }
+
+//   // })
+
+//   return filters
+// }
+
 export const buildFilters = (datapoints: any) => {
+  // get all available options for the various properties
   datapoints.map((datapoint: any) => {
     FILTERS.map(filter => {
       const newOptions = filter.fetchFn(datapoint)
@@ -149,10 +234,12 @@ export const buildFilters = (datapoints: any) => {
     })
   })
 
+  // remove dupes and sort lexographically
   FILTERS.map(filter => {
     filter.optionsSet = filter.defaultSort(filter.removeDupes(filter.optionsSet))
   })
 
+  // add color options
   FILTERS.map(filter => {
     if (filter.type == 'discrete') {
       let colorsOpts = distinctColors({

@@ -13,6 +13,7 @@ interface ProjectionPlotterProps {
     deselectHandler: () => void
     selectHandler: () => void
     cursor: string
+    pointsToSelect: []
 }
 
 interface ConfigProps {
@@ -49,7 +50,7 @@ const getBounds = (datapoints: Datapoint[]) => {
     }
 }
 
-const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedProjections, datapoints, showLoading, toolSelected, filters, selectHandler, deselectHandler }) => {
+const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedProjections, datapoints, showLoading, toolSelected, filters, selectHandler, deselectHandler, pointsToSelect }) => {
     let [reglInitialized, setReglInitialized] = useState(false);
     let [boundsSet, setBoundsSet] = useState(false);
     let [config, setConfig] = useState<ConfigProps>({})
@@ -66,6 +67,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedP
     useEffect(() => {
         if (insertedProjections !== true) return
         if (datapoints === undefined) return
+        if (boundsSet) return
 
         let bounds = getBounds(datapoints)
         setTarget([bounds.centerX, bounds.centerY])
@@ -83,6 +85,19 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedP
         }
 
     }, [insertedProjections, datapoints])
+
+    // whenever datapoints changes, we want to regenerate out points and send them down to plotter
+    useEffect(() => {
+        if (insertedProjections !== true) return
+        if (datapoints === undefined) return
+        calculateColorsAndDrawPoints()
+    }, [datapoints])
+
+    useEffect(() => {
+        if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
+            config.scatterplot.select(pointsToSelect)
+        }
+    }, [pointsToSelect])
 
     if (reglInitialized && (points !== null)) {
         if (toolSelected == 'lasso') {
@@ -124,12 +139,13 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({ cursor, insertedP
         let colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
         setColorByOptions(colorByOptionsSave)
 
-        points = datapoints!.map(datapoint => {
+        points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
+        datapoints!.map(datapoint => {
             let datapointColorByProp = colorByFilter.fetchFn(datapoint)[0]
             let datapointColorIndex = colorByFilter.optionsSet.findIndex((option: any) => option.name == datapointColorByProp)
 
             const visible = datapoint.visible ? 1 : 0
-            return [datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex]
+            return points.push([datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex])
         })
         setPoints(points)
     }

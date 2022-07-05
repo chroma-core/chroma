@@ -58,7 +58,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     // tags to add
     let add = newTagsArray.filter(x => !originalTagsArray.includes(x));
 
-    // tags to add
+    // tags to keep
     let keep = originalTagsArray.filter(x => newTagsArray.includes(x));
 
     add.map(tagToAdd => {

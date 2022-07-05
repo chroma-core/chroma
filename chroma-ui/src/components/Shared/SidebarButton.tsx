@@ -1,9 +1,10 @@
 import * as CSS from 'csstype'
-import { Flex, Button, useTheme, Icon, Box } from '@chakra-ui/react'
+import { Flex, Button, useTheme, Icon, Box, IconButton } from '@chakra-ui/react'
 import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
 import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
 import { IconType } from "react-icons";
+import { TbLasso } from 'react-icons/tb';
 
 const IconMap: any = {
   circle: BsCircleFill,
@@ -12,6 +13,7 @@ const IconMap: any = {
   square_outline: BsSquare,
   show: AiOutlineEye,
   hide: AiOutlineEyeInvisible,
+  select: TbLasso
 }
 
 interface SidebarButtonProps {
@@ -20,33 +22,67 @@ interface SidebarButtonProps {
   color: CSS.Property.Color
   indent: number,
   onClick?: ({ }) => void,
+  onClick2?: ({ }) => void,
   visible: boolean,
   classTitle: string
   keyName: string
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, onClick, visible = true, classTitle }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, onClick, onClick2, visible = true, classTitle }) => {
   var icon: string = (visible === true) ? 'show' : 'hide'
-  var opacity: string = (visible === true) ? "100%" : "30%"
+  var iconOpp: string = (visible === true) ? 'hide' : 'show'
+  var opacity: string = (visible === true) ? "100%" : "20%"
 
-  function buttonClicked() {
+  const [isHovered, setIsHovered] = useState(false);
+  const handleMouseEnter = () => {
+    setIsHovered(true)
+  }
+  const handleMouseLeave = () => {
+    setIsHovered(false)
+  }
+
+  function buttonClicked(event: any) {
+    event.stopPropagation()
     if (onClick)
       onClick({
         text: text,
         classTitle: classTitle,
       })
   }
+  function buttonClicked2(event: any) {
+    event.stopPropagation()
+    if (onClick2)
+      onClick2({
+        text: text,
+        classTitle: classTitle,
+      })
+  }
+
+  let eyeButtonOpacity = "0%"
+  if (!visible) eyeButtonOpacity = "30%"
+  if (isHovered) eyeButtonOpacity = "100%"
 
   return (
-    <Button key={keyName} justifyContent="flex-start" variant='ghost' size='sm' ml={indent} onClick={buttonClicked} opacity={opacity}>
+    <Button
+      key={keyName}
+      onClick={buttonClicked2}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      justifyContent="flex-start" variant='ghost' size='sm' ml={indent}>
       <Flex justify="space-between" wrap="wrap" width="100%">
-        <Box>
+        <Box opacity={opacity}>
           <Icon h={3} as={IconMap[symbol] as any} color={color} mr={2} />
           {text}
         </Box>
-        {!visible ? (
-          <Icon as={IconMap[icon] as any} color="black" />
-        ) : null}
+        <Flex>
+          <IconButton
+            _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
+            _active={{ backgroundColor: "rgba(0,0,0,0)" }}
+            onClick={buttonClicked}
+            height="100%"
+            opacity={eyeButtonOpacity}
+            variant="ghost" aria-label='ShowHide' icon={<Icon as={IconMap[icon] as any} color="black" />} />
+        </Flex>
       </Flex>
     </Button>
   )
