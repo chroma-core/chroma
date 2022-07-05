@@ -1,40 +1,48 @@
 import os
-from chroma.cli_commands.multi_command import SubCommand
+from chroma.cli.multi_command import SubCommand
 
-
-def data_manager_subcommand(base_dir, multicommand):
-    data_manager_env = os.environ.copy()
-    data_manager_env["FLASK_APP"] = "main.py"
-    data_manager_env["FLASK_ENV"] = "development"
-    data_manager_directory = "/".join((base_dir, "chroma/data_manager"))
+def app_subcommand(base_dir, multicommand):
+    app_env = os.environ.copy()
+    app_directory = "/".join((base_dir, "chroma/app"))
 
     subcommand = SubCommand(
         multicommand,
-        name="Data Manager",
-        command=["flask run --port 5000"],
-        env=data_manager_env,
-        cwd=data_manager_directory,
-        ready_string="Debugger is active!",
+        name="App",
+        command=["uvicorn app:app --reload --host '::'"],
+        env=app_env,
+        cwd=app_directory,
+        ready_string="Application startup complete",
     )
     return subcommand
 
+# def rabbit_subcommand(base_dir, multicommand):
+#     app_env = os.environ.copy()
+#     app_directory = "/".join((base_dir, "chroma/app"))
 
-def app_backend_subcommand(base_dir, multicommand):
-    app_backend_env = os.environ.copy()
-    app_backend_env["FLASK_APP"] = "main.py"
-    app_backend_env["FLASK_ENV"] = "development"
-    app_backend_directory = "/".join((base_dir, "chroma/app_backend"))
+#     subcommand = SubCommand(
+#         multicommand,
+#         name="RabbitMQ",
+#         command=["docker run -it -d rabbitmq:3"],
+#         # command=["docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3"],
+#         env=app_env,
+#         cwd=app_directory,
+#         ready_string="Application startup complete",
+#     )
+#     return subcommand
+
+def celery_subcommand(base_dir, multicommand):
+    app_env = os.environ.copy()
+    app_directory = "/".join((base_dir, "chroma/app"))
 
     subcommand = SubCommand(
         multicommand,
-        name="App Backend",
-        command=["flask run --port 4000"],
-        env=app_backend_env,
-        cwd=app_backend_directory,
-        ready_string="app backend ready",
+        name="Celery",
+        command=["celery -A tasks.celery worker --loglevel=info"],
+        env=app_env,
+        cwd=app_directory,
+        ready_string="Connected to amqp://guest:**@127.0.0.1:5672//",
     )
     return subcommand
-
 
 def frontend_subcommand(base_dir, multicommand):
     app_frontend_env = os.environ.copy()

@@ -1,0 +1,370 @@
+union AddDatasetResponse = Dataset | ProjectDoesNotExist
+
+union AddEmbeddingResponse = Embedding | EmbeddingExists
+
+union AddLayerResponse = Layer | LayerSetDoesNotExist
+
+union AddLayerSetResponse = LayerSet | TrainedModelDoesNotExist
+
+union AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist
+
+union AddSliceResponse = Slice | DatasetDoesNotExist
+
+union AddTrainedModelResponse = TrainedModel | ModelArchitectureDoesNotExist
+
+input CreateDatasetInput {
+  name: String!
+  projectId: Int!
+}
+
+input CreateJobInput {
+  name: String!
+}
+
+input CreateLayerInput {
+  layerSetId: Int!
+  id: ID = null
+}
+
+input CreateLayerSetInput {
+  trainedModelId: Int!
+  id: ID = null
+}
+
+input CreateModelArchitectureInput {
+  name: String!
+  projectId: Int!
+}
+
+input CreateProjectInput {
+  name: String!
+}
+
+input CreateProjectorInput {
+  id: ID = null
+}
+
+input CreateSliceInput {
+  name: String!
+  datasetId: Int!
+}
+
+input CreateTagInput {
+  name: String!
+}
+
+input CreateTrainedModelInput {
+  modelArchitectureId: Int!
+  id: ID = null
+}
+
+type Datapoint {
+  id: ID!
+  dataset: Dataset
+  tags: [Tag!]!
+  slices: [Slice!]!
+}
+
+type Dataset {
+  id: ID!
+  name: String
+  project: Project
+  slices: [Slice!]!
+  datapoints: [Datapoint!]!
+}
+
+type DatasetDoesNotExist {
+  message: String!
+}
+
+type Embedding {
+  id: ID!
+  data: String
+  label: String
+  inferenceIdentifier: String!
+  inputIdentifier: String!
+  embeddingSet: EmbeddingSet
+  projections: [Projection!]!
+}
+
+type EmbeddingConnection {
+  pageInfo: PageInfo!
+  edges: [EmbeddingEdge!]!
+}
+
+type EmbeddingEdge {
+  node: Embedding!
+  cursor: String!
+}
+
+type EmbeddingExists {
+  message: String!
+}
+
+input EmbeddingInput {
+  data: String!
+  label: String!
+  inferenceIdentifier: String!
+  inputIdentifier: String!
+  embeddingSetId: Int!
+}
+
+type EmbeddingSet {
+  id: ID!
+  projectionSets: [ProjectionSet!]!
+  embeddings: [Embedding!]!
+}
+
+input EmbeddingsInput {
+  embeddings: [EmbeddingInput!]!
+}
+
+type Inference {
+  id: ID!
+  datapoint: Datapoint
+}
+
+type Job {
+  id: ID!
+  name: String
+}
+
+type Label {
+  id: ID!
+  datapoint: Datapoint
+}
+
+type Layer {
+  id: ID!
+  layerSet: LayerSet
+  embeddings: [Embedding!]!
+}
+
+type LayerSet {
+  id: ID!
+  trainedModel: TrainedModel
+  layers: [Layer!]!
+}
+
+type LayerSetDoesNotExist {
+  message: String!
+}
+
+type ModelArchitecture {
+  id: ID!
+  name: String
+  project: Project
+  trainedModels: [TrainedModel!]!
+}
+
+type ModelArchitectureDoesNotExist {
+  message: String!
+}
+
+type Mutation {
+  createProject(project: CreateProjectInput!): Project!
+  updateProject(project: UpdateProjectInput!): Project!
+  deleteProject(project: UpdateProjectInput!): ObjectDeleted!
+  createDataset(dataset: CreateDatasetInput!): AddDatasetResponse!
+  updateDataset(dataset: UpdateDatasetInput!): Dataset!
+  deleteDataset(dataset: UpdateDatasetInput!): ObjectDeleted!
+  createSlice(slice: CreateSliceInput!): AddSliceResponse!
+  updateSlice(slice: UpdateSliceInput!): Slice!
+  deleteSlice(slice: UpdateSliceInput!): ObjectDeleted!
+  createTag(tag: CreateTagInput!): Tag!
+  updateTag(tag: UpdateTagInput!): Tag!
+  deleteTag(tag: UpdateTagInput!): ObjectDeleted!
+  createModelArchitecture(modelArchitecture: CreateModelArchitectureInput!): AddModelArchitectureResponse!
+  updateModelArchitecture(modelArchitecture: UpdateModelArchitectureInput!): ModelArchitecture!
+  deleteModelArchitecture(modelArchitecture: UpdateModelArchitectureInput!): ObjectDeleted!
+  createTrainedModel(trainedModel: CreateTrainedModelInput!): AddTrainedModelResponse!
+  deleteTrainedModel(trainedModel: UpdateTrainedModelInput!): ObjectDeleted!
+  createLayerSet(layerSet: CreateLayerSetInput!): AddLayerSetResponse!
+  deleteLayerSet(layerSet: UpdateLayerSetInput!): ObjectDeleted!
+  createLayer(layer: CreateLayerInput!): AddLayerResponse!
+  deleteLayer(layer: UpdateLayerInput!): ObjectDeleted!
+  createProjector(projector: CreateProjectorInput!): Projector!
+  deleteProjector(projector: UpdateProjectorInput!): ObjectDeleted!
+  createJob(job: CreateJobInput!): Job!
+  updateJob(job: UpdateJobInput!): Job!
+  deleteJob(job: UpdateJobInput!): ObjectDeleted!
+  addProjection(projectionInput: ProjectionInput!): Projection!
+  addProjectionSet(projectionSetInput: ProjectionSetInput!): ProjectionSet!
+  addEmbeddingSet: EmbeddingSet!
+  addEmbedding(embeddingInput: EmbeddingInput!): AddEmbeddingResponse!
+  addEmbeddings(embeddingsInput: EmbeddingsInput!): [Embedding!]!
+}
+
+type ObjectDeleted {
+  message: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+input PageInput {
+  first: Int!
+  after: String
+}
+
+type Project {
+  id: ID!
+  name: String
+  datasets: [Dataset!]!
+  modelArchitectures: [ModelArchitecture!]!
+}
+
+type ProjectDoesNotExist {
+  message: String!
+}
+
+type Projection {
+  id: ID!
+  x: Float!
+  y: Float!
+  embedding: Embedding
+  projectionSet: ProjectionSet
+}
+
+input ProjectionInput {
+  embeddingId: Int!
+  projectionSetId: Int!
+  x: Float!
+  y: Float!
+}
+
+type ProjectionSet {
+  id: ID!
+  embeddingSet: EmbeddingSet
+  projections: [Projection!]!
+}
+
+input ProjectionSetInput {
+  projectionSetId: Int!
+}
+
+type Projector {
+  id: ID!
+}
+
+type Query {
+  embeddingsByPage(pageInput: PageInput!): EmbeddingConnection!
+  projects: [Project!]!
+  project(id: ID!): Project!
+  datasets: [Dataset!]!
+  dataset(id: ID!): Dataset!
+  slices: [Slice!]!
+  slice(id: ID!): Slice!
+  datapoints: [Datapoint!]!
+  datapoint(id: ID!): Datapoint!
+  resources: [Resource!]!
+  resource(id: ID!): Resource!
+  labels: [Label!]!
+  label(id: ID!): Label!
+  tags: [Tag!]!
+  tag(id: ID!): Tag!
+  inferences: [Inference!]!
+  inference(id: ID!): Inference!
+  modelArchitectures: [ModelArchitecture!]!
+  modelArchitecture(id: ID!): ModelArchitecture!
+  trainedModels: [TrainedModel!]!
+  trainedModel(id: ID!): TrainedModel!
+  layerSets: [LayerSet!]!
+  layerSet(id: ID!): LayerSet!
+  layers: [Layer!]!
+  layer(id: ID!): Layer!
+  projectors: [Projector!]!
+  projector(id: ID!): Projector!
+  jobs: [Job!]!
+  job(id: ID!): Job!
+  embeddingSets: [EmbeddingSet!]!
+  embeddingSet(id: ID!): EmbeddingSet!
+  projectionSets: [ProjectionSet!]!
+  projectionSet(id: ID!): ProjectionSet!
+  projections: [Projection!]!
+  projection(id: ID!): Projection!
+  embeddings: [Embedding!]!
+  embedding(id: ID!): Embedding!
+}
+
+type Resource {
+  id: ID!
+  datapoints: [Datapoint!]!
+}
+
+type Slice {
+  id: ID!
+  name: String
+  dataset: Dataset
+  datapoints: [Datapoint!]!
+}
+
+type Subscription {
+  count(target: Int! = 100): Int!
+}
+
+type Tag {
+  id: ID!
+  name: String
+  datapoints: [Datapoint!]!
+}
+
+type TrainedModel {
+  id: ID!
+  modelArchitecture: ModelArchitecture
+  layerSets: [LayerSet!]!
+}
+
+type TrainedModelDoesNotExist {
+  message: String!
+}
+
+input UpdateDatasetInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateJobInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateLayerInput {
+  id: ID!
+}
+
+input UpdateLayerSetInput {
+  id: ID!
+}
+
+input UpdateModelArchitectureInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateProjectInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateProjectorInput {
+  id: ID!
+}
+
+input UpdateSliceInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateTagInput {
+  id: ID!
+  name: String = null
+}
+
+input UpdateTrainedModelInput {
+  id: ID!
+}

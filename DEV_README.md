@@ -2,13 +2,11 @@
 
 ## Tool selection
 
-React, Flask, Sqlite and Graphql were chosen for their simplicity and ubiquity. 
-
-We will get fancier with tooling when the occasion arises. 
+React, FastAPI, Sqlite and Graphql were chosen for their simplicity and ubiquity. We can get fancier with tooling when we need to. 
 
 The folder structure is:
 - `chroma-ui`: react app
-- `chroma`: contains all python code, the core library and flask apps
+- `chroma`: contains all python code, the core library and python apps
 - `examples`: example scripts that uses the Chroma pip package
 
 # Using Make
@@ -18,16 +16,47 @@ Make makes it easy to do stuff:
 - `make build_prod` will set up a production build for you
 - `pip install .` and `chroma application run` will run the full stack
 
+# Getting up and running
+You will need
+- `Docker`
+- `Python 3.9`
+
+```
+# get the code
+git clone git@github.com:chroma-core/chroma.git
+cd chroma
+
+# install python deps and js deps
+make install
+
+# run the service
+make run
+
+# or run via our sdk
+chroma application run
+
+# then you may want to set up background jobs running via celery
+
+# run rabbitmq
+docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3
+
+# run celery from within the app folder
+celery -A tasks.celery worker --loglevel=info
+
+```
+
 # Setup 
 
 ### The frontend
+The frontend uses (see all boilerplate dependencies in chroma-ui/package.json):
+
 - The frontend uses React via Create React App. 
 - We use [Chakra](https://chakra-ui.com/) for UI elements. 
 - This is a typescript app!
 - Linting (eslint, `yarn lint`) and code formatting (prettier, `yarn format`) have been setup. This is not autorun right now.
 - Jest has also been setup for testing, `yarn test`. This is not autorun right now.
 - When the app is built with `yarn build`, it copies it's built artifacts to the `app_backend` which serves it. 
- - Right now graphql queries are handwritten. This can be changed over to a number of libraries.
+- Urql for easy Graphql state and hooks
 
 One command up to install everything `make install`.
 
@@ -79,16 +108,19 @@ yarn start
 ```
 
 ### The backend
-The 2 backend apps use:
-- Flask
-- Araidne (graphql)
+The backend uses:
+- uvirocn (webserver)
+- FastAPI
+- Strawberry (graphql)
+- Alembic (migrations)
+- Sqlite (db)
 
 - `app_backend` runs on port 4000. `app_backend` serves a graphql playground at [http://127.0.0.1:5000/graphql](http://127.0.0.1:5000/graphql)
 - `data_manager` runs on port 5000
 
 ```
 # cd into directory
-cd chroma/chroma/app_backend
+cd chroma/app
 
 # Create the virtual environment.
 python3 -m venv chroma_env
@@ -97,8 +129,8 @@ python3 -m venv chroma_env
 source chroma_env/bin/activate
 
 # install dependencies
-TODO: upate this
-pip install .
+# currently python deps are maintained here and in the Pipfile
+pip install -r requirements.txt
 
 # set up db if chroma.db doesn not exist
 # python
@@ -108,21 +140,14 @@ pip install .
 # The pip bundled flask app now handles the DB creation through checking to see if the DB exists at runtime, and if not, it creates it.
 
 # run the app, development gives you hot reloading
-FLASK_APP=main.py FLASK_ENV=development flask run --port 4000
+uvicorn app:app --reload --host '::'
 
 # Verify it works
-open http://127.0.0.1:4000/graphql
-# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:4000
+open http://127.0.0.1:8000/graphql
+# if the frontend has been built - it will be served automatically at the root path: http://127.0.0.1:8000
 ```
 
 The pip bundled flask app installs these above dependencies through `setup.cfg`. 
-
-TODO: black, isort, pytest
-
-### The data manager
-The data manager is a seperate flask app that only fetches and writes data.
-
-TODO: write more
 
 ### The pip package
 `pip install chroma-core` (or whatever we end up naming it)
@@ -174,7 +199,7 @@ python -m twine upload -repository pypi dist/*
 ```
 
 ### Sqlite
-Sqlite saves it's db to `chroma_datamanager.db` and `chroma_app.db` in the backend directory.
+Sqlite saves it's db to `chroma.db` in the app backend directory.
 
 You can view this directly in terminal if you want to. For example:
 ```
@@ -195,7 +220,9 @@ Tutorials I referenced lashing this up:
 - https://www.youtube.com/watch?v=JkeNVaiUq_c
 - https://gorilla.readthedocs.io/en/latest/tutorial.html
 - https://github.com/mlflow/mlflow/blob/adb0a1142f90ad2832df643cb7b13e1ef5d5c536/tests/utils/test_gorilla.py#L40
-
+- https://blog.logrocket.com/using-graphql-strawberry-fastapi-next-js/
+- https://kimsereylam.com/sqlalchemy/2019/10/18/get-started-with-alembic.html
+- https://medium.com/thelorry-product-tech-data/celery-asynchronous-task-queue-with-fastapi-flower-monitoring-tool-e7135bd0479f
 
 # Test flow for pip package
 ```
@@ -210,22 +237,38 @@ chroma application run
 # run an example script like the one in the examples folder
 ```
 
-# Open questions
-- How to easily sync updates to graphql schema to frontend graphql code and the sdk/agent grapqhl code
-
 # Productionizing
 - Add CLI
 - Support multiple databases
-- Tests
-- Linting
 - CI
 - Release semver
-- VS code standardization/setup
 - Docs (autogenerated from python?)
-- DB migrations
-- Makefile - https://github.com/dagster-io/dagster/blob/master/Makefile
 - Telemetry, bug reporting?
-- Install/setup script
-- Live updating UI
 - Cloud deployment
-- ...........
+
+# New commands
+Strawberry relies on `python 3.9` so we will need that. 
+
+This will export the schema from the graphql backend, it's not especially helpful to us though.
+`strawberry export-schema package.module:schema > schema.graphql`
+
+# Adding a new field. 
+
+Say you want to add a new field... like adding metadata to inference. You want to be able to write to that field via the python sdk and read it in the React frontend. Here is what you want to do step-by-step. 
+
+1. Add the field to `models.py` - these are the sqlalchemy definitions that represent our db schema. (If you are trying to preserve production data, don't do this and make a migration with alembic instead). Then run `python models.py` to drop the existing db and set up a fresh one with the schema you want. For adding one-to-one, one-to-many, or many-to-many, we have examples of all of those in our data model in place now to glean from. 
+2. Add the field to the class in the `strawberry` `types.py` definitions. `metadata` is not a relationship, but if it was you would also want to add a loader that helps minimize on the number of transactions. You can see examples of that in many of the one-to-many and many-to-many examples. 
+3. For adding metadata, you don't have to update `qeuries.py`, but if you want to write to it, you will need to update the mutations for creating and updates. In `mutations.py` add the field to the create and update methods and make sure to add them to the object creating/update. 
+4. Then we want to hook this new stuff up to the python sdk so we can use it in our python projects. Look at `sdk/api/queries` and `sdk/api/mutations`. In the queries, if you want to fetch that field, you will want to add it to the default `inferences` and `inference` get queries. You probably don't need to update the mutation because we are passing in a type that is defined by our backend. 
+5. That being said, you will want to update `chroma_manager.py` to pass the correct fields down to that mutation! Again, look for the create and update methods especially for the field/model you are updating. 
+6. Lastly you can optionally surface this via our rough cli in `cli/sdk.py` if you want to. 
+7. Now to the frontend. Inside `chroma-ui`, `src/graphql/operations.graphql` - you can see a bunch of queries and mutations that we want `urql` to generate hooks for us. If you want to, add your fields to those queries/mutations. Then run `npm run codegen` to create the hooks. If it fails, it is probably right and it will tell you what you need to fix. 
+8. Done! 
+
+# running background jobs
+
+1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery tasks. 
+2. `celery -A tasks.celery worker --loglevel=info` runs the celery service for processing offline jobs.
+3. Now commands can take a `.delay` to move them to a background queue. 
+
+

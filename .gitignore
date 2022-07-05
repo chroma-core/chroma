@@ -33,3 +33,5 @@ examples/data/
 
 # ignore vscode 
 .vscode/
+
+chroma/app/static/*
