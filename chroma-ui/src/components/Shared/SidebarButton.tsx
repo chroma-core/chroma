@@ -65,7 +65,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   return (
     <Button
       key={keyName}
-      onClick={showHideFn}
+      onClick={selectByFn}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       justifyContent="flex-start" variant='ghost' size='sm' ml={indent}>
@@ -78,7 +78,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
           <IconButton
             _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
             _active={{ backgroundColor: "rgba(0,0,0,0)" }}
-            onClick={selectByFn}
+            onClick={showHideFn}
             height="100%"
             opacity={eyeButtonOpacity}
             variant="ghost" aria-label='ShowHide' icon={<Icon as={IconMap[icon] as any} color="black" />} />
