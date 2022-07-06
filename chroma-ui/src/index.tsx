@@ -9,7 +9,6 @@ import { extendTheme, ChakraProvider, ColorModeScript } from '@chakra-ui/react'
 import { Global, css } from '@emotion/react';
 
 import { createClient, Provider, defaultExchanges, subscriptionExchange } from 'urql';
-import { dedupExchange, fetchExchange } from 'urql';
 // import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
