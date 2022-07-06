@@ -10,7 +10,6 @@ import { Global, css } from '@emotion/react';
 
 import { createClient, Provider, defaultExchanges, subscriptionExchange } from 'urql';
 import { dedupExchange, fetchExchange } from 'urql';
-import { cacheExchange } from '@urql/exchange-graphcache';
 // import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
@@ -34,29 +33,28 @@ console.log(`%c
 
 const client = createClient({
   url: 'http://localhost:8000/graphql',
-  exchanges: [...defaultExchanges, dedupExchange, cacheExchange({}), fetchExchange],
-  // exchanges: [
-  //   ...defaultExchanges,
-  //   subscriptionExchange({
-  //     forwardSubscription: (operation) => subscriptionClient.request(operation)
-  //   }),
-  // ],
+  exchanges: [
+    ...defaultExchanges,
+    // subscriptionExchange({
+    //   forwardSubscription: (operation) => subscriptionClient.request(operation)
+    // }),
+  ],
 });
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)
 root.render(
-  // <React.StrictMode>
-  <ChakraProvider theme={defaultTheme}>
-    <HelmetProvider>
-      <Helmet defaultTitle="Chroma" />
-    </HelmetProvider>
-    <Global styles={GlobalStyles} />
-    <ColorModeScript initialColorMode="light" />
-    <Provider value={client}>
-      <ChromaRouter />
-    </Provider>
-  </ChakraProvider>
-  // </React.StrictMode>
+  <React.StrictMode>
+    <ChakraProvider theme={defaultTheme}>
+      <HelmetProvider>
+        <Helmet defaultTitle="Chroma" />
+      </HelmetProvider>
+      <Global styles={GlobalStyles} />
+      <ColorModeScript initialColorMode="light" />
+      <Provider value={client}>
+        <ChromaRouter />
+      </Provider>
+    </ChakraProvider>
+  </React.StrictMode>
 )
 
 // If you want to start measuring performance in your app, pass a function

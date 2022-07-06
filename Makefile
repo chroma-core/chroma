@@ -49,3 +49,5 @@ run_frontend:
 run:
 	python scripts/run_all.py
 
+reset-db:
+	cd chroma/app && rm chroma.db && python models.py && cd ../..

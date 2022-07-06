@@ -1,15 +1,11 @@
 // @ts-nocheck
-import React, { useState } from 'react';
-import { Tag, Flex, Text, Box, Spinner, IconButton, useTheme, Divider, Spacer, useColorMode, useColorModeValue, Skeleton } from '@chakra-ui/react'
-import { GiExpand } from 'react-icons/gi';
-import { BsTagFill, BsTag } from 'react-icons/bs';
-import { Button, Table, Thead, Tbody, Tfoot, Tr, Th, Td, TableCaption, TableContainer } from '@chakra-ui/react'
-import { render } from '@testing-library/react'
+import React from 'react';
+import { Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton } from '@chakra-ui/react'
+import { Table, Tbody, Tr, Td, TableContainer } from '@chakra-ui/react'
 import TagForm from './TagForm'
-import TagButton from './TagButton'
 import Tags from './Tags'
 import { Datapoint } from './DataViewTypes';
-import { FixedSizeList as List, FixedSizeGrid as Grid } from "react-window";
+import { FixedSizeList as List } from "react-window";
 import AutoSizer from "react-virtualized-auto-sizer";
 import { useQuery } from 'urql';
 

@@ -76,7 +76,6 @@ class Dataset:
     def marshal(cls, model: models.Dataset) -> "Dataset":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            # project=Project.marshal(model.project) if model.project else None,
             name=model.name if model.name else None,
             created_at=model.created_at,
             updated_at=model.updated_at
@@ -113,7 +112,6 @@ class Datapoint:
     updated_at: datetime.datetime
     metadata_: Optional[str]
     dataset: Optional[Dataset] = None
-    # resource: Optional["Resource"] = None
 
     # has_many embeddings
     @strawberry.field
@@ -147,19 +145,12 @@ class Datapoint:
             resource = (await s.execute(sql)).scalars().first()
         return Resource.marshal(resource)
 
-    # has_one inference
-    # @strawberry.field
-    # async def inference(self, info: Info) -> "Inference":
-    #     inferences = await info.context["inference_by_datapoint"].load(self.id)
-    #     return Inference.marshal(inferences[0]) if inferences[0] != None : None
-
     @classmethod
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
         metadata = model.metadata_ if model.metadata_ else "{}"
         return cls(
             id=strawberry.ID(str(model.id)),
             dataset=Dataset.marshal(model.dataset) if model.dataset else None,
-            # resource=Resource.marshal(model.resource) if model.resource else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
             metadata_=json.loads(metadata)
@@ -193,13 +184,11 @@ class Label:
     data: JSON
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    # datapoint: Optional[Datapoint] = None
 
     @classmethod
     def marshal(cls, model: models.Label) -> "Label":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            # datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
             data=json.loads(model.data)
@@ -233,7 +222,6 @@ class Inference:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     datapoint: Optional[Datapoint] = None
-    # trained_model: Optional[TrainedModel] = None
 
     @classmethod
     def marshal(cls, model: models.Inference) -> "Inference":
@@ -427,7 +415,6 @@ class ProjectionSet:
     def marshal(cls, model: models.ProjectionSet) -> "ProjectionSet":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            # embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -474,9 +461,6 @@ class Embedding:
             label=model.label if model.label else None,
             inference_identifier=model.inference_identifier,
             input_identifier=model.input_identifier,
-            # layer=Layer.marshal(model.layer) if model.layer else None,
-            # embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
-            # datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

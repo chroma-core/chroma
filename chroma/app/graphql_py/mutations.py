@@ -1022,28 +1022,6 @@ class Mutation:
             await s.commit()
         return Embedding.marshal(db_embedding)
 
-    # TODO: fix this function so it doesn't hard code the embedding set
-    # @strawberry.mutation
-    # async def add_embeddings(self, embeddings_input: EmbeddingsInput) -> list[Embedding]: # batch query example
-    #     async with models.get_session() as s:
-    #         objects = []
-
-    #         sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == 1)
-    #         embedding_set = (await s.execute(sql)).scalars().first()
-
-    #         for em in embeddings_input.embeddings:
-    #             objects.append(models.Embedding(
-    #                 data=em.data,
-    #                 label=em.label,
-    #                 inference_identifier=em.inference_identifier,
-    #                 input_identifier=em.input_identifier,
-    #                 embedding_set=embedding_set,
-    #             ))
-
-    #         s.add_all(objects)
-    #         await s.commit()
-    #     return [Embedding.marshal(loc) for loc in objects]
-
     #
     # Resource
     #

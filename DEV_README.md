@@ -271,4 +271,9 @@ Say you want to add a new field... like adding metadata to inference. You want t
 2. `celery -A tasks.celery worker --loglevel=info` runs the celery service for processing offline jobs.
 3. Now commands can take a `.delay` to move them to a background queue. 
 
-
+### Killing FastApi or Celery PIDs
+```
+ps aux | grep celery # search for celery processes
+lsof -i :8000 # search for processes running on port 8000
+kill -9 pid # kill process by pid
+```

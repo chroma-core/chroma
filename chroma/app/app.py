@@ -85,8 +85,8 @@ async def get_projection_set_data(projection_set_id: str):
 
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM 
-@app.get("/projection_set_data2/{projection_set_id}")
-async def get_projection_set_data2(projection_set_id: str):
+@app.get("/projection_set_data_viewer/{projection_set_id}")
+async def get_projection_set_data_viewer(projection_set_id: str):
     async with models.get_session() as s:
         start = time.process_time()
 
@@ -111,7 +111,7 @@ async def get_projection_set_data2(projection_set_id: str):
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM, by ~3x! 
 @app.get("/datapoints/{project_id}")
-async def get_projection_set_data2(project_id: str):
+async def get_datapoints_data_viewer(project_id: str):
     async with models.get_session() as s:
         start = time.process_time()
 

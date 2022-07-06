@@ -127,15 +127,6 @@ export type Datapoint = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type DatapointLight = {
-  __typename?: 'DatapointLight';
-  dataset: DatasetLight;
-  id: Scalars['Int'];
-  label: LabelLight;
-  resource: ResourceLight;
-  tags: Array<TagLight>;
-};
-
 export type Dataset = {
   __typename?: 'Dataset';
   createdAt: Scalars['DateTime'];
@@ -150,12 +141,6 @@ export type Dataset = {
 export type DatasetDoesntExist = {
   __typename?: 'DatasetDoesntExist';
   message: Scalars['String'];
-};
-
-export type DatasetLight = {
-  __typename?: 'DatasetLight';
-  id: Scalars['Int'];
-  name: Scalars['String'];
 };
 
 export type Embedding = {
@@ -195,12 +180,6 @@ export type EmbeddingInput = {
   inferenceIdentifier: Scalars['String'];
   inputIdentifier: Scalars['String'];
   label: Scalars['String'];
-};
-
-export type EmbeddingLight = {
-  __typename?: 'EmbeddingLight';
-  datapoint: DatapointLight;
-  id: Scalars['Int'];
 };
 
 export type EmbeddingSet = {
@@ -244,12 +223,6 @@ export type Label = {
 export type LabelDoesntExist = {
   __typename?: 'LabelDoesntExist';
   message: Scalars['String'];
-};
-
-export type LabelLight = {
-  __typename?: 'LabelLight';
-  data: Scalars['JSON'];
-  id: Scalars['Int'];
 };
 
 export type Layer = {
@@ -645,14 +618,6 @@ export type ProjectionInput = {
   y: Scalars['Float'];
 };
 
-export type ProjectionLight = {
-  __typename?: 'ProjectionLight';
-  embedding: EmbeddingLight;
-  id: Scalars['Int'];
-  x: Scalars['Float'];
-  y: Scalars['Float'];
-};
-
 export type ProjectionSet = {
   __typename?: 'ProjectionSet';
   createdAt: Scalars['DateTime'];
@@ -664,12 +629,6 @@ export type ProjectionSet = {
 
 export type ProjectionSetInput = {
   projectionSetId: Scalars['Int'];
-};
-
-export type ProjectionSetLight = {
-  __typename?: 'ProjectionSetLight';
-  id: Scalars['Int'];
-  projections: Array<ProjectionLight>;
 };
 
 export type Projector = {
@@ -704,7 +663,6 @@ export type Query = {
   modelArchitectures: Array<ModelArchitecture>;
   project: Project;
   projection: Projection;
-  projectionSet: ProjectionSetLight;
   projectionSets: Array<ProjectionSet>;
   projections: Array<Projection>;
   projector: Projector;
@@ -829,12 +787,6 @@ export type ResourceDoesntExist = {
   message: Scalars['String'];
 };
 
-export type ResourceLight = {
-  __typename?: 'ResourceLight';
-  id: Scalars['Int'];
-  uri: Scalars['String'];
-};
-
 export type Slice = {
   __typename?: 'Slice';
   createdAt: Scalars['DateTime'];
@@ -857,12 +809,6 @@ export type Tag = {
 export type TagByNameToDataPointsInput = {
   datapointIds?: InputMaybe<Array<Scalars['Int']>>;
   tagName: Scalars['String'];
-};
-
-export type TagLight = {
-  __typename?: 'TagLight';
-  id: Scalars['Int'];
-  name: Scalars['String'];
 };
 
 export type TagToDataPointInput = {
@@ -1003,7 +949,6 @@ export type AddProjectionMutation = { __typename?: 'Mutation', addProjection: { 
 
 export type ProjectionSetFieldsFragment = { __typename?: 'ProjectionSet', id: string, projections: Array<{ __typename?: 'Projection', id: string, x: number, y: number }> };
 
-export type ProjectionSetLightFieldsFragment = { __typename?: 'ProjectionSetLight', id: number, projections: Array<{ __typename?: 'ProjectionLight', id: number, x: number, y: number }> };
 
 export type GetProjectionSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -1105,16 +1050,7 @@ export const ProjectionSetFieldsFragmentDoc = gql`
   }
 }
     `;
-export const ProjectionSetLightFieldsFragmentDoc = gql`
-    fragment ProjectionSetLightFields on ProjectionSetLight {
-  id
-  projections {
-    id
-    x
-    y
-  }
-}
-    `;
+
 export const EmbeddingFieldsFragmentDoc = gql`
     fragment EmbeddingFields on Embedding {
   id
