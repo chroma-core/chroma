@@ -17,8 +17,6 @@ query getProjectionSets($filter: FilterProjectionSets!, $projectId: ID!) {
 `
 
 export function getProjectionsForProjectionSet(projection_set_id: number, cb: (projections: any) => void) {
-  console.log('running getProjectionsForProjectionSet')
-  console.time('getProjectionsForProjectionSet')
   fetch(`/api/projection_set_data_viewer/` + projection_set_id, {
     method: 'GET',
     headers: {
@@ -27,7 +25,6 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
   })
     .then(res => res.json())
     .then(res => {
-      console.timeEnd('getProjectionsForProjectionSet')
       cb(res.projections)
     })
     .catch((error) => {
@@ -37,8 +34,6 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
 }
 
 export function getDatapointsForProject(project_id: number, cb: (data: any) => void) {
-  console.log('running getDatapointsForProject')
-  console.time('getDatapointsForProject')
   fetch(`/api/datapoints/` + project_id, {
     method: 'GET',
     headers: {
@@ -47,7 +42,6 @@ export function getDatapointsForProject(project_id: number, cb: (data: any) => v
   })
     .then(res => res.json())
     .then(res => {
-      console.timeEnd('getDatapointsForProject')
       cb(res)
     })
     .catch((error) => {

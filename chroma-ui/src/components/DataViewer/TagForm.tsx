@@ -29,7 +29,6 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
 
   // callback for a new tag
   const onSubmitTagAll = (e: any) => {
-    console.log('onSubmitTagAll', onSubmitTagAll)
     e.preventDefault()
 
     let splitNewTags = newTag.split(",")
