@@ -10,9 +10,6 @@ query getProjectionSet {
       id
       name
     }
-    projectionSets {
-      id
-    }
 }
 `
 
@@ -31,8 +28,7 @@ export default function Projects() {
 
   return (
     <>
-      <SimpleList data={data?.projects} headerName="Projects" displayName="name" pathBase="projects" />
-      <SimpleList data={data?.projectionSets} headerName="Projection Sets" displayName="id" pathBase="projection_set" />
+      <SimpleList data={data?.projects} headerName="Projects" displayName="name" pathBase="data_viewer" />
     </>
 
   )

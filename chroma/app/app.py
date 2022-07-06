@@ -55,7 +55,7 @@ async def root():
 
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/projection_set_data/{projection_set_id}")
+@app.get("/api/projection_set_data/{projection_set_id}")
 async def get_projection_set_data(projection_set_id: str):
     async with models.get_session() as s:
 
@@ -85,9 +85,11 @@ async def get_projection_set_data(projection_set_id: str):
 
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM 
-@app.get("/projection_set_data_viewer/{projection_set_id}")
+@app.get("/api/projection_set_data_viewer/{projection_set_id}")
 async def get_projection_set_data_viewer(projection_set_id: str):
+    print("get_projection_set_data_viewer!")
     async with models.get_session() as s:
+        print("get_projection_set_data_viewer models.get_session!" + str(s))
         start = time.process_time()
 
         sql = (
@@ -104,15 +106,17 @@ async def get_projection_set_data_viewer(projection_set_id: str):
         val = (await s.execute(sql)).scalars().first()
 
         elapsedtime = time.process_time() - start
-        print("got records in " + str(elapsedtime) + " seconds")
+        print("got projections in " + str(elapsedtime) + " seconds")
 
     return val
 
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/datapoints/{project_id}")
+@app.get("/api/datapoints/{project_id}")
 async def get_datapoints_data_viewer(project_id: str):
+    print("get_datapoints_data_viewer!")
     async with models.get_session() as s:
+        print("get_datapoints_data_viewer models.get_session! " + str(s))
         start = time.process_time()
 
         sql = (
@@ -135,7 +139,7 @@ async def get_datapoints_data_viewer(project_id: str):
         val = (await s.execute(sql)).scalars().first()
 
         elapsedtime = time.process_time() - start
-        print("got records in " + str(elapsedtime) + " seconds")
+        print("got datapoints in " + str(elapsedtime) + " seconds")
 
     return val
 

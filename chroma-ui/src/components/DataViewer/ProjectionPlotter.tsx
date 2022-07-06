@@ -142,6 +142,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
       const visible = datapoint.visible ? 1 : 0
       return points.push([datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex])
     })
+    console.log('SETTING POINTS')
     setPoints(points)
   }
 

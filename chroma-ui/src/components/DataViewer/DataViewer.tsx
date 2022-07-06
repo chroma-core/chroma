@@ -65,12 +65,15 @@ const DataViewer = () => {
     if (result.data === undefined) return
     const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
     getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
+      console.log('got projections')
       setProjections(projectionsResponse)
     });
     getDatapointsForProject(projectId, (datapointsResponse: any) => {
+      console.log('got datapoints')
       const unpackedDatapoints = jsonifyDatapoints(datapointsResponse.datapoints)
       setDatapoints(unpackedDatapoints)
       let builtFilters = buildFilters(unpackedDatapoints)
+      console.log('built filters')
       setFilters(builtFilters)
     });
   }, [result]);
@@ -80,6 +83,7 @@ const DataViewer = () => {
     if ((datapoints !== undefined) && (projections !== undefined) && (insertedProjections == false)) {
       setDatapoints(insertProjectionsOntoDatapoints(datapoints, projections))
       setInsertedProjections(true)
+      console.log('loaded projections onto datapoints')
     }
   }, [datapoints, projections])
 
@@ -153,7 +157,8 @@ const DataViewer = () => {
   }
 
   const loading = (datapoints == undefined)
-  let datapointsToRender = (datapoints !== undefined) ? datapoints.filter(dp => dp.visible == true) : 0
+  let datapointsToRender = ((datapoints !== undefined) && (insertedProjections == true)) ? datapoints.filter(dp => dp.visible == true) : 0
+  console.log('datapointsToRender', datapointsToRender)
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react

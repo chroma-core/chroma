@@ -13,7 +13,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 
 function getProjections(projection_set_id, cb) {
-  fetch(`/projection_set_data/` + projection_set_id, {
+  fetch(`/api/projection_set_data/` + projection_set_id, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',

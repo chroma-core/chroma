@@ -97,8 +97,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
                         key={option.name}
                         indent={6}
                         keyName={option.name}
-                        onClick={() => updateFilter(filter, option)}
-                        onClick2={() => selectByFilter(filter, option)}
+                        showHide={() => updateFilter(filter, option)}
+                        selectBy={() => selectByFilter(filter, option)}
                       />
                     )
                   })

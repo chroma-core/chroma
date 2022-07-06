@@ -49,5 +49,6 @@ run_frontend:
 run:
 	python scripts/run_all.py
 
+# removes db and loads back up the schema -- equivalent to rails db:reset
 reset-db:
 	cd chroma/app && rm chroma.db && python models.py && cd ../..

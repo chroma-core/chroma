@@ -21,14 +21,14 @@ interface SidebarButtonProps {
   text: string
   color: CSS.Property.Color
   indent: number,
-  onClick?: ({ }) => void,
-  onClick2?: ({ }) => void,
+  showHide?: ({ }) => void,
+  selectBy?: ({ }) => void,
   visible: boolean,
   classTitle: string
   keyName: string
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, onClick, onClick2, visible = true, classTitle }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle }) => {
   var icon: string = (visible === true) ? 'show' : 'hide'
   var iconOpp: string = (visible === true) ? 'hide' : 'show'
   var opacity: string = (visible === true) ? "100%" : "20%"
@@ -41,18 +41,18 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
     setIsHovered(false)
   }
 
-  function buttonClicked(event: any) {
+  function showHideFn(event: any) {
     event.stopPropagation()
-    if (onClick)
-      onClick({
+    if (showHide)
+      showHide({
         text: text,
         classTitle: classTitle,
       })
   }
-  function buttonClicked2(event: any) {
+  function selectByFn(event: any) {
     event.stopPropagation()
-    if (onClick2)
-      onClick2({
+    if (selectBy)
+      selectBy({
         text: text,
         classTitle: classTitle,
       })
@@ -65,7 +65,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   return (
     <Button
       key={keyName}
-      onClick={buttonClicked2}
+      onClick={showHideFn}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       justifyContent="flex-start" variant='ghost' size='sm' ml={indent}>
@@ -78,7 +78,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
           <IconButton
             _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
             _active={{ backgroundColor: "rgba(0,0,0,0)" }}
-            onClick={buttonClicked}
+            onClick={selectByFn}
             height="100%"
             opacity={eyeButtonOpacity}
             variant="ghost" aria-label='ShowHide' icon={<Icon as={IconMap[icon] as any} color="black" />} />

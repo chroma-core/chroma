@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
+from click import echo
 
 from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float, Table
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -266,7 +267,7 @@ class Projection(Base):
     projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="select", back_populates="projections")
 
 engine = create_async_engine(
-    "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}
+    "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}, echo=True,
 )
 
 async_session = sessionmaker(
@@ -279,11 +280,14 @@ async_session = sessionmaker(
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    # print("get_session")
     async with async_session() as session:
         async with session.begin():
             try:
+                # print("yielding session")
                 yield session
             finally:
+                # print("closing session")
                 await session.close()
 
 async def _async_main():
