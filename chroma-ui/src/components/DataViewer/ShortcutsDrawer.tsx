@@ -44,6 +44,7 @@ function ShortcutsDrawer() {
         placement={'bottom'}
         onClose={onClose}
         isOpen={isOpen}
+        blockScrollOnMount={false}
         variant="alwaysOpen"
       >
         <DrawerOverlay bg='none' style={{ pointerEvents: 'none' }} />
