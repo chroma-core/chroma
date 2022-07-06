@@ -267,7 +267,7 @@ class Projection(Base):
     projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="select", back_populates="projections")
 
 engine = create_async_engine(
-    "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}, echo=True,
+    "sqlite+aiosqlite:///./chroma.db", connect_args={"check_same_thread": False}, #echo=True,
 )
 
 async_session = sessionmaker(
