@@ -43,5 +43,4 @@ layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 create_project_dedupe = nn(chroma.create_or_get_project("one project one project"))
 
 datapointembeddingset = nn(chroma.create_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]', int(embedding_set.createEmbeddingSet.id)))
-# datapointembeddingset = nn(chroma.create_batch_datapoint_embedding_set([int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]', int(embedding_set.createEmbeddingSet.id)]))
 print("seeded database")

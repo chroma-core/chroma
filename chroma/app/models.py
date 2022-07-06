@@ -280,14 +280,11 @@ async_session = sessionmaker(
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    # print("get_session")
     async with async_session() as session:
         async with session.begin():
             try:
-                # print("yielding session")
                 yield session
             finally:
-                # print("closing session")
                 await session.close()
 
 async def _async_main():
