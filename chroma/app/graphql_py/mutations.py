@@ -2,8 +2,8 @@ from xmlrpc.client import Boolean
 from h11 import Data
 import strawberry
 from yaml import load
-from chroma.app.graphql_py.types import ResourceDoesntExist
 from chroma.app.models import Tagdatapoint
+from chroma.app.graphql_py.types import ResourceDoesNotExist
 import models
 from sqlalchemy.orm import selectinload
 
@@ -16,7 +16,7 @@ from graphql_py.types import (
     AddEmbeddingResponse,
     EmbeddingSet,
     AddEmbeddingSetResponse,
-    LayerSetDoesntExist,
+    LayerSetDoesNotExist,
     ObjectDeleted,
     ProjectionSet,
     AddProjectionSetResponse, 
@@ -40,13 +40,13 @@ from graphql_py.types import (
     DeleteProjectResponse,
     AddDatasetResponse,
     ProjectDoesNotExist,
-    DatasetDoesntExist,
+    DatasetDoesNotExist,
     AddSliceResponse,
     AddTagResponse,
     AddModelArchitectureResponse,
     AddTrainedModelResponse,
-    ModelArchitectureDoesntExist,
-    TrainedModelDoesntExist,
+    ModelArchitectureDoesNotExist,
+    TrainedModelDoesNotExist,
     AddLayerSetResponse,
     AddLayerResponse,
     AddDatapointResponse,
@@ -55,8 +55,8 @@ from graphql_py.types import (
     Resource,
     Label,
     Datapoint,
-    LabelDoesntExist,
-    ResourceDoesntExist
+    LabelDoesNotExist,
+    ResourceDoesNotExist
 )
 from strawberry.dataloader import DataLoader
 from sqlalchemy import insert, select, update, delete
@@ -606,7 +606,7 @@ class Mutation:
             dataset = (await s.execute(sql)).scalars().first()
 
             if dataset is None: 
-                return DatasetDoesntExist
+                return DatasetDoesNotExist
 
             res = models.Slice(
                 name=slice.name,
@@ -740,7 +740,7 @@ class Mutation:
             model_architecture = (await s.execute(sql)).scalars().first()
 
             if model_architecture is None: 
-                return ModelArchitectureDoesntExist
+                return ModelArchitectureDoesNotExist
 
             res = models.TrainedModel(
                 model_architecture=model_architecture
@@ -787,7 +787,7 @@ class Mutation:
             trained_model = (await s.execute(sql)).scalars().first()
 
             if trained_model is None: 
-                return TrainedModelDoesntExist
+                return TrainedModelDoesNotExist
 
             res = models.LayerSet(
                 trained_model=trained_model
@@ -834,7 +834,7 @@ class Mutation:
             layer_set = (await s.execute(sql)).scalars().first()
 
             if layer_set is None: 
-                return LayerSetDoesntExist
+                return LayerSetDoesNotExist
 
             res = models.Layer(
                 layer_set=layer_set
@@ -1113,19 +1113,19 @@ class Mutation:
             dataset = (await s.execute(sql)).scalars().first()
     
             if dataset is None: 
-                return LabelDoesntExist
+                return LabelDoesNotExist
 
             sql = select(models.Label).where(models.Label.id == datapoint.label_id)
             label = (await s.execute(sql)).scalars().first()
 
             if label is None: 
-                return LabelDoesntExist
+                return LabelDoesNotExist
 
             sql = select(models.Resource).where(models.Resource.id == datapoint.resource_id)
             resource = (await s.execute(sql)).scalars().first()
 
             if resource is None: 
-                return ResourceDoesntExist
+                return ResourceDoesNotExist
             
             res = models.Datapoint(
                 dataset=dataset,

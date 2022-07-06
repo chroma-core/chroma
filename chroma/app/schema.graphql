@@ -2,15 +2,15 @@ union AddDatasetResponse = Dataset | ProjectDoesNotExist
 
 union AddEmbeddingResponse = Embedding | EmbeddingExists
 
-union AddLayerResponse = Layer | LayerSetDoesntExist
+union AddLayerResponse = Layer | LayerSetDoesNotExist
 
-union AddLayerSetResponse = LayerSet | TrainedModelDoesntExist
+union AddLayerSetResponse = LayerSet | TrainedModelDoesNotExist
 
 union AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist
 
-union AddSliceResponse = Slice | DatasetDoesntExist
+union AddSliceResponse = Slice | DatasetDoesNotExist
 
-union AddTrainedModelResponse = TrainedModel | ModelArchitectureDoesntExist
+union AddTrainedModelResponse = TrainedModel | ModelArchitectureDoesNotExist
 
 input CreateDatasetInput {
   name: String!
@@ -73,7 +73,7 @@ type Dataset {
   datapoints: [Datapoint!]!
 }
 
-type DatasetDoesntExist {
+type DatasetDoesNotExist {
   message: String!
 }
 
@@ -146,7 +146,7 @@ type LayerSet {
   layers: [Layer!]!
 }
 
-type LayerSetDoesntExist {
+type LayerSetDoesNotExist {
   message: String!
 }
 
@@ -157,7 +157,7 @@ type ModelArchitecture {
   trainedModels: [TrainedModel!]!
 }
 
-type ModelArchitectureDoesntExist {
+type ModelArchitectureDoesNotExist {
   message: String!
 }
 
@@ -319,7 +319,7 @@ type TrainedModel {
   layerSets: [LayerSet!]!
 }
 
-type TrainedModelDoesntExist {
+type TrainedModelDoesNotExist {
   message: String!
 }
 

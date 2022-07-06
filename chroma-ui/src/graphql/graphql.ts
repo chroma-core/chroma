@@ -19,21 +19,21 @@ export type Scalars = {
   JSON: any;
 };
 
-export type AddDatapointResponse = Datapoint | LabelDoesntExist | ResourceDoesntExist;
+export type AddDatapointResponse = Datapoint | LabelDoesNotExist | ResourceDoesNotExist;
 
 export type AddDatasetResponse = Dataset | ProjectDoesNotExist;
 
 export type AddEmbeddingResponse = Embedding | EmbeddingExists;
 
-export type AddLayerResponse = Layer | LayerSetDoesntExist;
+export type AddLayerResponse = Layer | LayerSetDoesNotExist;
 
-export type AddLayerSetResponse = LayerSet | TrainedModelDoesntExist;
+export type AddLayerSetResponse = LayerSet | TrainedModelDoesNotExist;
 
 export type AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist;
 
-export type AddSliceResponse = DatasetDoesntExist | Slice;
+export type AddSliceResponse = DatasetDoesNotExist | Slice;
 
-export type AddTrainedModelResponse = ModelArchitectureDoesntExist | TrainedModel;
+export type AddTrainedModelResponse = ModelArchitectureDoesNotExist | TrainedModel;
 
 export type CreateBatchDatapointEmbeddingSetInput = {
   batchData: Array<CreateDatapointEmbeddingSetInput>;
@@ -138,8 +138,8 @@ export type Dataset = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type DatasetDoesntExist = {
-  __typename?: 'DatasetDoesntExist';
+export type DatasetDoesNotExist = {
+  __typename?: 'DatasetDoesNotExist';
   message: Scalars['String'];
 };
 
@@ -220,8 +220,8 @@ export type Label = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type LabelDoesntExist = {
-  __typename?: 'LabelDoesntExist';
+export type LabelDoesNotExist = {
+  __typename?: 'LabelDoesNotExist';
   message: Scalars['String'];
 };
 
@@ -243,8 +243,8 @@ export type LayerSet = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type LayerSetDoesntExist = {
-  __typename?: 'LayerSetDoesntExist';
+export type LayerSetDoesNotExist = {
+  __typename?: 'LayerSetDoesNotExist';
   message: Scalars['String'];
 };
 
@@ -258,8 +258,8 @@ export type ModelArchitecture = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type ModelArchitectureDoesntExist = {
-  __typename?: 'ModelArchitectureDoesntExist';
+export type ModelArchitectureDoesNotExist = {
+  __typename?: 'ModelArchitectureDoesNotExist';
   message: Scalars['String'];
 };
 
@@ -782,8 +782,8 @@ export type Resource = {
   uri: Scalars['String'];
 };
 
-export type ResourceDoesntExist = {
-  __typename?: 'ResourceDoesntExist';
+export type ResourceDoesNotExist = {
+  __typename?: 'ResourceDoesNotExist';
   message: Scalars['String'];
 };
 
@@ -830,8 +830,8 @@ export type TrainedModel = {
   updatedAt: Scalars['DateTime'];
 };
 
-export type TrainedModelDoesntExist = {
-  __typename?: 'TrainedModelDoesntExist';
+export type TrainedModelDoesNotExist = {
+  __typename?: 'TrainedModelDoesNotExist';
   message: Scalars['String'];
 };
 

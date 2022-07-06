@@ -522,27 +522,27 @@ class ProjectDoesNotExist:
     message: str = "No Project by this ID exists, Object not created"
 
 @strawberry.type
-class DatasetDoesntExist:
+class DatasetDoesNotExist:
     message: str = "No Dataset by this ID exists, Object not created"
 
 @strawberry.type
-class ModelArchitectureDoesntExist:
+class ModelArchitectureDoesNotExist:
     message: str = "No Model Architecture by this ID exists, Object not created"
 
 @strawberry.type
-class TrainedModelDoesntExist:
+class TrainedModelDoesNotExist:
     message: str = "No Trained Model by this ID exists, Object not created"
 
 @strawberry.type
-class LayerSetDoesntExist:
+class LayerSetDoesNotExist:
     message: str = "No Layer Set by this ID exists, Object not created"
 
 @strawberry.type
-class LabelDoesntExist:
+class LabelDoesNotExist:
     message: str = "No Label by this ID exists, Object not created"
 
 @strawberry.type
-class ResourceDoesntExist:
+class ResourceDoesNotExist:
     message: str = "No Resource by this ID exists, Object not created"
 
 AddEmbeddingResponse = strawberry.union("AddEmbeddingResponse", (Embedding, EmbeddingExists))
@@ -551,16 +551,16 @@ AddProjectionSetResponse = ProjectionSet
 AddProjectionResponse = Projection
 DeleteProjectResponse = ObjectDeleted
 AddDatasetResponse = strawberry.union("AddDatasetResponse", (Dataset, ProjectDoesNotExist))
-AddSliceResponse = strawberry.union("AddSliceResponse", (Slice, DatasetDoesntExist))
+AddSliceResponse = strawberry.union("AddSliceResponse", (Slice, DatasetDoesNotExist))
 AddTagResponse = Tag
 AddModelArchitectureResponse = strawberry.union("AddModelArchitectureResponse", (ModelArchitecture, ProjectDoesNotExist))
-AddTrainedModelResponse = strawberry.union("AddTrainedModelResponse", (TrainedModel, ModelArchitectureDoesntExist))
-AddLayerSetResponse = strawberry.union("AddLayerSetResponse", (LayerSet, TrainedModelDoesntExist))
-AddLayerResponse = strawberry.union("AddLayerResponse", (Layer, LayerSetDoesntExist))
+AddTrainedModelResponse = strawberry.union("AddTrainedModelResponse", (TrainedModel, ModelArchitectureDoesNotExist))
+AddLayerSetResponse = strawberry.union("AddLayerSetResponse", (LayerSet, TrainedModelDoesNotExist))
+AddLayerResponse = strawberry.union("AddLayerResponse", (Layer, LayerSetDoesNotExist))
 
 AddResourceResponse = Resource
 AddLabelResponse = Label
-AddDatapointResponse = strawberry.union("AddDatapointResponse", (Datapoint, LabelDoesntExist, ResourceDoesntExist))
+AddDatapointResponse = strawberry.union("AddDatapointResponse", (Datapoint, LabelDoesNotExist, ResourceDoesNotExist))
 
 # Pagination
 # https://strawberry.rocks/docs/guides/pagination
