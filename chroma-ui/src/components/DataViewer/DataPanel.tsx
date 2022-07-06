@@ -64,7 +64,6 @@ const ImageBytesQuery = `
 `;
 
 const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
-
   const [result, reexecuteQuery] = useQuery({
     query: ImageBytesQuery,
     variables: { "identifer": datapoint.resource.uri },
@@ -160,6 +159,7 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
         },
       }}
       pt={14}>
+
       <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
         <Text fontWeight={600}>Inspect</Text>
         <Text fontSize="sm">{selectedDatapointsIds.length} selected</Text>

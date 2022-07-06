@@ -136,79 +136,6 @@ let FILTERS = [
   },
 ]
 
-// export const rebuildFilters = (datapoints: any, existingFilters: any) => {
-//   // get existing filters if they exist, we do this primarily because we want to 
-//   // respect visiblility information! eg if class "4" is hidden, it should stay so
-//   let filters;
-//   if (existingFilters !== undefined) {
-//     filters = existingFilters.slice()
-//   } else {
-//     filters = FILTERS.slice()
-//   }
-//   console.log('existingFilters', existingFilters)
-//   console.log('filters', filters)
-//   console.log('FILTERS', FILTERS)
-//   console.log('equality', existingFilters === filters)
-
-//   datapoints = datapoints.slice()
-
-//   // get all available options for the various properties
-//   datapoints.map((datapoint: any) => {
-//     filters.map(filter => {
-//       let currentOptions = filter.optionsSet
-//       let newOptions = filter.fetchFn(datapoint)
-
-//       // options to remove
-//       let remove = currentOptions.filter(x => !newOptions.some(y => y === x.name));
-
-//       // options to add
-//       let add = newOptions.filter(x => !currentOptions.some(y => y.name === x));
-//       console.log('remove', remove)
-//       console.log('add', add)
-
-//       // if (filter.type == 'discrete') {
-//       //   newOptions.map(newOption => {
-//       //     filter.optionsSet!.push({
-//       //       name: newOption,
-//       //       visible: true,
-//       //       color: "#333333"
-//       //     })
-//       //   })
-
-//       // } else if (filter.type == 'continuous') {
-//       //   newOptions.map(newOption => {
-//       //     filter.optionsSet!.min! = (filter.optionsSet?.min! > newOption) ? newOption : filter.optionsSet!.min
-//       //     filter.optionsSet!.max! = (filter.optionsSet?.max! < newOption) ? newOption : filter.optionsSet!.max
-//       //   })
-//       // }
-
-//     })
-//   })
-
-//   // remove dupes and sort lexographically
-//   // filters.map(filter => {
-//   //   filter.optionsSet = filter.defaultSort(filter.removeDupes(filter.optionsSet))
-//   // })
-
-//   // // add color options
-//   // filters.map(filter => {
-//   //   if (filter.type == 'discrete') {
-//   //     let colorsOpts = distinctColors({
-//   //       "count": filter.optionsSet.length,
-//   //       "lightMin": 20,
-//   //       "lightMax": 80,
-//   //       "chromaMin": 80
-//   //     })
-//   //     filter.optionsSet.map((option, index) => {
-//   //       option.color = colorsOpts[index].hex()
-//   //     })
-//   //   }
-
-//   // })
-
-//   return filters
-// }
-
 export const buildFilters = (datapoints: any) => {
   // get all available options for the various properties
   datapoints.map((datapoint: any) => {
@@ -260,9 +187,6 @@ export const buildFilters = (datapoints: any) => {
 
 export const applyAllFilters = (datapoints: any, filters: any) => {
   datapoints.map((datapoint: any) => {
-    // so maybe I do need to eval every filter..... 
-    // after i complete this... then i will need to figure out which projections i should should based on their embedding.datapoint.id
-
     datapoint.visible = true
 
     // of of these filters may set visible to false
@@ -276,31 +200,16 @@ export const applyAllFilters = (datapoints: any, filters: any) => {
   return datapoints
 }
 
-// const applySingleFilter = (datapoints: any, filter: any) => {
-//     datapoints.map((datapoint: any) => {
-//         applyFilter(datapoint, filter)
-//     })
-// }
-
 const applyFilter = (datapoint: any, filter: any) => {
   const newOptions = filter.fetchFn(datapoint)
   datapoint.visible = filter.filterBy(newOptions, filter.optionsSet)
 }
 
-// basically what i will want to do is........ (this is for filter by)
-// 1. iterate through list of datapoints
-// 2. if a filter "applies" to that datapoint, then mark it as not visible
-// 3. pass the visible datapoints to the right sidebar data viewer
-// 4. use the datapoint ids that are visible to find the corresponding projections and show/hide those
-
-// then you do color by and sort by seperately later
-
-
 export const insertProjectionsOntoDatapoints = (datapoints: any, projections: any) => {
   projections.map(projection => {
     const datapointId = projection.embedding.datapoint_id
     let datapoint = datapoints.find(dp => dp.id == datapointId)
-    datapoint.projection = projection // the second one is where im going to inject my coloration options
+    datapoint.projection = projection
   })
 
   return datapoints

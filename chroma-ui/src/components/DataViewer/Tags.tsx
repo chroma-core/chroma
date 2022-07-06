@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react'
 import {
   useTheme,
   Textarea,
   Box,
   Text,
-  Tag,
-  Spinner
 } from '@chakra-ui/react'
-import TagButton from './TagButton';
+import TagButton from './TagButton'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
 import { TagItem } from './DataPanel'
 
@@ -22,11 +20,11 @@ interface IOptions {
 }
 
 const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
-  const theme = useTheme();
+  const theme = useTheme()
   const [isEditing, setIsEditing] = useState(false)
-  const [originalTagString, setOriginalTagString] = useState('');
-  const [tagString, setTagString] = useState('');
-  const [tagsArray, setTagsArray] = React.useState<string[]>([]);
+  const [originalTagString, setOriginalTagString] = useState('') // used to diff against the input
+  const [tagString, setTagString] = useState('')
+  const [tagsArray, setTagsArray] = React.useState<string[]>([])
 
   const [addTagResult, addTag] = useAppendTagByNameToDatapointsMutation()
   const [unTagResult, unTag] = useRemoveTagFromDatapointsMutation()
@@ -37,7 +35,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     const allTags = tagStrings.join(", ")
     setTagString(allTags)
     setOriginalTagString(allTags)
-  }, [tags]);
+  }, [tags])
 
   const checkAndSetName = (e: React.ChangeEvent<HTMLInputElement>, name: string) => {
     setTagString(e.currentTarget.value)
@@ -52,22 +50,17 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     let originalTagsArray = originalTagString.split(",").map(tag => tag.trim())
     if (tagString === originalTagString) return
 
-    // tags to remove
-    let remove = originalTagsArray.filter(x => !newTagsArray.includes(x));
-
-    // tags to add
-    let add = newTagsArray.filter(x => !originalTagsArray.includes(x));
-
-    // tags to keep
-    let keep = originalTagsArray.filter(x => newTagsArray.includes(x));
+    let remove = originalTagsArray.filter(x => !newTagsArray.includes(x)) // tags to remove
+    let add = newTagsArray.filter(x => !originalTagsArray.includes(x)) // tags to add
+    //let keep = originalTagsArray.filter(x => newTagsArray.includes(x)) // tags to keep
 
     add.map(tagToAdd => {
-      const variables = { tagName: tagToAdd, datapointIds: [datapointId] };
+      const variables = { tagName: tagToAdd, datapointIds: [datapointId] }
       addTag(variables)
     })
 
     remove.map(tagToRemove => {
-      const variables = { tagName: tagToRemove, datapointIds: [datapointId] };
+      const variables = { tagName: tagToRemove, datapointIds: [datapointId] }
       unTag(variables)
     })
 

@@ -7,7 +7,6 @@ import {
 import React, { useState } from 'react'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
-import { ServerDataItem } from './DataPanel'
 import { datapointIndexToPointIndex } from './DataViewerUtils'
 
 interface TagFormProps {
@@ -17,7 +16,7 @@ interface TagFormProps {
 }
 
 const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, setDatapointsAndRebuildFilters }) => {
-  const theme = useTheme();
+  const theme = useTheme()
   const noneSelected = selectedDatapointsIds.length === 0
 
   // state for the inputs
@@ -42,7 +41,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
 
     // add the new tags to each datapoint
     splitNewTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointsIds };
+      const variables = { tagName: tag, datapointIds: selectedDatapointsIds }
       addTag(variables)
     })
 
@@ -53,8 +52,8 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
       var pointTags = datapoints[point].tags.slice()
       splitNewTags.forEach(splitNewTag => {
         const indexOf = pointTags.findIndex((currentTag: any) => {
-          return currentTag.tag.name === splitNewTag.trim();
-        });
+          return currentTag.tag.name === splitNewTag.trim()
+        })
 
         if (indexOf < 0) {
           pointTags.push({ "right_id": undefined, "tag": { "name": splitNewTag.trim() } })
@@ -80,7 +79,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
     })
 
     splitNewUnTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointsIds };
+      const variables = { tagName: tag, datapointIds: selectedDatapointsIds }
       unTag(variables)
     })
 
@@ -89,8 +88,8 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
 
       splitNewUnTags.forEach(splitNewTag => {
         const indexOf = tags.findIndex((currentTag: any) => {
-          return currentTag.tag.name === splitNewTag.trim();
-        });
+          return currentTag.tag.name === splitNewTag.trim()
+        })
 
         if (indexOf > -1) {
           tags.splice(indexOf, 1)

@@ -1,22 +1,34 @@
 
 // @ts-nocheck
 import React, { useEffect, useState } from 'react';
-import { useTheme, Button, Text, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, useDisclosure } from '@chakra-ui/react'
+import {
+  useTheme,
+  Button,
+  Text,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  useDisclosure
+} from '@chakra-ui/react'
 import { useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 import { GetProjectAndProjectionSets, getProjectionsForProjectionSet, getDatapointsForProject } from './DataViewerApi'
-import { ProjectionSet, Datapoint, ProjectionData } from './DataViewTypes'
-import { getMostRecentCreatedAt, jsonifyDatapoints, buildFilters, applyAllFilters, insertProjectionsOntoDatapoints, rebuildFilters } from './DataViewerUtils';
+import { Datapoint, ProjectionData } from './DataViewTypes'
+import {
+  getMostRecentCreatedAt,
+  jsonifyDatapoints,
+  buildFilters,
+  applyAllFilters,
+  insertProjectionsOntoDatapoints,
+  rebuildFilters
+} from './DataViewerUtils';
 import ExplorerContainer from '../Containers/ExplorerContainer';
 import Header from './Header';
 import FilterSidebar from './FilterSidebar';
 import DataPanel from './DataPanel';
 import ProjectionPlotter from './ProjectionPlotter';
-
-// on page load
-// 1. fetch all the data I need (1) available projection sets, (2) datapoints, (3) latest projection set
-// 2. generate the list of available filters given the datapoint data
-// 3. pass data
 
 const DataViewer = () => {
   const theme = useTheme()

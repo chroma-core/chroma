@@ -17,35 +17,35 @@ query getProjectionSets($filter: FilterProjectionSets!, $projectId: ID!) {
 `
 
 export function getProjectionsForProjectionSet(projection_set_id: number, cb: (projections: any) => void) {
-    fetch(`/projection_set_data_viewer/` + projection_set_id, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+  fetch(`/projection_set_data_viewer/` + projection_set_id, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then(res => res.json())
+    .then(res => {
+      cb(res.projections)
     })
-        .then(res => res.json())
-        .then(res => {
-            cb(res.projections)
-        })
-        .catch((error) => {
-            cb({ error: true, message: error })
-            // Only network error comes here
-        });
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
 }
 
 export function getDatapointsForProject(project_id: number, cb: (data: any) => void) {
-    fetch(`/datapoints/` + project_id, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+  fetch(`/datapoints/` + project_id, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then(res => res.json())
+    .then(res => {
+      cb(res)
     })
-        .then(res => res.json())
-        .then(res => {
-            cb(res)
-        })
-        .catch((error) => {
-            cb({ error: true, message: error })
-            // Only network error comes here
-        });
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
 }
