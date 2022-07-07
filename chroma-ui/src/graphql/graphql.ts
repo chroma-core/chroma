@@ -13,37 +13,148 @@ export type Scalars = {
   Boolean: boolean;
   Int: number;
   Float: number;
+  /** Date with time (isoformat) */
+  DateTime: any;
+  /** The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf). */
+  JSON: any;
 };
 
+export type AddDatapointResponse = Datapoint | LabelDoesNotExist | ResourceDoesNotExist;
+
+export type AddDatasetResponse = Dataset | ProjectDoesNotExist;
+
 export type AddEmbeddingResponse = Embedding | EmbeddingExists;
+
+export type AddLayerResponse = Layer | LayerSetDoesNotExist;
+
+export type AddLayerSetResponse = LayerSet | TrainedModelDoesNotExist;
+
+export type AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist;
+
+export type AddSliceResponse = DatasetDoesNotExist | Slice;
+
+export type AddTrainedModelResponse = ModelArchitectureDoesNotExist | TrainedModel;
+
+export type CreateBatchDatapointEmbeddingSetInput = {
+  batchData: Array<CreateDatapointEmbeddingSetInput>;
+};
+
+export type CreateDatapointEmbeddingSetInput = {
+  datasetId: Scalars['Int'];
+  embeddingData: Scalars['String'];
+  embeddingSetId: Scalars['Int'];
+  labelData: Scalars['String'];
+  resourceUri: Scalars['String'];
+};
+
+export type CreateDatapointInput = {
+  datasetId: Scalars['Int'];
+  inferenceId?: InputMaybe<Scalars['Int']>;
+  labelId?: InputMaybe<Scalars['Int']>;
+  resourceId: Scalars['Int'];
+};
+
+export type CreateDatapointSetInput = {
+  datasetId: Scalars['Int'];
+  labelData: Scalars['String'];
+  resourceUri: Scalars['String'];
+};
+
+export type CreateDatasetInput = {
+  name: Scalars['String'];
+  projectId: Scalars['Int'];
+};
+
+export type CreateJobInput = {
+  name: Scalars['String'];
+};
+
+export type CreateLabelInput = {
+  data: Scalars['String'];
+};
+
+export type CreateLayerInput = {
+  id?: InputMaybe<Scalars['ID']>;
+  layerSetId: Scalars['Int'];
+};
+
+export type CreateLayerSetInput = {
+  id?: InputMaybe<Scalars['ID']>;
+  trainedModelId: Scalars['Int'];
+};
+
+export type CreateModelArchitectureInput = {
+  name: Scalars['String'];
+  projectId: Scalars['Int'];
+};
 
 export type CreateProjectInput = {
   name: Scalars['String'];
 };
 
+export type CreateProjectorInput = {
+  id?: InputMaybe<Scalars['ID']>;
+};
+
+export type CreateResourceInput = {
+  uri: Scalars['String'];
+};
+
+export type CreateSliceInput = {
+  datasetId: Scalars['Int'];
+  name: Scalars['String'];
+};
+
+export type CreateTagInput = {
+  name: Scalars['String'];
+};
+
+export type CreateTrainedModelInput = {
+  id?: InputMaybe<Scalars['ID']>;
+  modelArchitectureId: Scalars['Int'];
+};
+
 export type Datapoint = {
   __typename?: 'Datapoint';
+  createdAt: Scalars['DateTime'];
+  dataset?: Maybe<Dataset>;
+  embeddings: Array<Embedding>;
   id: Scalars['ID'];
+  label: Label;
+  resource?: Maybe<Resource>;
   slices: Array<Slice>;
   tags: Array<Tag>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type Dataset = {
   __typename?: 'Dataset';
+  createdAt: Scalars['DateTime'];
   datapoints: Array<Datapoint>;
   id: Scalars['ID'];
+  name?: Maybe<Scalars['String']>;
+  project?: Maybe<Project>;
   slices: Array<Slice>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type DatasetDoesNotExist = {
+  __typename?: 'DatasetDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type Embedding = {
   __typename?: 'Embedding';
+  createdAt: Scalars['DateTime'];
   data?: Maybe<Scalars['String']>;
+  datapoint?: Maybe<Datapoint>;
   embeddingSet?: Maybe<EmbeddingSet>;
   id: Scalars['ID'];
-  inferenceIdentifier: Scalars['String'];
-  inputIdentifier: Scalars['String'];
+  inferenceIdentifier?: Maybe<Scalars['String']>;
+  inputIdentifier?: Maybe<Scalars['String']>;
   label?: Maybe<Scalars['String']>;
   projections: Array<Projection>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type EmbeddingConnection = {
@@ -73,68 +184,142 @@ export type EmbeddingInput = {
 
 export type EmbeddingSet = {
   __typename?: 'EmbeddingSet';
+  createdAt: Scalars['DateTime'];
+  dataset?: Maybe<Dataset>;
   embeddings: Array<Embedding>;
   id: Scalars['ID'];
   projectionSets: Array<ProjectionSet>;
+  updatedAt: Scalars['DateTime'];
 };
 
-export type EmbeddingsInput = {
-  embeddings: Array<EmbeddingInput>;
+export type EmbeddingSetInput = {
+  datasetId: Scalars['Int'];
 };
 
 export type Inference = {
   __typename?: 'Inference';
+  createdAt: Scalars['DateTime'];
+  datapoint?: Maybe<Datapoint>;
   id: Scalars['ID'];
+  updatedAt: Scalars['DateTime'];
 };
 
 export type Job = {
   __typename?: 'Job';
+  createdAt: Scalars['DateTime'];
   id: Scalars['ID'];
+  name?: Maybe<Scalars['String']>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type Label = {
   __typename?: 'Label';
+  createdAt: Scalars['DateTime'];
+  data: Scalars['JSON'];
   id: Scalars['ID'];
+  updatedAt: Scalars['DateTime'];
+};
+
+export type LabelDoesNotExist = {
+  __typename?: 'LabelDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type Layer = {
   __typename?: 'Layer';
+  createdAt: Scalars['DateTime'];
   embeddings: Array<Embedding>;
   id: Scalars['ID'];
+  layerSet?: Maybe<LayerSet>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type LayerSet = {
   __typename?: 'LayerSet';
+  createdAt: Scalars['DateTime'];
   id: Scalars['ID'];
   layers: Array<Layer>;
+  trainedModel?: Maybe<TrainedModel>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type LayerSetDoesNotExist = {
+  __typename?: 'LayerSetDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type ModelArchitecture = {
   __typename?: 'ModelArchitecture';
+  createdAt: Scalars['DateTime'];
   id: Scalars['ID'];
+  name?: Maybe<Scalars['String']>;
+  project?: Maybe<Project>;
   trainedModels: Array<TrainedModel>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type ModelArchitectureDoesNotExist = {
+  __typename?: 'ModelArchitectureDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type Mutation = {
   __typename?: 'Mutation';
   addEmbedding: AddEmbeddingResponse;
-  addEmbeddingSet: EmbeddingSet;
-  addEmbeddings: Array<Embedding>;
   addProjection: Projection;
   addProjectionSet: ProjectionSet;
+  appendTagByNameToDatapoints: Array<Datapoint>;
+  appendTagToDatapoint: Datapoint;
+  appendTagToDatapoints: Array<Datapoint>;
+  createBatchDatapointEmbeddingSet: Scalars['Boolean'];
+  createDatapoint: AddDatapointResponse;
+  createDatapointEmbeddingSet: Datapoint;
+  createDatapointSet: Datapoint;
+  createDataset: AddDatasetResponse;
+  createEmbeddingSet: EmbeddingSet;
+  createJob: Job;
+  createLabel: Label;
+  createLayer: AddLayerResponse;
+  createLayerSet: AddLayerSetResponse;
+  createModelArchitecture: AddModelArchitectureResponse;
+  createOrGetDataset: Dataset;
+  createOrGetProject: Project;
   createProject: Project;
+  createProjector: Projector;
+  createResource: Resource;
+  createSlice: AddSliceResponse;
+  createTag: Tag;
+  createTrainedModel: AddTrainedModelResponse;
+  deleteDatapoint: ObjectDeleted;
+  deleteDataset: ObjectDeleted;
+  deleteJob: ObjectDeleted;
+  deleteLabel: ObjectDeleted;
+  deleteLayer: ObjectDeleted;
+  deleteLayerSet: ObjectDeleted;
+  deleteModelArchitecture: ObjectDeleted;
   deleteProject: ObjectDeleted;
+  deleteProjector: ObjectDeleted;
+  deleteResource: ObjectDeleted;
+  deleteSlice: ObjectDeleted;
+  deleteTag: ObjectDeleted;
+  deleteTrainedModel: ObjectDeleted;
+  removeTagFromDatapoint: ObjectDeleted;
+  removeTagFromDatapoints: ObjectDeleted;
+  runProjectorOnEmbeddingSet: Scalars['Boolean'];
+  updateDatapoint: Datapoint;
+  updateDataset: Dataset;
+  updateJob: Job;
+  updateLabel: Label;
+  updateModelArchitecture: ModelArchitecture;
   updateProject: Project;
+  updateResource: Resource;
+  updateSlice: Slice;
+  updateTag: Tag;
 };
 
 
 export type MutationAddEmbeddingArgs = {
   embeddingInput: EmbeddingInput;
-};
-
-
-export type MutationAddEmbeddingsArgs = {
-  embeddingsInput: EmbeddingsInput;
 };
 
 
@@ -148,8 +333,148 @@ export type MutationAddProjectionSetArgs = {
 };
 
 
+export type MutationAppendTagByNameToDatapointsArgs = {
+  data: TagByNameToDataPointsInput;
+};
+
+
+export type MutationAppendTagToDatapointArgs = {
+  data: TagToDataPointInput;
+};
+
+
+export type MutationAppendTagToDatapointsArgs = {
+  data: TagToDataPointsInput;
+};
+
+
+export type MutationCreateBatchDatapointEmbeddingSetArgs = {
+  batchData: CreateBatchDatapointEmbeddingSetInput;
+};
+
+
+export type MutationCreateDatapointArgs = {
+  datapoint: CreateDatapointInput;
+};
+
+
+export type MutationCreateDatapointEmbeddingSetArgs = {
+  data: CreateDatapointEmbeddingSetInput;
+};
+
+
+export type MutationCreateDatapointSetArgs = {
+  data: CreateDatapointSetInput;
+};
+
+
+export type MutationCreateDatasetArgs = {
+  dataset: CreateDatasetInput;
+};
+
+
+export type MutationCreateEmbeddingSetArgs = {
+  embeddingSet: EmbeddingSetInput;
+};
+
+
+export type MutationCreateJobArgs = {
+  job: CreateJobInput;
+};
+
+
+export type MutationCreateLabelArgs = {
+  label: CreateLabelInput;
+};
+
+
+export type MutationCreateLayerArgs = {
+  layer: CreateLayerInput;
+};
+
+
+export type MutationCreateLayerSetArgs = {
+  layerSet: CreateLayerSetInput;
+};
+
+
+export type MutationCreateModelArchitectureArgs = {
+  modelArchitecture: CreateModelArchitectureInput;
+};
+
+
+export type MutationCreateOrGetDatasetArgs = {
+  dataset: CreateDatasetInput;
+};
+
+
+export type MutationCreateOrGetProjectArgs = {
+  project: CreateProjectInput;
+};
+
+
 export type MutationCreateProjectArgs = {
   project: CreateProjectInput;
+};
+
+
+export type MutationCreateProjectorArgs = {
+  projector: CreateProjectorInput;
+};
+
+
+export type MutationCreateResourceArgs = {
+  resource: CreateResourceInput;
+};
+
+
+export type MutationCreateSliceArgs = {
+  slice: CreateSliceInput;
+};
+
+
+export type MutationCreateTagArgs = {
+  tag: CreateTagInput;
+};
+
+
+export type MutationCreateTrainedModelArgs = {
+  trainedModel: CreateTrainedModelInput;
+};
+
+
+export type MutationDeleteDatapointArgs = {
+  datapoint: UpdateDatapointInput;
+};
+
+
+export type MutationDeleteDatasetArgs = {
+  dataset: UpdateDatasetInput;
+};
+
+
+export type MutationDeleteJobArgs = {
+  job: UpdateJobInput;
+};
+
+
+export type MutationDeleteLabelArgs = {
+  label: UpdateLabelInput;
+};
+
+
+export type MutationDeleteLayerArgs = {
+  layer: UpdateLayerInput;
+};
+
+
+export type MutationDeleteLayerSetArgs = {
+  layerSet: UpdateLayerSetInput;
+};
+
+
+export type MutationDeleteModelArchitectureArgs = {
+  modelArchitecture: UpdateModelArchitectureInput;
 };
 
 
@@ -158,8 +483,88 @@ export type MutationDeleteProjectArgs = {
 };
 
 
+export type MutationDeleteProjectorArgs = {
+  projector: UpdateProjectorInput;
+};
+
+
+export type MutationDeleteResourceArgs = {
+  resource: UpdateResourceInput;
+};
+
+
+export type MutationDeleteSliceArgs = {
+  slice: UpdateSliceInput;
+};
+
+
+export type MutationDeleteTagArgs = {
+  tag: UpdateTagInput;
+};
+
+
+export type MutationDeleteTrainedModelArgs = {
+  trainedModel: UpdateTrainedModelInput;
+};
+
+
+export type MutationRemoveTagFromDatapointArgs = {
+  data: TagToDataPointInput;
+};
+
+
+export type MutationRemoveTagFromDatapointsArgs = {
+  data: TagByNameToDataPointsInput;
+};
+
+
+export type MutationRunProjectorOnEmbeddingSetArgs = {
+  embeddingSetId: Scalars['Int'];
+};
+
+
+export type MutationUpdateDatapointArgs = {
+  datapoint: UpdateDatapointInput;
+};
+
+
+export type MutationUpdateDatasetArgs = {
+  dataset: UpdateDatasetInput;
+};
+
+
+export type MutationUpdateJobArgs = {
+  job: UpdateJobInput;
+};
+
+
+export type MutationUpdateLabelArgs = {
+  label: UpdateLabelInput;
+};
+
+
+export type MutationUpdateModelArchitectureArgs = {
+  modelArchitecture: UpdateModelArchitectureInput;
+};
+
+
 export type MutationUpdateProjectArgs = {
   project: UpdateProjectInput;
+};
+
+
+export type MutationUpdateResourceArgs = {
+  resource: UpdateResourceInput;
+};
+
+
+export type MutationUpdateSliceArgs = {
+  slice: UpdateSliceInput;
+};
+
+
+export type MutationUpdateTagArgs = {
+  tag: UpdateTagInput;
 };
 
 export type ObjectDeleted = {
@@ -182,17 +587,26 @@ export type PageInput = {
 
 export type Project = {
   __typename?: 'Project';
+  createdAt: Scalars['DateTime'];
   datasets: Array<Dataset>;
   id: Scalars['ID'];
   modelArchitectures: Array<ModelArchitecture>;
   name?: Maybe<Scalars['String']>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type ProjectDoesNotExist = {
+  __typename?: 'ProjectDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type Projection = {
   __typename?: 'Projection';
+  createdAt: Scalars['DateTime'];
   embedding?: Maybe<Embedding>;
   id: Scalars['ID'];
   projectionSet?: Maybe<ProjectionSet>;
+  updatedAt: Scalars['DateTime'];
   x: Scalars['Float'];
   y: Scalars['Float'];
 };
@@ -206,9 +620,11 @@ export type ProjectionInput = {
 
 export type ProjectionSet = {
   __typename?: 'ProjectionSet';
+  createdAt: Scalars['DateTime'];
   embeddingSet?: Maybe<EmbeddingSet>;
   id: Scalars['ID'];
   projections: Array<Projection>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type ProjectionSetInput = {
@@ -217,7 +633,9 @@ export type ProjectionSetInput = {
 
 export type Projector = {
   __typename?: 'Projector';
+  createdAt: Scalars['DateTime'];
   id: Scalars['ID'];
+  updatedAt: Scalars['DateTime'];
 };
 
 export type Query = {
@@ -245,7 +663,6 @@ export type Query = {
   modelArchitectures: Array<ModelArchitecture>;
   project: Project;
   projection: Projection;
-  projectionSet: ProjectionSet;
   projectionSets: Array<ProjectionSet>;
   projections: Array<Projection>;
   projector: Projector;
@@ -358,41 +775,127 @@ export type QueryTrainedModelArgs = {
 
 export type Resource = {
   __typename?: 'Resource';
+  createdAt: Scalars['DateTime'];
   datapoints: Array<Datapoint>;
   id: Scalars['ID'];
+  updatedAt: Scalars['DateTime'];
+  uri: Scalars['String'];
+};
+
+export type ResourceDoesNotExist = {
+  __typename?: 'ResourceDoesNotExist';
+  message: Scalars['String'];
 };
 
 export type Slice = {
   __typename?: 'Slice';
+  createdAt: Scalars['DateTime'];
   datapoints: Array<Datapoint>;
+  dataset?: Maybe<Dataset>;
   id: Scalars['ID'];
-};
-
-export type Subscription = {
-  __typename?: 'Subscription';
-  count: Scalars['Int'];
-};
-
-
-export type SubscriptionCountArgs = {
-  target?: Scalars['Int'];
+  name?: Maybe<Scalars['String']>;
+  updatedAt: Scalars['DateTime'];
 };
 
 export type Tag = {
   __typename?: 'Tag';
+  createdAt: Scalars['DateTime'];
   datapoints: Array<Datapoint>;
   id: Scalars['ID'];
+  name?: Maybe<Scalars['String']>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type TagByNameToDataPointsInput = {
+  datapointIds?: InputMaybe<Array<Scalars['Int']>>;
+  tagName: Scalars['String'];
+};
+
+export type TagToDataPointInput = {
+  datapointId: Scalars['Int'];
+  tagId: Scalars['Int'];
+};
+
+export type TagToDataPointsInput = {
+  datapointIds?: InputMaybe<Array<Scalars['Int']>>;
+  tagId: Scalars['Int'];
 };
 
 export type TrainedModel = {
   __typename?: 'TrainedModel';
+  createdAt: Scalars['DateTime'];
   id: Scalars['ID'];
   layerSets: Array<LayerSet>;
+  modelArchitecture?: Maybe<ModelArchitecture>;
+  updatedAt: Scalars['DateTime'];
+};
+
+export type TrainedModelDoesNotExist = {
+  __typename?: 'TrainedModelDoesNotExist';
+  message: Scalars['String'];
+};
+
+export type UpdateDatapointInput = {
+  id: Scalars['ID'];
+  inferenceId?: InputMaybe<Scalars['Int']>;
+  labelId?: InputMaybe<Scalars['Int']>;
+  resourceId: Scalars['Int'];
+};
+
+export type UpdateDatasetInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
+};
+
+export type UpdateJobInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
+};
+
+export type UpdateLabelInput = {
+  data: Scalars['String'];
+  id: Scalars['ID'];
+};
+
+export type UpdateLayerInput = {
+  id: Scalars['ID'];
+};
+
+export type UpdateLayerSetInput = {
+  id: Scalars['ID'];
+};
+
+export type UpdateModelArchitectureInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
 };
 
 export type UpdateProjectInput = {
   id: Scalars['ID'];
   name?: InputMaybe<Scalars['String']>;
+};
+
+export type UpdateProjectorInput = {
+  id: Scalars['ID'];
+};
+
+export type UpdateResourceInput = {
+  id: Scalars['ID'];
+  uri: Scalars['String'];
+};
+
+export type UpdateSliceInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
+};
+
+export type UpdateTagInput = {
+  id: Scalars['ID'];
+  name?: InputMaybe<Scalars['String']>;
+};
+
+export type UpdateTrainedModelInput = {
+  id: Scalars['ID'];
 };
 
 export type ProjectFieldsFragment = { __typename?: 'Project', id: string, name?: string | null };
@@ -446,17 +949,11 @@ export type AddProjectionMutation = { __typename?: 'Mutation', addProjection: { 
 
 export type ProjectionSetFieldsFragment = { __typename?: 'ProjectionSet', id: string, projections: Array<{ __typename?: 'Projection', id: string, x: number, y: number }> };
 
+
 export type GetProjectionSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetProjectionSetsQuery = { __typename?: 'Query', projectionSets: Array<{ __typename?: 'ProjectionSet', id: string, projections: Array<{ __typename?: 'Projection', id: string, x: number, y: number }> }> };
-
-export type GetProjectionSetQueryVariables = Exact<{
-  id: Scalars['ID'];
-}>;
-
-
-export type GetProjectionSetQuery = { __typename?: 'Query', projectionSet: { __typename?: 'ProjectionSet', id: string, projections: Array<{ __typename?: 'Projection', id: string, x: number, y: number }> } };
 
 export type AddProjectionSetMutationVariables = Exact<{
   projectionSetInput: ProjectionSetInput;
@@ -465,19 +962,19 @@ export type AddProjectionSetMutationVariables = Exact<{
 
 export type AddProjectionSetMutation = { __typename?: 'Mutation', addProjectionSet: { __typename: 'ProjectionSet', id: string, projections: Array<{ __typename?: 'Projection', id: string, x: number, y: number }> } };
 
-export type EmbeddingFieldsFragment = { __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier: string, inferenceIdentifier: string };
+export type EmbeddingFieldsFragment = { __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier?: string | null, inferenceIdentifier?: string | null };
 
 export type GetEmbeddingsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetEmbeddingsQuery = { __typename?: 'Query', embeddings: Array<{ __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier: string, inferenceIdentifier: string }> };
+export type GetEmbeddingsQuery = { __typename?: 'Query', embeddings: Array<{ __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier?: string | null, inferenceIdentifier?: string | null }> };
 
 export type GetEmbeddingQueryVariables = Exact<{
   id: Scalars['ID'];
 }>;
 
 
-export type GetEmbeddingQuery = { __typename?: 'Query', embedding: { __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier: string, inferenceIdentifier: string } };
+export type GetEmbeddingQuery = { __typename?: 'Query', embedding: { __typename?: 'Embedding', id: string, label?: string | null, inputIdentifier?: string | null, inferenceIdentifier?: string | null } };
 
 export type PageInfoFieldsFragment = { __typename?: 'PageInfo', hasNextPage: boolean, hasPreviousPage: boolean, startCursor?: string | null, endCursor?: string | null };
 
@@ -493,14 +990,7 @@ export type AddEmbeddingMutationVariables = Exact<{
 }>;
 
 
-export type AddEmbeddingMutation = { __typename?: 'Mutation', addEmbedding: { __typename: 'Embedding', id: string, label?: string | null, inputIdentifier: string, inferenceIdentifier: string } | { __typename: 'EmbeddingExists', message: string } };
-
-export type AddEmbeddingsMutationVariables = Exact<{
-  embeddingsInput: EmbeddingsInput;
-}>;
-
-
-export type AddEmbeddingsMutation = { __typename?: 'Mutation', addEmbeddings: Array<{ __typename?: 'Embedding', id: string, data?: string | null, embeddingSet?: { __typename?: 'EmbeddingSet', id: string } | null }> };
+export type AddEmbeddingMutation = { __typename?: 'Mutation', addEmbedding: { __typename: 'Embedding', id: string, label?: string | null, inputIdentifier?: string | null, inferenceIdentifier?: string | null } | { __typename: 'EmbeddingExists', message: string } };
 
 export type EmbeddingSetFieldsFragment = { __typename?: 'EmbeddingSet', id: string };
 
@@ -516,10 +1006,21 @@ export type GetEmbeddingSetQueryVariables = Exact<{
 
 export type GetEmbeddingSetQuery = { __typename?: 'Query', embeddingSet: { __typename?: 'EmbeddingSet', id: string } };
 
-export type AddEmbeddingSetMutationVariables = Exact<{ [key: string]: never; }>;
+export type AppendTagByNameToDatapointsMutationVariables = Exact<{
+  tagName: Scalars['String'];
+  datapointIds?: InputMaybe<Array<Scalars['Int']> | Scalars['Int']>;
+}>;
 
 
-export type AddEmbeddingSetMutation = { __typename?: 'Mutation', addEmbeddingSet: { __typename: 'EmbeddingSet', id: string } };
+export type AppendTagByNameToDatapointsMutation = { __typename?: 'Mutation', appendTagByNameToDatapoints: Array<{ __typename?: 'Datapoint', id: string, tags: Array<{ __typename?: 'Tag', id: string, name?: string | null }> }> };
+
+export type RemoveTagFromDatapointsMutationVariables = Exact<{
+  tagName: Scalars['String'];
+  datapointIds?: InputMaybe<Array<Scalars['Int']> | Scalars['Int']>;
+}>;
+
+
+export type RemoveTagFromDatapointsMutation = { __typename?: 'Mutation', removeTagFromDatapoints: { __typename?: 'ObjectDeleted', message: string } };
 
 export const ProjectFieldsFragmentDoc = gql`
     fragment ProjectFields on Project {
@@ -549,6 +1050,7 @@ export const ProjectionSetFieldsFragmentDoc = gql`
   }
 }
     `;
+
 export const EmbeddingFieldsFragmentDoc = gql`
     fragment EmbeddingFields on Embedding {
   id
@@ -662,17 +1164,6 @@ export const GetProjectionSetsDocument = gql`
 export function useGetProjectionSetsQuery(options?: Omit<Urql.UseQueryArgs<GetProjectionSetsQueryVariables>, 'query'>) {
   return Urql.useQuery<GetProjectionSetsQuery>({ query: GetProjectionSetsDocument, ...options });
 };
-export const GetProjectionSetDocument = gql`
-    query getProjectionSet($id: ID!) {
-  projectionSet(id: $id) {
-    ...ProjectionSetFields
-  }
-}
-    ${ProjectionSetFieldsFragmentDoc}`;
-
-export function useGetProjectionSetQuery(options: Omit<Urql.UseQueryArgs<GetProjectionSetQueryVariables>, 'query'>) {
-  return Urql.useQuery<GetProjectionSetQuery>({ query: GetProjectionSetDocument, ...options });
-};
 export const AddProjectionSetDocument = gql`
     mutation AddProjectionSet($projectionSetInput: ProjectionSetInput!) {
   addProjectionSet(projectionSetInput: $projectionSetInput) {
@@ -749,21 +1240,6 @@ export const AddEmbeddingDocument = gql`
 export function useAddEmbeddingMutation() {
   return Urql.useMutation<AddEmbeddingMutation, AddEmbeddingMutationVariables>(AddEmbeddingDocument);
 };
-export const AddEmbeddingsDocument = gql`
-    mutation AddEmbeddings($embeddingsInput: EmbeddingsInput!) {
-  addEmbeddings(embeddingsInput: $embeddingsInput) {
-    id
-    data
-    embeddingSet {
-      id
-    }
-  }
-}
-    `;
-
-export function useAddEmbeddingsMutation() {
-  return Urql.useMutation<AddEmbeddingsMutation, AddEmbeddingsMutationVariables>(AddEmbeddingsDocument);
-};
 export const GetEmbeddingSetsDocument = gql`
     query getEmbeddingSets {
   embeddingSets {
@@ -786,18 +1262,33 @@ export const GetEmbeddingSetDocument = gql`
 export function useGetEmbeddingSetQuery(options: Omit<Urql.UseQueryArgs<GetEmbeddingSetQueryVariables>, 'query'>) {
   return Urql.useQuery<GetEmbeddingSetQuery>({ query: GetEmbeddingSetDocument, ...options });
 };
-export const AddEmbeddingSetDocument = gql`
-    mutation AddEmbeddingSet {
-  addEmbeddingSet {
-    __typename
-    ... on EmbeddingSet {
-      __typename
-      ...EmbeddingSetFields
+export const AppendTagByNameToDatapointsDocument = gql`
+    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+  appendTagByNameToDatapoints(
+    data: {tagName: $tagName, datapointIds: $datapointIds}
+  ) {
+    id
+    tags {
+      id
+      name
     }
   }
 }
-    ${EmbeddingSetFieldsFragmentDoc}`;
+    `;
 
-export function useAddEmbeddingSetMutation() {
-  return Urql.useMutation<AddEmbeddingSetMutation, AddEmbeddingSetMutationVariables>(AddEmbeddingSetDocument);
+export function useAppendTagByNameToDatapointsMutation() {
+  return Urql.useMutation<AppendTagByNameToDatapointsMutation, AppendTagByNameToDatapointsMutationVariables>(AppendTagByNameToDatapointsDocument);
+};
+export const RemoveTagFromDatapointsDocument = gql`
+    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+  removeTagFromDatapoints(data: {tagName: $tagName, datapointIds: $datapointIds}) {
+    ... on ObjectDeleted {
+      message
+    }
+  }
+}
+    `;
+
+export function useRemoveTagFromDatapointsMutation() {
+  return Urql.useMutation<RemoveTagFromDatapointsMutation, RemoveTagFromDatapointsMutationVariables>(RemoveTagFromDatapointsDocument);
 };

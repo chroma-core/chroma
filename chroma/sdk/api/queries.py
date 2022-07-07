@@ -261,8 +261,8 @@ datapoint_query = gql(
 )
 datapoints_query = gql(
     """
-    query datapointsQuery {
-        datapoints {
+    query datapointsQuery($filter: FilterDatapoints!) {
+        datapoints(filter: $filter) {
             id
             label {
                 id

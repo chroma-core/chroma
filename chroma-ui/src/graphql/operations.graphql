@@ -84,14 +84,17 @@ fragment ProjectionSetFields on ProjectionSet {
   }
 }
 
-query getProjectionSets {
-  projectionSets {
-    ...ProjectionSetFields
+fragment ProjectionSetLightFields on ProjectionSetLight {
+  id
+  projections {
+    id
+    x
+    y
   }
 }
 
-query getProjectionSet($id: ID!) {
-  projectionSet(id: $id) {
+query getProjectionSets {
+  projectionSets {
     ...ProjectionSetFields
   }
 }
@@ -190,16 +193,6 @@ mutation AddEmbedding($embeddingInput: EmbeddingInput!) {
   }
 }
 
-mutation AddEmbeddings($embeddingsInput: EmbeddingsInput!) {
-    addEmbeddings(embeddingsInput: $embeddingsInput) {
-        id
-        data
-        embeddingSet {
-            id
-        }
-    }
-}
-
 # EmbeddingSet
 fragment EmbeddingSetFields on EmbeddingSet {
   id
@@ -217,17 +210,29 @@ query getEmbeddingSet($id: ID!) {
   }
 }
 
-mutation AddEmbeddingSet {
-  addEmbeddingSet {
-    __typename
-    ... on EmbeddingSet {
-      __typename
-      ...EmbeddingSetFields
-    }
-  }
-}
-
 # leave in as part of subscription example
 # subscription getCounter {
 #   count(target: 50)
 # }
+
+mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+	appendTagByNameToDatapoints(data: {
+		tagName: $tagName, datapointIds: $datapointIds
+	} ) {
+		id
+		tags {
+			id
+			name
+		}
+	}
+}
+
+mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+	removeTagFromDatapoints(data: {
+		tagName: $tagName, datapointIds: $datapointIds
+	} ) {
+		... on ObjectDeleted {
+      message
+    }
+	}
+}

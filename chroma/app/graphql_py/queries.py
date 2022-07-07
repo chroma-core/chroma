@@ -7,6 +7,17 @@ import base64
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
 from strawberry.scalars import JSON 
 
+from io import BytesIO
+import io
+from torchvision.datasets.mnist import MNIST, read_image_file, torch
+from PIL import Image, ImageOps
+
+def image_to_byte_array(image: Image) -> bytes:
+  imgByteArr = io.BytesIO()
+  image.save(imgByteArr, format="png")
+  imgByteArr = imgByteArr.getvalue()
+  return imgByteArr
+
 from typing import Optional, List
 from graphql_py.types import (
     Embedding, 
@@ -33,53 +44,35 @@ from strawberry.dataloader import DataLoader
 from sqlalchemy import select
 from strawberry import UNSET
 
-@strawberry.type
-class LabelLight:
-    id: int
-    data: JSON
+@strawberry.input
+class FilterDatapoints:
+    tag_name: Optional[str]
+    dataset_id: Optional[int]
 
-@strawberry.type
-class ResourceLight:
-    id: int
-    uri: str
-
-@strawberry.type
-class TagLight:
-    id: int
-    name: str
-
-@strawberry.type
-class DatasetLight:
-    id: int
-    name: str
-
-@strawberry.type
-class DatapointLight:
-    id: int
-    label: LabelLight
-    resource: ResourceLight
-    tags: list[TagLight]
-    dataset: DatasetLight
-
-@strawberry.type
-class EmbeddingLight:
-    id: int
-    datapoint: DatapointLight
-
-@strawberry.type
-class ProjectionLight:
-    id: int
-    x: float
-    y: float
-    embedding: EmbeddingLight
-
-@strawberry.type
-class ProjectionSetLight:
-    id: int
-    projections: list[ProjectionLight]
+@strawberry.input
+class FilterProjectionSets:
+    project_id: Optional[int]
 
 @strawberry.type
 class Query:
+
+    # Abstract
+    @strawberry.field
+    async def mnist_image(self, identifier: str) -> str:
+        test_data = read_image_file('../../examples/data/MNIST/raw/t10k-images-idx3-ubyte')
+        train_data = read_image_file('../../examples/data/MNIST/raw/train-images-idx3-ubyte')
+
+        # t10k-images-idx3-ubyte-7262
+        split_id = identifier.split('-')
+        dataset = split_id[0]
+        index = int(split_id[-1])
+
+        img = test_data[index] if dataset == 't10k' else train_data[index]
+        img = torch.Tensor.numpy(img)
+        image = Image.fromarray(img)
+        inverted_image = ImageOps.invert(image)
+        my_encoded_img = base64.encodebytes(image_to_byte_array(inverted_image)).decode('ascii')
+        return my_encoded_img
 
     # Project
     @strawberry.field
@@ -128,9 +121,16 @@ class Query:
     
     # Datapoint
     @strawberry.field
-    async def datapoints(self) -> list[Datapoint]:
+    async def datapoints(self, filter: FilterDatapoints = None) -> list[Datapoint]:
         async with models.get_session() as s:
             sql = select(models.Datapoint)
+            
+            if filter and filter.tag_name is not None:
+                sql = sql.join(models.Tagdatapoint).filter(models.Tagdatapoint.tag.has(name=filter.tag_name))
+
+            if filter and filter.dataset_id is not None:
+                sql = sql.where(models.Datapoint.dataset_id == filter.dataset_id)
+
             result = (await s.execute(sql)).scalars().unique().all()
         return [Datapoint.marshal(loc) for loc in result]
 
@@ -308,45 +308,18 @@ class Query:
 
     # ProjectionSet
     @strawberry.field
-    async def projection_sets(self) -> list[ProjectionSet]:
+    async def projection_sets(self, filter: FilterProjectionSets = None) -> list[ProjectionSet]:
         async with models.get_session() as s:
             sql = select(models.ProjectionSet)
+
+            if filter and filter.project_id is not None:
+                sql = sql.filter(models.ProjectionSet.project_id == filter.project_id)
+
             result = (await s.execute(sql)).scalars().unique().all()
         return [ProjectionSet.marshal(loc) for loc in result]
 
     def as_dict(self):
        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
-
-    # This returns a thin custom type to avoid the Strawberry type system
-    # Strawberry's type system will try to resolve things nicely so you don't have to prefetch
-    # all the data you want from the db. However in this query, we do want to prefetch everything
-    # and so we sidestep our normal types with these Lightweight types defined above. 
-    # Speeds things up by 2x
-    @strawberry.field
-    async def projection_set(self, id: strawberry.ID) -> ProjectionSetLight:
-        async with models.get_session() as s:
-
-            start = time.process_time()
-            # benchmarked difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
-            sql = (select(models.ProjectionSet).where(models.ProjectionSet.id == id)
-                .options(joinedload(models.ProjectionSet.projections).load_only("id", "x", "y", "embedding_id")
-                    .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
-                        .options(joinedload(models.Embedding.datapoint)
-                            .options(
-                                joinedload(models.Datapoint.tags), 
-                                joinedload(models.Datapoint.label), 
-                                joinedload(models.Datapoint.resource),
-                                joinedload(models.Datapoint.dataset)
-                                )
-                        )
-                    )
-                )
-            )
-            val = (await s.execute(sql)).scalars().first()
-            elapsedtime = time.process_time() - start
-            print("got records in " + str(elapsedtime) + " seconds")
-
-        return val
 
     # Projection
     @strawberry.field
@@ -378,7 +351,6 @@ class Query:
             db_tasks = await s.execute(sql)
             val = db_tasks.scalars().first()
         return Embedding.marshal(val)  
-        
 
     # pagination
     embeddings_by_page: List[Embedding] = strawberry.field(resolver=get_embeddings)

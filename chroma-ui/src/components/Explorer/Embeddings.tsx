@@ -13,7 +13,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from 'urql';
 
 function getProjections(projection_set_id, cb) {
-  fetch(`/projection_set_data/` + projection_set_id, {
+  fetch(`/api/projection_set_data/` + projection_set_id, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -21,7 +21,6 @@ function getProjections(projection_set_id, cb) {
   })
     .then(res => res.json())
     .then(res => {
-      console.log('res!', res)
       cb(res.projections)
     })
     .catch((error) => {
@@ -29,42 +28,6 @@ function getProjections(projection_set_id, cb) {
       // Only network error comes here
     });
 }
-
-// left in here so that you, the developer, know what to expect with what is being returned from the backend
-// const FetchEmbeddingSetandProjectionSets = `
-// query getProjectionSet($id: ID!) {
-//     projectionSet(id: $id) {
-//       id
-//       projections {
-//         id
-//         x
-//         y
-//         embedding {
-//           id
-//           datapoint {
-//             dataset {
-//               id
-//               name
-//             }
-//             tags {
-//               id
-//               name
-//             }
-//             id
-//             label {
-//               id
-//               data
-//             }
-//             resource {
-//               id
-//               uri
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-// `;
 
 // first we want to find the unique values in our metadata
 // and create sets of them
@@ -217,11 +180,14 @@ function Embeddings() {
     fetchEmbeddings()
   }, []);
 
+  // in order to force a re-render, we spread the data passed in
+  const setServerDataSpread = (data) => {
+    setServerData([...data])
+  }
+
   const fetchEmbeddings = () => {
     setFetchError(false)
     getProjections(params.projection_set_id!, data => {
-
-      console.log('data', data)
       if (data.error === true) {
         console.error(data.message)
         setFetchError(true)
@@ -348,6 +314,7 @@ function Embeddings() {
           clearSelected={clearSelected}
           tagSelected={tagSelected}
           serverData={serverData}
+          setServerData={setServerDataSpread}
         ></RightSidebar>
       </ExplorerContainer>
 

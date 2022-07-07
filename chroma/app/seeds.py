@@ -28,7 +28,7 @@ tag = nn(chroma.create_tag("im a tag!"))
 
 create_datapoint_set = nn(chroma.create_datapoint_set(1, '{"asdf":"1234"}', 'file://123.png'))
 append_tag = nn(chroma.append_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
-remove_tag = nn(chroma.remove_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
+remove_tag = nn(chroma.remove_tag_from_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
 append_tag = nn(chroma.append_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
 
 # ML stuff
@@ -42,6 +42,5 @@ layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 
 create_project_dedupe = nn(chroma.create_or_get_project("one project one project"))
 
-datapointembeddingset = nn(chroma.create_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]'))
-datapointembeddingset = nn(chroma.create_batch_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]'))
+datapointembeddingset = nn(chroma.create_datapoint_embedding_set(int(dataset1.createDataset.id), '{"asdf":"1234"}', 'file://123.png', '[022,992,002]', int(embedding_set.createEmbeddingSet.id)))
 print("seeded database")

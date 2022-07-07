@@ -205,7 +205,8 @@ You can view this directly in terminal if you want to. For example:
 ```
 cd chroma/app_backend
 sqlite3
-.open chroma_app.db
+.open chroma.db
+.headers ON
 select * from datapoint;
 .exit
 ```
@@ -265,10 +266,15 @@ Say you want to add a new field... like adding metadata to inference. You want t
 7. Now to the frontend. Inside `chroma-ui`, `src/graphql/operations.graphql` - you can see a bunch of queries and mutations that we want `urql` to generate hooks for us. If you want to, add your fields to those queries/mutations. Then run `npm run codegen` to create the hooks. If it fails, it is probably right and it will tell you what you need to fix. 
 8. Done! 
 
-# running background jobs
-
+# Running background jobs with celery
 1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery tasks. 
 2. `celery -A tasks.celery worker --loglevel=info` runs the celery service for processing offline jobs.
 3. Now commands can take a `.delay` to move them to a background queue. 
 
-
+### Killing FastApi or Celery PIDs
+If your shutdown process (from `make run` or `chroma application run`) doesn't tear down correctly, you might be left with some phantom processes running that will interfere with startup. Use these commands to remove and kill those processes. 
+```
+ps aux | grep celery # search for celery processes
+lsof -i :8000 # search for processes running on port 8000
+kill -9 pid # kill process by pid
+```

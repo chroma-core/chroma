@@ -1,4 +1,5 @@
 import json
+import random
 import time
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
@@ -44,13 +45,15 @@ from chroma.sdk.api.mutations import (
     delete_datapoint_mutation,
     create_datapoint_set_mutation,
     append_tag_to_datapoint_mutation,
-    remove_tag_to_datapoint_mutation,
+    remove_tag_from_datapoint_mutation,
     create_or_get_project_mutation,
     create_or_get_dataset_mutation,
     create_embedding_set_mutation,
     create_datapoint_embedding_set_mutation,
     create_batch_datapoint_embedding_set_mutation,
-    run_projector_on_embedding_set_mtuation
+    run_projector_on_embedding_set_mutuation,
+    append_tag_by_name_to_datapoints_mutation,
+    remove_tag_by_name_from_datapoints_mutation
     )
 from chroma.sdk.api.queries import (
     projects_query, 
@@ -149,6 +152,7 @@ class ChromaSDK:
                 # "embeddingSetId": 1, # think more about this
                 "datasetId": int(self._metadata_buffer["dataset_id"]),
                 "embeddingSetId": int(self._metadata_buffer["embedding_set_id"]),
+                "metadata": json.dumps({"quality": random.randint(0, 100)})
             })
 
         start = time.process_time()
@@ -193,14 +197,24 @@ class ChromaSDK:
         return result 
 
     # Abstract  
-    def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):
-        params = {"embeddingSetId": embeddingSetId}
-        result = self._client.execute(run_projector_on_embedding_set_mtuation, variable_values=params)
+    def append_tag_by_name_to_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
+        params = {"tagName": tag_name, "datapointIds": datapointIds}
+        result = self._client.execute(append_tag_by_name_to_datapoints_mutation, variable_values=params)
         return result
 
-    def remove_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
+    def remove_tag_by_name_from_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
+        params = {"tagName": tag_name, "datapointIds": datapointIds}
+        result = self._client.execute(remove_tag_by_name_from_datapoints_mutation, variable_values=params)
+        return result
+
+    def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):
+        params = {"embeddingSetId": embeddingSetId}
+        result = self._client.execute(run_projector_on_embedding_set_mutuation, variable_values=params)
+        return result
+
+    def remove_tag_from_datapoint_mutation(self, tagId: int, datapointId: int):
         params = {"data": {"tagId": tagId, "datapointId":datapointId}}
-        result = self._client.execute(remove_tag_to_datapoint_mutation, variable_values=params)
+        result = self._client.execute(remove_tag_from_datapoint_mutation, variable_values=params)
         return result
 
     def append_tag_to_datapoint_mutation(self, tagId: int, datapointId: int):
@@ -213,8 +227,8 @@ class ChromaSDK:
         result = self._client.execute(create_datapoint_set_mutation, variable_values=params)
         return result 
 
-    def create_datapoint_embedding_set(self, datasetId:int, labelData: str, resourceUri: str, embeddingData):
-        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri, "embeddingData": embeddingData }}
+    def create_datapoint_embedding_set(self, datasetId:int, labelData: str, resourceUri: str, embeddingData, embedding_set_id: int):
+        params = {"data": {"datasetId": datasetId, "labelData":labelData, "resourceUri": resourceUri, "embeddingData": embeddingData, "embeddingSetId": embedding_set_id }}
         result = self._client.execute(create_datapoint_embedding_set_mutation, variable_values=params)
         return result 
 
@@ -564,8 +578,9 @@ class ChromaSDK:
         return result 
 
     # Datapoint    
-    def get_datapoints(self):
-        result = self._client.execute(datapoints_query)
+    def get_datapoints(self, tagName: str = None, datasetId: int = None):
+        params = {"filter":{"tagName": tagName, "datasetId": datasetId}}
+        result = self._client.execute(datapoints_query, variable_values=params)
         return result 
 
     def get_datapoint(self, id: int):

@@ -85,11 +85,13 @@ module.exports = {
     'import/no-duplicates': 'off',
     'prefer-destructuring': 'off',
     'prefer-object-spread': 'off',
-    eqeqeq: 'off',
     'no-lonely-if': 'off',
     'consistent-return': 'off',
     'no-useless-escape': 'off',
-    'default-param-last': 'off'
+    'default-param-last': 'off',
+    'no-underscore-dangle': 'off',
+    '@typescript-eslint/no-non-null-asserted-optional-chain': 'off',
+    eqeqeq: 'off',
     //"camelcase": [2, {"properties": "always"}]
   },
 }

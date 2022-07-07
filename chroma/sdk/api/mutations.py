@@ -3,8 +3,38 @@
 from gql import gql
 
 # Abstract mutations
+append_tag_by_name_to_datapoints_mutation = gql(
+    """
+    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+        appendTagByNameToDatapoints(data: {
+            tagName: $tagName, datapointIds: $datapointIds
+        } ) {
+            id
+            tags {
+                id
+                name
+            }
+        }
+    }
+  """
+)
 
-run_projector_on_embedding_set_mtuation = gql(
+remove_tag_by_name_from_datapoints_mutation = gql(
+    """
+    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+        removeTagFromDatapoints(data: {
+            tagName: $tagName, datapointIds: $datapointIds
+        } ) {
+            ... on ObjectDeleted {
+        message
+        }
+        }
+    }
+  """
+)
+
+
+run_projector_on_embedding_set_mutuation = gql(
     """
     mutation runProjectorOnEmbeddingSet($embeddingSetId: Int!){
         runProjectorOnEmbeddingSet(embeddingSetId: $embeddingSetId) 
@@ -48,10 +78,10 @@ create_or_get_project_mutation = gql(
     """
 )
 
-remove_tag_to_datapoint_mutation = gql(
+remove_tag_from_datapoint_mutation = gql(
     """
-    mutation removeTagToDatapoint($data: TagToDataPointInput!) {
-        removeTagToDatapoint(data: $data) {
+    mutation removeTagFromDatapoint($data: TagToDataPointInput!) {
+        removeTagFromDatapoint(data: $data) {
             ... on ObjectDeleted {
                 __typename
                 message

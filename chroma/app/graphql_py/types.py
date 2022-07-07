@@ -50,7 +50,15 @@ class Dataset:
     name: Optional[str]
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    project: Optional[Project] = None
+    # project: Optional[Project] = None
+
+    # belongs_to project
+    @strawberry.field
+    async def project(self, info: Info) -> Project:
+        async with models.get_session() as s:
+            sql = select(models.Project).where(models.Project.id == self.project_id)
+            project = (await s.execute(sql)).scalars().first()
+        return Project.marshal(project)   
 
     # has_many slices
     @strawberry.field
@@ -68,7 +76,6 @@ class Dataset:
     def marshal(cls, model: models.Dataset) -> "Dataset":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            project=Project.marshal(model.project) if model.project else None,
             name=model.name if model.name else None,
             created_at=model.created_at,
             updated_at=model.updated_at
@@ -103,8 +110,8 @@ class Datapoint:
     id: strawberry.ID
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    metadata_: Optional[str]
     dataset: Optional[Dataset] = None
-    resource: Optional["Resource"] = None
 
     # has_many embeddings
     @strawberry.field
@@ -130,20 +137,23 @@ class Datapoint:
         labels = await info.context["label_by_datapoint"].load(self.id)
         return Label.marshal(labels[0]) 
 
-    # has_one inference
-    # @strawberry.field
-    # async def inference(self, info: Info) -> "Inference":
-    #     inferences = await info.context["inference_by_datapoint"].load(self.id)
-    #     return Inference.marshal(inferences[0]) if inferences[0] != None : None
+     # belongs_to embedding_set
+    @strawberry.field
+    async def resource(self, info: Info) -> "Resource":
+        async with models.get_session() as s:
+            sql = select(models.Resource).where(models.Resource.id == self.resource_id)
+            resource = (await s.execute(sql)).scalars().first()
+        return Resource.marshal(resource)
 
     @classmethod
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
+        metadata = model.metadata_ if model.metadata_ else "{}"
         return cls(
             id=strawberry.ID(str(model.id)),
             dataset=Dataset.marshal(model.dataset) if model.dataset else None,
-            resource=Resource.marshal(model.resource) if model.resource else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            metadata_=json.loads(metadata)
         )
 
 @strawberry.type
@@ -174,13 +184,11 @@ class Label:
     data: JSON
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    # datapoint: Optional[Datapoint] = None
 
     @classmethod
     def marshal(cls, model: models.Label) -> "Label":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            # datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
             data=json.loads(model.data)
@@ -214,7 +222,6 @@ class Inference:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     datapoint: Optional[Datapoint] = None
-    # trained_model: Optional[TrainedModel] = None
 
     @classmethod
     def marshal(cls, model: models.Inference) -> "Inference":
@@ -387,11 +394,27 @@ class ProjectionSet:
         projections = await info.context["projections_by_projection_set"].load(self.id)
         return [Projection.marshal(projection) for projection in projections]
 
+    # belongs_to project
+    @strawberry.field
+    async def project(self, info: Info) -> Project:
+        async with models.get_session() as s:
+            sql = select(models.Project).where(models.Project.id == self.project_id)
+            project = (await s.execute(sql)).scalars().first()
+        return Project.marshal(project)
+
+    # belongs_to embedding_set
+    @strawberry.field
+    async def embedding_set(self, info: Info) -> EmbeddingSet:
+        async with models.get_session() as s:
+            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == self.embedding_set_id)
+            embedding_set = (await s.execute(sql)).scalars().first()
+        return EmbeddingSet.marshal(embedding_set)
+
+
     @classmethod
     def marshal(cls, model: models.ProjectionSet) -> "ProjectionSet":
         return cls(
             id=strawberry.ID(str(model.id)), 
-            embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -414,6 +437,22 @@ class Embedding:
         projections = await info.context["projections_by_embedding"].load(self.id)
         return [Projection.marshal(projection) for projection in projections]
 
+    # belongs_to datapoint
+    @strawberry.field
+    async def datapoint(self, info: Info) -> Datapoint:
+        async with models.get_session() as s:
+            sql = select(models.Datapoint).where(models.Datapoint.id == self.datapoint_id)
+            datapoint = (await s.execute(sql)).scalars().first()
+        return Datapoint.marshal(datapoint)
+
+    # belongs_to embedding_set
+    @strawberry.field
+    async def embedding_set(self, info: Info) -> EmbeddingSet:
+        async with models.get_session() as s:
+            sql = select(models.EmbeddingSet).where(models.EmbeddingSet.id == self.embedding_set_id)
+            embedding_set = (await s.execute(sql)).scalars().first()
+        return EmbeddingSet.marshal(embedding_set)    
+
     @classmethod
     def marshal(cls, model: models.Embedding) -> "Embedding":
         return cls(
@@ -422,9 +461,6 @@ class Embedding:
             label=model.label if model.label else None,
             inference_identifier=model.inference_identifier,
             input_identifier=model.input_identifier,
-            # layer=Layer.marshal(model.layer) if model.layer else None,
-            embedding_set=EmbeddingSet.marshal(model.embedding_set) if model.embedding_set else None,
-            datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -439,14 +475,28 @@ class Projection:
     embedding: Optional[Embedding] = None # belongs_to embedding
     projection_set: Optional[ProjectionSet] = None # belongs_to projection_set
 
+    # belongs_to projection_set
+    @strawberry.field
+    async def projection_set(self, info: Info) -> ProjectionSet:
+        async with models.get_session() as s:
+            sql = select(models.ProjectionSet).where(models.ProjectionSet.id == self.projection_set_id)
+            projection_set = (await s.execute(sql)).scalars().first()
+        return ProjectionSet.marshal(projection_set)
+
+    # belongs_to embedding
+    @strawberry.field
+    async def embedding(self, info: Info) -> Embedding:
+        async with models.get_session() as s:
+            sql = select(models.Embedding).where(models.Embedding.id == self.embedding_id)
+            embedding = (await s.execute(sql)).scalars().first()
+        return Embedding.marshal(embedding)
+
     @classmethod
     def marshal(cls, model: models.Projection) -> "Projection":
         return cls(
             id=strawberry.ID(str(model.id)),
             x=model.x,
             y=model.y,
-            embedding=Embedding.marshal(model.embedding) if model.embedding else None,
-            projection_set=ProjectionSet.marshal(model.projection_set) if model.projection_set else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )

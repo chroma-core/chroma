@@ -37,6 +37,8 @@
     "react-icons": "^4.4.0",
     "react-router-dom": "^6.3.0",
     "react-scripts": "5.0.1",
+    "react-virtualized-auto-sizer": "^1.0.6",
+    "react-window": "^1.8.7",
     "regl": "^2.1.0",
     "regl-scatterplot": "file:../../regl-scatterplot",
     "subscriptions-transport-ws": "^0.11.0",
