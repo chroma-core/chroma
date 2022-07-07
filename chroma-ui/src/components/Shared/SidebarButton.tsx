@@ -5,6 +5,7 @@ import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
 import { IconType } from "react-icons";
 import { TbLasso } from 'react-icons/tb';
+import { GiSelect } from 'react-icons/gi'
 
 const IconMap: any = {
   circle: BsCircleFill,
@@ -13,7 +14,7 @@ const IconMap: any = {
   square_outline: BsSquare,
   show: AiOutlineEye,
   hide: AiOutlineEyeInvisible,
-  select: TbLasso
+  select: GiSelect
 }
 
 interface SidebarButtonProps {
@@ -59,13 +60,13 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   }
 
   let eyeButtonOpacity = "0%"
-  if (!visible) eyeButtonOpacity = "30%"
   if (isHovered) eyeButtonOpacity = "100%"
+  if (!visible && isHovered) eyeButtonOpacity = "0%"
 
   return (
     <Button
       key={keyName}
-      onClick={selectByFn}
+      onClick={showHideFn}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       justifyContent="flex-start" variant='ghost' size='sm' ml={indent}>
@@ -75,13 +76,13 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
           {text}
         </Box>
         <Flex>
-          <IconButton
+          <Icon
             _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
             _active={{ backgroundColor: "rgba(0,0,0,0)" }}
-            onClick={showHideFn}
+            onClick={selectByFn}
             height="100%"
             opacity={eyeButtonOpacity}
-            variant="ghost" aria-label='ShowHide' icon={<Icon as={IconMap[icon] as any} color="black" />} />
+            variant="ghost" aria-label='ShowHide' as={IconMap.select as any} />
         </Flex>
       </Flex>
     </Button>

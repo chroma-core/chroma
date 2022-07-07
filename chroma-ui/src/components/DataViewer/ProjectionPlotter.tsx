@@ -49,6 +49,10 @@ const getBounds = (datapoints: Datapoint[]) => {
   }
 }
 
+function minMaxNormalization(value: number, min: number, max: number) {
+  return (value - min) / (max - min)
+}
+
 const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   cursor,
   insertedProjections,
@@ -131,18 +135,23 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
 
   const calculateColorsAndDrawPoints = () => {
     let colorByFilter = filters.find((a: any) => a.name == colorByFilterString)
-    let colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
+
+    let colorByOptionsSave
+    if (colorByFilter.type == 'discrete') colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
+    if (colorByFilter.type == 'continuous') colorByOptionsSave = colorByFilter.optionsSet.colors
     setColorByOptions(colorByOptionsSave)
 
     points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
     datapoints!.map(datapoint => {
       let datapointColorByProp = colorByFilter.fetchFn(datapoint)[0]
-      let datapointColorIndex = colorByFilter.optionsSet.findIndex((option: any) => option.name == datapointColorByProp)
+
+      let datapointColorIndex
+      if (colorByFilter.type == 'discrete') datapointColorIndex = colorByFilter.optionsSet.findIndex((option: any) => option.name == datapointColorByProp)
+      if (colorByFilter.type == 'continuous') datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter.optionsSet.min, colorByFilter.optionsSet.max) // normalize
 
       const visible = datapoint.visible ? 1 : 0
       return points.push([datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex])
     })
-    console.log('SETTING POINTS')
     setPoints(points)
   }
 
@@ -188,6 +197,12 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
 
   if (points === null) showLoading = true
 
+  let validFilters
+  if (filters !== undefined) {
+    const noFilterList = ["Tags"]
+    validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
+  }
+
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
@@ -195,7 +210,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     <Box flex='1' cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
       {(filters !== undefined) ?
         <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
-          {filters.map((filterb: any) => {
+          {validFilters.map((filterb: any) => {
             return (
               <option key={filterb.name} value={filterb.name} >{filterb.name}</option>
             )

@@ -1,7 +1,7 @@
 // @ts-nocheck
-import React from 'react';
+import React, { useState } from 'react';
 import { Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton } from '@chakra-ui/react'
-import { Table, Tbody, Tr, Td, TableContainer } from '@chakra-ui/react'
+import { Table, Tbody, Tr, Td, TableContainer, Select } from '@chakra-ui/react'
 import TagForm from './TagForm'
 import Tags from './Tags'
 import { Datapoint } from './DataViewTypes';
@@ -47,6 +47,7 @@ interface DataPanelProps {
   datapoints: Datapoint[]
   selectedDatapointsIds: number[]
   setDatapointsAndRebuildFilters: (datapoints: ServerDataItem[]) => void
+  filters: any[]
 }
 
 interface Hash<T> {
@@ -94,16 +95,24 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
           <Table variant='unstyled' size="sm">
             <Tbody>
               <Tr key={"dpid"}>
-                <Td width="20%" p={0} pl={0} fontSize="xs">Datapoint ID</Td>
+                <Td width="30%" p={0} pl={0} fontSize="xs">Datapoint ID</Td>
                 <Td p={0} fontSize="xs">{datapoint.id}</Td>
               </Tr>
               <Tr key={"category"}>
-                <Td width="20%" p={0} pl={0} fontSize="xs">Category</Td>
+                <Td width="30%" p={0} pl={0} fontSize="xs">Category</Td>
                 <Td p={0} fontSize="xs">{datapoint.label.data.categories[0].name}</Td>
               </Tr>
               <Tr key={"dataset"}>
-                <Td width="20%" p={0} pl={0} fontSize="xs">Dataset</Td>
+                <Td width="30%" p={0} pl={0} fontSize="xs">Dataset</Td>
                 <Td p={0} fontSize="xs">{datapoint.dataset.name}</Td>
+              </Tr>
+              <Tr key={"quality"}>
+                <Td width="30%" p={0} pl={0} fontSize="xs">Quality</Td>
+                <Td p={0} fontSize="xs">{datapoint.metadata_.quality}</Td>
+              </Tr>
+              <Tr key={"visible"}>
+                <Td width="30%" p={0} pl={0} fontSize="xs">Visible</Td>
+                <Td p={0} fontSize="xs">{datapoint.visible ? 'visible' : 'hidden'}</Td>
               </Tr>
             </Tbody>
           </Table>
@@ -117,16 +126,19 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
 }
 
 const Row = ({ data, index, style }) => (
-  <div style={style} >
+  <div style={style} key={index}>
     <DataPanelRow datapoint={data[index]} />
   </div>
 );
 
-const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds, setDatapointsAndRebuildFilters }) => {
+const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds, setDatapointsAndRebuildFilters, filters }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
   const borderColorCards = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
+  let [sortByFilterString, setSortByFilterString] = useState('Classes')
+  let [sortByInvert, setSortByInvert] = useState(false)
 
   let datapointsToRender;
   let reactWindowListLength
@@ -138,6 +150,26 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
   if (selectedDatapointsIds.length > 0) {
     reactWindowListLength = selectedDatapointsIds.length
     datapointsToRender = datapoints.filter(dp => selectedDatapointsIds.includes(dp.id))
+  }
+
+  const newSortBy = (event: any) => {
+    let str = event.target.value
+    setSortByFilterString(str)
+    let invert = (str.split("-")[1] === 'down')
+    setSortByInvert(invert)
+  }
+
+  let validFilters
+  if (filters !== undefined) {
+    const noFilterList = ["Tags"]
+    validFilters = filters.filter(f => !noFilterList.includes(f.name))
+
+    let baseFilterName = sortByFilterString.split("-")[0]
+    let sortByFilter = filters.find((a: any) => a.name == baseFilterName)
+    datapointsToRender.sort(function (a, b) {
+      return sortByFilter.fetchFn(a) - sortByFilter.fetchFn(b)
+    })
+    if (sortByInvert) datapointsToRender?.reverse()
   }
 
   return (
@@ -162,7 +194,19 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
 
       <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
         <Text fontWeight={600}>Inspect</Text>
-        <Text fontSize="sm">{selectedDatapointsIds.length} selected</Text>
+        {/* <Text fontSize="sm">{selectedDatapointsIds.length} selected</Text> */}
+        {(filters !== undefined) ?
+          <Select variant="ghost" size="xs" fontWeight={600} width="150px" value={sortByFilterString} onChange={newSortBy}>
+            {validFilters.map((filterb: any) => {
+              return (
+                <React.Fragment key={filterb.name}>
+                  <option key={filterb.name + "-up"} value={filterb.name + "-up"}>{filterb.name} - Up</option>
+                  <option key={filterb.name + "-down"} value={filterb.name + "-down"}>{filterb.name} - Down</option>
+                </React.Fragment>
+              )
+            })}
+          </Select>
+          : null}
       </Flex>
 
       <TagForm selectedDatapointsIds={selectedDatapointsIds} datapoints={datapoints} setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters} />
