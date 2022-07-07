@@ -45,11 +45,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    // sortBy: function (datapoints, fetchfn) {
-    //   datapoints = datapoints.slice()
-    //   datapoints.sort(function (a, b) { return fetchfn(a) - fetchfn(a) })
-    //   return datapoints
-    // },
     filterBy: function (evalFields, optionsSet) {
       let visible = true;
       evalFields.map(evalField => {
@@ -79,7 +74,6 @@ let FILTERS = [
       minVisible: 0,
       maxVisible: 0
     },
-    sortBy: function () { },
     filterBy: function (quality, optionsSet) {
       let visible = true;
       quality = quality[0] // just a singular value
@@ -103,7 +97,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    sortBy: function () { },
     filterBy: function (evalFields, optionsSet) {
       let visible = true;
       evalFields.map(evalField => {
@@ -126,7 +119,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    sortBy: function () { },
     filterBy: function (evalFields, optionsSet) {
       let visible;
       evalFields.map(evalField => {

@@ -194,9 +194,9 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
 
       <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
         <Text fontWeight={600}>Inspect</Text>
-        {/* <Text fontSize="sm">{selectedDatapointsIds.length} selected</Text> */}
+
         {(filters !== undefined) ?
-          <Select variant="ghost" size="xs" fontWeight={600} width="150px" value={sortByFilterString} onChange={newSortBy}>
+          <Select variant="ghost" size="xs" fontWeight={600} width="120px" value={sortByFilterString} onChange={newSortBy}>
             {validFilters.map((filterb: any) => {
               return (
                 <React.Fragment key={filterb.name}>
@@ -211,7 +211,9 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
 
       <TagForm selectedDatapointsIds={selectedDatapointsIds} datapoints={datapoints} setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters} />
 
-      <Divider w="100%" pt={2} />
+      <Divider w="100%" pt={0} />
+      <Text fontSize="sm" px={3} py={1}>{selectedDatapointsIds.length} selected</Text>
+      <Divider w="100%" pt={0} />
 
       {(datapoints !== undefined) ?
         <AutoSizer>

@@ -51,7 +51,6 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
 
   function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
     let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
-    // let optionIndex = filters[filterIndex].optionsSet.findIndex((option: any) => option.name === passedOption.name)
     filters[filterIndex].optionsSet.minVisible = minVisible
     filters[filterIndex].optionsSet.maxVisible = maxVisible
     setFilters([...filters])
