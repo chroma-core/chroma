@@ -33,11 +33,15 @@ def infer(model, device, data_loader, chroma_sdk, dataset, embedding_set):
         for data, target, input_identifier, inference_identifier in data_loader:
 
             chroma_sdk.set_metadata(
-                labels=target.data.detach().tolist(), # eg  7 <-- this is the class
-                input_identifiers=list(input_identifier), # eg t10k-images-idx3-ubyte-24 <-- this is the uri
-                inference_identifiers=list(inference_identifier), # eg MNIST_test <-- this is the dataset
+                labels=target.data.detach().tolist(),  # eg  7 <-- this is the class
+                input_identifiers=list(
+                    input_identifier
+                ),  # eg t10k-images-idx3-ubyte-24 <-- this is the uri
+                inference_identifiers=list(
+                    inference_identifier
+                ),  # eg MNIST_test <-- this is the dataset
                 dataset_id=dataset.createOrGetDataset.id,
-                embedding_set_id=embedding_set.createEmbeddingSet.id
+                embedding_set_id=embedding_set.createEmbeddingSet.id,
             )
 
             data, target = data.to(device), target.to(device)
@@ -77,11 +81,17 @@ def main():
 
     # set up chroma workspace - these are consistent across runs?
     project = nn(chroma_sdk.create_or_get_project("Mnist Demo"))
-    training_dataset_chroma = nn(chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id)))
-    test_dataset_chroma = nn(chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id)))
-    
+    training_dataset_chroma = nn(
+        chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id))
+    )
+    test_dataset_chroma = nn(
+        chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id))
+    )
+
     # change across runs
-    test_embedding_set = nn(chroma_sdk.create_embedding_set(int(training_dataset_chroma.createOrGetDataset.id)))
+    test_embedding_set = nn(
+        chroma_sdk.create_embedding_set(int(training_dataset_chroma.createOrGetDataset.id))
+    )
 
     # TODO: create model arch, trained model, layer sets, layer here...
 
@@ -98,7 +108,7 @@ def main():
 
     # Attach the hook
     get_layer_outputs = partial(get_and_store_layer_outputs, storage=chroma_sdk)
-    model.fc1.register_forward_hook(get_layer_outputs)
+    model.fc2.register_forward_hook(get_layer_outputs)
 
     # Use the MNIST test set
     inference_kwargs = {"batch_size": args.batch_size}
@@ -120,9 +130,12 @@ def main():
     data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
     infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
 
-    chroma_sdk.run_projector_on_embedding_set_mutation(int(test_embedding_set.createEmbeddingSet.id))
+    chroma_sdk.run_projector_on_embedding_set_mutation(
+        int(test_embedding_set.createEmbeddingSet.id)
+    )
 
     print("Completed")
+
 
 if __name__ == "__main__":
     main()
