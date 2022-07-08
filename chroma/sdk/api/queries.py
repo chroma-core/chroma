@@ -241,6 +241,10 @@ datapoint_query = gql(
                 id
                 data
             }
+            inference {
+                id
+                data
+            }
             tags {
                 id
                 name
@@ -268,6 +272,10 @@ datapoints_query = gql(
                 id
                 data
             }
+            inference {
+                id 
+                data
+            }
             resource {
                 id
                 uri
@@ -288,6 +296,7 @@ inference_query = gql(
             id
             createdAt
             updatedAt
+            data
         }
     }
     """
@@ -299,6 +308,7 @@ inferences_query = gql(
             id
             createdAt
             updatedAt
+            data
         }
     }
     """
