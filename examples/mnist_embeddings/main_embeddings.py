@@ -89,24 +89,20 @@ def main():
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
 
-    # Instantiate Chroma storage
-    chroma_storage = chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test")
+    # Run in the Chroma context
+    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
 
-    # Attach the hook
-    test_hook_handle = model.fc2.register_forward_hook(chroma_storage.set_embeddings_forward_hook)
+        # Attach the hook
+        test_hook_handle = model.fc2.register_forward_hook(
+            chroma_storage.set_embeddings_forward_hook
+        )
 
-    # Use the MNIST test set
-    test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
+        # Use the MNIST test set
+        test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
 
-    # Run inference over the test set
-    data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
-    infer(model, device, data_loader, chroma_storage)
-
-    # Run inference over the training set
-    # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
-    # infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
-
-    print("Completed")
+        # Run inference over the test set
+        data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
+        infer(model, device, data_loader, chroma_storage)
 
 
 if __name__ == "__main__":

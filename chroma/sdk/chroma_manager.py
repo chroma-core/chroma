@@ -183,6 +183,14 @@ class ChromaSDK:
             dataset_id=dataset_id, embedding_set_id=embedding_set_id
         )
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # TODO(anton) Make this a set of post-run tasks
+        if exc_type:
+            self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
+
     def set_resource_uris(self, uris):
         self._data_buffer.set_data("_resource_uris", uris)
 
@@ -203,10 +211,6 @@ class ChromaSDK:
         batch_data = self._data_buffer.get_batch_data()
         result = self.create_batch_datapoint_embedding_set(batch_data)
         self._data_buffer.reset()
-
-        # TODO(anton) Make this a set of post-run tasks
-        self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
-
         return result
 
     def get_embeddings_page(self, after):
