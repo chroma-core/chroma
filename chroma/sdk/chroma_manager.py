@@ -93,7 +93,7 @@ from chroma.sdk.api.queries import (
     embedding_set_query,
     embedding_sets_query,
 )
-from .utils import hoist_to_list
+from .utils import hoist_to_list, nn
 
 
 class ChromaSDK:
@@ -142,16 +142,18 @@ class ChromaSDK:
                 {
                     "datasetId": self._dataset_id,
                     "embeddingSetId": self._embedding_set_id,
-                    "label_data": {
-                        "categories": [
-                            {
-                                "id": int(self._labels[index]),
-                                "name": str(self._labels[index]),
-                                "supercategory": "none",
-                            }
-                        ]
-                    },
-                    "inferenceData": self._inferences[index],
+                    "labelData": json.dumps(
+                        {
+                            "categories": [
+                                {
+                                    "id": int(self._labels[index]),
+                                    "name": str(self._labels[index]),
+                                    "supercategory": "none",
+                                }
+                            ]
+                        }
+                    ),
+                    "inferenceData": str(self._inferences[index]),
                     "embeddingData": json.dumps(self._embeddings[index]),
                     "resourceUri": self._resource_uris[index],
                 }
@@ -167,10 +169,15 @@ class ChromaSDK:
         )
 
         project = nn(self.create_or_get_project(project_name))
+        project_id = int(project.createOrGetProject.id)
 
-        training_dataset_chroma = nn(
-            self.create_or_get_dataset("Training", int(project.createOrGetProject.id))
-        )
+        dataset = nn(self.create_or_get_dataset(dataset_name, project_id))
+        dataset_id = int(dataset.createOrGetDataset.id)
+
+        embedding_set = nn(self.create_embedding_set(dataset_id))
+        embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+
+        # TODO: create model arch, trained model, layer sets, layer here...
 
         self._data_buffer = ChromaSDK._DataBuffer(
             dataset_id=dataset_id, embedding_set_id=embedding_set_id
@@ -182,8 +189,12 @@ class ChromaSDK:
     def set_labels(self, labels):
         self._data_buffer.set_data("_labels", labels)
 
+    # Users can call this directly, or use the forward hook
     def set_embeddings(self, embeddings):
         self._data_buffer.set_data("_embeddings", embeddings)
+
+    def set_embeddings_forward_hook(self, model, input, output):
+        self.set_embeddings(output.data.detach().tolist())
 
     def set_inferences(self, inferences):
         self._data_buffer.set_data("_inferences", inferences)

@@ -17,38 +17,31 @@ from chroma.sdk.utils import nn
 class CustomDataset(datasets.MNIST):
     def __getitem__(self, index):
         img, target = super().__getitem__(index)
-        input_identifier = f"{'train' if self.train else 't10k'}-images-idx3-ubyte-{index}"
-        inference_identifier = f"MNIST_{'train' if self.train else 'test'}"
-        return img, target, input_identifier, inference_identifier
+        resource_uri = f"{'train' if self.train else 't10k'}-images-idx3-ubyte-{index}"
+        return img, target, resource_uri
 
 
 def get_and_store_layer_outputs(self, input, output, storage):
     storage.store_batch_embeddings(output.data.detach().tolist())
 
 
-def infer(model, device, data_loader, chroma_sdk, dataset, embedding_set):
+def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data, target, input_identifier, inference_identifier in data_loader:
+        for data, target, resource_uri in data_loader:
 
-            chroma_sdk.set_metadata(
-                labels=target.data.detach().tolist(),  # eg  7 <-- this is the class
-                input_identifiers=list(
-                    input_identifier
-                ),  # eg t10k-images-idx3-ubyte-24 <-- this is the uri
-                inference_identifiers=list(
-                    inference_identifier
-                ),  # eg MNIST_test <-- this is the dataset
-                dataset_id=dataset.createOrGetDataset.id,
-                embedding_set_id=embedding_set.createEmbeddingSet.id,
-            )
+            chroma_storage.set_labels(labels=target.data.detach().tolist())
+            chroma_storage.set_resource_uris(uris=list(resource_uri))
 
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(output, target, reduction="sum").item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
+
+            chroma_storage.set_inferences(pred.data.detach().flatten().tolist())
+            chroma_storage.store_batch_embeddings()
 
     test_loss /= len(data_loader.dataset)
 
@@ -76,17 +69,6 @@ def main():
 
     args = parser.parse_args()
 
-    test_dataset_chroma = nn(
-        chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id))
-    )
-
-    # change across runs
-    test_embedding_set = nn(
-        chroma_sdk.create_embedding_set(int(training_dataset_chroma.createOrGetDataset.id))
-    )
-
-    # TODO: create model arch, trained model, layer sets, layer here...
-
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -108,31 +90,28 @@ def main():
     )
 
     # Define somewhere to store the embeddings
-    chroma_test_storage = chroma_manager.ChromaSDK(
-        dataset_id=int(training_dataset_chroma.createOrGetDataset.id),
-        embedding_set_id=int(test_embedding_set.createEmbeddingSet.id),
-    )
+    chroma_test_storage = chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test")
 
     # Attach the hook
-    get_layer_outputs = partial(get_and_store_layer_outputs, storage=chroma_test_storage)
-    test_hook_handle = model.fc2.register_forward_hook(get_layer_outputs)
+    test_hook_handle = model.fc2.register_forward_hook(
+        chroma_test_storage.set_embeddings_forward_hook
+    )
 
     # Use the MNIST test set
-
     test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
-    train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
+    # train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
 
     # Run inference over the test set
     data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
-    infer(model, device, data_loader, chroma_sdk, training_dataset_chroma, test_embedding_set)
+    infer(model, device, data_loader, chroma_test_storage)
 
     # Run inference over the training set
-    data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
-    infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
+    # data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+    # infer(model, device, data_loader, chroma_sdk, test_dataset_chroma, test_embedding_set)
 
-    chroma_sdk.run_projector_on_embedding_set_mutation(
-        int(test_embedding_set.createEmbeddingSet.id)
-    )
+    # chroma_sdk.run_projector_on_embedding_set_mutation(
+    #     int(test_embedding_set.createEmbeddingSet.id)
+    # )
 
     print("Completed")
 
