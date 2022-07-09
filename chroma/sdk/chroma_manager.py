@@ -203,6 +203,10 @@ class ChromaSDK:
         batch_data = self._data_buffer.get_batch_data()
         result = self.create_batch_datapoint_embedding_set(batch_data)
         self._data_buffer.reset()
+
+        # TODO(anton) Make this a set of post-run tasks
+        self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
+
         return result
 
     def get_embeddings_page(self, after):
