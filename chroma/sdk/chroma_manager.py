@@ -113,11 +113,14 @@ class ChromaSDK:
             self._resource_uris = None
             self._labels = None
             self._inferences = None
+            self._embeddings = None
 
         def set_data(self, type: str, data: Any):
             # We should only ever try to set any field on the buffer once
             try:
-                assert getattr(self, type) == None
+                assert (
+                    getattr(self, type) == None
+                ), f"{type} is already set. Did you forget to reset() the buffer?"
             except AttributeError as e:
                 print(f"{type} is not a valid data handle")
 
@@ -125,12 +128,36 @@ class ChromaSDK:
             if self._count == 0:
                 self._count = len(data)
             else:
-                assert len(data) == self._count
+                assert (
+                    len(data) == self._count
+                ), f"Data length ({len(data)}) does not match buffer count ({self._count})"
 
             try:
                 setattr(self, type, data)
             except AttributeError as e:
                 print(f"{type} is not a valid data handle")
+
+        def get_batch_data(self):
+            batch_data = [
+                {
+                    "datasetId": self._dataset_id,
+                    "embeddingSetId": self._embedding_set_id,
+                    "label_data": {
+                        "categories": [
+                            {
+                                "id": int(self._labels[index]),
+                                "name": str(self._labels[index]),
+                                "supercategory": "none",
+                            }
+                        ]
+                    },
+                    "inferenceData": self._inferences[index],
+                    "embeddingData": json.dumps(self._embeddings[index]),
+                    "resourceUri": self._resource_uris[index],
+                }
+                for index in range(self._count)
+            ]
+            return batch_data
 
     # Internal
     def __init__(self, dataset_id: int, embedding_set_id: int) -> None:
@@ -142,64 +169,22 @@ class ChromaSDK:
             dataset_id=dataset_id, embedding_set_id=embedding_set_id
         )
 
-    def set_metadata(
-        self, input_identifiers, inference_identifiers, labels, dataset_id, embedding_set_id
-    ):
-        self._clear_metadata()
+    def set_resource_uris(self, uris):
+        self._data_buffer.set_data("_resource_uris", uris)
 
-        input_identifiers = hoist_to_list(input_identifiers)
-        inference_identifiers = hoist_to_list(inference_identifiers)
-        labels = hoist_to_list(labels)
+    def set_labels(self, labels):
+        self._data_buffer.set_data("_labels", labels)
 
-        input_identifiers = [str(i) for i in input_identifiers]
-        inference_identifiers = [str(n) for n in inference_identifiers]
-        labels = [str(l) for l in labels]
+    def set_embeddings(self, embeddings):
+        self._data_buffer.set_data("_embeddings", embeddings)
 
-        # Sanity check that we have the right number of things
-        assert len(input_identifiers) == len(labels)
-        assert len(inference_identifiers) == len(labels)
+    def set_inferences(self, inferences):
+        self._data_buffer.set_data("_inferences", inferences)
 
-        self._metadata_buffer["input_identifiers"] = input_identifiers
-        self._metadata_buffer["inference_identifiers"] = inference_identifiers
-        self._metadata_buffer["labels"] = labels
-        self._metadata_buffer["dataset_id"] = dataset_id
-        self._metadata_buffer["embedding_set_id"] = embedding_set_id
-
-    def _clear_metadata(self):
-        self._metadata_buffer = {}
-
-    def store_batch_embeddings(self, dataset):
-        # Sanity check
-        assert len(dataset) == len(self._metadata_buffer["input_identifiers"])
-
-        new_embeddings = []
-        for index, data in enumerate(dataset):
-
-            label_data = {
-                "categories": [
-                    {
-                        "id": int(self._metadata_buffer["labels"][index]),
-                        "name": str(self._metadata_buffer["labels"][index]),
-                        "supercategory": "none",
-                    },
-                ]
-            }
-
-            new_embeddings.append(
-                {
-                    "embeddingData": json.dumps(dataset[index]),
-                    "resourceUri": self._metadata_buffer["input_identifiers"][index],
-                    "labelData": json.dumps(label_data),
-                    "datasetId": int(self._metadata_buffer["dataset_id"]),
-                    "embeddingSetId": int(self._metadata_buffer["embedding_set_id"]),
-                    "metadata": json.dumps({"quality": random.randint(0, 100)}),
-                }
-            )
-
-        start = time.process_time()
-        result = self.create_batch_datapoint_embedding_set(new_embeddings)
-        elapsedtime = time.process_time() - start
-        self._clear_metadata()
+    def store_batch_embeddings(self):
+        batch_data = self._data_buffer.get_batch_data()
+        result = self.create_batch_datapoint_embedding_set(batch_data)
+        self._data_buffer.reset()
         return result
 
     def get_embeddings_page(self, after):
