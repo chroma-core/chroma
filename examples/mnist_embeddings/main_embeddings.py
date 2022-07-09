@@ -76,14 +76,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Define somewhere to store the embeddings
-    chroma_sdk = chroma_manager.ChromaSDK()
-
-    # set up chroma workspace - these are consistent across runs?
-    project = nn(chroma_sdk.create_or_get_project("Mnist Demo"))
-    training_dataset_chroma = nn(
-        chroma_sdk.create_or_get_dataset("Training", int(project.createOrGetProject.id))
-    )
     test_dataset_chroma = nn(
         chroma_sdk.create_or_get_dataset("Test", int(project.createOrGetProject.id))
     )
@@ -106,11 +98,6 @@ def main():
     model.eval()
     model.to(device)
 
-    # Attach the hook
-    get_layer_outputs = partial(get_and_store_layer_outputs, storage=chroma_sdk)
-    model.fc2.register_forward_hook(get_layer_outputs)
-
-    # Use the MNIST test set
     inference_kwargs = {"batch_size": args.batch_size}
     if use_cuda:
         cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
@@ -119,6 +106,19 @@ def main():
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
+
+    # Define somewhere to store the embeddings
+    chroma_test_storage = chroma_manager.ChromaSDK(
+        dataset_id=int(training_dataset_chroma.createOrGetDataset.id),
+        embedding_set_id=int(test_embedding_set.createEmbeddingSet.id),
+    )
+
+    # Attach the hook
+    get_layer_outputs = partial(get_and_store_layer_outputs, storage=chroma_test_storage)
+    test_hook_handle = model.fc2.register_forward_hook(get_layer_outputs)
+
+    # Use the MNIST test set
+
     test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
     train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
 

@@ -160,11 +160,18 @@ class ChromaSDK:
             return batch_data
 
     # Internal
-    def __init__(self, dataset_id: int, embedding_set_id: int) -> None:
+    def __init__(self, project_name: str, dataset_name: str) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
         self._client = Client(
             transport=transport, fetch_schema_from_transport=True, execute_timeout=30
         )
+
+        project = nn(self.create_or_get_project(project_name))
+
+        training_dataset_chroma = nn(
+            self.create_or_get_dataset("Training", int(project.createOrGetProject.id))
+        )
+
         self._data_buffer = ChromaSDK._DataBuffer(
             dataset_id=dataset_id, embedding_set_id=embedding_set_id
         )
