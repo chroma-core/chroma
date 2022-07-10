@@ -21,10 +21,6 @@ class CustomDataset(datasets.MNIST):
         return img, target, resource_uri
 
 
-def get_and_store_layer_outputs(self, input, output, storage):
-    storage.store_batch_embeddings(output.data.detach().tolist())
-
-
 def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
     test_loss = 0
     correct = 0
@@ -46,7 +42,7 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
     test_loss /= len(data_loader.dataset)
 
     print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        "\nAverage loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
             test_loss, correct, len(data_loader.dataset), 100.0 * correct / len(data_loader.dataset)
         )
     )
@@ -92,16 +88,25 @@ def main():
     # Run in the Chroma context
     with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
 
-        # Attach the hook
-        test_hook_handle = model.fc2.register_forward_hook(
-            chroma_storage.set_embeddings_forward_hook
-        )
-
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
-
-        # Run inference over the test set
         data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
+
+        # Attach the hook
+        chroma_storage.attach_forward_hook(model.fc2)
+
+        infer(model, device, data_loader, chroma_storage)
+
+    # Run in the Chroma context
+    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Train") as chroma_storage:
+
+        # Use the MNIST test set
+        train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
+        data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+
+        # Attach the hook
+        chroma_storage.attach_forward_hook(model.fc2)
+
         infer(model, device, data_loader, chroma_storage)
 
 

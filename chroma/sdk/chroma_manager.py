@@ -174,8 +174,19 @@ class ChromaSDK:
         dataset = nn(self.create_or_get_dataset(dataset_name, project_id))
         dataset_id = int(dataset.createOrGetDataset.id)
 
-        embedding_set = nn(self.create_embedding_set(dataset_id))
-        embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+        # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
+        # TODO(anton) Rationalize or remove EmbeddingSet. EmbeddingSets don't necessarily have any correspondence
+        # to datasets.
+        if len(project.createOrGetProject.datasets) == 0:
+            embedding_set = nn(self.create_embedding_set(dataset_id))
+            embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+        else:
+            first_dataset_id = project.createOrGetProject.datasets[0]["id"]
+            first_dataset = nn(self.get_dataset(int(first_dataset_id)))
+            assert (
+                len(first_dataset.dataset.embeddingSets) != 0
+            ), f"Global embedding set for project {project_id} not present!"
+            embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
 
         # TODO: create model arch, trained model, layer sets, layer here...
 
@@ -187,9 +198,9 @@ class ChromaSDK:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # TODO(anton) Make this a set of post-run tasks
-        if exc_type:
-            self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
+        # TODO(anton) Make chroma context exit a programmatic set of post-run tasks
+        self._forward_hook.remove()
+        self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
 
     def set_resource_uris(self, uris):
         self._data_buffer.set_data("_resource_uris", uris)
@@ -201,8 +212,10 @@ class ChromaSDK:
     def set_embeddings(self, embeddings):
         self._data_buffer.set_data("_embeddings", embeddings)
 
-    def set_embeddings_forward_hook(self, model, input, output):
-        self.set_embeddings(output.data.detach().tolist())
+    def attach_forward_hook(self, model):
+        self._forward_hook = model.register_forward_hook(
+            lambda model, input, output: self.set_embeddings(output.data.detach().tolist())
+        )
 
     def set_inferences(self, inferences):
         self._data_buffer.set_data("_inferences", inferences)
