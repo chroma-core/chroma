@@ -21,7 +21,12 @@ export const getMostRecentCreatedAt = function (data: any) {
 // converts string JSON coming back from a REST endpoint to JSON
 export const jsonifyDatapoints = function (datapoints: any) {
   datapoints.map((datapoint: any) => {
-    datapoint.metadata_ = JSON.parse(datapoint.metadata_)
+    // Metadata may not be present 
+    if(datapoint.metadata_) {
+      datapoint.metadata_= JSON.parse(datapoint.metadata_)
+    } else {
+      datapoint.metadata_ = ""
+    }
     datapoint.label.data = JSON.parse(datapoint.label.data)
 
     // add other state we will want to track
