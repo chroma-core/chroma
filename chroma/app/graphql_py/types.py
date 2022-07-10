@@ -77,6 +77,12 @@ class Dataset:
         datapoints = await info.context["datapoints_by_dataset"].load(self.id)
         return [Datapoint.marshal(datapoint) for datapoint in datapoints]
 
+    # habm embedding_sets
+    @strawberry.field
+    async def embedding_sets(self, info: Info) -> list["EmbeddingSet"]:
+        embedding_sets = await info.context["embedding_sets_by_dataset"].load(self.id)
+        return [EmbeddingSet.marshal(embedding_set) for embedding_set in embedding_sets]
+
     @classmethod
     def marshal(cls, model: models.Dataset) -> "Dataset":
         return cls(

@@ -1406,6 +1406,15 @@ async def load_embeddings_by_layer(keys: list) -> list[Embedding]:
     return data
 
 
+async def load_embedding_sets_by_dataset(keys: list) -> list[EmbeddingSet]:
+    async with models.get_session() as s:
+        all_queries = [
+            select(models.EmbeddingSet).where(models.EmbeddingSet.dataset_id == key) for key in keys
+        ]
+        data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
+    return data
+
+
 async def load_datasets_by_project(keys: list) -> list[Dataset]:
     async with models.get_session() as s:
         all_queries = [
@@ -1447,6 +1456,7 @@ async def get_context() -> dict:
             load_fn=load_projection_sets_by_embedding_set
         ),
         "embeddings_by_embedding_set": DataLoader(load_fn=load_embeddings_by_embedding_set),
+        "embedding_sets_by_dataset": DataLoader(load_fn=load_embedding_sets_by_dataset),
         "projections_by_projection_set": DataLoader(load_fn=load_projections_by_projection_set),
         "model_architectures_by_project": DataLoader(load_fn=load_model_architectures_by_project),
         "slices_by_dataset": DataLoader(load_fn=load_slices_by_dataset),

@@ -73,6 +73,9 @@ create_or_get_project_mutation = gql(
         createOrGetProject(project: $project) {
             id
             name
+            datasets {
+                id
+            }
         }
     }
     """

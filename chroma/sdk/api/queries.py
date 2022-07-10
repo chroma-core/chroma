@@ -155,7 +155,7 @@ dataset_query = gql(
             name
             createdAt
             updatedAt
-            project {
+            embeddingSets {
                 id
             }
         }
