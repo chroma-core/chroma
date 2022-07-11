@@ -1,4 +1,5 @@
 // @ts-nocheck
+import chroma from 'chroma-js'
 import distinctColors from 'distinct-colors'
 
 // our datapoints are 1 index
@@ -44,7 +45,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    sortBy: function () { },
     filterBy: function (evalFields, optionsSet) {
       let visible = true;
       evalFields.map(evalField => {
@@ -54,37 +54,36 @@ let FILTERS = [
     },
     colorBy: function () { },
   },
-  // {
-  //   name: 'Quality',
-  //   type: 'continuous',
-  //   fetchFn: function (datapoint) {
-  //     return [datapoint.metadata_.quality]
-  //   },
-  //   removeDupes(filterOptions) {
-  //     return filterOptions
-  //   },
-  //   defaultSort(filterOptions) {
-  //     filterOptions.maxVisible = filterOptions.max
-  //     filterOptions.minVisible = filterOptions.min
-  //     return filterOptions
-  //   },
-  //   optionsSet: {
-  //     min: Infinity,
-  //     max: -Infinity,
-  //     minVisible: 0,
-  //     maxVisible: 0
-  //   },
-  //   sortBy: function () { },
-  //   filterBy: function (quality, optionsSet) {
-  //     let visible = true;
-  //     if ((quality <= optionsSet.maxVisible) && (quality >= optionsSet.minVisible)) {
-  //       visible = false;
-  //     }
-
-  //     return true
-  //   },
-  //   colorBy: function () { },
-  // },
+  {
+    name: 'Quality',
+    type: 'continuous',
+    fetchFn: function (datapoint) {
+      return [datapoint.metadata_.quality]
+    },
+    removeDupes(filterOptions) {
+      return filterOptions
+    },
+    defaultSort(filterOptions) {
+      filterOptions.maxVisible = filterOptions.max
+      filterOptions.minVisible = filterOptions.min
+      return filterOptions
+    },
+    optionsSet: {
+      min: Infinity,
+      max: -Infinity,
+      minVisible: 0,
+      maxVisible: 0
+    },
+    filterBy: function (quality, optionsSet) {
+      let visible = true;
+      quality = quality[0] // just a singular value
+      if ((quality >= optionsSet.maxVisible) || (quality <= optionsSet.minVisible)) {
+        visible = false;
+      }
+      return visible
+    },
+    colorBy: function () { },
+  },
   {
     name: 'Tags',
     type: 'discrete',
@@ -98,7 +97,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    sortBy: function () { },
     filterBy: function (evalFields, optionsSet) {
       let visible = true;
       evalFields.map(evalField => {
@@ -121,7 +119,6 @@ let FILTERS = [
       return filterOptions.sort(function (a, b) { return a.name - b.name; });
     },
     optionsSet: [],
-    sortBy: function () { },
     filterBy: function (evalFields, optionsSet) {
       let visible;
       evalFields.map(evalField => {
@@ -179,7 +176,10 @@ export const buildFilters = (datapoints: any) => {
         option.color = colorsOpts[index].hex()
       })
     }
-
+    if (filter.type == 'continuous') {
+      var colorScale = chroma.scale(["5B68A8", "5CC8C6", "87DF9C", "E4ED58", "F8EB49", "FACE31", "F79A17", "DE500F"]).colors(50)
+      filter.optionsSet.colors = colorScale
+    }
   })
 
   return FILTERS

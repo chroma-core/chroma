@@ -190,6 +190,7 @@ const DataViewer = () => {
         <DataPanel
           datapoints={datapoints}
           selectedDatapointsIds={selectedPoints}
+          filters={filters}
           setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters}
         />
       </ExplorerContainer>

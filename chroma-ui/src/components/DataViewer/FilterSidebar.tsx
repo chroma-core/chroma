@@ -6,7 +6,18 @@ import {
   useTheme,
   Divider,
   Stack,
-  Skeleton
+  Skeleton,
+  RangeSliderTrack,
+  RangeSlider,
+  RangeSliderFilledTrack,
+  RangeSliderThumb,
+  Slider,
+  SliderFilledTrack,
+  SliderMark,
+  SliderThumb,
+  SliderTrack,
+  Tooltip,
+  Box
 } from '@chakra-ui/react'
 import SidebarButton from '../Shared/SidebarButton';
 
@@ -31,10 +42,17 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
-  function updateFilter(passedFilter: any, passedOption: any) {
+  function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
     let optionIndex = filters[filterIndex].optionsSet.findIndex((option: any) => option.name === passedOption.name)
     filters[filterIndex].optionsSet[optionIndex].visible = !filters[filterIndex].optionsSet[optionIndex].visible
+    setFilters([...filters])
+  }
+
+  function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
+    let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
+    filters[filterIndex].optionsSet.minVisible = minVisible
+    filters[filterIndex].optionsSet.maxVisible = maxVisible
     setFilters([...filters])
   }
 
@@ -94,14 +112,26 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
                         symbol="circle"
                         color={option.color}
                         classTitle={filter.title}
-                        key={option.name}
+                        key={filter.name + "." + option.name}
                         indent={6}
                         keyName={option.name}
-                        showHide={() => updateFilter(filter, option)}
+                        showHide={() => updateDiscreteFilter(filter, option)}
                         selectBy={() => selectByFilter(filter, option)}
                       />
                     )
                   })
+                  : null}
+
+                {(filter.type == 'continuous') ?
+                  <SliderThumbWithTooltip
+                    min={filter.optionsSet.min}
+                    max={filter.optionsSet.max}
+                    minVisible={filter.optionsSet.minVisible}
+                    maxVisible={filter.optionsSet.maxVisible}
+                    update={updateContinuousFilter}
+                    filter={filter}
+                  />
+
                   : null}
               </React.Fragment>
             )
@@ -113,3 +143,69 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
 }
 
 export default FilterSidebar
+
+interface SliderProps {
+  min: number
+  max: number
+  minVisible: number
+  maxVisible: number
+  update: (filter: any, minVisible: number, maxVisible: number) => void
+  filter: any
+}
+
+const SliderThumbWithTooltip: React.FC<SliderProps> = ({ min, max, minVisible, maxVisible, update, filter }) => {
+
+  const [sliderValue, setSliderValue] = React.useState([min, max])
+  const [showTooltip, setShowTooltip] = React.useState(false)
+
+  const midValue = (max - min) / 2
+
+  function onEnd(val: number[]) {
+    update(filter, sliderValue[0], sliderValue[1])
+  }
+
+  return (
+    <Box px={10} py={3}>
+      <RangeSlider
+        aria-label={['min', 'max']}
+        defaultValue={sliderValue}
+        min={0}
+        max={100}
+        colorScheme='blue'
+        onChange={(v) => setSliderValue(v)}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        onChangeEnd={(val) => onEnd(val)}
+      >
+        <RangeSliderTrack>
+          <RangeSliderFilledTrack />
+        </RangeSliderTrack>
+        <Tooltip
+          hasArrow
+          bg='blue.500'
+          color='white'
+          placement='bottom'
+          isOpen={showTooltip}
+          label={`${sliderValue[0]}%`}
+        >
+          <RangeSliderThumb index={0} />
+        </Tooltip>
+        <Tooltip
+          hasArrow
+          bg='blue.500'
+          color='white'
+          placement='bottom'
+          isOpen={showTooltip}
+          label={`${sliderValue[1]}%`}
+        >
+          <RangeSliderThumb index={1} />
+        </Tooltip>
+      </RangeSlider>
+      <Flex justifyContent="space-between">
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{min}</Text>
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{midValue}</Text>
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{max}</Text>
+      </Flex>
+    </Box>
+  )
+}
