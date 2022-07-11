@@ -12,14 +12,15 @@ import { TagItem } from './DataPanel'
 interface TagsProps {
   tags: TagItem[]
   datapointId: number
-  setServerData: () => void
+  setServerData: (datapoints: any) => void
+  datapoints:any
 }
 
 interface IOptions {
   options: []
 }
 
-const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
+const Tags: React.FC<TagsProps> = ({ tags, datapointId, datapoints, setServerData }) => {
   const theme = useTheme()
   const [isEditing, setIsEditing] = useState(false)
   const [originalTagString, setOriginalTagString] = useState('') // used to diff against the input
@@ -52,7 +53,7 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
 
     let remove = originalTagsArray.filter(x => !newTagsArray.includes(x)) // tags to remove
     let add = newTagsArray.filter(x => !originalTagsArray.includes(x)) // tags to add
-    //let keep = originalTagsArray.filter(x => newTagsArray.includes(x)) // tags to keep
+    let keep = originalTagsArray.filter(x => newTagsArray.includes(x)) // tags to keep
 
     add.map(tagToAdd => {
       const variables = { tagName: tagToAdd, datapointIds: [datapointId] }
@@ -64,8 +65,16 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
       unTag(variables)
     })
 
+    let tagsPush: any[] = []
+    keep.map(t => tagsPush.push({ "right_id": undefined, "tag": { "name": t.trim() } }))
+    add.map(t => tagsPush.push({ "right_id": undefined, "tag": { "name": t.trim() } }))
+
+    var datapointIndex = datapoints.findIndex((dp:any) => dp.id == datapointId)
+    datapoints[datapointIndex].tags = tagsPush 
+
     // optimistic update
     setTagsArray(newTagsArray)
+    setServerData([...datapoints])
   }
 
   const onKeyPress = (e: any) => {

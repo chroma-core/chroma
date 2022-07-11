@@ -94,7 +94,6 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
           tags.splice(indexOf, 1)
         }
       })
-
       datapoints[point].tags = tags
     })
 

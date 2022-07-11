@@ -16,7 +16,11 @@ code {
 }
 
 /* Hide scrollbar for Chrome, Safari and Opera */
-::-webkit-scrollbar {
+html::-webkit-scrollbar {
+  display: none;
+}
+
+body::-webkit-scrollbar {
   display: none;
 }
 
@@ -31,4 +35,14 @@ body {
 
 .select-cursor {
   cursor: url('../public/cursor-outline.svg'), auto;
+}
+
+/* pointer events should skip this and populate down */
+.chakra-modal__content-container {
+  pointer-events: none;
+}
+
+/* pointer events on this should stop here */
+.chakra-modal__content {
+  pointer-events: all;
 }
