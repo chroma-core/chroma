@@ -131,6 +131,8 @@ async def get_datapoints_data_viewer(project_id: str):
                             .options(load_only(models.Resource.id, models.Resource.uri)),
                         joinedload(models.Datapoint.label)
                             .options(load_only(models.Label.id, models.Label.data)),
+                        joinedload(models.Datapoint.inference)
+                            .options(load_only(models.Inference.id, models.Inference.data)),
                         joinedload(models.Datapoint.tags)
                             .options(joinedload(models.Tagdatapoint.tag))#.options(load_only(models.Tagdatapoint.id, models.Tagdatapoint.data))
                         )

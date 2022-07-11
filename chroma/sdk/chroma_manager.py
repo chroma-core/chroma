@@ -153,7 +153,17 @@ class ChromaSDK:
                             ]
                         }
                     ),
-                    "inferenceData": str(self._inferences[index]),
+                    "inferenceData": json.dumps(
+                        {
+                            "categories": [
+                                {
+                                    "id": int(self._inferences[index]),
+                                    "name": str(self._inferences[index]),
+                                    "supercategory": "none",
+                                }
+                            ]
+                        }
+                    ),
                     "embeddingData": json.dumps(self._embeddings[index]),
                     "resourceUri": self._resource_uris[index],
                 }

@@ -101,6 +101,10 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
                 <Td width="20%" p={0} pl={0} fontSize="xs">Category</Td>
                 <Td p={0} fontSize="xs">{datapoint.label.data.categories[0].name}</Td>
               </Tr>
+              <Tr key={"category"}>
+                <Td width="20%" p={0} pl={0} fontSize="xs">Inference</Td>
+                <Td p={0} fontSize="xs">{datapoint.inference?.data.categories[0].name}</Td>
+              </Tr>
               <Tr key={"dataset"}>
                 <Td width="20%" p={0} pl={0} fontSize="xs">Dataset</Td>
                 <Td p={0} fontSize="xs">{datapoint.dataset.name}</Td>

@@ -83,6 +83,8 @@ const DataViewer = () => {
     }
   }, [datapoints, projections])
 
+  console.log('datapoints', datapoints)
+
   // reapply filters
   useEffect(() => {
     if (filters === undefined) return

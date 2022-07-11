@@ -22,12 +22,13 @@ export const getMostRecentCreatedAt = function (data: any) {
 export const jsonifyDatapoints = function (datapoints: any) {
   datapoints.map((datapoint: any) => {
     // Metadata may not be present 
-    if(datapoint.metadata_) {
-      datapoint.metadata_= JSON.parse(datapoint.metadata_)
+    if (datapoint.metadata_) {
+      datapoint.metadata_ = JSON.parse(datapoint.metadata_)
     } else {
       datapoint.metadata_ = ""
     }
     datapoint.label.data = JSON.parse(datapoint.label.data)
+    datapoint.inference.data = JSON.parse(datapoint.inference.data)
 
     // add other state we will want to track
     datapoint.visible = true
