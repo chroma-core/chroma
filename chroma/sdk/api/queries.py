@@ -155,7 +155,7 @@ dataset_query = gql(
             name
             createdAt
             updatedAt
-            project {
+            embeddingSets {
                 id
             }
         }
@@ -241,6 +241,10 @@ datapoint_query = gql(
                 id
                 data
             }
+            inference {
+                id
+                data
+            }
             tags {
                 id
                 name
@@ -268,6 +272,10 @@ datapoints_query = gql(
                 id
                 data
             }
+            inference {
+                id 
+                data
+            }
             resource {
                 id
                 uri
@@ -288,6 +296,7 @@ inference_query = gql(
             id
             createdAt
             updatedAt
+            data
         }
     }
     """
@@ -299,6 +308,7 @@ inferences_query = gql(
             id
             createdAt
             updatedAt
+            data
         }
     }
     """
@@ -384,7 +394,7 @@ embeddingsByPage_query = gql(
 # embedding set
 embedding_set_query = gql(
     """
-    query projectionQuery($id: ID!) {
+    query ebeddingSetQuery($id: ID!) {
         embeddingSet(id: $id) {
             id
             createdAt
@@ -395,7 +405,7 @@ embedding_set_query = gql(
 )
 embedding_sets_query = gql(
     """
-    query projectionsQuery {
+    query ebeddingSetsQuery {
         embeddingSets {
             id
             createdAt
