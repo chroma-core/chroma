@@ -167,7 +167,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   const resizeListener = () => {
     var canvas = document.getElementById("regl-canvas")
     var container = document.getElementById("regl-canvas-container")
-    console.log('resizeListener container?.clientWidth: ', container?.clientWidth)
     canvas!.style.width = container?.clientWidth + "px"
     canvas!.style.height = container?.clientHeight + "px"
   };

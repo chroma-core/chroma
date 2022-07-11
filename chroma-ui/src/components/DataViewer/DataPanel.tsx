@@ -59,7 +59,7 @@ interface Hash<T> {
   [key: string]: T;
 }
 
-interface DataPanelRowProps {
+interface DataPanelGridProps {
   datapoint: any
   index: number
   totalLength: number
@@ -71,7 +71,7 @@ const ImageBytesQuery = `
   }
 `;
 
-const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
+const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   if (datapoint === undefined) return <></> // this is the case of not having a "full" row. the grid will still query for the item, but it does not exist
 
   const [result, reexecuteQuery] = useQuery({
@@ -114,8 +114,8 @@ const DataPanelRow: React.FC<DataPanelRowProps> = ({ datapoint }) => {
   )
 }
 
-const DataPanelModal: React.FC<DataPanelRowProps> = ({ datapoint, setData, datapoints }) => {
-  if (datapoint === undefined) return <></> // this is the case of not having a "full" row. the grid will still query for the item, but it does not exist
+const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, datapoints }) => {
+  if (datapoint === undefined) return <></> // handle this case though we dont expect to run into it
 
   const [result, reexecuteQuery] = useQuery({
     query: ImageBytesQuery,
@@ -183,7 +183,7 @@ const Cell = ({ columnIndex, rowIndex, style, data }) => {
   let index = (rowIndex * colsPerRow) + columnIndex
   return (
     <div style={style}>
-      <DataPanelRow datapoint={data[index]}/>
+      <DataPanelGrid datapoint={data[index]}/>
     </div>
   )
 };
