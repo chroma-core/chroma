@@ -52,6 +52,9 @@ run-dev:
 run:
 	python scripts/run_all.py
 
+preload-data:
+	cd scripts && python fetch-large-data.py
+
 # removes db and loads back up the schema -- equivalent to rails db:reset
 reset-db:
 	cd chroma/app && rm chroma.db && python models.py && cd ../..
