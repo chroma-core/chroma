@@ -46,6 +46,9 @@ run_app:
 run_frontend: 
 	python scripts/run_frontend.py
 
+run-dev:
+	python scripts/run_dev.py
+
 run:
 	python scripts/run_all.py
 
