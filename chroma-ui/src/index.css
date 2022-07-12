@@ -34,9 +34,11 @@ body {
 }
 
 .crosshair-plus-cursor {
-  cursor: url('../public/crosshair-plus.svg'), auto;
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-plus.svg') 8 7, auto;
 }
 
 .crosshair-minus-cursor {
-  cursor: url('../public/crosshair-minus.svg'), auto;
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-minus.svg') 8 7, auto;
 }
