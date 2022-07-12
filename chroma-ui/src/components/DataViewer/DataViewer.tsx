@@ -104,14 +104,14 @@ const DataViewer = () => {
   }
 
   function handleKeyDown(event: any) {
-    if (event.keyCode === 16) { // SHIFT
+    if ([91, 93, 16].includes(event.keyCode)) { // 16: SHIFT, 91/93: COMMAND left and right
       setToolSelected('lasso')
       setToolWhenShiftPressed(toolSelected)
     }
   }
 
   function handleKeyUp(event: any) {
-    if (event.keyCode === 16) { // SHIFT
+    if ([91, 93, 16].includes(event.keyCode)) { // 16: SHIFT, 91/93: COMMAND left and right
       if (toolWhenShiftPressed !== 'lasso') {
         setToolSelected(toolWhenShiftPressed)
         setToolWhenShiftPressed('')

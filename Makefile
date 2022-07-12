@@ -40,10 +40,10 @@ pytest:
 	pytest
 
 # convenience
-run_app:
+run-app:
 	python scripts/run_app.py
 
-run_frontend: 
+run-frontend: 
 	python scripts/run_frontend.py
 
 run:
@@ -52,3 +52,7 @@ run:
 # removes db and loads back up the schema -- equivalent to rails db:reset
 reset-db:
 	cd chroma/app && rm chroma.db && python models.py && cd ../..
+
+load-examples:
+	cd examples/mnist_embeddings && python main_embeddings.py --input-model mnist_cnn.pt && cd ../..
+
