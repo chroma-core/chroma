@@ -107,6 +107,8 @@ const DataViewer = () => {
     if ([91, 93, 16].includes(event.keyCode)) { // 16: SHIFT, 91/93: COMMAND left and right
       setToolSelected('lasso')
       setToolWhenShiftPressed(toolSelected)
+      if (event.keyCode == 16) setCursor('crosshair-plus-cursor')
+      if ([91, 93].includes(event.keyCode)) setCursor('crosshair-minus-cursor')
     }
   }
 
@@ -115,6 +117,7 @@ const DataViewer = () => {
       if (toolWhenShiftPressed !== 'lasso') {
         setToolSelected(toolWhenShiftPressed)
         setToolWhenShiftPressed('')
+        setCursor('select-cursor')
       }
     }
   }

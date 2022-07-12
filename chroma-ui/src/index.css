@@ -32,3 +32,11 @@ body {
 .select-cursor {
   cursor: url('../public/cursor-outline.svg'), auto;
 }
+
+.crosshair-plus-cursor {
+  cursor: url('../public/crosshair-plus.svg'), auto;
+}
+
+.crosshair-minus-cursor {
+  cursor: url('../public/crosshair-minus.svg'), auto;
+}
