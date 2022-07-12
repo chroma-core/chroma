@@ -28,7 +28,7 @@ def download(url: str, dest_folder: str, filename: str):
         print("Download failed: status code {}\n{}".format(r.status_code, r.text))
 
 # get pre-trained model
-download("https://chroma-data.sfo3.digitaloceanspaces.com/mnist_cnn-" + config['MODEL_FILE_VERSION'] + ".pt", dest_folder="../examples/mnist_embeddings", filename='mnist_cnn.pt')
+download("https://chroma-datastore.sfo3.digitaloceanspaces.com/mnist_cnn-" + config['MODEL_FILE_VERSION'] + ".pt", dest_folder="../examples/mnist_embeddings", filename='mnist_cnn.pt')
 
 # get pre-filled db
-download("https://chroma-data.sfo3.digitaloceanspaces.com/chroma-" + config['DB_FILE_VERSION'] + ".db", dest_folder="../chroma/app", filename='chroma.db')
+download("https://chroma-datastore.sfo3.digitaloceanspaces.com/chroma-" + config['DB_FILE_VERSION'] + ".db", dest_folder="../chroma/app", filename='chroma.db')

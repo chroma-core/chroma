@@ -12,6 +12,17 @@ Chroma is under active development to become the analytical engine for your prod
 
 [View an example using MNIST](./examples/mnist_embeddings/README.md)
 
+### Try it out
+
+```
+python3 -m venv chroma_env
+source chroma_env/bin/activate
+brew install redis
+pip install -e .
+make preload-data
+make run
+```
+
 ### License
 Chroma is licensed under Apache 2.0.
 
