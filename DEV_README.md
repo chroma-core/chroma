@@ -31,6 +31,9 @@ You will need
 git clone git@github.com:chroma-core/chroma.git
 cd chroma
 
+# make sure you have redis installed
+brew install redis # on mac
+
 # install python deps and js deps
 make install
 
@@ -42,8 +45,8 @@ chroma application run
 
 # then you may want to set up background jobs running via celery
 
-# run rabbitmq
-docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3
+# run redis
+redis-server
 
 # run celery from within the app folder
 celery -A tasks.celery worker --loglevel=info
@@ -288,7 +291,7 @@ Say you want to add a new field... like adding metadata to inference. You want t
 
 # Running background jobs with celery
 
-1. `docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3` will run the rabbitmq service that sends messages from the fastapi app to the celery tasks.
+1. `redis-server` will run the redis service that sends messages from the fastapi app to the celery tasks.
 2. `celery -A tasks.celery worker --loglevel=info` runs the celery service for processing offline jobs.
 3. Now commands can take a `.delay` to move them to a background queue.
 

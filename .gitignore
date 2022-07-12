@@ -35,3 +35,5 @@ examples/data/
 .vscode/
 
 chroma/app/static/*
+
+dump.rdb

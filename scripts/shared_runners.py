@@ -15,20 +15,19 @@ def app_subcommand(base_dir, multicommand):
     )
     return subcommand
 
-# def rabbit_subcommand(base_dir, multicommand):
-#     app_env = os.environ.copy()
-#     app_directory = "/".join((base_dir, "chroma/app"))
+def redis_subcommand(base_dir, multicommand):
+    app_env = os.environ.copy()
+    app_directory = "/".join((base_dir, "chroma/app"))
 
-#     subcommand = SubCommand(
-#         multicommand,
-#         name="RabbitMQ",
-#         command=["docker run -it -d rabbitmq:3"],
-#         # command=["docker run -d --name some-rabbit -p 4369:4369 -p 5671:5671 -p 5672:5672 -p 15672:15672 rabbitmq:3"],
-#         env=app_env,
-#         cwd=app_directory,
-#         ready_string="Application startup complete",
-#     )
-#     return subcommand
+    subcommand = SubCommand(
+        multicommand,
+        name="Redis",
+        command=["redis-server"],
+        env=app_env,
+        cwd=app_directory,
+        ready_string="Ready to accept connections",
+    )
+    return subcommand
 
 def celery_subcommand(base_dir, multicommand):
     app_env = os.environ.copy()
@@ -40,7 +39,7 @@ def celery_subcommand(base_dir, multicommand):
         command=["celery -A tasks.celery worker --loglevel=info"],
         env=app_env,
         cwd=app_directory,
-        ready_string="Connected to amqp://guest:**@127.0.0.1:5672//",
+        ready_string="Connected to redis://127.0.0.1:6379/0",
     )
     return subcommand
 
