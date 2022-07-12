@@ -1,5 +1,6 @@
 from curses.ascii import EM
 from re import A, L
+from tkinter import E
 from h11 import Data
 from numpy import Inf
 import strawberry
@@ -55,7 +56,7 @@ class Dataset:
     name: Optional[str]
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    # project: Optional[Project] = None
+    project_id: Optional[int]
 
     # belongs_to project
     @strawberry.field
@@ -90,8 +91,8 @@ class Dataset:
             name=model.name if model.name else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
-        )
-
+            project_id=model.project_id
+        )   
 
 @strawberry.type
 class Slice:
@@ -124,8 +125,9 @@ class Datapoint:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     metadata_: Optional[str]
+    resource_id: Optional[int]
     dataset: Optional[Dataset] = None
-
+    
     # has_many embeddings
     @strawberry.field
     async def embeddings(self, info: Info) -> list["Embedding"]:
@@ -155,7 +157,7 @@ class Datapoint:
         inferences = await info.context["inference_by_datapoint"].load(self.id)
         return Inference.marshal(inferences[0])
 
-    # belongs_to embedding_set
+    # belongs_to resource
     @strawberry.field
     async def resource(self, info: Info) -> "Resource":
         async with models.get_session() as s:
@@ -172,6 +174,7 @@ class Datapoint:
             created_at=model.created_at,
             updated_at=model.updated_at,
             metadata_=json.loads(metadata),
+            resource_id=model.resource_id
         )
 
 
@@ -422,6 +425,7 @@ class ProjectionSet:
     id: strawberry.ID
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    project_id: Optional[int]
     embedding_set: Optional[EmbeddingSet] = None  # belongs_to embedding_set
 
     # has_many projections
@@ -452,6 +456,7 @@ class ProjectionSet:
             id=strawberry.ID(str(model.id)),
             created_at=model.created_at,
             updated_at=model.updated_at,
+            project_id=model.project_id
         )
 
 
@@ -464,8 +469,8 @@ class Embedding:
     input_identifier: Optional[str]
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    embedding_set: Optional[EmbeddingSet] = None  # belongs_to embedding_set
-    datapoint: Optional[Datapoint] = None  # belongs_to projection_set
+    embedding_set_id: Optional[int]
+    datapoint_id: Optional[int] 
 
     # has_many projections
     @strawberry.field
@@ -499,6 +504,8 @@ class Embedding:
             input_identifier=model.input_identifier,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            datapoint_id=model.datapoint_id,
+            embedding_set_id=model.embedding_set_id
         )
 
 
@@ -509,8 +516,8 @@ class Projection:
     y: float
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    embedding: Optional[Embedding] = None  # belongs_to embedding
-    projection_set: Optional[ProjectionSet] = None  # belongs_to projection_set
+    embedding_id: Optional[int]
+    projection_set_id: Optional[int] 
 
     # belongs_to projection_set
     @strawberry.field
@@ -538,6 +545,8 @@ class Projection:
             y=model.y,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            projection_set_id=model.projection_set_id,
+            embedding_id=model.embedding_id
         )
 
 
