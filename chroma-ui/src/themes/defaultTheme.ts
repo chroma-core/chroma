@@ -65,7 +65,6 @@ const defaultTheme = extendTheme({
       },
     },
     Tag: {
-
       variants: {
         darkMode: {
           container: {

@@ -74,6 +74,9 @@ const ImageBytesQuery = `
 const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   if (datapoint === undefined) return <></> // this is the case of not having a "full" row. the grid will still query for the item, but it does not exist
 
+  const theme = useTheme()
+  const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
   const [result, reexecuteQuery] = useQuery({
     query: ImageBytesQuery,
     variables: { "identifer": datapoint.resource.uri },
@@ -99,7 +102,7 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
             <img width="100px" src={'data:image/jpeg;base64,' + data.mnistImage} />
           }
         </Flex>
-        <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} bgColor="#fafafa" ml="5px" mr="5px">
+        <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">
           <Flex alignItems="center" >
             <BsTag color='#666' />
             <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.tags.length}</Text>
@@ -121,6 +124,9 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
 const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, datapoints }) => {
   if (datapoint === undefined) return <></> // handle this case though we dont expect to run into it
 
+  const theme = useTheme()
+  const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
   const [result, reexecuteQuery] = useQuery({
     query: ImageBytesQuery,
     variables: { "identifer": datapoint.resource.uri },
@@ -136,7 +142,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, data
       flexGrow={1}
     >
       <ChakraGrid templateColumns='repeat(3, 1fr)' gap={6} height="100%" py={3}>
-        <GridItem colSpan={2} rowSpan={8} bgColor="#fafafa">
+        <GridItem colSpan={2} rowSpan={8} bgColor={bgColor}>
           <Center>
             {(data === undefined) ?
               <Skeleton width={200} height={200} />
