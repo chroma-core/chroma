@@ -30,9 +30,8 @@ export const jsonifyDatapoints = function (datapoints: any) {
     }
     datapoint.label.data = JSON.parse(datapoint.label.data)
 
-    if (datapoint.inference) {
-      datapoint.inference.data = JSON.parse(datapoint.inference?.data)
-    }
+    // all datapoints should have inference
+    datapoint.inference.data = JSON.parse(datapoint.inference?.data)
 
     // add other state we will want to track
     datapoint.visible = true
