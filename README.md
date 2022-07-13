@@ -14,6 +14,8 @@ Chroma is under active development to become the analytical engine for your prod
 
 ### Try it out
 
+Chroma requires Python 3.9 and redis installed. 
+
 ```
 python3 -m venv chroma_env
 source chroma_env/bin/activate
