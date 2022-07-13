@@ -74,7 +74,6 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   return (
     <Button
       key={keyName}
-      width="100%"
       onClick={showHideFn}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
