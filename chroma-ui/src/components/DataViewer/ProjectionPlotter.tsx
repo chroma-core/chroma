@@ -71,7 +71,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   let [points, setPoints] = useState<any>(undefined)
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
-  let [colorByFilterString, setColorByFilterString] = useState('Labels')
+  let [colorByFilterString, setColorByFilterString] = useState('Inferences')
   let [colorByOptions, setColorByOptions] = useState([])
   const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
   const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({

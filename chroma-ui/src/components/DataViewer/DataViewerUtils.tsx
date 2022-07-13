@@ -42,6 +42,36 @@ export const jsonifyDatapoints = function (datapoints: any) {
 
 let FILTERS = [
   {
+    name: 'Inferences',
+    type: 'discrete',
+    fetchFn: function (datapoint) {
+      return datapoint.inference.data.categories.map(category => category.name)
+    },
+    removeDupes(filterOptions) {
+      return filterOptions.filter((v, i, a) => a.findIndex(v2 => (v2.name === v.name)) === i)
+    },
+    defaultSort(filterOptions) {
+      return filterOptions.sort(function (a, b) { return a.name - b.name; });
+    },
+    optionsSet: [],
+    filterBy: function (evalFields, optionsSet) {
+      let visible = true;
+      evalFields.map(evalField => {
+        visible = ((visible == true) ? optionsSet.find(o => o.name === evalField).visible : visible) // if visible is true, potentially set it to false, else keep it false
+      })
+      return visible
+    },
+    colorBy: function () { },
+    generateColors: function (numColors) {
+      return distinctColors({
+        "count": numColors, //filter.optionsSet.length,
+        "lightMin": 20,
+        "lightMax": 80,
+        "chromaMin": 80
+      }).map(color => color.hex())
+    }
+  },
+  {
     name: 'Labels',
     type: 'discrete',
     fetchFn: function (datapoint) {

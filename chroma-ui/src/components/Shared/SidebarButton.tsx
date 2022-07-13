@@ -6,6 +6,7 @@ import { useState } from "react";
 import { IconType } from "react-icons";
 import { TbLasso } from 'react-icons/tb';
 import { GiSelect } from 'react-icons/gi'
+import { MdOutlineKeyboardArrowDown, MdOutlineKeyboardArrowRight } from 'react-icons/md'
 
 const IconMap: any = {
   circle: BsCircleFill,
@@ -14,7 +15,9 @@ const IconMap: any = {
   square_outline: BsSquare,
   show: AiOutlineEye,
   hide: AiOutlineEyeInvisible,
-  select: GiSelect
+  select: GiSelect,
+  open: MdOutlineKeyboardArrowDown,
+  closed: MdOutlineKeyboardArrowRight
 }
 
 interface SidebarButtonProps {
@@ -27,9 +30,10 @@ interface SidebarButtonProps {
   visible: boolean,
   classTitle: string
   keyName: string
+  isExpanded?: boolean
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle, isExpanded }) => {
   var icon: string = (visible === true) ? 'show' : 'hide'
   var iconOpp: string = (visible === true) ? 'hide' : 'show'
   var opacity: string = (visible === true) ? "100%" : "20%"
@@ -43,12 +47,14 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   }
 
   function showHideFn(event: any) {
-    event.stopPropagation()
-    if (showHide)
+    if (showHide) {
+      event.stopPropagation() // only stop propagation if event is defined
       showHide({
         text: text,
         classTitle: classTitle,
       })
+    }
+
   }
   function selectByFn(event: any) {
     event.stopPropagation()
@@ -66,6 +72,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
   return (
     <Button
       key={keyName}
+      width="100%"
       onClick={showHideFn}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -75,15 +82,24 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
           <Icon h={3} as={IconMap[symbol] as any} color={color} mr={2} />
           {text}
         </Box>
-        <Flex>
-          <Icon
-            _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
-            _active={{ backgroundColor: "rgba(0,0,0,0)" }}
-            onClick={selectByFn}
-            height="100%"
-            opacity={eyeButtonOpacity}
-            variant="ghost" aria-label='ShowHide' as={IconMap.select as any} />
-        </Flex>
+        {(selectBy !== undefined) ?
+          <Flex>
+            <Icon
+              _hover={{ backgroundColor: "rgba(0,0,0,0)" }}
+              _active={{ backgroundColor: "rgba(0,0,0,0)" }}
+              onClick={selectByFn}
+              height="100%"
+              opacity={eyeButtonOpacity}
+              variant="ghost" aria-label='ShowHide' as={IconMap.select as any} />
+          </Flex>
+          : null}
+        {(isExpanded !== undefined) ?
+          <Flex>
+            <Icon
+              height="100%"
+              variant="ghost" as={(isExpanded ? IconMap.open : IconMap.closed) as any} />
+          </Flex>
+          : null}
       </Flex>
     </Button>
   )
