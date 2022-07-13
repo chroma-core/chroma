@@ -95,7 +95,7 @@ function ShortcutsDrawer() {
                                         <Grid templateColumns='repeat(3, 1fr)' gap={12}>
                                             <GridItem>
                                                 <Flex justifyContent="space-between" mb={3}>
-                                                    <Flex alignItems="center"><Icon h={3} as={BsCursorFill} mr={2} />Move</Flex>
+                                                    <Flex alignItems="center"><Icon h={3} as={BsCursorFill} mr={2} />Select</Flex>
                                                     <Text><Tag variant="darkMode">V</Tag></Text>
                                                 </Flex>
                                                 <Flex justifyContent="space-between" mb={3}>

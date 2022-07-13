@@ -23,12 +23,15 @@ export const getMostRecentCreatedAt = function (data: any) {
 export const jsonifyDatapoints = function (datapoints: any) {
   datapoints.map((datapoint: any) => {
     // Metadata may not be present 
-    if(datapoint.metadata_) {
-      datapoint.metadata_= JSON.parse(datapoint.metadata_)
+    if (datapoint.metadata_) {
+      datapoint.metadata_ = JSON.parse(datapoint.metadata_)
     } else {
       datapoint.metadata_ = ""
     }
     datapoint.label.data = JSON.parse(datapoint.label.data)
+
+    // all datapoints should have inference
+    datapoint.inference.data = JSON.parse(datapoint.inference?.data)
 
     // add other state we will want to track
     datapoint.visible = true
@@ -38,7 +41,7 @@ export const jsonifyDatapoints = function (datapoints: any) {
 
 let FILTERS = [
   {
-    name: 'Classes',
+    name: 'Labels',
     type: 'discrete',
     fetchFn: function (datapoint) {
       return datapoint.label.data.categories.map(category => category.name)
@@ -58,6 +61,14 @@ let FILTERS = [
       return visible
     },
     colorBy: function () { },
+    generateColors: function (numColors) {
+      return distinctColors({
+        "count": numColors, //filter.optionsSet.length,
+        "lightMin": 20,
+        "lightMax": 80,
+        "chromaMin": 80
+      }).map(color => color.hex())
+    }
   },
   {
     name: 'Quality',
@@ -110,6 +121,14 @@ let FILTERS = [
       return visible
     },
     colorBy: function () { },
+    generateColors: function (numColors) {
+      return distinctColors({
+        "count": numColors, //filter.optionsSet.length,
+        "lightMin": 20,
+        "lightMax": 80,
+        "chromaMin": 80
+      }).map(color => color.hex())
+    }
   },
   {
     name: 'Datasets',
@@ -135,12 +154,61 @@ let FILTERS = [
       return visible
     },
     colorBy: function () { },
+    generateColors: function (numColors) {
+      return distinctColors({
+        "count": numColors, //filter.optionsSet.length,
+        "lightMin": 20,
+        "lightMax": 80,
+        "chromaMin": 80
+      }).map(color => color.hex())
+    }
+  },
+  {
+    name: 'Label/Inference Match',
+    type: 'discrete',
+    fetchFn: function (datapoint) {
+      return [datapoint.labelInferenceMatch]
+    },
+    removeDupes(filterOptions) {
+      return filterOptions.filter((v, i, a) => a.findIndex(v2 => (v2.name === v.name)) === i)
+    },
+    defaultSort(filterOptions) {
+      return filterOptions.sort(function (a, b) { return a.name - b.name; });
+    },
+    optionsSet: [],
+    filterBy: function (evalFields, optionsSet) {
+      let visible;
+      evalFields.map(evalField => {
+        if (visible !== false) {
+          var filterVisible = optionsSet.find(o => o.name === evalField).visible
+          visible = filterVisible
+        }
+      })
+      return visible
+    },
+    colorBy: function () { },
+    generateColors: function (numColors) {
+      return ["#27ce47", "#ce2731", "#999999"]
+    }
   },
 ]
 
 export const buildFilters = (datapoints: any) => {
   // get all available options for the various properties
   datapoints.map((datapoint: any) => {
+
+    // preprocess, mainly to add fields we don't already have
+    // hard-coded for now, in the future filters could publish to this
+    const labelClass = datapoint.label?.data.categories[0].name
+    const inferenceClass = datapoint.inference?.data.categories[0].name
+    if (labelClass && inferenceClass && (labelClass === inferenceClass)) {
+      datapoint.labelInferenceMatch = 'Agree'
+    } else if (labelClass && inferenceClass && (labelClass !== inferenceClass)) {
+      datapoint.labelInferenceMatch = 'Disagree'
+    } else {
+      datapoint.labelInferenceMatch = 'Not enough data'
+    }
+
     FILTERS.map(filter => {
       const newOptions = filter.fetchFn(datapoint)
 
@@ -171,14 +239,9 @@ export const buildFilters = (datapoints: any) => {
   // add color options
   FILTERS.map(filter => {
     if (filter.type == 'discrete') {
-      let colorsOpts = distinctColors({
-        "count": filter.optionsSet.length,
-        "lightMin": 20,
-        "lightMax": 80,
-        "chromaMin": 80
-      })
+      let colorsOpts = filter.generateColors(filter.optionsSet.length)
       filter.optionsSet.map((option, index) => {
-        option.color = colorsOpts[index].hex()
+        option.color = colorsOpts[index]
       })
     }
     if (filter.type == 'continuous') {

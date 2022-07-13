@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
 import { Datapoint } from './DataViewTypes'
+import useResizeObserver from "use-resize-observer";
 
 interface ProjectionPlotterProps {
   datapoints?: Datapoint[]
@@ -70,9 +71,17 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   let [points, setPoints] = useState<any>(undefined)
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
-  let [colorByFilterString, setColorByFilterString] = useState('Classes')
+  let [colorByFilterString, setColorByFilterString] = useState('Labels')
   let [colorByOptions, setColorByOptions] = useState([])
   const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
+  const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
+    onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
+      if (config.scatterplot !== undefined) {
+        config.scatterplot.resizeHandler()
+        resizeListener()
+      }
+    }
+  })
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   useEffect(() => {
@@ -155,27 +164,29 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     setPoints(points)
   }
 
+  const resizeListener = () => {
+    var canvas = document.getElementById("regl-canvas")
+    var container = document.getElementById("regl-canvas-container")
+    canvas!.style.width = container?.clientWidth + "px"
+    canvas!.style.height = container?.clientHeight + "px"
+  };
+
+  // resize our scatterplot on window resize
   useEffect(() => {
-    const resizeListener = () => {
-      var canvas = document.getElementById("regl-canvas")
-      var container = document.getElementById("regl-canvas-container")
-      canvas!.style.width = container?.clientWidth + "px"
-      canvas!.style.height = container?.clientHeight + "px"
-    };
     window.addEventListener('resize', resizeListener);
     return () => {
       window.removeEventListener('resize', resizeListener);
     }
   }, [])
 
-  function getRef(ref: any) {
-    if (!ref) return;
+  function getRef(canvasRef: any) {
+    if (!canvasRef) return;
     if (!reglInitialized && (points !== null)) {
       scatterplot(points,
         colorByOptions,
         {
           pixelRatio: Math.min(1.5, window.devicePixelRatio),
-          canvas: ref,
+          canvas: canvasRef,
           deselectHandler: deselectHandler,
           selectHandler: selectHandler,
           target: target,
@@ -207,7 +218,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
   return (
-    <Box flex='1' cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
+    <Box flex='1' ref={ref} cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
       {(filters !== undefined) ?
         <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
           {validFilters.map((filterb: any) => {
@@ -233,4 +244,4 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   )
 }
 
-export default React.memo(ProjectionPlotter)
+export default ProjectionPlotter

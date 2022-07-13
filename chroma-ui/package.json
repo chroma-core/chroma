@@ -30,7 +30,9 @@
     "framer-motion": "^6",
     "graphql": "^16.5.0",
     "pub-sub-es": "^2.0.1",
+    "re-resizable": "^6.9.9",
     "react": "^18.1.0",
+    "react-custom-scrollbars": "^4.2.1",
     "react-dom": "^18.1.0",
     "react-focus-lock": "^2.9.1",
     "react-helmet-async": "^1.3.0",
@@ -44,6 +46,7 @@
     "subscriptions-transport-ws": "^0.11.0",
     "typescript": "^4.4.2",
     "urql": "^2.2.2",
+    "use-resize-observer": "^9.0.2",
     "web-vitals": "^2.1.0"
   },
   "devDependencies": {
