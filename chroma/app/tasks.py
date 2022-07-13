@@ -13,7 +13,7 @@ from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
 
 # Initialize celery
-celery = Celery('tasks', broker='amqp://guest:guest@127.0.0.1:5672//')
+celery = Celery('tasks', broker="redis://127.0.0.1:6379/0")
 
 # Create logger - enable to display messages on task logger
 celery_log = get_task_logger(__name__)

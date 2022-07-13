@@ -2,6 +2,7 @@ import {
   Input,
   InputGroup,
   InputLeftElement,
+  useColorModeValue,
   useTheme
 } from '@chakra-ui/react'
 import React, { useState } from 'react'
@@ -17,6 +18,7 @@ interface TagFormProps {
 
 const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, setDatapointsAndRebuildFilters }) => {
   const theme = useTheme()
+  const textColor = useColorModeValue(theme.colors.ch_gray.dark, theme.colors.ch_gray.light)
   const noneSelected = selectedDatapointsIds.length === 0
 
   // state for the inputs
@@ -94,7 +96,6 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
           tags.splice(indexOf, 1)
         }
       })
-
       datapoints[point].tags = tags
     })
 
@@ -132,6 +133,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
             value={newTag}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
+            _placeholder={{ opacity: 1, color: textColor }}
             placeholder='Tag selected' />
         </InputGroup>
       </form>
@@ -153,6 +155,7 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
             isDisabled={noneSelected}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
+            _placeholder={{ opacity: 1, color: textColor }}
             placeholder='Untag selected' />
         </InputGroup>
       </form>

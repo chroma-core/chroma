@@ -73,6 +73,9 @@ create_or_get_project_mutation = gql(
         createOrGetProject(project: $project) {
             id
             name
+            datasets {
+                id
+            }
         }
     }
     """
@@ -110,6 +113,10 @@ create_datapoint_set_mutation = gql(
                 id
                 data
             }
+            inference {
+                id
+                data
+            }
             resource {
                 id
                 uri
@@ -138,6 +145,10 @@ create_datapoint_embedding_set_mutation = gql(
         createDatapointEmbeddingSet(data: $data) {
             id
             label {
+                id
+                data
+            }
+            inference {
                 id
                 data
             }
@@ -366,8 +377,6 @@ delete_tag_mutation = gql(
 #     }
 #     """
 # )
-
-
 
 
 # model architecture mutations
@@ -718,6 +727,9 @@ create_datapoint_mutation = gql(
                 label {
                     id
                 }
+                inference {
+                    id
+                }
                 dataset {
                     id
                 }
@@ -744,6 +756,9 @@ update_datapoint_mutation = gql(
                 id
             }
             label {
+                id
+            }
+            inference {
                 id
             }
             dataset {

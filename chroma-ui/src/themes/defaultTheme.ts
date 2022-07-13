@@ -31,9 +31,28 @@ const defaultTheme = extendTheme({
         },
       },
     },
+    Accordion: {
+      baseStyle: {
+        _focus: {
+          boxShadow: 'none',
+        },
+      },
+    },
     Modal: {
       baseStyle: {
         borderRadius: 'sm',
+      },
+      variants: {
+        datapoint: {
+          dialog: {
+            position: 'absolute',
+            left: "0px",
+            top: "0%",
+            margin: "30px",
+            bottom: "0px",
+            width: "60%"
+          },
+        },
       },
     },
     Drawer: {
@@ -53,7 +72,6 @@ const defaultTheme = extendTheme({
       },
     },
     Tag: {
-
       variants: {
         darkMode: {
           container: {
