@@ -96,6 +96,13 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
               <Skeleton height='25px' style={{ marginLeft: '30px' }} />
             </Stack>
             : filters.map(function (filter, index) {
+              let filtersActive = 0
+              if (filter.type == 'discrete') {
+                filtersActive = filter.optionsSet.filter((o: any) => !o.visible).length
+              } else if (filter.type == 'continuous') {
+                filtersActive = 0
+              }
+
               return (
                 <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)">
                   {({ isExpanded }) => (
@@ -111,6 +118,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
                           keyName={filter.name}
                           key={filter.name}
                           isExpanded={isExpanded}
+                          filtersActive={filtersActive}
                         ></SidebarButton>
                       </AccordionButton>
                       <AccordionPanel p={0} m={0}>

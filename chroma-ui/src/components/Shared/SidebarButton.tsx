@@ -1,5 +1,5 @@
 import * as CSS from 'csstype'
-import { Flex, Button, useTheme, Icon, Box, IconButton } from '@chakra-ui/react'
+import { Flex, Button, useTheme, Icon, Box, IconButton, filter, Tag } from '@chakra-ui/react'
 import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
 import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
@@ -31,9 +31,11 @@ interface SidebarButtonProps {
   classTitle: string
   keyName: string
   isExpanded?: boolean
+  filtersActive?: number
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle, isExpanded }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle, isExpanded, filtersActive }) => {
+  const theme = useTheme();
   var icon: string = (visible === true) ? 'show' : 'hide'
   var iconOpp: string = (visible === true) ? 'hide' : 'show'
   var opacity: string = (visible === true) ? "100%" : "20%"
@@ -77,10 +79,18 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       justifyContent="flex-start" variant='ghost' size='sm' ml={indent}>
-      <Flex justify="space-between" wrap="wrap" width="100%">
+      <Flex justify="space-between" wrap="wrap" width="100%" alignItems="center">
         <Box opacity={opacity}>
           <Icon h={3} as={IconMap[symbol] as any} color={color} mr={2} />
           {text}
+          {(filtersActive! > 0) ?
+            <Icon
+              height="7px"
+              mb="6px"
+              ml="2px"
+              color={theme.colors.ch_blue}
+              variant="ghost" as={IconMap.circle as any} />
+            : null}
         </Box>
         {(selectBy !== undefined) ?
           <Flex>
@@ -93,10 +103,12 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
               variant="ghost" aria-label='ShowHide' as={IconMap.select as any} />
           </Flex>
           : null}
+
         {(isExpanded !== undefined) ?
           <Flex>
+
             <Icon
-              height="100%"
+              height="24px"
               variant="ghost" as={(isExpanded ? IconMap.open : IconMap.closed) as any} />
           </Flex>
           : null}
