@@ -30,6 +30,13 @@ import FilterSidebar from './FilterSidebar';
 import DataPanel from './DataPanel';
 import ProjectionPlotter from './ProjectionPlotter';
 
+const CursorMap: any = {
+  select: "select-cursor",
+  lasso: "crosshair",
+  add: "crosshair-plus-cursor",
+  remove: "crosshair-minus-cursor",
+}
+
 const DataViewer = () => {
   const theme = useTheme()
   let params = useParams();
@@ -48,7 +55,7 @@ const DataViewer = () => {
   const { isOpen, onOpen, onClose } = useDisclosure()
   let [insertedProjections, setInsertedProjections] = useState<boolean>(false);
   let [plottedPoints, setPlottedPoints] = useState<any>();
-  let [cursor, setCursor] = useState('select-cursor');
+  let [cursor, setCursor] = useState(CursorMap.select);
   let [selectedPoints, setSelectedPoints] = useState([]) // callback from regl-scatterplot
   let [unselectedPoints, setUnselectedPoints] = useState([]) // passed down to regl-scatterplot
   let [pointsToSelect, setPointsToSelect] = useState([]) // send down to regl-scatterplot
@@ -104,17 +111,23 @@ const DataViewer = () => {
   }
 
   function handleKeyDown(event: any) {
-    if (event.keyCode === 16) { // SHIFT
+    if ([91, 93, 16].includes(event.keyCode)) { // 16: SHIFT, 91/93: COMMAND left and right
       setToolSelected('lasso')
       setToolWhenShiftPressed(toolSelected)
+      if (event.keyCode == 16) setCursor(CursorMap.add)
+      if ([91, 93].includes(event.keyCode)) setCursor(CursorMap.remove)
     }
   }
 
   function handleKeyUp(event: any) {
-    if (event.keyCode === 16) { // SHIFT
+    if ([91, 93, 16].includes(event.keyCode)) { // 16: SHIFT, 91/93: COMMAND left and right
       if (toolWhenShiftPressed !== 'lasso') {
         setToolSelected(toolWhenShiftPressed)
         setToolWhenShiftPressed('')
+        setCursor(CursorMap.select)
+      }
+      if (toolWhenShiftPressed === 'lasso') {
+        setCursor(CursorMap.lasso)
       }
     }
   }
@@ -122,11 +135,11 @@ const DataViewer = () => {
   // Topbar functions passed down
   function moveClicked() {
     setToolSelected('cursor')
-    setCursor('select-cursor')
+    setCursor(CursorMap.select)
   }
   function lassoClicked() {
     setToolSelected('lasso')
-    setCursor('crosshair')
+    setCursor(CursorMap.lasso)
   }
 
   // Callback functions that are fired by regl-scatterplot

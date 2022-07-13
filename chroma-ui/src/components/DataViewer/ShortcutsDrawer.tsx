@@ -113,7 +113,7 @@ function ShortcutsDrawer() {
                     </Grid>
                   </TabPanel>
                   <TabPanel pt={2}>
-                    <Grid templateColumns='repeat(3, 1fr)' gap={12}>
+                    <Grid templateColumns='repeat(2, 1fr)' gap={12}>
                       <GridItem>
                         <Flex justifyContent="space-between" mb={3}>
                           <Flex alignItems="center"><Icon h={3} as={BsCursorFill} mr={2} />Move</Flex>
@@ -123,9 +123,16 @@ function ShortcutsDrawer() {
                           <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
                           <Text><Tag variant="darkMode">L</Tag></Text>
                         </Flex>
+
+                      </GridItem>
+                      <GridItem>
                         <Flex justifyContent="space-between" mb={3}>
-                          <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Lasso</Flex>
+                          <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Add to selection</Flex>
                           <Text><Tag variant="darkMode">Shift</Tag> + <Tag variant="darkMode">Drag</Tag></Text>
+                        </Flex>
+                        <Flex justifyContent="space-between" mb={3}>
+                          <Flex alignItems="center"><Icon h={3} as={TbLasso} mr={2} />Remove from Selection</Flex>
+                          <Text><Tag variant="darkMode">Command</Tag> + <Tag variant="darkMode">Drag</Tag></Text>
                         </Flex>
                       </GridItem>
                     </Grid>

@@ -37,6 +37,16 @@ body {
   cursor: url('../public/cursor-outline.svg'), auto;
 }
 
+.crosshair-plus-cursor {
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-plus.svg') 8 7, auto;
+}
+
+.crosshair-minus-cursor {
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-minus.svg') 8 7, auto;
+}
+
 /* pointer events should skip this and populate down */
 .chakra-modal__content-container {
   pointer-events: none;
