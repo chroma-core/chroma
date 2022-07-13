@@ -158,7 +158,7 @@ class ChromaSDK:
                             "categories": [
                                 {
                                     "id": int(self._inferences[index]),
-                                    "name": str(self._inferences[index]),
+                                    "name": int(self._inferences[index]),
                                     "supercategory": "none",
                                 }
                             ]
