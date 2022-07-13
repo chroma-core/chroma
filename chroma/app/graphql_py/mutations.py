@@ -8,7 +8,8 @@ import models
 from sqlalchemy.orm import selectinload
 
 from celery.result import AsyncResult
-from tasks import process_embeddings
+from tasks import process_embeddings, compute_class_distances
+from celery import chain, group
 
 from typing import Optional, List, Annotated
 from graphql_py.types import (
@@ -317,9 +318,17 @@ class Mutation:
     #
     # Abstract
     #
+
     @strawberry.mutation
     def run_projector_on_embedding_set(self, embedding_set_id: int) -> Boolean:
         process_embeddings.delay(embedding_set_id)
+        return True
+
+    @strawberry.mutation
+    def compute_class_distances(self, training_dataset_id: int, target_dataset_id: int) -> Boolean:
+        compute_class_distances.delay(
+            training_dataset_id=training_dataset_id, target_dataset_id=target_dataset_id
+        )
         return True
 
     @strawberry.mutation

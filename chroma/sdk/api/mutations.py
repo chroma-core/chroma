@@ -42,6 +42,14 @@ run_projector_on_embedding_set_mutuation = gql(
     """
 )
 
+run_compute_class_distances_mutation = gql(
+    """
+    mutation computeClassDistances($trainingDatasetId: Int!, $targetDatasetId: Int!){
+        computeClassDistances(trainingDatasetId: $trainingDatasetId, targetDatasetId: $targetDatasetId)
+    }
+    """
+)
+
 gql_batch_create_embeddings = gql(
     """
     mutation batchCreateEmbeddings($embeddingsInput: EmbeddingsInput!) {

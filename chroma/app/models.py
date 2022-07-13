@@ -130,7 +130,7 @@ class Datapoint(Base):
     embeddings: list["Embedding"] = relationship(
         "Embedding", lazy="select", back_populates="datapoint"
     )
-    metadata_ = Column("metadata", Integer)
+    metadata_ = Column("metadata", Text)
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
     project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datapoints")
 

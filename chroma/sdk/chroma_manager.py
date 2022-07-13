@@ -1,4 +1,5 @@
 import json
+from math import inf
 import random
 import time
 from typing import Any
@@ -55,6 +56,7 @@ from chroma.sdk.api.mutations import (
     run_projector_on_embedding_set_mutuation,
     append_tag_by_name_to_datapoints_mutation,
     remove_tag_by_name_from_datapoints_mutation,
+    run_compute_class_distances_mutation,
 )
 from chroma.sdk.api.queries import (
     projects_query,
@@ -158,7 +160,7 @@ class ChromaSDK:
                             "categories": [
                                 {
                                     "id": int(self._inferences[index]),
-                                    "name": int(self._inferences[index]),
+                                    "name": str(self._inferences[index]),
                                     "supercategory": "none",
                                 }
                             ]
@@ -179,9 +181,9 @@ class ChromaSDK:
         )
 
         project = nn(self.create_or_get_project(project_name))
-        project_id = int(project.createOrGetProject.id)
+        self._project_id = int(project.createOrGetProject.id)
 
-        dataset = nn(self.create_or_get_dataset(dataset_name, project_id))
+        dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id))
         dataset_id = int(dataset.createOrGetDataset.id)
 
         # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
@@ -195,7 +197,7 @@ class ChromaSDK:
             first_dataset = nn(self.get_dataset(int(first_dataset_id)))
             assert (
                 len(first_dataset.dataset.embeddingSets) != 0
-            ), f"Global embedding set for project {project_id} not present!"
+            ), f"Global embedding set for project {self._project_id} not present!"
             embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
 
         # TODO: create model arch, trained model, layer sets, layer here...
@@ -211,6 +213,19 @@ class ChromaSDK:
         # TODO(anton) Make chroma context exit a programmatic set of post-run tasks
         self._forward_hook.remove()
         self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
+
+        # TODO(anton) We just automatically treat the first (by id) dataset for a project as the 'training' dataset.
+        # This is also really ugly, we should be able to get the right training set by knowing which
+        # model we're getting inferences from.
+        project = nn(self.get_project(id=self._project_id))
+        min_dataset_id = inf
+        for dataset in project.project.datasets:
+            dataset_id = int(dataset["id"])
+            if dataset_id < min_dataset_id:
+                min_dataset_id = dataset_id
+        self.run_compute_class_distance_mutation(
+            trainingDatasetId=min_dataset_id, targetDatasetId=self._data_buffer._dataset_id
+        )
 
     def set_resource_uris(self, uris):
         self._data_buffer.set_data("_resource_uris", uris)
@@ -291,6 +306,11 @@ class ChromaSDK:
         result = self._client.execute(
             run_projector_on_embedding_set_mutuation, variable_values=params
         )
+        return result
+
+    def run_compute_class_distance_mutation(self, trainingDatasetId: int, targetDatasetId: int):
+        params = {"trainingDatasetId": trainingDatasetId, "targetDatasetId": targetDatasetId}
+        result = self._client.execute(run_compute_class_distances_mutation, variable_values=params)
         return result
 
     def remove_tag_from_datapoint_mutation(self, tagId: int, datapointId: int):

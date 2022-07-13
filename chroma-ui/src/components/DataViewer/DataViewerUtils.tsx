@@ -101,10 +101,10 @@ let FILTERS = [
     }
   },
   {
-    name: 'Quality',
+  name: 'Quality',
     type: 'continuous',
     fetchFn: function (datapoint) {
-      return [datapoint.metadata_.quality]
+      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100]
     },
     removeDupes(filterOptions) {
       return filterOptions
@@ -253,8 +253,9 @@ export const buildFilters = (datapoints: any) => {
 
       } else if (filter.type == 'continuous') {
         newOptions.map(newOption => {
-          filter.optionsSet!.min! = (filter.optionsSet?.min! > newOption) ? newOption : filter.optionsSet!.min
-          filter.optionsSet!.max! = (filter.optionsSet?.max! < newOption) ? newOption : filter.optionsSet!.max
+          let num = parseFloat(newOption) // make sure for continuous we are forcing a number
+          filter.optionsSet!.min! = (filter.optionsSet?.min! > num) ? num : filter.optionsSet!.min
+          filter.optionsSet!.max! = (filter.optionsSet?.max! < num) ? num : filter.optionsSet!.max
         })
       }
 

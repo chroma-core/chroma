@@ -178,11 +178,11 @@ interface SliderProps {
 }
 
 const SliderThumbWithTooltip: React.FC<SliderProps> = ({ min, max, minVisible, maxVisible, update, filter }) => {
-
   const [sliderValue, setSliderValue] = React.useState([min, max])
   const [showTooltip, setShowTooltip] = React.useState(false)
 
   const midValue = (max - min) / 2
+  const step = (max - min) / 100
 
   function onEnd(val: number[]) {
     update(filter, sliderValue[0], sliderValue[1])
@@ -193,8 +193,9 @@ const SliderThumbWithTooltip: React.FC<SliderProps> = ({ min, max, minVisible, m
       <RangeSlider
         aria-label={['min', 'max']}
         defaultValue={sliderValue}
-        min={0}
-        max={100}
+        min={min}
+        max={max}
+        step={step}
         colorScheme='blue'
         onChange={(v) => setSliderValue(v)}
         onMouseEnter={() => setShowTooltip(true)}
@@ -210,7 +211,7 @@ const SliderThumbWithTooltip: React.FC<SliderProps> = ({ min, max, minVisible, m
           color='white'
           placement='bottom'
           isOpen={showTooltip}
-          label={`${sliderValue[0]}%`}
+          label={`${sliderValue[0].toFixed(3)}`}
         >
           <RangeSliderThumb index={0} />
         </Tooltip>
@@ -220,15 +221,15 @@ const SliderThumbWithTooltip: React.FC<SliderProps> = ({ min, max, minVisible, m
           color='white'
           placement='bottom'
           isOpen={showTooltip}
-          label={`${sliderValue[1]}%`}
+          label={`${sliderValue[1].toFixed(3)}`}
         >
           <RangeSliderThumb index={1} />
         </Tooltip>
       </RangeSlider>
       <Flex justifyContent="space-between">
-        <Text fontSize="sm" fontWeight={600} opacity="50%">{min}</Text>
-        <Text fontSize="sm" fontWeight={600} opacity="50%">{midValue}</Text>
-        <Text fontSize="sm" fontWeight={600} opacity="50%">{max}</Text>
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{min.toFixed(3)}</Text>
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{midValue.toFixed(3)}</Text>
+        <Text fontSize="sm" fontWeight={600} opacity="50%">{max.toFixed(3)}</Text>
       </Flex>
     </Box>
   )

@@ -22,6 +22,9 @@ project_query = gql(
             name
             createdAt
             updatedAt
+            datasets {
+                id
+            }
         }
     }
     """

@@ -86,8 +86,9 @@ class Dataset:
             name=model.name if model.name else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            project_id=model.project_id
-        )   
+            project_id=model.project_id,
+        )
+
 
 @strawberry.type
 class Slice:
@@ -122,7 +123,7 @@ class Datapoint:
     metadata_: Optional[str]
     resource_id: Optional[int]
     dataset: Optional[Dataset] = None
-    
+
     # has_many embeddings
     @strawberry.field
     async def embeddings(self, info: Info) -> list["Embedding"]:
@@ -162,14 +163,13 @@ class Datapoint:
 
     @classmethod
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
-        metadata = model.metadata_ if model.metadata_ else "{}"
         return cls(
             id=strawberry.ID(str(model.id)),
             dataset=Dataset.marshal(model.dataset) if model.dataset else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            metadata_=json.loads(metadata),
-            resource_id=model.resource_id
+            metadata_=model.metadata_,
+            resource_id=model.resource_id,
         )
 
 
@@ -451,7 +451,7 @@ class ProjectionSet:
             id=strawberry.ID(str(model.id)),
             created_at=model.created_at,
             updated_at=model.updated_at,
-            project_id=model.project_id
+            project_id=model.project_id,
         )
 
 
@@ -465,7 +465,7 @@ class Embedding:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     embedding_set_id: Optional[int]
-    datapoint_id: Optional[int] 
+    datapoint_id: Optional[int]
 
     # has_many projections
     @strawberry.field
@@ -500,7 +500,7 @@ class Embedding:
             created_at=model.created_at,
             updated_at=model.updated_at,
             datapoint_id=model.datapoint_id,
-            embedding_set_id=model.embedding_set_id
+            embedding_set_id=model.embedding_set_id,
         )
 
 
@@ -512,7 +512,7 @@ class Projection:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     embedding_id: Optional[int]
-    projection_set_id: Optional[int] 
+    projection_set_id: Optional[int]
 
     # belongs_to projection_set
     @strawberry.field
@@ -541,7 +541,7 @@ class Projection:
             created_at=model.created_at,
             updated_at=model.updated_at,
             projection_set_id=model.projection_set_id,
-            embedding_id=model.embedding_id
+            embedding_id=model.embedding_id,
         )
 
 

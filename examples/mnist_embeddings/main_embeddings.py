@@ -86,11 +86,11 @@ def main():
     )
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Train") as chroma_storage:
 
-        # Use the MNIST test set
-        test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
-        data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
+        # Use the MNIST training set
+        train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
+        data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
 
         # Attach the hook
         chroma_storage.attach_forward_hook(model.fc2)
@@ -98,11 +98,11 @@ def main():
         infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Train") as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
 
         # Use the MNIST test set
-        train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
-        data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+        test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
+        data_loader = torch.utils.data.DataLoader(test_dataset, **inference_kwargs)
 
         # Attach the hook
         chroma_storage.attach_forward_hook(model.fc2)
