@@ -17,7 +17,11 @@ import {
   SliderThumb,
   SliderTrack,
   Tooltip,
-  Box
+  Box,
+  Accordion,
+  AccordionButton,
+  AccordionItem,
+  AccordionPanel
 } from '@chakra-ui/react'
 import SidebarButton from '../Shared/SidebarButton';
 
@@ -81,62 +85,82 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
         : null}
       <Divider w="100%" pt={2} />
       <Flex direction="column" mt={2}>
-        {showSkeleton ?
-          <Stack mx={3}>
-            <Skeleton height='25px' />
-            <Skeleton height='25px' style={{ marginLeft: '30px' }} />
-            <Skeleton height='25px' style={{ marginLeft: '30px' }} />
-            <Skeleton height='25px' />
-            <Skeleton height='25px' style={{ marginLeft: '30px' }} />
-            <Skeleton height='25px' style={{ marginLeft: '30px' }} />
-          </Stack>
-          : filters.map(function (filter, index) {
-            return (
-              <React.Fragment key={index}>
-                <SidebarButton
-                  text={filter.name}
-                  symbol="square"
-                  visible={true}
-                  color="#f0f0f0"
-                  indent={0}
-                  classTitle={filter.name}
-                  keyName={filter.name}
-                  key={filter.name}
-                ></SidebarButton>
-                {(filter.type == 'discrete') ?
-                  filter.optionsSet.map(function (option: any) {
-                    return (
-                      <SidebarButton
-                        text={option.name}
-                        visible={option.visible}
-                        symbol="circle"
-                        color={option.color}
-                        classTitle={filter.title}
-                        key={filter.name + "." + option.name}
-                        indent={6}
-                        keyName={option.name}
-                        showHide={() => updateDiscreteFilter(filter, option)}
-                        selectBy={() => selectByFilter(filter, option)}
-                      />
-                    )
-                  })
-                  : null}
+        <Accordion defaultIndex={[0, 1, 2, 3, 4, 5, 6]} allowMultiple borderWidth={0}>
+          {showSkeleton ?
+            <Stack mx={3}>
+              <Skeleton height='25px' />
+              <Skeleton height='25px' style={{ marginLeft: '30px' }} />
+              <Skeleton height='25px' style={{ marginLeft: '30px' }} />
+              <Skeleton height='25px' />
+              <Skeleton height='25px' style={{ marginLeft: '30px' }} />
+              <Skeleton height='25px' style={{ marginLeft: '30px' }} />
+            </Stack>
+            : filters.map(function (filter, index) {
+              let filtersActive = 0
+              if (filter.type == 'discrete') {
+                filtersActive = filter.optionsSet.filter((o: any) => !o.visible).length
+              } else if (filter.type == 'continuous') {
+                filtersActive = 0
+              }
 
-                {(filter.type == 'continuous') ?
-                  <SliderThumbWithTooltip
-                    min={filter.optionsSet.min}
-                    max={filter.optionsSet.max}
-                    minVisible={filter.optionsSet.minVisible}
-                    maxVisible={filter.optionsSet.maxVisible}
-                    update={updateContinuousFilter}
-                    filter={filter}
-                  />
+              return (
+                <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)">
+                  {({ isExpanded }) => (
+                    <React.Fragment key={index}>
+                      <AccordionButton w="100%" p={0} m={0}>
+                        <SidebarButton
+                          text={filter.name}
+                          symbol="square"
+                          visible={true}
+                          color="#f0f0f0"
+                          indent={0}
+                          classTitle={filter.name}
+                          keyName={filter.name}
+                          key={filter.name}
+                          isExpanded={isExpanded}
+                          filtersActive={filtersActive}
+                        ></SidebarButton>
+                      </AccordionButton>
+                      <AccordionPanel p={0} m={0}>
+                        <Flex direction="column">
+                          {(filter.type == 'discrete') ?
+                            filter.optionsSet.map(function (option: any) {
+                              return (
+                                <SidebarButton
+                                  text={option.name}
+                                  visible={option.visible}
+                                  symbol="circle"
+                                  color={option.color}
+                                  classTitle={filter.title}
+                                  key={filter.name + "." + option.name}
+                                  indent={6}
+                                  keyName={option.name}
+                                  showHide={() => updateDiscreteFilter(filter, option)}
+                                  selectBy={() => selectByFilter(filter, option)}
+                                />
+                              )
+                            })
+                            : null}
 
-                  : null}
-              </React.Fragment>
-            )
-          })
-        }
+                          {(filter.type == 'continuous') ?
+                            <SliderThumbWithTooltip
+                              min={filter.optionsSet.min}
+                              max={filter.optionsSet.max}
+                              minVisible={filter.optionsSet.minVisible}
+                              maxVisible={filter.optionsSet.maxVisible}
+                              update={updateContinuousFilter}
+                              filter={filter}
+                            />
+                            : null}
+                        </Flex>
+                      </AccordionPanel>
+                    </React.Fragment>
+                  )}
+                </AccordionItem>
+              )
+            })
+          }
+        </Accordion>
       </Flex>
     </Flex >
   )

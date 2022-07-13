@@ -31,6 +31,13 @@ const defaultTheme = extendTheme({
         },
       },
     },
+    Accordion: {
+      baseStyle: {
+        _focus: {
+          boxShadow: 'none',
+        },
+      },
+    },
     Modal: {
       baseStyle: {
         borderRadius: 'sm',
