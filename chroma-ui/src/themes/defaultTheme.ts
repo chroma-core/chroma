@@ -36,6 +36,11 @@ const defaultTheme = extendTheme({
         _focus: {
           boxShadow: 'none',
         },
+        button: {
+          _focus: {
+            boxShadow: 'none',
+          },
+        }
       },
     },
     Modal: {

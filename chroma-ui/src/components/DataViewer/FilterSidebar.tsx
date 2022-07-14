@@ -24,6 +24,7 @@ import {
   AccordionPanel
 } from '@chakra-ui/react'
 import SidebarButton from '../Shared/SidebarButton';
+import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 
 interface FilterSidebarProps {
   filters: any[]
@@ -104,11 +105,11 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
               }
 
               return (
-                <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)">
+                <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)" key={filter.name}>
                   {({ isExpanded }) => (
                     <React.Fragment key={index}>
                       <AccordionButton w="100%" p={0} m={0}>
-                        <SidebarButton
+                        <FilterSidebarHeader
                           text={filter.name}
                           symbol="square"
                           visible={true}
@@ -119,7 +120,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
                           key={filter.name}
                           isExpanded={isExpanded}
                           filtersActive={filtersActive}
-                        ></SidebarButton>
+                        ></FilterSidebarHeader>
                       </AccordionButton>
                       <AccordionPanel p={0} m={0}>
                         <Flex direction="column">
