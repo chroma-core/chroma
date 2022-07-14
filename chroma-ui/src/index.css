@@ -34,7 +34,7 @@ body {
 }
 
 .select-cursor {
-  cursor: url('../public/cursor-outline.svg'), auto;
+  cursor: url('../public/cursor-outline.svg') -1 -2, auto;
 }
 
 .crosshair-plus-cursor {

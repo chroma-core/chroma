@@ -166,7 +166,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, data
                 </Tr>
                 <Tr key={"quality"}>
                   <Td width="30%" fontSize="xs">Quality</Td>
-                  <Td p={0} fontSize="xs">{Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100}</Td>
+                  <Td p={0} fontSize="xs">{(Math.exp(-parseFloat(datapoint.metadata_.distance_score)) * 100).toFixed(3)}</Td>
                 </Tr>
               </Tbody>
             </Table>
