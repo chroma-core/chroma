@@ -1888,6 +1888,11 @@
     minimatch "^3.1.2"
     strip-json-comments "^3.1.1"
 
+"@flekschas/utils@^0.29.0":
+  version "0.29.0"
+  resolved "https://registry.yarnpkg.com/@flekschas/utils/-/utils-0.29.0.tgz#9289134234539cc9cb8f5777279c32028e60fbef"
+  integrity sha512-iIthDImmmZ7pHHJuSVQqLPqKfaD4RxgmMlibMcfqIb20q9WK1uoqRJbHcIIIecZmEJ+VHZohvmMSacXegf5PHQ==
+
 "@fontsource/ibm-plex-mono@^4.5.10":
   version "4.5.10"
   resolved "https://registry.npmjs.org/@fontsource/ibm-plex-mono/-/ibm-plex-mono-4.5.10.tgz"
@@ -6492,6 +6497,16 @@ get-symbol-description@^1.0.0:
     call-bind "^1.0.2"
     get-intrinsic "^1.1.1"
 
+gl-matrix@^3.3.0:
+  version "3.4.3"
+  resolved "https://registry.yarnpkg.com/gl-matrix/-/gl-matrix-3.4.3.tgz#fc1191e8320009fd4d20e9339595c6041ddc22c9"
+  integrity sha512-wcCp8vu8FT22BnvKVPjXa/ICBWRq/zjFfdofZy1WSpQZpphblv12/bOQLBC1rMM7SGOFS9ltVmKOHil5+Ml7gA==
+
+gl-matrix@~3.3.0:
+  version "3.3.0"
+  resolved "https://registry.yarnpkg.com/gl-matrix/-/gl-matrix-3.3.0.tgz#232eef60b1c8b30a28cbbe75b2caf6c48fd6358b"
+  integrity sha512-COb7LDz+SXaHtl/h4LeaFcNdJdAQSDeVqjiIihSXNrkWObZLhDI4hIkZC11Aeqp7bcE72clzB0BnDXr2SmslRA==
+
 glob-parent@^5.1.2, glob-parent@~5.1.2:
   version "5.1.2"
   resolved "https://registry.npmjs.org/glob-parent/-/glob-parent-5.1.2.tgz"
@@ -8333,6 +8348,11 @@ jws@^3.2.2:
     jwa "^1.4.1"
     safe-buffer "^5.0.1"
 
+kdbush@~3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/kdbush/-/kdbush-3.0.0.tgz#f8484794d47004cc2d85ed3a79353dbe0abc2bf0"
+  integrity sha512-hRkd6/XW4HTsA9vjVpY9tuXJYLSlelnkTmVFu4M9/7MIYQtFcHpbugAU7UbOfjOiVSVYl2fqgBuJ32JUmRo5Ew==
+
 keyv@^3.0.0:
   version "3.1.0"
   resolved "https://registry.npmjs.org/keyv/-/keyv-3.1.0.tgz"
@@ -8497,6 +8517,11 @@ locate-path@^6.0.0:
   integrity sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==
   dependencies:
     p-locate "^5.0.0"
+
+lodash-es@~4.17.21:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash-es/-/lodash-es-4.17.21.tgz#43e626c46e6591b7750beb2b50117390c609e3ee"
+  integrity sha512-mKnC+QJ9pWVzv+C4/U3rRsHapFfHvQFoFB92e52xeyGMcX6/OlIl78je1u8vePzYZSkkogMPJ2yjxxsb89cxyw==
 
 lodash.debounce@^4.0.8:
   version "4.0.8"
@@ -10033,7 +10058,7 @@ psl@^1.1.33:
   resolved "https://registry.npmjs.org/psl/-/psl-1.8.0.tgz"
   integrity sha512-RIdOzyoavK+hA18OGGWDqUTsCLhtA7IcZ/6NCs4fFJaHBDab+pDDmDIByWFRQJq2Cd7r1OoQxBGKOaztq+hjIQ==
 
-pub-sub-es@^2.0.1:
+pub-sub-es@^2.0.1, pub-sub-es@~2.0.1:
   version "2.0.1"
   resolved "https://registry.npmjs.org/pub-sub-es/-/pub-sub-es-2.0.1.tgz"
   integrity sha512-KuL5i+1YdQ/o9xGCz7AsG6hb6PBUFhKNIt3NhZ6Jh/d6F3fVfURyq5fAAwxPcpJS6kkrR4vOYyzZfMpYI8sxlQ==
@@ -10496,7 +10521,27 @@ regjsparser@^0.8.2:
   dependencies:
     jsesc "~0.5.0"
 
-regl@^2.1.0:
+regl-line@~1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/regl-line/-/regl-line-1.0.0.tgz#4fe9de66b70ab76ae60572fc570ae93ad819325d"
+  integrity sha512-AkLBm/XbJl1a6EBSd18o33teVjtHFMSGQLY8EnpvcG+OcBRBEc/OHPbmJGJruLXrtTypvuqoCSfG5fPzN7zSVw==
+  dependencies:
+    gl-matrix "^3.3.0"
+    regl "^2.1.0"
+
+"regl-scatterplot@file:../../regl-scatterplot":
+  version "2.0.4"
+  dependencies:
+    "@flekschas/utils" "^0.29.0"
+    eslint-plugin-react "^7.30.0"
+    gl-matrix "~3.3.0"
+    kdbush "~3.0.0"
+    lodash-es "~4.17.21"
+    pub-sub-es "~2.0.1"
+    regl "~2.1.0"
+    regl-line "~1.0.0"
+
+regl@^2.1.0, regl@~2.1.0:
   version "2.1.0"
   resolved "https://registry.npmjs.org/regl/-/regl-2.1.0.tgz"
   integrity sha512-oWUce/aVoEvW5l2V0LK7O5KJMzUSKeiOwFuJehzpSFd43dO5spP9r+sSUfhKtsky4u6MCqWJaRL+abzExynfTg==

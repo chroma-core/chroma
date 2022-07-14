@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from strawberry.extensions import Extension
 from strawberry.fastapi import GraphQLRouter
+from fastapi.responses import FileResponse
 
 from graphql_py.queries import Query
 from graphql_py.mutations import Mutation, get_context
@@ -175,6 +176,14 @@ if os.path.isdir('static/'):
             name="React App static files",
         )
         templates = Jinja2Templates(directory=build_dir.as_posix())
+
+        @app.get("/manifest.json")
+        async def serve_manifest_json():
+            """Serve the react app
+            `full_path` variable is necessary to serve each possible endpoint with
+            `index.html` file in order to be compatible with `react-router-dom
+            """
+            return FileResponse("static/manifest.json")
 
         @app.get("/{full_path:path}")
         async def serve_react_app(request: Request, full_path: str):

@@ -36,6 +36,11 @@ const defaultTheme = extendTheme({
         _focus: {
           boxShadow: 'none',
         },
+        button: {
+          _focus: {
+            boxShadow: 'none',
+          },
+        }
       },
     },
     Modal: {
@@ -50,7 +55,9 @@ const defaultTheme = extendTheme({
             top: "0%",
             margin: "30px",
             bottom: "0px",
-            width: "60%"
+            width: "60%",
+            border: "1px solid #666",
+            boxShadow: "0px 0px 29px -5px #666"
           },
         },
       },
