@@ -167,8 +167,10 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   const resizeListener = () => {
     var canvas = document.getElementById("regl-canvas")
     var container = document.getElementById("regl-canvas-container")
-    canvas!.style.width = container?.clientWidth + "px"
-    canvas!.style.height = container?.clientHeight + "px"
+    if (canvas !== null) {
+      canvas.style.width = container?.clientWidth + "px"
+      canvas.style.height = container?.clientHeight + "px"
+    }
   };
 
   // resize our scatterplot on window resize
