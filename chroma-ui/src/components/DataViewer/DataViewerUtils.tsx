@@ -1,6 +1,7 @@
 // @ts-nocheck
 import chroma from 'chroma-js'
 import distinctColors from 'distinct-colors'
+import { cocoDetection } from './cocodetection'
 
 // our datapoints are 1 index
 // but our datastructures are 0 indexed
@@ -28,10 +29,10 @@ export const jsonifyDatapoints = function (datapoints: any) {
     } else {
       datapoint.metadata_ = ""
     }
-    datapoint.label.data = JSON.parse(datapoint.label.data)
+    datapoint.label.data = cocoDetection// JSON.parse(datapoint.label.data)
 
     // all datapoints should have inference
-    datapoint.inference.data = JSON.parse(datapoint.inference?.data)
+    datapoint.inference.data = cocoDetection//JSON.parse(datapoint.inference?.data)
 
     // add other state we will want to track
     datapoint.visible = true
@@ -101,10 +102,10 @@ let FILTERS = [
     }
   },
   {
-  name: 'Quality',
+    name: 'Quality',
     type: 'continuous',
     fetchFn: function (datapoint) {
-      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100]
+      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score)) * 100]
     },
     removeDupes(filterOptions) {
       return filterOptions
