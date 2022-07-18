@@ -1,8 +1,8 @@
 // @ts-nocheck
-import React, { useEffect, useState } from 'react';
-import { Spacer, Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton, useDisclosure, Button, Modal, ModalBody, ModalContent, ModalHeader, ModalOverlay, ModalFooter, ModalCloseButton, Portal } from '@chakra-ui/react'
+import React, { useEffect, useState, useRef } from 'react';
+import { Spacer, Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton, useDisclosure, Button, Modal, ModalBody, ModalContent, ModalHeader, ModalOverlay, ModalFooter, ModalCloseButton, Portal, color } from '@chakra-ui/react'
 import { Grid as ChakraGrid, GridItem, Tag } from '@chakra-ui/react'
-import { Table, Tbody, Tr, Td, TableContainer, Select, Center, Image } from '@chakra-ui/react'
+import { Table, Tbody, Tr, Td, TableContainer, Select, Center } from '@chakra-ui/react'
 import TagForm from './TagForm'
 import Tags from './Tags'
 import { Datapoint } from './DataViewTypes';
@@ -13,6 +13,8 @@ import { Resizable } from 're-resizable'
 import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
+import { cocoDetection } from './cocodetection'
+import { conforms } from 'lodash';
 
 export interface TagItem {
   left_id?: number
@@ -122,19 +124,137 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   )
 }
 
+function scaleToFittedImage(originalSize, plottedSize, annotation) {
+  var scaleWidth = plottedSize[0] / originalSize[0]
+  var scaleHeight = plottedSize[1] / originalSize[1]
+  console.log('scaleWidth', originalSize, plottedSize, scaleWidth, scaleHeight)
+  return [
+    annotation[0] * scaleWidth - (annotation[2] * scaleWidth) / 2,
+    annotation[1] * scaleHeight - (annotation[3] * scaleHeight) / 2,
+    annotation[2] * scaleWidth,
+    annotation[3] * scaleHeight,
+    annotation[4],
+    annotation[5]
+  ]
+}
+
+const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, thumbnail = false }) => {
+  let [imageDimensions, setImageDimensions] = useState([]) // [width, height]
+  let [originalImageDimensions, setOriginalImageDimensions] = useState([]) // [width, height]
+  const imageRef = useRef(null);
+
+  // sets image dimensons on load
+  const onImgLoad = ({ target: img }) => {
+    let { offsetHeight, offsetWidth } = img;
+    setImageDimensions([offsetWidth, offsetHeight])
+  };
+
+  // set image dimensions on resize
+  useEffect(() => {
+    const resizeListener = () => {
+      setImageDimensions([imageRef.current.width, imageRef.current.height])
+    };
+    window.addEventListener('resize', resizeListener);
+    return () => {
+      window.removeEventListener('resize', resizeListener);
+    }
+  }, [])
+
+  // fetch the image
+  const [result, reexecuteQuery] = useQuery({
+    query: ImageQuery,
+    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": 'url' },
+  });
+
+  const { data, fetching, error } = result;
+
+  // set the original image dimensions
+  useEffect(() => {
+    if (data === undefined) return
+    var imageOriginalDimensions = new Image()
+    imageOriginalDimensions.src = 'data:image/jpeg;base64,' + data.imageResolver
+    setOriginalImageDimensions([imageOriginalDimensions.naturalWidth, imageOriginalDimensions.naturalHeight])
+  }, [data])
+
+  if (error) return <p>Oh no... {error.message}</p>;
+
+  let scaledDimensions = annotations.map(a => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
+
+  return (
+    <>
+      {(data === undefined) ?
+        <Skeleton width={200} height={200} />
+        :
+        <>
+          <img style={{ position: 'absolute' }} ref={imageRef} maxwidth="100%" src={'data:image/jpeg;base64,' + data.imageResolver} onLoad={onImgLoad} />
+
+          {(imageDimensions !== []) ?
+
+            <div style={{ backgroundColor: "rgba(255,0,0,0.0)", width: imageDimensions[0], height: imageDimensions[1], position: 'absolute' }}>
+
+              {scaledDimensions.map(a => (
+                <Box
+                  _hover={{ zIndex: 999 }} // on hover bring label to the top
+                  style={{
+                    left: a[0],
+                    top: a[1],
+                    width: a[2],
+                    height: a[3],
+                    position: 'absolute',
+                    border: "2px solid " + a[5],
+                    backgroundColor: a[5] + '33' // 33 adds opacity to the hex color
+                  }}
+                >
+                  {/* <Box style={{
+                    position: 'absolute',
+                    backgroundColor: a[5],
+                    color: 'white',
+                    top: '-19px',
+                    fontSize: '12px',
+                    padding: '0px 4px 0px 4px',
+                    left: '-2px',
+                    fontWeight: "600"
+                  }}>
+                    {a[4]}
+                  </Box> */}
+                </Box>
+              )
+              )}
+            </div>
+
+            : null}
+        </>
+      }
+    </>
+  )
+}
+
 const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, datapoints }) => {
   if (datapoint === undefined) return <></> // handle this case though we dont expect to run into it
 
   const theme = useTheme()
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
-  const [result, reexecuteQuery] = useQuery({
-    query: ImageQuery,
-    variables: { "identifier": datapoint.resource.uri, "thumbnail": false, "resolverName": 'url' },
-  });
+  // var annotations = [
+  //   [50, 160, 500, 450, 'head', '#00ff28'],
+  //   [50, 180, 500, 450, 'neck', '#ff0000'],
+  //   [850, 160, 800, 150, 'tail', '#003aff']
+  // ]
 
-  const { data, fetching, error } = result;
-  if (error) return <p>Oh no... {error.message}</p>;
+  var annotations = [
+    [55.5, 117, 19, 26, "helmet", "#ff00df"],
+    [138.5, 114.5, 41, 49, "helmet", "#ff00df"],
+    [199.5, 114, 43, 48, "helmet", "#ff00df"],
+    [260, 116.5, 30, 37, "head", "#01ff00"],
+    [91.5, 108, 27, 32, "head", "#01ff00"],
+    [28.5, 109, 25, 36, "head", "#01ff00"],
+    [457, 143, 24, 32, "head", "#01ff00"],
+    [389.5, 124, 33, 34, "head", "#01ff00"],
+    [353.5, 135, 21, 28, "head", "#01ff00"],
+    [326.5, 132.5, 35, 35, "head", "#01ff00"],
+    [306, 142.5, 20, 33, "head", "#01ff00"],
+    [279.5, 140, 23, 30, "head", "#01ff00"]
+  ]
 
   return (
     <Box
@@ -145,11 +265,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, data
       <ChakraGrid templateColumns='repeat(3, 1fr)' gap={6} height="100%" py={3}>
         <GridItem colSpan={2} rowSpan={8} bgColor={bgColor}>
           <Flex direction="row" alignItems="center" justifyContent="center" height="100%">
-            {(data === undefined) ?
-              <Skeleton width={200} height={200} />
-              :
-              <img maxWidth="100%" src={'data:image/jpeg;base64,' + data.imageResolver} />
-            }
+            <ImageRenderer imageUri={datapoint.resource.uri} annotations={annotations} />
           </Flex>
         </GridItem>
         <GridItem colSpan={1} rowSpan={8}>

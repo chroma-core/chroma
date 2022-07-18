@@ -85,7 +85,7 @@ class Query:
             return my_encoded_img
 
         if (resolver_name == 'url'):
-            response = requests.get('https://res.cloudinary.com/dk-find-out/image/upload/q_80,w_1920,f_auto/580540_mjznrj.jpg')
+            response = requests.get('http://i.imgur.com/1T6nTzl.jpg')
             image = Image.open(BytesIO(response.content))
             if (thumbnail == True):
                 image.thumbnail([120, 120])
