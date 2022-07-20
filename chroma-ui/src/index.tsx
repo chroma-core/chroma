@@ -51,9 +51,7 @@ root.render(
       <Global styles={GlobalStyles} />
       <ColorModeScript initialColorMode="light" />
       <Provider value={client}>
-        <JotAiProvider>
           <ChromaRouter />
-        </JotAiProvider>
       </Provider>
     </ChakraProvider>
   </React.StrictMode>
