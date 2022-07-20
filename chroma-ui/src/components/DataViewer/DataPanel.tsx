@@ -82,7 +82,7 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
 
   const [result, reexecuteQuery] = useQuery({
     query: ImageQuery,
-    variables: { "identifier": datapoint.resource.uri, "thumbnail": true, "resolverName": 'url' },
+    variables: { "identifier": datapoint.resource.uri, "thumbnail": true, "resolverName": 'filepath' },
   });
 
   const { data, fetching, error } = result;
@@ -127,10 +127,10 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
 function scaleToFittedImage(originalSize, plottedSize, annotation) {
   var scaleWidth = plottedSize[0] / originalSize[0]
   var scaleHeight = plottedSize[1] / originalSize[1]
-  console.log('scaleWidth', originalSize, plottedSize, scaleWidth, scaleHeight)
+  // console.log('scaleWidth', originalSize, plottedSize, scaleWidth, scaleHeight)
   return [
-    annotation[0] * scaleWidth - (annotation[2] * scaleWidth) / 2,
-    annotation[1] * scaleHeight - (annotation[3] * scaleHeight) / 2,
+    annotation[0] * scaleWidth,
+    annotation[1] * scaleHeight,
     annotation[2] * scaleWidth,
     annotation[3] * scaleHeight,
     annotation[4],
@@ -163,7 +163,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   // fetch the image
   const [result, reexecuteQuery] = useQuery({
     query: ImageQuery,
-    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": 'url' },
+    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": 'filepath' },
   });
 
   const { data, fetching, error } = result;
@@ -205,7 +205,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
                     backgroundColor: a[5] + '33' // 33 adds opacity to the hex color
                   }}
                 >
-                  {/* <Box style={{
+                  <Box style={{
                     position: 'absolute',
                     backgroundColor: a[5],
                     color: 'white',
@@ -216,7 +216,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
                     fontWeight: "600"
                   }}>
                     {a[4]}
-                  </Box> */}
+                  </Box>
                 </Box>
               )
               )}
@@ -229,32 +229,26 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   )
 }
 
+function cocoAnnotationToFlat(annnotations, categories) {
+  var data = []
+  annnotations.map(a => {
+    let category = categories.find(cat => cat.id == a.category_id)
+    data.push([...a.bbox, category.name, "#ff00df"])
+  })
+  return data
+}
+
 const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, datapoints }) => {
   if (datapoint === undefined) return <></> // handle this case though we dont expect to run into it
 
   const theme = useTheme()
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
+  console.log('DataPanelModal', datapoint)
+  var annotations = cocoAnnotationToFlat(datapoint.label.data.annotations, datapoint.label.data.categories)
   // var annotations = [
-  //   [50, 160, 500, 450, 'head', '#00ff28'],
-  //   [50, 180, 500, 450, 'neck', '#ff0000'],
-  //   [850, 160, 800, 150, 'tail', '#003aff']
+  //   [55.5, 117, 19, 26, "helmet", "#ff00df"],
   // ]
-
-  var annotations = [
-    [55.5, 117, 19, 26, "helmet", "#ff00df"],
-    [138.5, 114.5, 41, 49, "helmet", "#ff00df"],
-    [199.5, 114, 43, 48, "helmet", "#ff00df"],
-    [260, 116.5, 30, 37, "head", "#01ff00"],
-    [91.5, 108, 27, 32, "head", "#01ff00"],
-    [28.5, 109, 25, 36, "head", "#01ff00"],
-    [457, 143, 24, 32, "head", "#01ff00"],
-    [389.5, 124, 33, 34, "head", "#01ff00"],
-    [353.5, 135, 21, 28, "head", "#01ff00"],
-    [326.5, 132.5, 35, 35, "head", "#01ff00"],
-    [306, 142.5, 20, 33, "head", "#01ff00"],
-    [279.5, 140, 23, 30, "head", "#01ff00"]
-  ]
 
   return (
     <Box
@@ -446,6 +440,7 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
     reactWindowListLength = selectedDatapointsIds.length
     datapointsToRender = datapoints.filter(dp => selectedDatapointsIds.includes(dp.id))
   }
+  console.log('datapointsToRender length', datapointsToRender?.length)
 
   const newSortBy = (event: any) => {
     let str = event.target.value
@@ -491,7 +486,7 @@ const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds
   return (
     <Resizable
       size={{ width: resizeState.width, height: resizeState.height }}
-      minWidth={400}
+      minWidth={1200}
       onResizeStop={(e, direction, re2f, d) => {
         setResizeState({
           width: resizeState.width + d.width,

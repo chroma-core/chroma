@@ -78,7 +78,7 @@ class Query:
             return my_encoded_img
 
         if (resolver_name == 'filepath'):
-            image = Image.open("/Users/jeff/Desktop/error.png")
+            image = Image.open(identifier)
             if (thumbnail == True):
                 image.thumbnail([120, 120])
             my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')

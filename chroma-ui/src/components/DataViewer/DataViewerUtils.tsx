@@ -15,6 +15,8 @@ export const pointIndexToDataPointIndex = (id: number) => {
 }
 
 export const getMostRecentCreatedAt = function (data: any) {
+  // console.log('getMostRecentCreatedAt', data)
+  if (data.length == 0) return undefined
   return data.reduce((p1: any, p2: any) => {
     return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
   });
@@ -29,9 +31,10 @@ export const jsonifyDatapoints = function (datapoints: any) {
     } else {
       datapoint.metadata_ = ""
     }
-    datapoint.label.data = cocoDetection// JSON.parse(datapoint.label.data)
+    datapoint.label.data = JSON.parse(datapoint.label.data)
 
     // all datapoints should have inference
+    if (datapoint.inference === null) datapoint.inference = { data: undefined }
     datapoint.inference.data = cocoDetection//JSON.parse(datapoint.inference?.data)
 
     // add other state we will want to track

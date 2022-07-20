@@ -26,6 +26,8 @@ export default function Projects() {
 
   let noData = (data?.projects.length == 0)
 
+  console.log('data', data)
+
   return (
     <>
       <SimpleList data={data?.projects} headerName="Projects" displayName="name" pathBase="data_viewer" />
