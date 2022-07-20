@@ -29,6 +29,8 @@ import Header from './Header';
 import FilterSidebar from './FilterSidebar';
 import DataPanel from './DataPanel';
 import ProjectionPlotter from './ProjectionPlotter';
+import { datapointsAtom } from '../../atoms/datapointsAtom'
+import { useAtom } from 'jotai'
 
 const CursorMap: any = {
   select: "select-cursor",
@@ -44,7 +46,8 @@ const DataViewer = () => {
   const projectId = parseInt(params.project_id!, 10)
 
   // core data state management for this and all subcomponents
-  let [datapoints, setDatapoints] = useState<Datapoint[]>();
+  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
+
   let [projections, setProjections] = useState<ProjectionData>();
   let [filters, setFilters] = useState<any>();
 
@@ -65,7 +68,6 @@ const DataViewer = () => {
     query: GetProjectAndProjectionSets,
     variables: { "filter": { "projectId": projectId }, "projectId": projectId }
   })
-  const { data, fetching, error } = result;
 
   // once complete, fetch datapoints for the project, and the most recent set of projections
   useEffect(() => {
@@ -201,7 +203,6 @@ const DataViewer = () => {
           pointsToSelect={pointsToSelect}
         />
         <DataPanel
-          datapoints={datapoints}
           selectedDatapointsIds={selectedPoints}
           filters={filters}
           setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters}

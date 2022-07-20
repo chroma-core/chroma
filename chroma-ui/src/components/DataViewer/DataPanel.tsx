@@ -13,6 +13,8 @@ import { Resizable } from 're-resizable'
 import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
+import { datapointsAtom } from '../../atoms/datapointsAtom'
+import { useAtom } from 'jotai'
 
 export interface TagItem {
   left_id?: number
@@ -49,7 +51,6 @@ export interface ServerDataItem {
 }
 
 interface DataPanelProps {
-  datapoints: Datapoint[]
   selectedDatapointsIds: number[]
   setDatapointsAndRebuildFilters: (datapoints: ServerDataItem[]) => void
   filters: any[]
@@ -294,11 +295,13 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ datapoint, isOpen, onCl
   )
 }
 
-const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds, setDatapointsAndRebuildFilters, filters }) => {
+const DataPanel: React.FC<DataPanelProps> = ({ selectedDatapointsIds, setDatapointsAndRebuildFilters, filters }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
   const borderColorCards = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
+  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 

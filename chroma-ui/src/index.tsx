@@ -12,6 +12,7 @@ import { createClient, Provider, defaultExchanges, subscriptionExchange } from '
 // import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
+import { Provider as JotAiProvider } from "jotai"
 
 const GlobalStyles = css`
   /*
@@ -30,7 +31,7 @@ console.log(`%c
 
 // const subscriptionClient = new SubscriptionClient('ws://localhost:8000/graphql', { reconnect: true });
 
-const client = createClient({
+export const client = createClient({
   url: 'http://localhost:8000/graphql',
   exchanges: [
     ...defaultExchanges,
@@ -50,7 +51,9 @@ root.render(
       <Global styles={GlobalStyles} />
       <ColorModeScript initialColorMode="light" />
       <Provider value={client}>
-        <ChromaRouter />
+        <JotAiProvider>
+          <ChromaRouter />
+        </JotAiProvider>
       </Provider>
     </ChakraProvider>
   </React.StrictMode>
