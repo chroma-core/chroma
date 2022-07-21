@@ -78,7 +78,7 @@ let FILTERS = [
     name: 'Labels',
     type: 'discrete',
     fetchFn: function (datapoint) {
-      return datapoint.label.data.annotations.map(a => a.category_id)
+      return datapoint.label.data.labels.map(a => a.category_id)
     },
     removeDupes(filterOptions) {
       return filterOptions.filter((v, i, a) => a.findIndex(v2 => (v2.name === v.name)) === i)

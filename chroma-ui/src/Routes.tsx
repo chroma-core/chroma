@@ -11,6 +11,7 @@ import Jobs from './components/Jobs/Jobs'
 import Job from './components/Jobs/Job'
 import Embeddings from './components/Explorer/Embeddings'
 import DataViewer from './components/DataViewer/DataViewer'
+import DataFetchTest from './components/DataViewer/DataFetchTest'
 
 const ChromaRouter: React.FC = () => {
   return (
@@ -20,6 +21,7 @@ const ChromaRouter: React.FC = () => {
           <Route index element={<AppContainer><Projects /></AppContainer>} />
           {/* <Route path="jobs" element={<AppContainer><Jobs /></AppContainer>} />
           <Route path="jobs/:job_id" element={<AppContainer><Job /></AppContainer>} /> */}
+          <Route path="test" element={<DataFetchTest />} />
           <Route path="data_viewer/:project_id" element={<DataViewer />} />
           <Route path="projects/:project_id" element={<AppContainer><Project /></AppContainer>} />
           <Route path="projects/:project_id/datasets" element={<AppContainer><Datasets /></AppContainer>} />

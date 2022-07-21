@@ -44,9 +44,9 @@ export function getDatapointsForProject(project_id: number, cb: (data: any) => v
     .then(res => {
       cb(res)
     })
-  // .catch((error) => {
-  //   console.log("error happening", error)
-  //   cb({ error: true, message: error })
-  //   // Only network error comes here
-  // });
+  .catch((error) => {
+    console.log("error happening", error)
+    cb({ error: true, message: error })
+    // Only network error comes here
+  });
 }

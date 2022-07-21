@@ -2944,9 +2944,9 @@
     defer-to-connect "^1.0.1"
 
 "@tanstack/query-core@^4.0.0-beta.1":
-  version "4.0.5"
-  resolved "https://registry.yarnpkg.com/@tanstack/query-core/-/query-core-4.0.5.tgz#70c7275a9f1fbc8e6520d895991f9bace0fd5bb8"
-  integrity sha512-QOJ2gLbwlf8p0487pMey6vv8EF5X2ib1zINayaD7mb9/LibUtXmZ12uJgTqcnjgNY/4tWZn5qJnEk2ePG5AVGA==
+  version "4.0.10"
+  resolved "https://registry.yarnpkg.com/@tanstack/query-core/-/query-core-4.0.10.tgz#cae6f818006616dc72c95c863592f5f68b47548a"
+  integrity sha512-9LsABpZXkWZHi4P1ozRETEDXQocLAxVzQaIhganxbNuz/uA3PsCAJxJTiQrknG5htLMzOF5MqM9G10e6DCxV1A==
 
 "@testing-library/dom@^8.5.0":
   version "8.13.0"

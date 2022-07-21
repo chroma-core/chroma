@@ -488,7 +488,7 @@ const DataPanel: React.FC<DataPanelProps> = ({ selectedDatapointsIds, setDatapoi
   return (
     <Resizable
       size={{ width: resizeState.width, height: resizeState.height }}
-      minWidth={1200}
+      minWidth={400}
       onResizeStop={(e, direction, re2f, d) => {
         setResizeState({
           width: resizeState.width + d.width,

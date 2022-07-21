@@ -29,32 +29,6 @@ import Header from './Header';
 import FilterSidebar from './FilterSidebar';
 import DataPanel from './DataPanel';
 import ProjectionPlotter from './ProjectionPlotter';
-import { datapointsAtom } from '../../atoms/datapointsAtom'
-import { useAtom } from 'jotai'
-
-import { normalize, schema } from 'normalizr';
-
-// const datapoint = new schema.Entity('datapoints');
-// const label = new schema.Entity('labels', {
-//   datapoint: datapoint
-// });
-
-const dataset = new schema.Entity('datasets');
-const inference = new schema.Entity('inferences');
-const label = new schema.Entity('labels');
-const tag = new schema.Entity('tags');
-const resource = new schema.Entity('resources');
-const datapoint = new schema.Entity('datapoints', {
-  dataset: dataset,
-  inference: inference,
-  label: label,
-  tags: [tag],
-  resource: resource
-});
-const datapointsNormalized = new schema.Entity('datapointsarray', {
-  datapoints: [datapoint]
-});
-
 
 const CursorMap: any = {
   select: "select-cursor",
@@ -70,8 +44,7 @@ const DataViewer = () => {
   const projectId = parseInt(params.project_id!, 10)
 
   // core data state management for this and all subcomponents
-  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
-
+  let [datapoints, setDatapoints] = useState<Datapoint[]>();
   let [projections, setProjections] = useState<ProjectionData>();
   let [filters, setFilters] = useState<any>();
 
@@ -92,31 +65,18 @@ const DataViewer = () => {
     query: GetProjectAndProjectionSets,
     variables: { "filter": { "projectId": projectId }, "projectId": projectId }
   })
+  const { data, fetching, error } = result;
 
   // once complete, fetch datapoints for the project, and the most recent set of projections
   useEffect(() => {
     if (result.data === undefined) return
-    const mostRecent = getMostRecentCreatedAt(result.data.projectionSets)
-    if (mostRecent !== undefined) {
-      const latestProjectionSetId = parseInt(mostRecent.id, 10)
-      getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
-        setProjections(projectionsResponse)
-      });
-    }
-
+    const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
+    getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
+      setProjections(projectionsResponse)
+    });
     getDatapointsForProject(projectId, (datapointsResponse: any) => {
       const unpackedDatapoints = jsonifyDatapoints(datapointsResponse.datapoints)
       setDatapoints(unpackedDatapoints)
-      console.log('unpackedDatapoints', unpackedDatapoints)
-
-      const normalizedData = normalize(unpackedDatapoints, [datapoint]);
-      console.log('normalizedData', normalizedData)
-
-      // unpackedDatapoints.map(dp => {
-      //   const normalizedData = normalize(dp, datapoint);
-      //   console.log('normalizedData', normalizedData)
-      // })
-
       let builtFilters = buildFilters(unpackedDatapoints)
       setFilters(builtFilters)
     });
@@ -229,7 +189,7 @@ const DataViewer = () => {
           numTotal={datapoints?.length}
           selectByFilter={selectByFilter}
         ></FilterSidebar>
-        {/* <ProjectionPlotter
+        <ProjectionPlotter
           datapoints={datapoints}
           cursor={cursor}
           filters={filters}
@@ -239,8 +199,9 @@ const DataViewer = () => {
           selectHandler={selectHandler}
           deselectHandler={deselectHandler}
           pointsToSelect={pointsToSelect}
-        /> */}
+        />
         <DataPanel
+          datapoints={datapoints}
           selectedDatapointsIds={selectedPoints}
           filters={filters}
           setDatapointsAndRebuildFilters={setDatapointsAndRebuildFilters}
