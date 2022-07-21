@@ -1,7 +1,6 @@
 // @ts-nocheck
 import chroma from 'chroma-js'
 import distinctColors from 'distinct-colors'
-import { cocoDetection } from './cocodetection'
 
 // our datapoints are 1 index
 // but our datastructures are 0 indexed
@@ -15,8 +14,6 @@ export const pointIndexToDataPointIndex = (id: number) => {
 }
 
 export const getMostRecentCreatedAt = function (data: any) {
-  // console.log('getMostRecentCreatedAt', data)
-  if (data.length == 0) return undefined
   return data.reduce((p1: any, p2: any) => {
     return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
   });
@@ -34,8 +31,7 @@ export const jsonifyDatapoints = function (datapoints: any) {
     datapoint.label.data = JSON.parse(datapoint.label.data)
 
     // all datapoints should have inference
-    if (datapoint.inference === null) datapoint.inference = { data: undefined }
-    datapoint.inference.data = cocoDetection//JSON.parse(datapoint.inference?.data)
+    datapoint.inference.data = JSON.parse(datapoint.inference?.data)
 
     // add other state we will want to track
     datapoint.visible = true
@@ -78,7 +74,7 @@ let FILTERS = [
     name: 'Labels',
     type: 'discrete',
     fetchFn: function (datapoint) {
-      return datapoint.label.data.labels.map(a => a.category_id)
+      return datapoint.label.data.categories.map(category => category.name)
     },
     removeDupes(filterOptions) {
       return filterOptions.filter((v, i, a) => a.findIndex(v2 => (v2.name === v.name)) === i)
@@ -105,10 +101,10 @@ let FILTERS = [
     }
   },
   {
-    name: 'Quality',
+  name: 'Quality',
     type: 'continuous',
     fetchFn: function (datapoint) {
-      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score)) * 100]
+      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100]
     },
     removeDupes(filterOptions) {
       return filterOptions
@@ -229,8 +225,6 @@ let FILTERS = [
 
 export const buildFilters = (datapoints: any) => {
   // get all available options for the various properties
-  let categories = []
-
   datapoints.map((datapoint: any) => {
 
     // preprocess, mainly to add fields we don't already have
@@ -244,10 +238,6 @@ export const buildFilters = (datapoints: any) => {
     } else {
       datapoint.labelInferenceMatch = 'Not enough data'
     }
-
-    datapoint.label.data.categories.map(category => {
-      categories.push(category)
-    })
 
     FILTERS.map(filter => {
       const newOptions = filter.fetchFn(datapoint)
@@ -290,9 +280,6 @@ export const buildFilters = (datapoints: any) => {
       filter.optionsSet.colors = colorScale
     }
   })
-  
-  categories = categories.filter((v, i, a) => a.findIndex(v2 => (v2.id === v.id)) === i)
-  console.log('categories', categories)
 
   return FILTERS
 }

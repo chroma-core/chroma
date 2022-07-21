@@ -1,8 +1,8 @@
 // @ts-nocheck
-import React, { useEffect, useState, useRef } from 'react';
-import { Spacer, Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton, useDisclosure, Button, Modal, ModalBody, ModalContent, ModalHeader, ModalOverlay, ModalFooter, ModalCloseButton, Portal, color } from '@chakra-ui/react'
+import React, { useEffect, useState } from 'react';
+import { Spacer, Flex, Text, Box, useTheme, Divider, useColorModeValue, Skeleton, useDisclosure, Button, Modal, ModalBody, ModalContent, ModalHeader, ModalOverlay, ModalFooter, ModalCloseButton, Portal } from '@chakra-ui/react'
 import { Grid as ChakraGrid, GridItem, Tag } from '@chakra-ui/react'
-import { Table, Tbody, Tr, Td, TableContainer, Select, Center } from '@chakra-ui/react'
+import { Table, Tbody, Tr, Td, TableContainer, Select, Center, Image } from '@chakra-ui/react'
 import TagForm from './TagForm'
 import Tags from './Tags'
 import { Datapoint } from './DataViewTypes';
@@ -13,9 +13,6 @@ import { Resizable } from 're-resizable'
 import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
-import { cocoDetection } from './cocodetection'
-import { datapointsAtom } from '../../atoms/datapointsAtom'
-import { useAtom } from 'jotai'
 
 export interface TagItem {
   left_id?: number
@@ -52,6 +49,7 @@ export interface ServerDataItem {
 }
 
 interface DataPanelProps {
+  datapoints: Datapoint[]
   selectedDatapointsIds: number[]
   setDatapointsAndRebuildFilters: (datapoints: ServerDataItem[]) => void
   filters: any[]
@@ -67,10 +65,9 @@ interface DataPanelGridProps {
   totalLength: number
 }
 
-
-const ImageQuery = `
-  query getimage($identifier: String!, $thumbnail: Boolean!, $resolverName: String!) {
-    imageResolver(identifier: $identifier, thumbnail: $thumbnail, resolverName: $resolverName) 
+const ImageBytesQuery = `
+  query getimage($identifer: String!) {
+    mnistImage(identifier: $identifer) 
   }
 `;
 
@@ -81,8 +78,8 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
   const [result, reexecuteQuery] = useQuery({
-    query: ImageQuery,
-    variables: { "identifier": datapoint.resource.uri, "thumbnail": true, "resolverName": 'filepath' },
+    query: ImageBytesQuery,
+    variables: { "identifer": datapoint.resource.uri },
   });
 
   const { data, fetching, error } = result;
@@ -98,11 +95,11 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
       borderRadius={3}
     >
       <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%">
-        <Flex direction="row" justifyContent="center" width="100%" minWidth={100} height={100}>
+        <Flex direction="row" justifyContent="center">
           {(data === undefined) ?
             <Skeleton width={100} height={100} />
             :
-            <img style={{ objectFit: "contain" }} src={'data:image/jpeg;base64,' + data.imageResolver} />
+            <img width="100px" src={'data:image/jpeg;base64,' + data.mnistImage} />
           }
         </Flex>
         <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">
@@ -124,131 +121,19 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   )
 }
 
-function scaleToFittedImage(originalSize, plottedSize, annotation) {
-  var scaleWidth = plottedSize[0] / originalSize[0]
-  var scaleHeight = plottedSize[1] / originalSize[1]
-  // console.log('scaleWidth', originalSize, plottedSize, scaleWidth, scaleHeight)
-  return [
-    annotation[0] * scaleWidth,
-    annotation[1] * scaleHeight,
-    annotation[2] * scaleWidth,
-    annotation[3] * scaleHeight,
-    annotation[4],
-    annotation[5]
-  ]
-}
-
-const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, thumbnail = false }) => {
-  let [imageDimensions, setImageDimensions] = useState([]) // [width, height]
-  let [originalImageDimensions, setOriginalImageDimensions] = useState([]) // [width, height]
-  const imageRef = useRef(null);
-
-  // sets image dimensons on load
-  const onImgLoad = ({ target: img }) => {
-    let { offsetHeight, offsetWidth } = img;
-    setImageDimensions([offsetWidth, offsetHeight])
-  };
-
-  // set image dimensions on resize
-  useEffect(() => {
-    const resizeListener = () => {
-      setImageDimensions([imageRef.current.width, imageRef.current.height])
-    };
-    window.addEventListener('resize', resizeListener);
-    return () => {
-      window.removeEventListener('resize', resizeListener);
-    }
-  }, [])
-
-  // fetch the image
-  const [result, reexecuteQuery] = useQuery({
-    query: ImageQuery,
-    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": 'filepath' },
-  });
-
-  const { data, fetching, error } = result;
-
-  // set the original image dimensions
-  useEffect(() => {
-    if (data === undefined) return
-    var imageOriginalDimensions = new Image()
-    imageOriginalDimensions.src = 'data:image/jpeg;base64,' + data.imageResolver
-    setOriginalImageDimensions([imageOriginalDimensions.naturalWidth, imageOriginalDimensions.naturalHeight])
-  }, [data])
-
-  if (error) return <p>Oh no... {error.message}</p>;
-
-  let scaledDimensions = annotations.map(a => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
-
-  return (
-    <>
-      {(data === undefined) ?
-        <Skeleton width={200} height={200} />
-        :
-        <>
-          <img style={{ position: 'absolute' }} ref={imageRef} maxwidth="100%" src={'data:image/jpeg;base64,' + data.imageResolver} onLoad={onImgLoad} />
-
-          {(imageDimensions !== []) ?
-
-            <div style={{ backgroundColor: "rgba(255,0,0,0.0)", width: imageDimensions[0], height: imageDimensions[1], position: 'absolute' }}>
-
-              {scaledDimensions.map(a => (
-                <Box
-                  _hover={{ zIndex: 999 }} // on hover bring label to the top
-                  style={{
-                    left: a[0],
-                    top: a[1],
-                    width: a[2],
-                    height: a[3],
-                    position: 'absolute',
-                    border: "2px solid " + a[5],
-                    backgroundColor: a[5] + '33' // 33 adds opacity to the hex color
-                  }}
-                >
-                  <Box style={{
-                    position: 'absolute',
-                    backgroundColor: a[5],
-                    color: 'white',
-                    top: '-19px',
-                    fontSize: '12px',
-                    padding: '0px 4px 0px 4px',
-                    left: '-2px',
-                    fontWeight: "600"
-                  }}>
-                    {a[4]}
-                  </Box>
-                </Box>
-              )
-              )}
-            </div>
-
-            : null}
-        </>
-      }
-    </>
-  )
-}
-
-function cocoAnnotationToFlat(annnotations, categories) {
-  var data = []
-  annnotations.map(a => {
-    let category = categories.find(cat => cat.id == a.category_id)
-    data.push([...a.bbox, category.name, "#ff00df"])
-  })
-  return data
-}
-
 const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, datapoints }) => {
   if (datapoint === undefined) return <></> // handle this case though we dont expect to run into it
 
   const theme = useTheme()
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
-  console.log('DataPanelModal', datapoint)
-  var annotations = cocoAnnotationToFlat(datapoint.label.data.annotations, datapoint.label.data.categories)
-  // var annotations = [
-  //   [55.5, 117, 19, 26, "helmet", "#ff00df"],
-  // ]
+  const [result, reexecuteQuery] = useQuery({
+    query: ImageBytesQuery,
+    variables: { "identifer": datapoint.resource.uri },
+  });
+
+  const { data, fetching, error } = result;
+  if (error) return <p>Oh no... {error.message}</p>;
 
   return (
     <Box
@@ -258,9 +143,13 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapoint, setData, data
     >
       <ChakraGrid templateColumns='repeat(3, 1fr)' gap={6} height="100%" py={3}>
         <GridItem colSpan={2} rowSpan={8} bgColor={bgColor}>
-          <Flex direction="row" alignItems="center" justifyContent="center" height="100%">
-            <ImageRenderer imageUri={datapoint.resource.uri} annotations={annotations} />
-          </Flex>
+          <Center>
+            {(data === undefined) ?
+              <Skeleton width={200} height={200} />
+              :
+              <img width="200px" src={'data:image/jpeg;base64,' + data.mnistImage} />
+            }
+          </Center>
         </GridItem>
         <GridItem colSpan={1} rowSpan={8}>
           <Text fontWeight={600} pb={2}>Data</Text>
@@ -405,13 +294,11 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ datapoint, isOpen, onCl
   )
 }
 
-const DataPanel: React.FC<DataPanelProps> = ({ selectedDatapointsIds, setDatapointsAndRebuildFilters, filters }) => {
+const DataPanel: React.FC<DataPanelProps> = ({ datapoints, selectedDatapointsIds, setDatapointsAndRebuildFilters, filters }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
   const borderColorCards = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
-
-  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 
@@ -442,7 +329,6 @@ const DataPanel: React.FC<DataPanelProps> = ({ selectedDatapointsIds, setDatapoi
     reactWindowListLength = selectedDatapointsIds.length
     datapointsToRender = datapoints.filter(dp => selectedDatapointsIds.includes(dp.id))
   }
-  console.log('datapointsToRender length', datapointsToRender?.length)
 
   const newSortBy = (event: any) => {
     let str = event.target.value
@@ -566,4 +452,3 @@ const DataPanel: React.FC<DataPanelProps> = ({ selectedDatapointsIds, setDatapoi
 }
 
 export default DataPanel
-
