@@ -78,7 +78,7 @@ let FILTERS = [
     name: 'Labels',
     type: 'discrete',
     fetchFn: function (datapoint) {
-      return datapoint.label.data.categories.map(category => category.name)
+      return datapoint.label.data.annotations.map(a => a.category_id)
     },
     removeDupes(filterOptions) {
       return filterOptions.filter((v, i, a) => a.findIndex(v2 => (v2.name === v.name)) === i)
@@ -229,6 +229,8 @@ let FILTERS = [
 
 export const buildFilters = (datapoints: any) => {
   // get all available options for the various properties
+  let categories = []
+
   datapoints.map((datapoint: any) => {
 
     // preprocess, mainly to add fields we don't already have
@@ -242,6 +244,10 @@ export const buildFilters = (datapoints: any) => {
     } else {
       datapoint.labelInferenceMatch = 'Not enough data'
     }
+
+    datapoint.label.data.categories.map(category => {
+      categories.push(category)
+    })
 
     FILTERS.map(filter => {
       const newOptions = filter.fetchFn(datapoint)
@@ -284,6 +290,9 @@ export const buildFilters = (datapoints: any) => {
       filter.optionsSet.colors = colorScale
     }
   })
+  
+  categories = categories.filter((v, i, a) => a.findIndex(v2 => (v2.id === v.id)) === i)
+  console.log('categories', categories)
 
   return FILTERS
 }
