@@ -65,9 +65,9 @@ interface DataPanelGridProps {
   totalLength: number
 }
 
-const ImageBytesQuery = `
-  query getimage($identifer: String!) {
-    mnistImage(identifier: $identifer) 
+const ImageQuery = `
+  query getimage($identifier: String!, $thumbnail: Boolean!, $resolverName: String!) {
+    imageResolver(identifier: $identifier, thumbnail: $thumbnail, resolverName: $resolverName) 
   }
 `;
 
@@ -78,8 +78,8 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
   const [result, reexecuteQuery] = useQuery({
-    query: ImageBytesQuery,
-    variables: { "identifer": datapoint.resource.uri },
+    query: ImageQuery,
+    variables: { "identifier": datapoint.resource.uri, "thumbnail": true, "resolverName": 'filepath' },
   });
 
   const { data, fetching, error } = result;
@@ -95,11 +95,11 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint }) => {
       borderRadius={3}
     >
       <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%">
-        <Flex direction="row" justifyContent="center">
+        <Flex direction="row" justifyContent="center" width="100%" minWidth={100} height={100}>
           {(data === undefined) ?
             <Skeleton width={100} height={100} />
             :
-            <img width="100px" src={'data:image/jpeg;base64,' + data.mnistImage} />
+            <img style={{ objectFit: "contain" }} src={'data:image/jpeg;base64,' + data.imageResolver} />
           }
         </Flex>
         <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">

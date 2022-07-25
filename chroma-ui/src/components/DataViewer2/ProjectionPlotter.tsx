@@ -1,36 +1,27 @@
 import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
-import { Datapoint } from './DataViewTypes'
 import useResizeObserver from "use-resize-observer";
-
-interface ProjectionPlotterProps {
-  datapoints?: Datapoint[]
-  toolSelected: string
-  showLoading: boolean
-  filters?: any
-  insertedProjections: boolean
-  deselectHandler: () => void
-  selectHandler: () => void
-  cursor: string
-  pointsToSelect: []
-}
+import { categoryFilterAtom, cursorAtom, datapointsAtom, datasetFilterAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
+import { useAtom } from 'jotai'
+import { Projection, Datapoint, FilterArray, FilterType } from './types';
 
 interface ConfigProps {
   scatterplot?: any
 }
 
-const getBounds = (datapoints: Datapoint[]) => {
+const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
   var minY = Infinity
   var maxX = -Infinity
   var maxY = -Infinity
 
-  datapoints.forEach((datapoint) => {
-    if (datapoint.projection!.y < minY) minY = datapoint.projection!.y
-    if (datapoint.projection!.y > maxY) maxY = datapoint.projection!.y
-    if (datapoint.projection!.x < minX) minX = datapoint.projection!.x
-    if (datapoint.projection!.x > maxX) maxX = datapoint.projection!.x
+  Object.keys(datapoints).map(function (keyName, keyIndex) {
+    let datapoint = datapoints[parseInt(keyName, 10)]
+    if (projections[datapoint.projection!].y < minY) minY = projections[datapoint.projection!].y
+    if (projections[datapoint.projection!].y > maxY) maxY = projections[datapoint.projection!].y
+    if (projections[datapoint.projection!].x < minX) minX = projections[datapoint.projection!].x
+    if (projections[datapoint.projection!].x > maxX) maxX = projections[datapoint.projection!].x
   })
 
   var centerX = (maxX + minX) / 2
@@ -54,17 +45,15 @@ function minMaxNormalization(value: number, min: number, max: number) {
   return (value - min) / (max - min)
 }
 
-const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
-  cursor,
-  insertedProjections,
-  datapoints,
-  showLoading,
-  toolSelected,
-  filters,
-  selectHandler,
-  deselectHandler,
-  pointsToSelect }
-) => {
+const ProjectionPlotter: React.FC = () => {
+  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
+  const [selectedDatapoints, updateselectedDatapoints] = useAtom(selectedDatapointsAtom)
+  const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
+  const [projections, updateprojections] = useAtom(projectionsAtom)
+  const [cursor, setCursor] = useAtom(cursorAtom)
+  const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
+  const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
+
   let [reglInitialized, setReglInitialized] = useState(false);
   let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
@@ -72,7 +61,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
   let [colorByFilterString, setColorByFilterString] = useState('Inferences')
-  let [colorByOptions, setColorByOptions] = useState([])
+  let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
   const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
   const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
     onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
@@ -83,18 +72,44 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     }
   })
 
+  // Callback functions that are fired by regl-scatterplot
+  // @ts-ignore
+  const selectHandler = ({ points: newSelectedPoints }) => {
+    newSelectedPoints = newSelectedPoints.map((id: number) => parseInt(Object.keys(datapoints)[id], 10))
+    console.log('selectHandler running?', newSelectedPoints)
+    updateselectedDatapoints(newSelectedPoints)
+  }
+  const deselectHandler = () => {
+    console.log('deselectHandler running?')
+    updateselectedDatapoints([])
+    setpointsToSelect([])
+  };
+
+  const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
+  const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
+  const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
+
+  const filterArray: FilterArray[] = [
+    { filter: categoryFilter!, update: updatecategoryFilter },
+    { filter: tagFilter!, update: updatetagFilter },
+    { filter: datasetFilter!, update: updatedatasetFilter }
+  ]
+
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   useEffect(() => {
-    if (insertedProjections !== true) return
-    if (datapoints === undefined) return
-    if (boundsSet) return
+    if (Object.keys(datapoints).length == 0) return
 
-    let bounds = getBounds(datapoints)
+    let bounds = getBounds(datapoints, projections)
     setTarget([bounds.centerX, bounds.centerY])
     setMaxSize(bounds.maxSize)
     calculateColorsAndDrawPoints()
+  }, [datapoints])
 
+  useEffect(() => {
+    if (boundsSet) return
+    if (config.scatterplot == undefined) return
     if (boundsSet == false) {
+      let bounds = getBounds(datapoints, projections)
       config.scatterplot.set({
         cameraDistance: (bounds.maxSize * 1.4),
         minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
@@ -103,19 +118,25 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
       })
       setBoundsSet(true)
     }
-
-  }, [insertedProjections, datapoints])
+  }, [config])
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   useEffect(() => {
-    if (insertedProjections !== true) return
     if (datapoints === undefined) return
     calculateColorsAndDrawPoints()
-  }, [datapoints])
+  }, [datapoints, visibleDatapoints])
 
   useEffect(() => {
+    if (pointsToSelect.length === 0) return
     if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
-      config.scatterplot.select(pointsToSelect)
+      // go from Ids to indices... 
+      var select: number[] = []
+      pointsToSelect.map(p => {
+        select.push(Object.keys(datapoints).findIndex(i => parseInt(i, 10) == p))
+      })
+
+      config.scatterplot.select(select)
+      setpointsToSelect([])
     }
   }, [pointsToSelect])
 
@@ -136,32 +157,34 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   }, [points])
 
   // whenever colorByFilterString change, redraw
-  useEffect(() => {
-    if (insertedProjections !== true) return
-    if (datapoints === undefined) return
-    calculateColorsAndDrawPoints()
-  }, [colorByFilterString])
+  // useEffect(() => {
+  //   if (insertedProjections !== true) return
+  //   if (datapoints === undefined) return
+  //   calculateColorsAndDrawPoints()
+  // }, [colorByFilterString])
 
   const calculateColorsAndDrawPoints = () => {
-    let colorByFilter = filters.find((a: any) => a.name == colorByFilterString)
+    // let colorByFilter = filterArray.find((a: any) => a.filter.name == colorByFilterString)
 
-    let colorByOptionsSave
-    if (colorByFilter.type == 'discrete') colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
-    if (colorByFilter.type == 'continuous') colorByOptionsSave = colorByFilter.optionsSet.colors
-    setColorByOptions(colorByOptionsSave)
+    // let colorByOptionsSave
+    // if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
+    // if (colorByFilter?.filter.type == FilterType.Continuous) colorByOptionsSave = colorByFilter.filter.range!.colorScale
+    // // @ts-ignore
+    // setColorByOptions(colorByOptionsSave)
 
     points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
-    datapoints!.map(datapoint => {
-      let datapointColorByProp = colorByFilter.fetchFn(datapoint)[0]
+    Object.keys(datapoints).map(function (keyName, keyIndex) {
+      let datapoint = datapoints[parseInt(keyName, 10)]
+      // let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)[0]
 
-      let datapointColorIndex
-      if (colorByFilter.type == 'discrete') datapointColorIndex = colorByFilter.optionsSet.findIndex((option: any) => option.name == datapointColorByProp)
-      if (colorByFilter.type == 'continuous') datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter.optionsSet.min, colorByFilter.optionsSet.max) // normalize
+      // let datapointColorIndex
+      // if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.name == datapointColorByProp)
+      // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
 
-      const visible = datapoint.visible ? 1 : 0
-      return points.push([datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex])
+      const visible = visibleDatapoints.includes(datapoint.id) ? 1 : 0
+      return points.push([projections[datapoint.projection].x, projections[datapoint.projection].y, visible, 0])
     })
-    setPoints(points)
+    if (points.length > 1) setPoints(points)
   }
 
   const resizeListener = () => {
@@ -208,22 +231,21 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     setColorByFilterString(event.target.value)
   }
 
-  if (points === null) showLoading = true
+  let showLoading = false
+  if (Object.keys(datapoints).length === 0) showLoading = true
 
-  let validFilters
-  if (filters !== undefined) {
-    const noFilterList = ["Tags"]
-    validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
-  }
-  console.log('points', points)
-  console.log('colorByOptions', colorByOptions)
+  // let validFilters
+  // if (filters !== undefined) {
+  //   const noFilterList = ["Tags"]
+  //   validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
+  // }
 
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
   return (
     <Box flex='1' ref={ref} cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
-      {(filters !== undefined) ?
+      {/* {(filters !== undefined) ?
         <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
           {validFilters.map((filterb: any) => {
             return (
@@ -231,7 +253,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
             )
           })}
         </Select>
-        : null}
+        : null} */}
       {
         showLoading ?
           <Center height="100vh" bgColor={bgColor} >
