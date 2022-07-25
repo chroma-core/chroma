@@ -55,11 +55,37 @@ class FilterProjectionSets:
     project_id: Optional[int]
 
 @strawberry.type
+class ImageAndSize:
+    imageData: str 
+    original_width: int 
+    original_height: int 
+
+@strawberry.type
 class Query:
 
     # Abstract
     @strawberry.field
-    async def image_resolver(self, identifier: str, thumbnail: bool, resolver_name: str) -> str:
+    async def mnist_image(self, identifier: str) -> str:
+
+        test_data = read_image_file('../../examples/data/MNIST/raw/t10k-images-idx3-ubyte')
+        train_data = read_image_file('../../examples/data/MNIST/raw/train-images-idx3-ubyte')
+
+        # t10k-images-idx3-ubyte-7262
+        split_id = identifier.split('-')
+        dataset = split_id[0]
+        index = int(split_id[-1])
+
+        img = test_data[index] if dataset == 't10k' else train_data[index]
+        img = torch.Tensor.numpy(img)
+        image = Image.fromarray(img)
+        inverted_image = ImageOps.invert(image)
+        my_encoded_img = base64.encodebytes(image_to_byte_array(inverted_image)).decode('ascii')
+        return my_encoded_img
+
+
+    # Abstract
+    @strawberry.field
+    async def image_resolver(self, identifier: str, thumbnail: bool, resolver_name: str) -> ImageAndSize:
 
         if (resolver_name == 'mnist'):
             test_data = read_image_file('../../examples/data/MNIST/raw/t10k-images-idx3-ubyte')
@@ -73,16 +99,18 @@ class Query:
             img = test_data[index] if dataset == 't10k' else train_data[index]
             img = torch.Tensor.numpy(img)
             image = Image.fromarray(img)
+            width, height = image.size
             inverted_image = ImageOps.invert(image)
             my_encoded_img = base64.encodebytes(image_to_byte_array(inverted_image)).decode('ascii')
-            return my_encoded_img
+            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
 
         if (resolver_name == 'filepath'):
             image = Image.open(identifier)
+            width, height = image.size
             if (thumbnail == True):
                 image.thumbnail([120, 120])
             my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')
-            return my_encoded_img
+            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
 
         if (resolver_name == 'url'):
             response = requests.get('http://i.imgur.com/1T6nTzl.jpg')
@@ -90,8 +118,7 @@ class Query:
             if (thumbnail == True):
                 image.thumbnail([120, 120])
             my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')
-            return my_encoded_img
-
+            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
 
     # Project
     @strawberry.field
