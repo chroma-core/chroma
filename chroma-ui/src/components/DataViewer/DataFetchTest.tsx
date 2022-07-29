@@ -3,7 +3,7 @@ import { atom, useAtom } from 'jotai'
 import { atomWithQuery } from 'jotai/query'
 import { normalize, schema } from 'normalizr'
 import { Suspense, useEffect } from 'react'
-import { Text ,Grid, GridItem } from '@chakra-ui/react'
+import { Text, Grid, GridItem } from '@chakra-ui/react'
 
 const inference = new schema.Entity(
   'inferences',
@@ -69,8 +69,8 @@ const dataset = new schema.Entity(
   }
 );
 
-const addCategoryProcessStrategy = (entity:any, parent:any) => {
-  if (parent.annotations.find((a:any) => a.category_id == entity.id) !== undefined) return { ...entity, datapoints: [parent.id] }
+const addCategoryProcessStrategy = (entity: any, parent: any) => {
+  if (parent.annotations.find((a: any) => a.category_id == entity.id) !== undefined) return { ...entity, datapoints: [parent.id] }
   else return { ...entity }
 }
 
@@ -96,13 +96,13 @@ const datapoint = new schema.Entity('datapoints', {
 
 
 const preprocess = (datapoints: any) => {
-  datapoints.map((dp:any) => {
+  datapoints.map((dp: any) => {
 
     // our HABTM models are fetched oddly, this is a hack to fix that
     // @ts-ignore
     let newTags = []
     if (dp.tags.length > 0) {
-      dp.tags.map((t:any) => {
+      dp.tags.map((t: any) => {
         newTags.push(t.tag)
       })
       // @ts-ignore
@@ -118,7 +118,7 @@ const preprocess = (datapoints: any) => {
     dp.metadata = JSON.parse(dp.metadata_)
 
     // inject projection for now..........
-    dp.projection = {id: dp.id, x: Math.random()*100, y: Math.random()*100}
+    dp.projection = { id: dp.id, x: Math.random() * 100, y: Math.random() * 100 }
   })
 
   return datapoints
@@ -137,10 +137,10 @@ export function getDatapointsForProject(project_id: number, cb: (data: any) => v
       const normalizedData = normalize(preprocess(res.datapoints), [datapoint]);
       cb(normalizedData)
     })
-  .catch((error) => {
-    cb({ error: true, message: error })
-    // Only network error comes here
-  });
+    .catch((error) => {
+      cb({ error: true, message: error })
+      // Only network error comes here
+    });
 }
 
 interface Annotation {
@@ -210,25 +210,25 @@ interface Category {
 
 interface NormalizeData {
   entities: {
-    datapoints: {[key: number]: Datapoint}
-    datasets: {[key: number]: Dataset}
-    inferences: {[key: number]: Inference}
-    labels: {[key: number]: Label}
-    resources: {[key: number]: Resource}
-    tags: {[key: number]: Tag}
-    categories: {[key: number]: Category}
-    projections: {[key: number]: Projection}
+    datapoints: { [key: number]: Datapoint }
+    datasets: { [key: number]: Dataset }
+    inferences: { [key: number]: Inference }
+    labels: { [key: number]: Label }
+    resources: { [key: number]: Resource }
+    tags: { [key: number]: Tag }
+    categories: { [key: number]: Category }
+    projections: { [key: number]: Projection }
   }
 }
 
-const datapointsAtom = atom<{[key: number]: Datapoint}>({})
-const datasetsAtom = atom<{[key: number]: Dataset}>({})
-const labelsAtom = atom<{[key: number]: Label}>({})
-const tagsAtom = atom<{[key: number]: Tag}>({})
-const resourcesAtom = atom<{[key: number]: Resource}>({})
-const inferencesAtom = atom<{[key: number]: Inference}>({})
-const categoriesAtom = atom<{[key: number]: Category}>({})
-const projectionsAtom = atom<{[key: number]: Projection}>({})
+const datapointsAtom = atom<{ [key: number]: Datapoint }>({})
+const datasetsAtom = atom<{ [key: number]: Dataset }>({})
+const labelsAtom = atom<{ [key: number]: Label }>({})
+const tagsAtom = atom<{ [key: number]: Tag }>({})
+const resourcesAtom = atom<{ [key: number]: Resource }>({})
+const inferencesAtom = atom<{ [key: number]: Inference }>({})
+const categoriesAtom = atom<{ [key: number]: Category }>({})
+const projectionsAtom = atom<{ [key: number]: Projection }>({})
 const selectedDatapointsAtom = atom<number[]>([])
 
 const DataFetchTest = () => {
@@ -241,10 +241,7 @@ const DataFetchTest = () => {
   const [categories, updatecategories] = useAtom(categoriesAtom)
   const [projections, updateprojections] = useAtom(projectionsAtom)
 
-  const [selectedDatapoints, setselectedDatapoints] = useAtom(selectedDatapointsAtom)
-
   const hydrateAtoms = (normalizedData: NormalizeData) => {
-    console.log('normalizedData', normalizedData)
     updatedatapoints(normalizedData.entities.datapoints)
     updatedatasets(normalizedData.entities.datasets)
     updatelabels(normalizedData.entities.labels)
@@ -259,10 +256,6 @@ const DataFetchTest = () => {
     getDatapointsForProject(2, hydrateAtoms)
   }, [])
 
-  // if (Object.keys(datapoints).length > 0) {
-  //   console.log('datapoints', datapoints[70001].annotations)
-  // }
-  
 
   return (
     <Suspense fallback="Loading">
@@ -281,68 +274,68 @@ const DataFetchTest = () => {
           : null}
         </GridItem>
       </Grid> */}
-        
-        <Grid templateColumns='repeat(6, 1fr)' gap={6}>
-          <GridItem w='100%'>
-            <Text>Datapoints</Text>
-            {Object.keys(datapoints).map(function(keyName, keyIndex) {
-              if (keyIndex > 100) return
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
-            <Text>Datasets</Text>
-            {Object.keys(datasets).map(function(keyName, keyIndex) {
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
-            <Text>Labels</Text>
-            {Object.keys(labels).map(function(keyName, keyIndex) {
-              if (keyIndex > 100) return
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
+
+      <Grid templateColumns='repeat(6, 1fr)' gap={6}>
+        <GridItem w='100%'>
+          <Text>Datapoints</Text>
+          {Object.keys(datapoints).map(function (keyName, keyIndex) {
+            if (keyIndex > 100) return
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
+          <Text>Datasets</Text>
+          {Object.keys(datasets).map(function (keyName, keyIndex) {
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
+          <Text>Labels</Text>
+          {Object.keys(labels).map(function (keyName, keyIndex) {
+            if (keyIndex > 100) return
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
           <Text>Resources</Text>
-            {Object.keys(resources).map(function(keyName, keyIndex) {
-              if (keyIndex > 100) return
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
+          {Object.keys(resources).map(function (keyName, keyIndex) {
+            if (keyIndex > 100) return
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
           <Text>Tags</Text>
-            {Object.keys(tags).map(function(keyName, keyIndex) {
-              if (keyIndex > 100) return
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
+          {Object.keys(tags).map(function (keyName, keyIndex) {
+            if (keyIndex > 100) return
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
           <Text>Categories</Text>
-            {Object.keys(categories).map(function(keyName, keyIndex) {
-              if (keyIndex > 100) return
-              return (
-                // @ts-ignore
-                <Text key={keyName}>{keyName} - {keyIndex}</Text>
-              )
-            })}
-          </GridItem>
-          <GridItem w='100%'>
+          {Object.keys(categories).map(function (keyName, keyIndex) {
+            if (keyIndex > 100) return
+            return (
+              // @ts-ignore
+              <Text key={keyName}>{keyName} - {keyIndex}</Text>
+            )
+          })}
+        </GridItem>
+        <GridItem w='100%'>
           {/* <Text>Inferences</Text>
             {Object.keys(inferences).map(function(keyName, keyIndex) {
               if (keyIndex > 100) return
@@ -351,8 +344,8 @@ const DataFetchTest = () => {
                 <Text key={keyName}>{keyName} - {keyIndex}</Text>
               )
             })} */}
-          </GridItem>
-        </Grid>
+        </GridItem>
+      </Grid>
     </Suspense>
   )
 }

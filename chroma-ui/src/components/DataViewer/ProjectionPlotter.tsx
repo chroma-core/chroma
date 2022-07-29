@@ -215,8 +215,6 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     const noFilterList = ["Tags"]
     validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
   }
-  console.log('points', points)
-  console.log('colorByOptions', colorByOptions)
 
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it

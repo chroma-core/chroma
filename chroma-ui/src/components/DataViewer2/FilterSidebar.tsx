@@ -70,8 +70,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
 
   function selectPoints(dps: number[]) {
     console.log('selectpoints', dps)
-    setselectedDatapoints(dps)
     updatepointsToSelect(dps)
+    setselectedDatapoints(dps)
   }
 
   return (
@@ -150,9 +150,9 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
                                   classTitle={f.filter.name}
                                   key={f.filter.name + "." + link.name}
                                   indent={6}
-                                  keyName={link.name}
+                                  keyName={f.filter.name + "." + link.name}
                                   showHide={() => updateDiscreteFilter(f.filter, option)}
-                                  selectBy={() => selectPoints(link.datapoints)}// selectByFilter(filter, option)}
+                                  selectBy={() => selectPoints(link.datapoint_ids)}// selectByFilter(filter, option)}
                                 />
                               )
                             })

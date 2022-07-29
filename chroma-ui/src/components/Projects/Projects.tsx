@@ -12,8 +12,6 @@ export default function Projects() {
   if (error) return <p>Oh no... {error.message}</p>;
   let noData = (data?.projects.length == 0)
 
-  console.log('data', data)
-
   return (
     <>
       <Suspense fallback="Loading...">

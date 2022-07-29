@@ -3,12 +3,14 @@ import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
 import { categoryFilterAtom, cursorAtom, datapointsAtom, datasetFilterAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
-import { useAtom } from 'jotai'
+import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterArray, FilterType } from './types';
 
 interface ConfigProps {
   scatterplot?: any
 }
+
+const readDatapointsAtom = atom((get) => get(datapointsAtom))
 
 const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
@@ -18,10 +20,10 @@ const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key
 
   Object.keys(datapoints).map(function (keyName, keyIndex) {
     let datapoint = datapoints[parseInt(keyName, 10)]
-    if (projections[datapoint.projection!].y < minY) minY = projections[datapoint.projection!].y
-    if (projections[datapoint.projection!].y > maxY) maxY = projections[datapoint.projection!].y
-    if (projections[datapoint.projection!].x < minX) minX = projections[datapoint.projection!].x
-    if (projections[datapoint.projection!].x > maxX) maxX = projections[datapoint.projection!].x
+    if (projections[datapoint.projection_id!].y < minY) minY = projections[datapoint.projection_id!].y
+    if (projections[datapoint.projection_id!].y > maxY) maxY = projections[datapoint.projection_id!].y
+    if (projections[datapoint.projection_id!].x < minX) minX = projections[datapoint.projection_id!].x
+    if (projections[datapoint.projection_id!].x > maxX) maxX = projections[datapoint.projection_id!].x
   })
 
   var centerX = (maxX + minX) / 2
@@ -45,13 +47,21 @@ function minMaxNormalization(value: number, min: number, max: number) {
   return (value - min) / (max - min)
 }
 
+// @ts-ignore
+// let window.currentInstance: any = null
+function selectCallbackOutsideReact(points: any) {
+  // @ts-ignore
+  window.selectHandler(points)
+}
+
 const ProjectionPlotter: React.FC = () => {
-  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
+  const [datapoints] = useAtom(datapointsAtom)
+  const [readDatapoints] = useAtom(readDatapointsAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(selectedDatapointsAtom)
-  const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
-  const [projections, updateprojections] = useAtom(projectionsAtom)
-  const [cursor, setCursor] = useAtom(cursorAtom)
-  const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
+  const [visibleDatapoints] = useAtom(visibleDatapointsAtom)
+  const [projections] = useAtom(projectionsAtom)
+  const [cursor] = useAtom(cursorAtom)
+  const [toolSelected] = useAtom(toolSelectedAtom)
   const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
 
   let [reglInitialized, setReglInitialized] = useState(false);
@@ -75,12 +85,19 @@ const ProjectionPlotter: React.FC = () => {
   // Callback functions that are fired by regl-scatterplot
   // @ts-ignore
   const selectHandler = ({ points: newSelectedPoints }) => {
-    newSelectedPoints = newSelectedPoints.map((id: number) => parseInt(Object.keys(datapoints)[id], 10))
-    console.log('selectHandler running?', newSelectedPoints)
-    updateselectedDatapoints(newSelectedPoints)
+    if (pointsToSelect.length > 0) return
+    const selectedPoints = newSelectedPoints.map((id: number) => {
+      var datapointId = Object.keys(datapoints)[id - 1]
+      return parseInt(datapointId, 10)
+    })
+    if (selectedPoints == selectedDatapoints) return
+    updateselectedDatapoints(selectedPoints)
   }
+
+  // @ts-ignore
+  window.selectHandler = selectHandler; // eslint-disable-line @typescript-eslint/no-this-alias
+
   const deselectHandler = () => {
-    console.log('deselectHandler running?')
     updateselectedDatapoints([])
     setpointsToSelect([])
   };
@@ -132,7 +149,7 @@ const ProjectionPlotter: React.FC = () => {
       // go from Ids to indices... 
       var select: number[] = []
       pointsToSelect.map(p => {
-        select.push(Object.keys(datapoints).findIndex(i => parseInt(i, 10) == p))
+        select.push(Object.keys(datapoints).findIndex(i => parseInt(i, 10) == p) + 1)
       })
 
       config.scatterplot.select(select)
@@ -182,7 +199,7 @@ const ProjectionPlotter: React.FC = () => {
       // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
 
       const visible = visibleDatapoints.includes(datapoint.id) ? 1 : 0
-      return points.push([projections[datapoint.projection].x, projections[datapoint.projection].y, visible, 0])
+      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, visible, 0, parseInt(keyName, 10)])
     })
     if (points.length > 1) setPoints(points)
   }
@@ -213,7 +230,7 @@ const ProjectionPlotter: React.FC = () => {
           pixelRatio: Math.min(1.5, window.devicePixelRatio),
           canvas: canvasRef,
           deselectHandler: deselectHandler,
-          selectHandler: selectHandler,
+          selectHandler: selectCallbackOutsideReact,
           target: target,
           distance: maxSize * 1.2
         }

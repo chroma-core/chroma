@@ -11,16 +11,16 @@ export interface Annotation {
 }
 
 export interface Datapoint {
-  dataset: number
+  dataset_id: number
   id: number
-  inference: number
-  label: number
+  inference_id: number
+  label_id: number
   metadata: {}
-  resource: number
-  tags: number[]
-  categories: number[]
+  resource_id: number
+  tag_ids: number[]
   annotations: Annotation[]
-  projection: number
+  inferences: Annotation[]
+  projection_id: number
   visible: boolean
 }
 
@@ -28,6 +28,7 @@ export interface Dataset {
   id: number
   name: string
   datapoints: number[]
+  categories: string
 }
 
 export interface Projection {
@@ -58,7 +59,7 @@ export interface Resource {
 export interface Tag {
   id: number
   name: string
-  datapoints: number[]
+  datapoint_ids: number[]
 }
 
 export interface Category {
@@ -69,18 +70,18 @@ export interface Category {
 
 export interface NormalizeData {
   entities: {
-    datapoints: {[key: number]: Datapoint}
-    datasets: {[key: number]: Dataset}
-    inferences: {[key: number]: Inference}
-    labels: {[key: number]: Label}
-    resources: {[key: number]: Resource}
-    tags: {[key: number]: Tag}
-    categories: {[key: number]: Category}
-    projections: {[key: number]: Projection}
+    datapoints: { [key: number]: Datapoint }
+    datasets: { [key: number]: Dataset }
+    inferences: { [key: number]: Inference }
+    labels: { [key: number]: Label }
+    resources: { [key: number]: Resource }
+    tags: { [key: number]: Tag }
+    categories: { [key: number]: Category }
+    projections: { [key: number]: Projection }
   }
 }
 
-export const CursorMap: {[key: string]: string} = {
+export const CursorMap: { [key: string]: string } = {
   select: "select-cursor",
   lasso: "crosshair",
   add: "crosshair-plus-cursor",

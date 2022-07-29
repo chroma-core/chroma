@@ -98,7 +98,7 @@ const Updater: React.FC = () => {
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
-          if ((option.visible == false) && (datapoint.tags.includes(option.id))) return true
+          if ((option.visible == false) && (datapoint.tag_ids.includes(option.id))) return true
           else return false
         }
       }
@@ -129,7 +129,7 @@ const Updater: React.FC = () => {
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
-          if ((option.visible == false) && (datapoint.dataset == option.id)) return true
+          if ((option.visible == false) && (datapoint.dataset_id == option.id)) return true
           else return false
         }
       }

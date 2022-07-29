@@ -12,8 +12,6 @@ category_ids = coco.getCatIds(['bicycle'])
 
 # Get list of image_ids which contain bicycles
 image_ids = coco.getImgIds(catIds=[2])
-print(str(image_ids))
- 
 image_id = image_ids[0]
  
 images_path = "/Users/jeff/data/train2014/COCO_train2014_"

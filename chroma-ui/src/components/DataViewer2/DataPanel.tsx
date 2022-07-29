@@ -31,7 +31,7 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
   let [datapointModalIndex, updatedatapointModalIndex] = useAtom(datapointModalIndexAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
 
-  const uri = resources[datapoint.resource].uri
+  const uri = resources[datapoint.resource_id].uri
 
   // const [result, reexecuteQuery] = useQuery({
   //   query: ImageQuery,
@@ -62,7 +62,7 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
         <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">
           <Flex alignItems="center" >
             <BsTag color='#666' />
-            <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.tags.length}</Text>
+            <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.tag_ids.length}</Text>
           </Flex>
           {/* <Flex alignItems="center" >
             <BiCategoryAlt color='#666' />
@@ -157,15 +157,7 @@ const DataPanel: React.FC = () => {
   }
   else dps = visibleDatapoints
 
-  // let modalDatapoint = 0
-  // if (dps !== undefined) {
-  //   // sending fns through itemData to react-window is stupid, but it is what it is
-  //   dps?.map((dp, index) => {
-  //     dp.triggerModal = () => triggerModal(index)
-  //     dp.selected = (index === modalDatapointIndex)
-  //   })
-  //   modalDatapoint = dps[modalDatapointIndex]
-  // }
+  dps.sort(function (a, b) { return a - b });
 
   return (
     <Resizable

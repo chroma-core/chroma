@@ -75,10 +75,6 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId }) => {
     setTagsArray(newTagsArray)
   }
 
-  // const callback = (data: any) => {
-  //   console.log('done', data)
-  // }
-
   const onKeyPress = (e: any) => {
     if (e.key === 'Enter') {
       onSubmitName(e)

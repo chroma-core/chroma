@@ -43,7 +43,7 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
   const datapoint = datapoints[datapointId]
 
   useEffect(() => {
-    var tagStrings = datapoint.tags.map(tag => tags[tag].name)
+    var tagStrings = datapoint.tag_ids.map(tid => tags[tid].name)
     setTagsArray(tagStrings)
     const allTags = tagStrings.join(", ")
     setTagString(allTags)
@@ -81,39 +81,38 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
     var newDatapoints = Object.assign({}, datapoints)
     var dp = newDatapoints[datapointId]
 
-    console.log('onSubmitName', add)
-
     // for every tag we want to add
     // 1. see if the tag already exists, if so, add its id to this list, and also add it to the tags list?
     // else create the tag, add it, and then add its id 
     var tempUUid = uuidv4()//Object.keys(newTags).length
     add.forEach(t => {
       var exists = Object.values(newTags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
-      console.log('exists', exists)
       if (exists < 0) {
         // add and get the index
         tempUUid += 1
-        newTags[tempUUid] = { id: tempUUid, name: t.trim(), datapoints: [dp.id] }
-        dp.tags.push(tempUUid)
-        console.log('wtf', tempUUid, newTags[tempUUid], dp.tags)
+        newTags[tempUUid] = { id: tempUUid, name: t.trim(), datapoint_ids: [dp.id] }
+        dp.tag_ids.push(tempUUid)
       } else {
-        // add to the tag
-        Object.values(newTags)[exists].datapoints.push(dp.id)
-        // @ts-ignore
-        dp.tags.push(Object.keys(newTags)[exists])
+        if (Object.values(newTags)[exists].datapoint_ids.indexOf(dp.id < 0)) { // cant add twice
+          // add to the tag
+          Object.values(newTags)[exists].datapoint_ids.push(dp.id)
+          // @ts-ignore
+          dp.tag_ids.push(Object.keys(newTags)[exists])
+        }
+
       }
     })
 
     var markForDeletion: number[] = []
     remove.map(t => {
-      console.log('remove..', remove, t)
       if (t == '') return
       var exists = Object.values(newTags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
       var id = Object.values(newTags)[exists].id
+      dp.tag_ids.splice(dp.tag_ids.indexOf(id), 1)
       if (exists > -1) {
-        removeItem(newTags[id].datapoints, dp.id)
-        removeItem(dp.tags, id)
-        if (newTags[id].datapoints.length === 0) {
+        removeItem(newTags[id].datapoint_ids, dp.id)
+        removeItem(dp.tag_ids, id)
+        if (newTags[id].datapoint_ids.length === 0) {
           markForDeletion.push(id)
         }
       }
@@ -122,6 +121,8 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
       delete newTags[deleteTagId]
     })
 
+    console.log('markForDeletion', markForDeletion)
+    console.log('remove', remove)
     console.log('newTags', newTags)
 
     setTags({ ...newTags })

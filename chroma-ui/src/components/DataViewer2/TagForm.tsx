@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import {
   Input,
   InputGroup,
@@ -46,24 +47,24 @@ const TagForm: React.FC = () => {
       const variables = { tagName: tag, datapointIds: selectedDatapoints }
       addTag(variables)
 
-      var tempUUid = Object.keys(tags).length
+      var tempUUid = uuidv4()
       splitNewTags.map(t => {
         var exists = Object.values(tags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
         if (exists < 0) {
           // add and get the index
-          tempUUid += 1
-          tags[tempUUid] = { id: tempUUid, name: t.trim(), datapoints: selectedDatapoints }
+          // @ts-ignore
+          tags[tempUUid] = { id: tempUUid, name: t.trim(), datapoint_ids: selectedDatapoints }
           selectedDatapoints.map(d => {
             // @ts-ignore
-            datapoints[d].tags.push(tags[tempUUid].id)
+            datapoints[d].tag_ids.push(tags[tempUUid].id)
           })
         } else {
           // add to the tag
-          Object.values(tags)[exists].datapoints.push(...selectedDatapoints)
+          Object.values(tags)[exists].datapoint_ids.push(...selectedDatapoints)
           // @ts-ignore
           selectedDatapoints.map(d => {
             // @ts-ignore
-            datapoints[d].tags.push(Object.keys(tags)[exists].id)
+            datapoints[d].tag_ids.push(Object.keys(tags)[exists].id)
           })
         }
       })
@@ -90,13 +91,14 @@ const TagForm: React.FC = () => {
       unTag(variables)
 
       var tagIndex = Object.values(newTags).findIndex(existingTag => existingTag.name == tag) // -1 means it doesnt exist yet, otherwise we need the index
+
       selectedDatapointsCopy.forEach(sd => {
 
-        let tagDatapoints = Object.values(newTags)[tagIndex].datapoints
+        let tagDatapoints = Object.values(newTags)[tagIndex].datapoint_ids
         let tagDatapointsNew = tagDatapoints.slice()
         let tagId = Object.values(newTags)[tagIndex].id
         let datapointId = newDatapoints[sd].id
-        let datapointTags = newDatapoints[sd].tags
+        let datapointTags = newDatapoints[sd].tag_ids
         let index = 0
 
         index = datapointTags.indexOf(tagId);
@@ -112,7 +114,7 @@ const TagForm: React.FC = () => {
           markForDeletion.push(tagId)
         }
 
-        Object.values(newTags)[tagIndex].datapoints = tagDatapointsNew
+        Object.values(newTags)[tagIndex].datapoint_ids = tagDatapointsNew
 
       })
     })
@@ -187,3 +189,4 @@ const TagForm: React.FC = () => {
 }
 
 export default TagForm
+

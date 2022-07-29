@@ -218,7 +218,6 @@ function Embeddings() {
     setSelectedPoints(newSelectedPoints)
   }
   const deselectHandler = () => {
-    console.log('deselected points')
     setSelectedPoints([])
   };
 

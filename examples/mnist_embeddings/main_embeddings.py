@@ -12,6 +12,8 @@ from torchvision import datasets, transforms
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 
+import json
+
 # We modify the MNIST dataset to expose some information about the source data
 # to allow us to uniquely identify an input in a way that we can recover it later
 class CustomDataset(datasets.MNIST):
@@ -85,8 +87,21 @@ def main():
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
 
+    mnist_category_data = json.dumps([
+        {'supercategory': 'none', 'id': 1, 'name': '1'}, 
+        {'supercategory': 'none', 'id': 2, 'name': '2'}, 
+        {'supercategory': 'none', 'id': 3, 'name': '3'}, 
+        {'supercategory': 'none', 'id': 4, 'name': '4'}, 
+        {'supercategory': 'none', 'id': 5, 'name': '5'}, 
+        {'supercategory': 'none', 'id': 6, 'name': '6'}, 
+        {'supercategory': 'none', 'id': 7, 'name': '7'}, 
+        {'supercategory': 'none', 'id': 8, 'name': '8'}, 
+        {'supercategory': 'none', 'id': 9, 'name': '9'}, 
+        {'supercategory': 'none', 'id': 0, 'name': '0'}
+    ])
+
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Train") as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST2", dataset_name="Train2", categories=mnist_category_data) as chroma_storage:
 
         # Use the MNIST training set
         train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
@@ -98,7 +113,7 @@ def main():
         infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST2", dataset_name="Test2", categories=mnist_category_data) as chroma_storage:
 
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)

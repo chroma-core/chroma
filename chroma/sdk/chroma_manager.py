@@ -146,22 +146,18 @@ class ChromaSDK:
                     "embeddingSetId": self._embedding_set_id,
                     "labelData": json.dumps(
                         {
-                            "categories": [
+                            "annotations": [
                                 {
-                                    "id": int(self._labels[index]),
-                                    "name": str(self._labels[index]),
-                                    "supercategory": "none",
+                                    "category_id": int(self._labels[index]),
                                 }
                             ]
                         }
                     ),
                     "inferenceData": json.dumps(
                         {
-                            "categories": [
+                            "annotations": [
                                 {
-                                    "id": int(self._inferences[index]),
-                                    "name": str(self._inferences[index]),
-                                    "supercategory": "none",
+                                    "category_id": int(self._inferences[index]),
                                 }
                             ]
                         }
@@ -174,7 +170,7 @@ class ChromaSDK:
             return batch_data
 
     # Internal
-    def __init__(self, project_name: str, dataset_name: str) -> None:
+    def __init__(self, project_name: str, dataset_name: str, categories: str) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
         self._client = Client(
             transport=transport, fetch_schema_from_transport=True, execute_timeout=30
@@ -183,7 +179,7 @@ class ChromaSDK:
         project = nn(self.create_or_get_project(project_name))
         self._project_id = int(project.createOrGetProject.id)
 
-        dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id))
+        dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id, categories))
         dataset_id = int(dataset.createOrGetDataset.id)
 
         # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
@@ -424,8 +420,8 @@ class ChromaSDK:
         result = self._client.execute(create_dataset_mutation, variable_values=params)
         return result
 
-    def create_or_get_dataset(self, name: str, project_id: int):
-        params = {"dataset": {"name": name, "projectId": project_id}}
+    def create_or_get_dataset(self, name: str, project_id: int, categories: str):
+        params = {"dataset": {"name": name, "projectId": project_id, "categories": categories}}
         result = self._client.execute(create_or_get_dataset_mutation, variable_values=params)
         return result
 
