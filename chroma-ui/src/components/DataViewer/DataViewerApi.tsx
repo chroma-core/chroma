@@ -33,8 +33,8 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
     });
 }
 
-export function getDatapointsForProject(project_id: number, cb: (data: any) => void) {
-  fetch(`/api/datapoints/` + project_id, {
+export function getTotalDatapointsToFetch(project_id: number, cb: (res: any) => void) {
+  fetch(`/api/datapoints_count/` + project_id, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -48,4 +48,30 @@ export function getDatapointsForProject(project_id: number, cb: (data: any) => v
       cb({ error: true, message: error })
       // Only network error comes here
     });
+}
+
+const worker: Worker = new Worker('/workers/process.js')
+
+export function getDatapointsForProject(project_id: number, page_id: number, cb: (data: any, datalen: number, prevPage: number) => void) {
+  // console.log('fetching data')
+  // console.time('fetching data')
+  fetch(`/api/datapoints/` + project_id + "&page=" + page_id, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then(response => {
+      return response.text()
+    })
+    .then((response) => {
+      worker.postMessage(response)
+      worker.onmessage = (e: MessageEvent) => {
+        var { data } = e
+        cb(data, data.numberOfDatapoints, page_id)
+      }
+    })
+    .catch((error) => {
+      cb({ error: true, message: error }, 0, 0)
+    })
 }

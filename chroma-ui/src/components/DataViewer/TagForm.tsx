@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import {
   Input,
   InputGroup,
@@ -8,18 +9,19 @@ import {
 import React, { useState } from 'react'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
+import { datapointsAtom, selectedDatapointsAtom, tagsAtom } from './atoms'
 import { datapointIndexToPointIndex } from './DataViewerUtils'
+import { useAtom } from 'jotai'
+import { removeItem } from './Tags'
 
-interface TagFormProps {
-  selectedDatapointsIds: []
-  datapoints: any[]
-  setDatapointsAndRebuildFilters: (datapoints: any[]) => void
-}
+const TagForm: React.FC = () => {
+  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
+  const [tags, updatetags] = useAtom(tagsAtom)
+  const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
 
-const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, setDatapointsAndRebuildFilters }) => {
   const theme = useTheme()
   const textColor = useColorModeValue(theme.colors.ch_gray.dark, theme.colors.ch_gray.light)
-  const noneSelected = selectedDatapointsIds.length === 0
+  const noneSelected = selectedDatapoints.length === 0
 
   // state for the inputs
   const [newTag, setNewTag] = useState("")
@@ -36,36 +38,40 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
     let splitNewTags = newTag.split(",")
 
     // get selected datapoint ids from selected projection ids
-    var selectedPointsIds = selectedDatapointsIds.slice().map(selectedPointId => {
+    var selectedPointsIds = selectedDatapoints.slice().map(selectedPointId => {
       return datapointIndexToPointIndex(selectedPointId)
     })
 
     // add the new tags to each datapoint
     splitNewTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointsIds }
+      const variables = { tagName: tag, datapointIds: selectedDatapoints }
       addTag(variables)
-    })
 
-    // update our `datapoints` data structure with the new tags, this is an optimistic update
-    // we handle this manually for now, since graphcache won't support it since the data was 
-    // fetched with rest
-    selectedPointsIds.forEach((point, index) => {
-      var pointTags = datapoints[point].tags.slice()
-      splitNewTags.forEach(splitNewTag => {
-        const indexOf = pointTags.findIndex((currentTag: any) => {
-          return currentTag.tag.name === splitNewTag.trim()
-        })
-
-        if (indexOf < 0) {
-          pointTags.push({ "right_id": undefined, "tag": { "name": splitNewTag.trim() } })
+      var tempUUid = uuidv4()
+      splitNewTags.map(t => {
+        var exists = Object.values(tags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
+        if (exists < 0) {
+          // add and get the index
+          // @ts-ignore
+          tags[tempUUid] = { id: tempUUid, name: t.trim(), datapoint_ids: selectedDatapoints }
+          selectedDatapoints.map(d => {
+            // @ts-ignore
+            datapoints[d].tag_ids.push(tags[tempUUid].id)
+          })
+        } else {
+          // add to the tag
+          Object.values(tags)[exists].datapoint_ids.push(...selectedDatapoints)
+          // @ts-ignore
+          selectedDatapoints.map(d => {
+            // @ts-ignore
+            datapoints[d].tag_ids.push(Object.keys(tags)[exists].id)
+          })
         }
       })
-      datapoints[point].tags = pointTags
     })
 
-    // set new tag data which forces the rerender
-    setDatapointsAndRebuildFilters([...datapoints])
-
+    updatetags({ ...tags })
+    updatedatapoints({ ...datapoints })
     setNewTag("")
   }
 
@@ -75,31 +81,50 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
 
     let splitNewUnTags = newUnTag.split(",")
 
-    var selectedPointsIds = selectedDatapointsIds.slice().map(selectedPointId => {
-      return datapointIndexToPointIndex(selectedPointId)
-    })
+    var selectedDatapointsCopy = selectedDatapoints.slice()
+    var newTags = Object.assign({}, tags)
+    var newDatapoints = Object.assign({}, datapoints)
 
+    var markForDeletion: number[] = []
     splitNewUnTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointsIds }
+      const variables = { tagName: tag, datapointIds: selectedDatapointsCopy }
       unTag(variables)
-    })
 
-    selectedPointsIds.forEach(point => {
-      var tags = datapoints[point].tags.slice()
+      var tagIndex = Object.values(newTags).findIndex(existingTag => existingTag.name == tag) // -1 means it doesnt exist yet, otherwise we need the index
 
-      splitNewUnTags.forEach(splitNewTag => {
-        const indexOf = tags.findIndex((currentTag: any) => {
-          return currentTag.tag.name === splitNewTag.trim()
-        })
+      selectedDatapointsCopy.forEach(sd => {
 
-        if (indexOf > -1) {
-          tags.splice(indexOf, 1)
+        let tagDatapoints = Object.values(newTags)[tagIndex].datapoint_ids
+        let tagDatapointsNew = tagDatapoints.slice()
+        let tagId = Object.values(newTags)[tagIndex].id
+        let datapointId = newDatapoints[sd].id
+        let datapointTags = newDatapoints[sd].tag_ids
+        let index = 0
+
+        index = datapointTags.indexOf(tagId);
+        if (index > -1) {
+          datapointTags.splice(index, 1);
         }
+
+        index = tagDatapoints.indexOf(datapointId);
+        if (index > -1) {
+          tagDatapointsNew.splice(index, 1);
+        }
+        if (tagDatapointsNew.length === 0) {
+          markForDeletion.push(tagId)
+        }
+
+        Object.values(newTags)[tagIndex].datapoint_ids = tagDatapointsNew
+
       })
-      datapoints[point].tags = tags
     })
 
-    setDatapointsAndRebuildFilters([...datapoints])
+    markForDeletion.map(deleteTagId => {
+      delete newTags[deleteTagId]
+    })
+
+    updatetags({ ...newTags })
+    updatedatapoints({ ...newDatapoints })
 
     setNewUnTag("")
   }
@@ -164,3 +189,4 @@ const TagForm: React.FC<TagFormProps> = ({ selectedDatapointsIds, datapoints, se
 }
 
 export default TagForm
+

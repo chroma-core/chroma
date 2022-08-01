@@ -29,8 +29,8 @@ const Updater: React.FC = () => {
   useEffect(() => {
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
-    Object.keys(datapoints).map(function (keyName, keyIndex) {
-      let dp = datapoints[parseInt(keyName, 10)]
+    Object.values(datapoints).map(function (val, keyIndex) {
+      let dp = val
       visibleDps.push(dp.id)
 
       for (let i = 0; i < filtersToObserve.length; i++) {
@@ -52,16 +52,16 @@ const Updater: React.FC = () => {
   // categories filter
   useEffect(() => {
     var colors = distinctColors({
-      "count": Object.keys(categories).length,
+      "count": Object.values(categories).length,
       "lightMin": 20,
       "lightMax": 85,
       "chromaMin": 50
     }).map(color => color.hex())
 
-    let options: FilterOption[] = Object.keys(categories).map((c, i) => {
+    let options: FilterOption[] = Object.values(categories).map((c, i) => {
       let option: FilterOption = {
         // @ts-ignore
-        id: categories[c].id,
+        id: c.id,
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
@@ -85,16 +85,16 @@ const Updater: React.FC = () => {
   // tags filter
   useEffect(() => {
     var colors = distinctColors({
-      "count": Object.keys(tags).length,
+      "count": Object.values(tags).length,
       "lightMin": 20,
       "lightMax": 85,
       "chromaMin": 50
     }).map(color => color.hex())
 
-    let options: FilterOption[] = Object.keys(tags).map((c, i) => {
+    let options: FilterOption[] = Object.values(tags).map((c, i) => {
       let option: FilterOption = {
         // @ts-ignore
-        id: tags[c].id,
+        id: c.id,
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
@@ -117,15 +117,15 @@ const Updater: React.FC = () => {
   // dataset filter
   useEffect(() => {
     var colors = distinctColors({
-      "count": Object.keys(datasets).length,
+      "count": Object.values(datasets).length,
       "lightMin": 20,
       "lightMax": 85,
       "chromaMin": 50
     }).map(color => color.hex())
 
-    let options: FilterOption[] = Object.keys(datasets).map((c, i) => {
+    let options: FilterOption[] = Object.values(datasets).map((c, i) => {
       let option: FilterOption = {
-        id: datasets[parseInt(c, 10)].id,
+        id: c.id,
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {

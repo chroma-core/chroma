@@ -49,8 +49,7 @@ self.onmessage = (message) => {
     })
 
 
-    Object.keys(tagsObject).map(function (keyName, keyIndex) {
-        let tag = tagsObject[parseInt(keyName, 10)]
+    Object.values(tagsObject).map(function (tag) {
         tag.datapoint_ids.map(dpid => {
             datapointsObject[dpid].tag_ids.push(tag.id)
         })
@@ -76,7 +75,7 @@ self.onmessage = (message) => {
 
     })
 
-    Object.keys(annsIdsToAdd).map((c, i) => {
+    Object.keys(annsIdsToAdd).map((c) => {
         // @ts-ignore
         const dps = (annsIdsToAdd[c]).keys()
         // @ts-ignore

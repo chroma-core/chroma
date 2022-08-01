@@ -33,8 +33,6 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   const [categories] = useAtom(categoriesAtom)
   const [categoryFilter] = useAtom(categoryFilterAtom)
 
-
-
   // sets image dimensons on load
   const onImgLoad = (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
     // @ts-ignore
@@ -54,7 +52,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   }, [])
 
   let resolverName = 'filepath'
-  if (imageUri.startsWith('train-images-idx3')) resolverName = 'mnist'
+  if (imageUri.startsWith('train-images-idx3') || imageUri.startsWith('t10k-images-idx3')) resolverName = 'mnist'
   if (imageUri.startsWith('http')) resolverName = 'url'
 
   // fetch the image

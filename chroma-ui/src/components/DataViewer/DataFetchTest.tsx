@@ -256,7 +256,6 @@ const DataFetchTest = () => {
     getDatapointsForProject(2, hydrateAtoms)
   }, [])
 
-
   return (
     <Suspense fallback="Loading">
 

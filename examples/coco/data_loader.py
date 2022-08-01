@@ -7,7 +7,7 @@ from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 import json
 
-chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014')
+chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014',categories=json.dumps({}))
 
 project = nn(chroma.create_or_get_project('COCO - 20k'))
 
@@ -19,7 +19,6 @@ coco=COCO(ann_file)
 cat_ids = coco.getCatIds()
 cats = coco.loadCats(cat_ids)
 dataset = nn(chroma.create_or_get_dataset("Train2014-10 - 20k", int(project.createOrGetProject.id), json.dumps(cats)))
-raise Exception(str(cats))
 embedding_set = nn(chroma.create_embedding_set(int(dataset.createOrGetDataset.id)))
 
 # Get list of image_ids which contain bicycles
@@ -53,33 +52,32 @@ for image_id in image_ids:
         'annotations': anns_trimmed
     }
 
-    raise Exception(str(data))
 
-    # # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))
-    # # print(str(i))
-    # i = i + 1
+    # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))
+    # print(str(i))
+    i = i + 1
 
-    # data_item = {
-    #     'datasetId': int(dataset.createOrGetDataset.id), 
-    #     'labelData': json.dumps(data), 
-    #     'inferenceData': json.dumps({}), 
-    #     'resourceUri': uri, 
-    #     'embeddingData': json.dumps({}), 
-    #     'embeddingSetId': int(embedding_set.createEmbeddingSet.id), 
-    # }
+    data_item = {
+        'datasetId': int(dataset.createOrGetDataset.id), 
+        'labelData': json.dumps(data), 
+        'inferenceData': json.dumps({}), 
+        'resourceUri': uri, 
+        'embeddingData': json.dumps({}), 
+        'embeddingSetId': int(embedding_set.createEmbeddingSet.id), 
+    }
 
-    # # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))
+    # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))
 
-    # add_data_batch.append(data_item)
-    # # print(str(create_datapoint_set))
-    # if (i == (len(image_ids)-1)): 
-    #     chroma.create_batch_datapoint_embedding_set(add_data_batch)
-    #     print (str(i))
+    add_data_batch.append(data_item)
+    # print(str(create_datapoint_set))
+    if (i == (len(image_ids)-1)): 
+        chroma.create_batch_datapoint_embedding_set(add_data_batch)
+        print (str(i))
 
-    # if(not i % 10000):
-    #     chroma.create_batch_datapoint_embedding_set(add_data_batch)
-    #     add_data_batch = []
-    #     print (str(i))
+    if(not i % 10000):
+        chroma.create_batch_datapoint_embedding_set(add_data_batch)
+        add_data_batch = []
+        print (str(i))
         
-    # if (i > 21000):
-    #     raise Exception("stop")
+    if (i > 21000):
+        raise Exception("stop")
