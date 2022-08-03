@@ -25,14 +25,9 @@ const Updater: React.FC = () => {
   const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
   const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
 
-  useEffect(() => {
-    console.log('wtf')
-  }, [metadataFilters])
-
   // whenever a filter is changed... generate the list of datapoints ids to hide
   const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(metadataFilters)]
   useEffect(() => {
-    console.log('watched filter changed!')
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
     Object.values(datapoints).map(function (val, keyIndex) {
