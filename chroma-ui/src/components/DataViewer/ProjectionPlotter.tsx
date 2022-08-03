@@ -52,7 +52,11 @@ function selectCallbackOutsideReact(points: any) {
   window.selectHandler(points)
 }
 
-const ProjectionPlotter: React.FC = () => {
+interface PlotterProps {
+  allFetched: boolean
+}
+
+const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const [datapoints] = useAtom(datapointsAtom)
   const [readDatapoints] = useAtom(readDatapointsAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(selectedDatapointsAtom)
@@ -66,6 +70,9 @@ const ProjectionPlotter: React.FC = () => {
   let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
   let [points, setPoints] = useState<any>(undefined)
+  let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
+  let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
+
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
   let [colorByFilterString, setColorByFilterString] = useState('Inferences')
@@ -81,14 +88,16 @@ const ProjectionPlotter: React.FC = () => {
   })
 
   useEffect(() => {
-    if (boundsSet) return
+    if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) return
+    if (!allFetched) return
     if (config.scatterplot == undefined) return
     if (boundsSet == false) {
       let bounds = getBounds(datapoints, projections)
       config.scatterplot.set({
-        cameraDistance: (bounds.maxSize * 1.4),
+        cameraDistance: (bounds.maxSize * 1.4) * 3,
         minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
-        maxCameraDistance: (bounds.maxSize * 1.4) * 3,
+        maxCameraDistance: (bounds.maxSize * 1.4) * 8,
         cameraTarget: [bounds.centerX, bounds.centerY],
       })
       setBoundsSet(true)
@@ -100,13 +109,11 @@ const ProjectionPlotter: React.FC = () => {
   const selectHandler = ({ points: newSelectedPoints }) => {
     const t3 = performance.now();
     if (pointsToSelect.length > 0) return
-    console.log('newSelectedPoints', newSelectedPoints)
-    // const selectedPoints = newSelectedPoints.map((id: number) => {
-    //   return Object.values(datapoints)[id - 1]
-    // })
-    // if (selectedPoints == selectedDatapoints) return0
-    updateselectedDatapoints(newSelectedPoints)
-    // console.log('selectedPoints', selectedPoints)
+    var sdp: number[] = []
+    newSelectedPoints.map((pointId: any) => {
+      sdp.push(pointdatapointMap[pointId])
+    })
+    updateselectedDatapoints(sdp)
     const t4 = performance.now();
     console.log(`selectHandler hook: ${(t4 - t3) / 1000} seconds.`);
   }
@@ -131,12 +138,15 @@ const ProjectionPlotter: React.FC = () => {
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 2 times! every time a new batch of data is loaded in
   useEffect(() => {
+    if (!allFetched) return
     const t3 = performance.now();
     if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) return
     let bounds = getBounds(datapoints, projections)
     setTarget([bounds.centerX, bounds.centerY])
     setMaxSize(bounds.maxSize)
     calculateColorsAndDrawPoints()
+    setBoundsSet(true)
     const t4 = performance.now();
     console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
   }, [datapoints])
@@ -144,26 +154,26 @@ const ProjectionPlotter: React.FC = () => {
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 3 times! every time a new batch of data is loaded in
   useEffect(() => {
+    if (!allFetched) return
     const t3 = performance.now();
-    if (datapoints === undefined) return
+    if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) return
     calculateColorsAndDrawPoints()
     const t4 = performance.now();
     console.log(`datapoints, visibleDatapoints hook: ${(t4 - t3) / 1000} seconds.`);
-  }, [datapoints, visibleDatapoints])
+  }, [visibleDatapoints])
 
   useEffect(() => {
     const t3 = performance.now();
     if (pointsToSelect.length === 0) return
     if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
-      console.log('pointsToSelect', pointsToSelect)
-      // go from Ids to indices... 
-      // var select: number[] = []
-      // pointsToSelect.map(p => {
-      //   select.push(Object.keys(datapoints).findIndex(i => parseInt(i, 10) == p) + 1)
-      // })
 
-      config.scatterplot.select(pointsToSelect)
-      // console.log('select', select)
+      let selectionPoints: number[] = []
+      pointsToSelect.map(dpid => {
+        selectionPoints.push(datapointPointMap[dpid])
+      })
+
+      config.scatterplot.select(selectionPoints)
       setpointsToSelect([])
     }
     const t4 = performance.now();
@@ -204,16 +214,28 @@ const ProjectionPlotter: React.FC = () => {
     // if (colorByFilter?.filter.type == FilterType.Continuous) colorByOptionsSave = colorByFilter.filter.range!.colorScale
     // // @ts-ignore
     // setColorByOptions(colorByOptionsSave)
-    visibleDatapoints.forEach(vdp => datapoints[vdp].visible = true)
+    let datapointsClone = Object.assign({}, datapoints)
+    Object.values(datapointsClone).map(function (datapoint) {
+      datapoint.visible = false
+    })
+    visibleDatapoints.forEach(vdp => datapointsClone[vdp].visible = true)
+
+    let datapointPointMapObject: { [key: number]: number } = {}
+    let pointdatapointObject: { [key: number]: number } = {}
 
     points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
-    Object.values(datapoints).map(function (datapoint) {
+    Object.values(datapointsClone).map(function (datapoint) {
+      datapointPointMapObject[datapoint.id] = points.length //+ 1
+      pointdatapointObject[points.length] = datapoint.id
+      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
       // let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)[0]
       // let datapointColorIndex
       // if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.name == datapointColorByProp)
       // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
-      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
+      // return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
     })
+    setdatapointPointMap(datapointPointMapObject)
+    setpointdatapointMap(pointdatapointObject)
     if (points.length > 1) setPoints(points)
     const t4 = performance.now();
     console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
@@ -237,7 +259,8 @@ const ProjectionPlotter: React.FC = () => {
   }, [])
 
   function getRef(canvasRef: any) {
-    if (!canvasRef) return;
+    if (!canvasRef) return
+    if (!boundsSet) return
     if (!reglInitialized && (points !== null)) {
       scatterplot(points,
         colorByOptions,

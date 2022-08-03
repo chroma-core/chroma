@@ -1,4 +1,5 @@
 from PIL import Image
+import random
 from matplotlib import image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -9,7 +10,7 @@ import json
 
 chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014',categories=json.dumps({}))
 
-project = nn(chroma.create_or_get_project('COCO - 20k'))
+project = nn(chroma.create_or_get_project('COCO - 20k - Metadata2'))
 
 ann_file = "/Users/jeff/data/annotations/instances_train2014.json"
 coco=COCO(ann_file)
@@ -18,13 +19,15 @@ coco=COCO(ann_file)
 # category_ids = coco.getCatIds(['bicycle'])
 cat_ids = coco.getCatIds()
 cats = coco.loadCats(cat_ids)
-dataset = nn(chroma.create_or_get_dataset("Train2014-10 - 20k", int(project.createOrGetProject.id), json.dumps(cats)))
+dataset = nn(chroma.create_or_get_dataset("Train2014-10 - 20k - Metadata2", int(project.createOrGetProject.id), json.dumps(cats)))
 embedding_set = nn(chroma.create_embedding_set(int(dataset.createOrGetDataset.id)))
 
 # Get list of image_ids which contain bicycles
 # image_ids = coco.getImgIds(catIds=[2])
 image_ids = coco.getImgIds()
 print(str(len(image_ids)))
+
+str_options = ['New York', 'San Francisco', 'Atlanta', 'Miami', 'Dallas', 'Chicago', 'DC']
 
 i = 0
 add_data_batch = []
@@ -52,7 +55,6 @@ for image_id in image_ids:
         'annotations': anns_trimmed
     }
 
-
     # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))
     # print(str(i))
     i = i + 1
@@ -64,6 +66,12 @@ for image_id in image_ids:
         'resourceUri': uri, 
         'embeddingData': json.dumps({}), 
         'embeddingSetId': int(embedding_set.createEmbeddingSet.id), 
+        'metadata': json.dumps(
+            {
+                'quality': random.randint(0, 100),
+                'location': str_options[random.randint(0, 6)]
+            }
+        )
     }
 
     # create_datapoint_set = nn(chroma.create_datapoint_set(int(dataset.createOrGetDataset.id), json.dumps(data), uri))

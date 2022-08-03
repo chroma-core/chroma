@@ -121,10 +121,6 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
       delete newTags[deleteTagId]
     })
 
-    console.log('markForDeletion', markForDeletion)
-    console.log('remove', remove)
-    console.log('newTags', newTags)
-
     setTags({ ...newTags })
     setDatapoints({ ...newDatapoints })
   }

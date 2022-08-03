@@ -1,6 +1,6 @@
 import { useAtom } from 'jotai'
 import React, { useCallback, useEffect } from 'react'
-import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, inferenceFilterAtom, categoryFilterAtom, tagFilterAtom, datasetFilterAtom, visibleDatapointsAtom } from './atoms'
+import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, inferenceFilterAtom, categoryFilterAtom, tagFilterAtom, datasetFilterAtom, visibleDatapointsAtom, metadataFiltersAtom } from './atoms'
 import { FilterOption, Filter, FilterType, Datapoint } from './types'
 
 import chroma from 'chroma-js'
@@ -23,10 +23,16 @@ const Updater: React.FC = () => {
   const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
   const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
+
+  useEffect(() => {
+    console.log('wtf')
+  }, [metadataFilters])
 
   // whenever a filter is changed... generate the list of datapoints ids to hide
-  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter]
+  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(metadataFilters)]
   useEffect(() => {
+    console.log('watched filter changed!')
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
     Object.values(datapoints).map(function (val, keyIndex) {
@@ -47,7 +53,7 @@ const Updater: React.FC = () => {
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatevisibleDatapoints(visibleDps)
-  }, filtersToObserve)
+  }, [...filtersToObserve, metadataFilters])
 
   // categories filter
   useEffect(() => {

@@ -7,7 +7,7 @@ self.onmessage = (message) => {
     let labelsObject = {} // { [key: number]: {} } =
     let resourcesObject = {} // { [key: number]: {} } =
     let tagsObject = {} // { [key: number]: {} } =
-    let projectionsObject = {} // { [key: number]: {} } =
+    //let projectionsObject = {} // { [key: number]: {} } =
     let inferencesObject = {} // { [key: number]: {} } =
 
     const { datapoints, labels, resources, inferences, datasets, tags } = dataRead;
@@ -34,20 +34,42 @@ self.onmessage = (message) => {
         }
     })
 
+    metadataFilters = {}
+
     datapoints.forEach((datapoint) => {
-        projectionsObject[datapoint.id] = { id: datapoint.id, x: Math.random() * 10, y: Math.random() * 10, datapoint_id: datapoint.id }
+
+        // build the metadata dict
+        if (datapoint.metadata_ == '') datapoint.metadata_ = "{}"
+        var datapointaMetadata = JSON.parse(datapoint.metadata_)
+        Object.keys(datapointaMetadata).map(key => {
+            if (metadataFilters[key] === undefined) metadataFilters[key] = { name: key, options: {}, type: 0, linkedAtom: {} }
+            if (metadataFilters[key].linkedAtom[datapointaMetadata[key]] === undefined) metadataFilters[key].linkedAtom[datapointaMetadata[key]] = { datapoint_ids: [] }
+
+            metadataFilters[key].options[datapointaMetadata[key]] = {
+                id: datapointaMetadata[key],
+                visible: true,
+                color: "#333333",
+            }
+            metadataFilters[key].linkedAtom[datapointaMetadata[key]] = {
+                id: datapointaMetadata[key],
+                name: datapointaMetadata[key],
+                datapoint_ids: [...metadataFilters[key].linkedAtom[datapointaMetadata[key]].datapoint_ids, datapoint.id]
+            }
+        })
+
+        //projectionsObject[datapoint.id] = { id: datapoint.id, x: Math.random() * 10, y: Math.random() * 10, datapoint_id: datapoint.id }
         datapointsObject[datapoint.id] = {
             ...datapoint,
-            projection_id: datapoint.id,
             tag_ids: [],
             inferences: [],
-            annotations: []
+            annotations: [],
+            metadata: datapointaMetadata
         }
 
         // @ts-ignore
         datasetsObject[datapoint.dataset_id].datapoint_ids.push(datapoint.id)
     })
-
+    // console.log('metadataFilters', metadataFilters)
 
     Object.values(tagsObject).map(function (tag) {
         tag.datapoint_ids.map(dpid => {
@@ -104,9 +126,9 @@ self.onmessage = (message) => {
         datapoints: datapointsObject,
         datasets: datasetsObject,
         resources: resourcesObject,
-        tags: tagsObject,
+        tags: tagsObject || {},
         inferences: inferencesObject,
-        projections: projectionsObject,
-        numberOfDatapoints: datapoints.length
+        numberOfDatapoints: datapoints.length,
+        metadataFilters: metadataFilters
     })
 }

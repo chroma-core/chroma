@@ -101,19 +101,19 @@ def main():
     ])
 
     # Run in the Chroma context
-    # with chroma_manager.ChromaSDK(project_name="MNIST2", dataset_name="Train2", categories=mnist_category_data) as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST-All", dataset_name="Train4", categories=mnist_category_data) as chroma_storage:
 
-    #     # Use the MNIST training set
-    #     train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
-    #     data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+        # Use the MNIST training set
+        train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
+        data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
 
-    #     # Attach the hook
-    #     chroma_storage.attach_forward_hook(model.fc2)
+        # Attach the hook
+        chroma_storage.attach_forward_hook(model.fc2)
 
-    #     infer(model, device, data_loader, chroma_storage)
+        infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST3", dataset_name="Test3", categories=mnist_category_data) as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST-All", dataset_name="Test4", categories=mnist_category_data) as chroma_storage:
 
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)

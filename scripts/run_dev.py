@@ -22,7 +22,7 @@ if __name__ == "__main__":
     celery_subcommand = celery_subcommand(base_dir, multicommand)
     multicommand.append_threaded_command(celery_subcommand.name, celery_subcommand)
 
-    frontend_subcommand = frontend_subcommand(base_dir, multicommand)
-    multicommand.append_threaded_command(frontend_subcommand.name, frontend_subcommand)
+    # frontend_subcommand = frontend_subcommand(base_dir, multicommand)
+    # multicommand.append_threaded_command(frontend_subcommand.name, frontend_subcommand)
 
     multicommand.run()

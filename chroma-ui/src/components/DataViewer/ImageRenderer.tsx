@@ -75,7 +75,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   if (error) return <p>Oh no... {error.message}</p>;
 
   let boundingBoxes: any[] = []
-  if (annotations[0].bbox !== undefined) {
+  if ((annotations.length > 0) && (annotations[0].bbox !== undefined)) {
     boundingBoxes = annotations.map(a => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
   }
 

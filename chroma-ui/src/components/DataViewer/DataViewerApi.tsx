@@ -50,11 +50,9 @@ export function getTotalDatapointsToFetch(project_id: number, cb: (res: any) => 
     });
 }
 
-const worker: Worker = new Worker('/workers/process.js')
+const worker: Worker = new Worker('/workers/processDatapoints.js')
 
 export function getDatapointsForProject(project_id: number, page_id: number, cb: (data: any, datalen: number, prevPage: number) => void) {
-  // console.log('fetching data')
-  // console.time('fetching data')
   fetch(`/api/datapoints/` + project_id + "&page=" + page_id, {
     method: 'GET',
     headers: {

@@ -165,6 +165,29 @@ async def get_datapoints_data_viewer(project_id: str):
         res = (await s.execute(query)).scalar()
     return res
 
+@app.get("/api/projections/{projection_set_id}")
+async def get_projections_data_viewer(projection_set_id: str):
+    async with models.get_session() as s:
+        print("get_projections_data_viewer models.get_session! " + str(s))
+        start = time.process_time()
+
+        sql = (select(models.Projection).where(models.ProjectionSet.id == int(projection_set_id))
+                    .options(
+                        load_only(models.Projection.x, models.Projection.y), 
+                        joinedload(models.Projection.embedding)
+                            .options(load_only(models.Embedding.id, models.Embedding.datapoint_id))
+                        )
+        )
+        projections = (await s.execute(sql)).scalars().unique().all()
+
+        elapsedtime = time.process_time() - start
+        print("got projections in " + str(elapsedtime) + " seconds")
+
+        return {
+            'projections': projections
+        }
+
+
 @app.get("/api/datapoints/{project_id}&page={page_id}")
 async def get_datapoints_data_viewer(project_id: str, page_id: int):
     async with models.get_session() as s:
@@ -175,7 +198,14 @@ async def get_datapoints_data_viewer(project_id: str, page_id: int):
         offset = page_size * page_id 
 
         sql = (select(models.Datapoint).where(models.Datapoint.project_id == int(project_id))
-                .options(load_only(models.Datapoint.id, models.Datapoint.resource_id, models.Datapoint.dataset_id))).limit(page_size).offset(offset)
+                .options(
+                    load_only(
+                        models.Datapoint.id, 
+                        models.Datapoint.resource_id, 
+                        models.Datapoint.dataset_id,
+                        models.Datapoint.metadata_
+                    )
+                )).limit(page_size).offset(offset)
         datapoints = (await s.execute(sql)).scalars().unique().all()
 
         datapoint_ids = []

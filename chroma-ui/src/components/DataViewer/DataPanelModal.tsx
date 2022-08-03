@@ -57,6 +57,27 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
           </TableContainer>
 
           <Flex pt={5} alignItems="center">
+            <Text fontWeight={600}>Metadata</Text>
+          </Flex>
+
+          <TableContainer>
+            <Table variant='simple' size="sm">
+              <Tbody>
+                {Object.keys(datapoint.metadata).map((a: string) => {
+                  // @ts-ignore
+                  const val = datapoint.metadata[a]
+                  return (
+                    <Tr key={a}>
+                      <Td width="30%" p={1} fontSize="xs">{a}</Td>
+                      <Td p={1} fontSize="xs">{val}</Td>
+                    </Tr>
+                  )
+                })}
+              </Tbody>
+            </Table>
+          </TableContainer>
+
+          <Flex pt={5} alignItems="center">
             <BiCategoryAlt color='#666' />
             <Text ml={1} fontWeight={600}>Labels</Text>
           </Flex>

@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { categoryFilterAtom, datapointsAtom, datasetFilterAtom, pointsToSelectAtom, selectedDatapointsAtom, tagFilterAtom, visibleDatapointsAtom } from './atoms';
+import { categoryFilterAtom, datapointsAtom, datasetFilterAtom, metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, tagFilterAtom, visibleDatapointsAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -39,12 +39,33 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
   const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
   const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
 
+  const updateCategory = (data: any, fn: any) => {
+    updatecategoryFilter(fn)
+  }
+  const updateTag = (data: any, fn: any) => {
+    updatetagFilter(fn)
+  }
+  const updateDataset = (data: any, fn: any) => {
+    updatedatasetFilter(fn)
+  }
+  const updateMetadata = (data: any, fn: any) => {
+    console.log('updateMetadata')
+    let findMatchedFilter = metatadataFilterMap.find(f => f.filter.name === data.filter.filter.name)
+    updateMetadataFilter({ ...metadataFilters })
+  }
+
+  var metatadataFilterMap = Object.values(metadataFilters).map(m => {
+    return { filter: m, update: updateMetadata }
+  })
+
   const filterArray: FilterArray[] = [
-    { filter: categoryFilter!, update: updatecategoryFilter },
-    { filter: tagFilter!, update: updatetagFilter },
-    { filter: datasetFilter!, update: updatedatasetFilter }
+    { filter: categoryFilter!, update: updateCategory },
+    { filter: tagFilter!, update: updateTag },
+    { filter: datasetFilter!, update: updateDataset },
+    ...metatadataFilterMap
   ]
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
@@ -53,7 +74,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     let optionIndex = filterArray[filterIndex].filter.options!.findIndex((option: any) => option.id === passedOption.id)
 
     options[optionIndex].visible = !options[optionIndex].visible
-    filterArray[filterIndex].update((prev: any) => {
+    filterArray[filterIndex].update({ 'filter': filterArray[filterIndex] }, (prev: any) => {
       return ({ ...prev, options: [...options] })
     })
   }

@@ -7,8 +7,8 @@ import DataPanel from './DataPanel';
 import { getDatapointsForProject, GetProjectAndProjectionSets, getProjectionsForProjectionSet, getTotalDatapointsToFetch } from './DataViewerApi';
 import { getMostRecentCreatedAt } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
-import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom } from './atoms';
-import { NormalizeData, CursorMap, Filter, FilterType, FilterOption } from './types';
+import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom } from './atoms';
+import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
 import FilterSidebar from './FilterSidebar';
 import Updater from './Updater';
@@ -49,6 +49,7 @@ export function mergeDeep(target, ...sources) {
 }
 
 const SERVER_PAGE_SIZE = 10000
+const projectionsWorker: Worker = new Worker('/workers/processProjections.js')
 
 const DataViewer = () => {
   const theme = useTheme()
@@ -65,27 +66,97 @@ const DataViewer = () => {
   const [categories, updatecategories] = useAtom(categoriesAtom)
   const [projections, updateprojections] = useAtom(projectionsAtom)
   const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
+  const [metadataFilters, updateMetadataFilters] = useAtom(metadataFiltersAtom)
 
   // UI State
   const [totalDatapointsToFetch, setTotalDatapointsToFetch] = useState<number | null>(null)
   const [datapointsFetched, setDatapointsFetched] = useState<number>(0)
   const [processingDatapoints, setProcessingDatapoints] = useState<boolean>(false)
+  const [processingProjections, setProcessingProjections] = useState<boolean>(false)
   const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
+  const allFetched = (datapointsFetched == totalDatapointsToFetch)
+
+  // Onload Fetch projects and projection sets
+  const [result, reexecuteQuery] = useQuery({
+    query: GetProjectAndProjectionSets,
+    variables: { "filter": { "projectId": projectId }, "projectId": projectId }
+  })
+  const { data, fetching, error } = result;
+
+  // once complete, fetch datapoints for the project, and the most recent set of projections
+  useEffect(() => {
+    if (result.data === undefined) return
+    if (result.data.projectionSets.length === 0) return
+    if (allFetched != true) return
+    setProcessingProjections(true)
+
+    const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
+    getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
+
+      projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: datapoints })
+      projectionsWorker.onmessage = (e: MessageEvent) => {
+        updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
+        updateprojections(e.data.projections)
+        setProcessingProjections(false)
+      }
+
+    });
+  }, [result, datapointsFetched]);
 
   const hydrateAtoms = (normalizedData: any, len: number, prevPage: number) => {
-    // console.log('hydrateAtoms: normalizedData', normalizedData)
+    // console.log('normalizedData.metadataFilters', normalizedData.metadataFilters)
+
+    // deep merge datapoint id lists for tags and categories and datasets
+    Object.keys(normalizedData.categories).map((item: any, index: number) => {
+      let category = categories[item]
+      let existing = (category !== undefined) ? category.datapoint_ids : []
+      normalizedData.categories[item].datapoint_ids = [...normalizedData.categories[item].datapoint_ids, ...existing]
+    })
+    Object.keys(normalizedData.tags).map((key: any, index: number) => {
+      let item = tags[key]
+      let existing = (item !== undefined) ? item.datapoint_ids : []
+      normalizedData.tags[key].datapoint_ids = [...normalizedData.tags[key].datapoint_ids, ...existing]
+    })
+    Object.keys(normalizedData.datasets).map((key: any, index: number) => {
+      let item = datasets[key]
+      let existing = (item !== undefined) ? item.datapoint_ids : []
+      normalizedData.datasets[key].datapoint_ids = [...normalizedData.datasets[key].datapoint_ids, ...existing]
+    })
+    Object.keys(normalizedData.metadataFilters).map((key: any, index: number) => {
+      let item = metadataFilters[key]
+      if (item === undefined) item = { options: {} }
+
+      Object.values(item.options).map((option: any) => {
+        let item2 = item.linkedAtom[option.id]
+        let existing = (item2 !== undefined) ? item2.datapoint_ids : []
+        normalizedData.metadataFilters[key].linkedAtom[option.id].datapoint_ids = [...normalizedData.metadataFilters[key].linkedAtom[option.id].datapoint_ids, ...existing]
+      })
+
+      normalizedData.metadataFilters[key].options = Object.values(normalizedData.metadataFilters[key].options)
+      normalizedData.metadataFilters[key].options.map((option: any) => {
+        option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
+          // if (datapoint.metadata[key] == 'San Francisco') {
+          //   console.log('datapoint.metadata[key]', datapoint.metadata[key], 'option.id', option.id, 'option.visible', option.visible, 'test', datapoint.metadata[key] == option.id)
+          // }
+          // @ts-ignore
+          if ((option.visible == false) && (datapoint.metadata[key] == option.id)) return true
+          else return false
+        }
+      })
+    })
+
+    updateMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.metadataFilters })
     updatedatapoints({ ...{ ...datapoints }, ...normalizedData.datapoints })
     updatedatasets({ ...{ ...datasets }, ...normalizedData.datasets })
     updatelabels({ ...{ ...labels }, ...normalizedData.labels })
     updateresources({ ...{ ...resources }, ...normalizedData.resources })
     updateinferences({ ...{ ...inferences }, ...normalizedData.inferences })
-    updateprojections({ ...{ ...projections }, ...normalizedData.projections })
-    updatetags({ ...{ ...tags }, ...normalizedData.tags || {} })
+    updatetags({ ...{ ...tags }, ...normalizedData.tags })
     updatecategories({ ...{ ...categories }, ...normalizedData.categories })
-    setDatapointsFetched(datapointsFetched + len)
     setProcessingDatapoints(false)
+    setDatapointsFetched(datapointsFetched + len)
   }
 
   useEffect(() => {
@@ -97,7 +168,6 @@ const DataViewer = () => {
     if (totalDatapointsToFetch == null) return
     const page = Math.ceil(datapointsFetched / SERVER_PAGE_SIZE)
     setProcessingDatapoints(true)
-    console.log('page', page)
     getDatapointsForProject(projectId, page, hydrateAtoms);
   }, [datapointsFetched, totalDatapointsToFetch]);
 
@@ -123,9 +193,9 @@ const DataViewer = () => {
     }
   }
 
-  const allFetched = (datapointsFetched == totalDatapointsToFetch)
+
   let loadingModalString = ""
-  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints
+  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingProjections
   let progressWidth = 0
   if (totalDatapointsToFetch) progressWidth = ((datapointsFetched) / (totalDatapointsToFetch)) * 100
   if (allFetched) loadingModalString = "Finishing loading...."
@@ -142,7 +212,7 @@ const DataViewer = () => {
       <ExplorerContainer>
         <Header />
         <FilterSidebar showSkeleton={false} />
-        <ProjectionPlotter />
+        <ProjectionPlotter allFetched={allFetched} />
         <DataPanel />
       </ExplorerContainer>
 

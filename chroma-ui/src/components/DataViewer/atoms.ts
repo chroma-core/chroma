@@ -2,14 +2,15 @@ import { atom } from "jotai"
 import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter } from "./types"
 
 // Core data atoms
-export const datapointsAtom = atom<{[key: number]: Datapoint}>({})
-export const datasetsAtom = atom<{[key: number]: Dataset}>({})
-export const labelsAtom = atom<{[key: number]: Label}>({})
-export const tagsAtom = atom<{[key: number]: Tag}>({})
-export const resourcesAtom = atom<{[key: number]: Resource}>({})
-export const inferencesAtom = atom<{[key: number]: Inference}>({})
-export const categoriesAtom = atom<{[key: number]: Category}>({})
-export const projectionsAtom = atom<{[key: number]: Projection}>({})
+export const datapointsAtom = atom<{ [key: number]: Datapoint }>({})
+export const datasetsAtom = atom<{ [key: number]: Dataset }>({})
+export const labelsAtom = atom<{ [key: number]: Label }>({})
+export const tagsAtom = atom<{ [key: number]: Tag }>({})
+export const resourcesAtom = atom<{ [key: number]: Resource }>({})
+export const inferencesAtom = atom<{ [key: number]: Inference }>({})
+export const categoriesAtom = atom<{ [key: number]: Category }>({})
+export const projectionsAtom = atom<{ [key: number]: Projection }>({})
+export const metadataFiltersAtom = atom<{ [key: number]: any }>({})
 
 // Visbility state
 export const selectedDatapointsAtom = atom<number[]>([]) // positive selection list

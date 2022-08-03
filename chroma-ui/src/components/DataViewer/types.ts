@@ -27,7 +27,7 @@ export interface Datapoint {
 export interface Dataset {
   id: number
   name: string
-  datapoints: number[]
+  datapoint_ids: number[]
   categories: string
 }
 
@@ -35,7 +35,7 @@ export interface Projection {
   id: number
   x: number
   y: number
-  datapoint: number
+  datapoint_id: number
 }
 
 export interface Inference {
@@ -65,7 +65,7 @@ export interface Tag {
 export interface Category {
   id: number
   name: string
-  datapoints: number[]
+  datapoint_ids: number[]
 }
 
 export interface NormalizeData {
@@ -123,5 +123,5 @@ export interface Filter {
 
 export interface FilterArray {
   filter: Filter
-  update: (updateObject: any) => void
+  update: (data: any, updateObject: any) => void
 }
