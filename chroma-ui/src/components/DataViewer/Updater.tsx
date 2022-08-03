@@ -26,6 +26,7 @@ const Updater: React.FC = () => {
   const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
 
   // whenever a filter is changed... generate the list of datapoints ids to hide
+  const filtersToWatch = [categoryFilter, datasetFilter, tagFilter]
   const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(metadataFilters)]
   useEffect(() => {
     let visibleDps: number[] = []
@@ -37,7 +38,7 @@ const Updater: React.FC = () => {
       for (let i = 0; i < filtersToObserve.length; i++) {
         let filter = filtersToObserve[i]
         for (let j = 0; j < filter!.options!.length; j++) {
-          var result = filter!.options![j].evalDatapoint(dp, filter!.options![j])
+          var result = filter!.options![j].evalDatapoint(dp, filter!.options![j], filter)
           if (result) {
             datapointsToHide.push(dp.id)
             i = filtersToObserve.length
@@ -48,7 +49,7 @@ const Updater: React.FC = () => {
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatevisibleDatapoints(visibleDps)
-  }, [...filtersToObserve, metadataFilters])
+  }, [...filtersToWatch, metadataFilters])
 
   // categories filter
   useEffect(() => {

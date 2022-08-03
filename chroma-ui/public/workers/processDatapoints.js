@@ -69,7 +69,6 @@ self.onmessage = (message) => {
         // @ts-ignore
         datasetsObject[datapoint.dataset_id].datapoint_ids.push(datapoint.id)
     })
-    // console.log('metadataFilters', metadataFilters)
 
     Object.values(tagsObject).map(function (tag) {
         tag.datapoint_ids.map(dpid => {

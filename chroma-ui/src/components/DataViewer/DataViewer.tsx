@@ -128,6 +128,22 @@ const DataViewer = () => {
       let item = metadataFilters[key]
       if (item === undefined) item = { options: {} }
 
+      var allNumbers = Object.values(item.options).map((op: any) => !(typeof op.id === 'number')).includes(false)
+      if (allNumbers) {
+        normalizedData.metadataFilters[key].type = FilterType.Continuous
+        normalizedData.metadataFilters[key].range = { min: Infinity, max: -Infinity, minVisible: Infinity, maxVisible: -Infinity }
+        Object.values(normalizedData.metadataFilters[key].options).map((op: any) => {
+          if (op.id < normalizedData.metadataFilters[key].range.min) {
+            normalizedData.metadataFilters[key].range.min = op.id
+            normalizedData.metadataFilters[key].range.minVisible = normalizedData.metadataFilters[key].range.min
+          }
+          if (op.id > normalizedData.metadataFilters[key].range.max) {
+            normalizedData.metadataFilters[key].range.max = op.id
+            normalizedData.metadataFilters[key].range.maxVisible = normalizedData.metadataFilters[key].range.max
+          }
+        })
+      }
+
       Object.values(item.options).map((option: any) => {
         let item2 = item.linkedAtom[option.id]
         let existing = (item2 !== undefined) ? item2.datapoint_ids : []
@@ -135,16 +151,27 @@ const DataViewer = () => {
       })
 
       normalizedData.metadataFilters[key].options = Object.values(normalizedData.metadataFilters[key].options)
-      normalizedData.metadataFilters[key].options.map((option: any) => {
-        option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
-          // if (datapoint.metadata[key] == 'San Francisco') {
-          //   console.log('datapoint.metadata[key]', datapoint.metadata[key], 'option.id', option.id, 'option.visible', option.visible, 'test', datapoint.metadata[key] == option.id)
-          // }
-          // @ts-ignore
-          if ((option.visible == false) && (datapoint.metadata[key] == option.id)) return true
-          else return false
-        }
-      })
+
+      if (normalizedData.metadataFilters[key].type == FilterType.Discrete) {
+        normalizedData.metadataFilters[key].options.map((option: any) => {
+          option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
+            // @ts-ignore
+            if ((option.visible == false) && (datapoint.metadata[key] == option.id)) return true
+            else return false
+          }
+        })
+      } else if (normalizedData.metadataFilters[key].type == FilterType.Continuous) {
+        normalizedData.metadataFilters[key].options.map((option: any) => {
+          option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
+            // @ts-ignore
+            if ((datapoint.metadata[key] >= f.range.maxVisible) || (datapoint.metadata[key] <= f.range.minVisible)) {
+              return true
+            }
+            else return false
+          }
+        })
+      }
+
     })
 
     updateMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.metadataFilters })

@@ -79,15 +79,12 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     })
   }
 
-  // function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
-  //   let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
-  //   filters[filterIndex].optionsSet.minVisible = minVisible
-  //   filters[filterIndex].optionsSet.maxVisible = maxVisible
-  //   setFilters([...filters])
-  // }
-  // const updateBling = (bling) => {
-  //   updatecategoryFilter((prev) => ({ ...prev, funkyPig: { ...prev.funkyPig, bling } }))
-  // }
+  function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
+    let findMatchedFilter = metatadataFilterMap.find(f => f.filter.name === passedFilter.name)
+    findMatchedFilter!.filter.range.minVisible = minVisible
+    findMatchedFilter!.filter.range.maxVisible = maxVisible
+    updateMetadataFilter({ ...metadataFilters })
+  }
 
   function selectPoints(dps: number[]) {
     updatepointsToSelect(dps)
@@ -184,7 +181,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
                               max={f.filter.range!.max}
                               minVisible={f.filter.range!.minVisible}
                               maxVisible={f.filter.range!.maxVisible}
-                              update={() => { }}
+                              update={updateContinuousFilter}
                               filter={f.filter}
                             />
                             : null}
