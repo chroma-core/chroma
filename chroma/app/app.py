@@ -9,8 +9,9 @@ import asyncio, concurrent.futures
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload, load_only
 import time
+# from ddtrace.contrib.asgi import TraceMiddleware
 
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -20,6 +21,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from strawberry.extensions import Extension
 from strawberry.fastapi import GraphQLRouter
 from fastapi.responses import FileResponse
+
+# import ujson
+# from starlette.responses import JSONResponse
+
+# class UJSONResponse(JSONResponse):
+#     def render(self, content: Any) -> bytes:
+#         return ujson.dumps(content, ensure_ascii=False).encode("utf-8")
 
 from graphql_py.queries import Query
 from graphql_py.mutations import Mutation, get_context
@@ -188,66 +196,67 @@ async def get_projections_data_viewer(projection_set_id: str):
         }
 
 
-@app.get("/api/datapoints/{project_id}&page={page_id}")
+@app.get("/api/datapoints/{project_id}&page={page_id}")#, response_class=UJSONResponse)
 async def get_datapoints_data_viewer(project_id: str, page_id: int):
-    async with models.get_session() as s:
-        print("get_datapoints_data_viewer models.get_session! " + str(s))
-        start = time.process_time()
+    with profiled():
+        async with models.get_session() as s:
+            print("get_datapoints_data_viewer models.get_session! " + str(s))
+            start = time.process_time()
 
-        page_size = 10000
-        offset = page_size * page_id 
+            page_size = 10000
+            offset = page_size * page_id 
 
-        sql = (select(models.Datapoint).where(models.Datapoint.project_id == int(project_id))
-                .options(
-                    load_only(
-                        models.Datapoint.id, 
-                        models.Datapoint.resource_id, 
-                        models.Datapoint.dataset_id,
-                        models.Datapoint.metadata_
-                    )
-                )).limit(page_size).offset(offset)
-        datapoints = (await s.execute(sql)).scalars().unique().all()
+            sql = (select(models.Datapoint).where(models.Datapoint.project_id == int(project_id))
+                    .options(
+                        load_only(
+                            models.Datapoint.id, 
+                            models.Datapoint.resource_id, 
+                            models.Datapoint.dataset_id,
+                            models.Datapoint.metadata_
+                        )
+                    )).limit(page_size).offset(offset)
+            datapoints = (await s.execute(sql)).scalars().unique().all()
 
-        datapoint_ids = []
-        resource_ids = []
-        dataset_list = {}
+            datapoint_ids = []
+            resource_ids = []
+            dataset_list = {}
 
-        for dp in datapoints:
-            datapoint_ids.append(dp.id)
-            resource_ids.append(dp.id)
-            dataset_list[dp.dataset_id] = True # eg {4: True}, use this to prevent dupes
-        
-        # Labels
-        sql = (select(models.Label).filter(models.Label.datapoint_id.in_(datapoint_ids)).options(load_only(models.Label.id, models.Label.data, models.Label.datapoint_id)))
-        labels = (await s.execute(sql)).scalars().unique().all()
+            for dp in datapoints:
+                datapoint_ids.append(dp.id)
+                resource_ids.append(dp.id)
+                dataset_list[dp.dataset_id] = True # eg {4: True}, use this to prevent dupes
+            
+            # Labels
+            sql = (select(models.Label).filter(models.Label.datapoint_id.in_(datapoint_ids)).options(load_only(models.Label.id, models.Label.data, models.Label.datapoint_id)))
+            labels = (await s.execute(sql)).scalars().unique().all()
 
-        # Resources
-        sql = (select(models.Resource).filter(models.Resource.id.in_(resource_ids)).options(load_only(models.Resource.id, models.Resource.uri)))
-        resources = (await s.execute(sql)).scalars().unique().all()
+            # Resources
+            sql = (select(models.Resource).filter(models.Resource.id.in_(resource_ids)).options(load_only(models.Resource.id, models.Resource.uri)))
+            resources = (await s.execute(sql)).scalars().unique().all()
 
-        # Inferences
-        sql = (select(models.Inference).filter(models.Inference.datapoint_id.in_(datapoint_ids)).options(load_only(models.Inference.id, models.Inference.data, models.Inference.datapoint_id)))
-        inferences = (await s.execute(sql)).scalars().unique().all()
+            # Inferences
+            sql = (select(models.Inference).filter(models.Inference.datapoint_id.in_(datapoint_ids)).options(load_only(models.Inference.id, models.Inference.data, models.Inference.datapoint_id)))
+            inferences = (await s.execute(sql)).scalars().unique().all()
 
-        # Datasets
-        sql = (select(models.Dataset).filter(models.Dataset.id.in_(dataset_list.keys())).options(load_only(models.Dataset.id, models.Dataset.name, models.Dataset.categories)))
-        datasets = (await s.execute(sql)).scalars().unique().all()
-        
-        # Tags
-        sql = (select(models.Tagdatapoint).filter(models.Tagdatapoint.right_id.in_(datapoint_ids)).options(joinedload(models.Tagdatapoint.tag)))
-        tags = (await s.execute(sql)).scalars().unique().all()
+            # Datasets
+            sql = (select(models.Dataset).filter(models.Dataset.id.in_(dataset_list.keys())).options(load_only(models.Dataset.id, models.Dataset.name, models.Dataset.categories)))
+            datasets = (await s.execute(sql)).scalars().unique().all()
+            
+            # Tags
+            sql = (select(models.Tagdatapoint).filter(models.Tagdatapoint.right_id.in_(datapoint_ids)).options(joinedload(models.Tagdatapoint.tag)))
+            tags = (await s.execute(sql)).scalars().unique().all()
 
-        elapsedtime = time.process_time() - start
-        print("got datapoints in " + str(elapsedtime) + " seconds")
+            elapsedtime = time.process_time() - start
+            print("got datapoints in " + str(elapsedtime) + " seconds")
 
-    return {
-        'datapoints': datapoints,
-        'labels': labels,
-        'resources': resources,
-        'inferences': inferences,
-        'datasets': datasets,
-        'tags': tags
-    }
+        return ({
+            'datapoints': datapoints,
+            'labels': labels,
+            'resources': resources,
+            'inferences': inferences,
+            'datasets': datasets,
+            'tags': tags
+        })
 
 
 app.include_router(graphql_app, prefix="/graphql")
@@ -302,3 +311,5 @@ if os.path.isdir('static/'):
 
 else:
     print("NOTICE: the frontend has not been built into the static directory. Serving frontend from localhost:8000 will be disabled.")
+
+# app = TraceMiddleware(app)

@@ -53,6 +53,10 @@ export function getTotalDatapointsToFetch(project_id: number, cb: (res: any) => 
 const worker: Worker = new Worker('/workers/processDatapoints.js')
 
 export function getDatapointsForProject(project_id: number, page_id: number, cb: (data: any, datalen: number, prevPage: number) => void) {
+  var t1 = performance.now()
+  var t2: any = null
+  var t3: any = null
+  var t4: any = null
   fetch(`/api/datapoints/` + project_id + "&page=" + page_id, {
     method: 'GET',
     headers: {
@@ -60,13 +64,20 @@ export function getDatapointsForProject(project_id: number, page_id: number, cb:
     },
   })
     .then(response => {
+      t2 = performance.now()
+      console.log(`fetch: ${(t2 - t1) / 1000} seconds.`);
       return response.text()
     })
     .then((response) => {
+      t3 = performance.now()
+      console.log(`unpack: ${(t3 - t2) / 1000} seconds.`);
       worker.postMessage(response)
       worker.onmessage = (e: MessageEvent) => {
         var { data } = e
+        t4 = performance.now()
+        console.log(`process: ${(t4 - t3) / 1000} seconds.`);
         cb(data, data.numberOfDatapoints, page_id)
+
       }
     })
     .catch((error) => {
