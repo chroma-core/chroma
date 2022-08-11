@@ -5,10 +5,11 @@ import { useQuery } from "urql"
 import { categoriesAtom, categoryFilterAtom } from "./atoms"
 import { Annotation } from "./types"
 import { useAtom } from 'jotai'
+import { slice } from "lodash"
 
 export const ImageQuery = `
-  query getimage($identifier: String!, $thumbnail: Boolean!, $resolverName: String!) {
-    imageResolver(identifier: $identifier, thumbnail: $thumbnail, resolverName: $resolverName) {
+  query getimage($identifier: String!, $thumbnail: Boolean!, $resolverName: String!, $topOffset: Float, $leftOffset: Float, $cropWidth: Float, $cropHeight: Float) {
+    imageResolver(identifier: $identifier, thumbnail: $thumbnail, resolverName: $resolverName, topOffset: $topOffset, leftOffset: $leftOffset, cropWidth: $cropWidth, cropHeight: $cropHeight) {
       imageData
       originalWidth
       originalHeight
@@ -32,6 +33,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   const imageRef = useRef<HTMLImageElement>(null);
   const [categories] = useAtom(categoriesAtom)
   const [categoryFilter] = useAtom(categoryFilterAtom)
+  var hasBoundingBoxes = (annotations[0].bbox !== undefined)
 
   // sets image dimensons on load
   const onImgLoad = (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
@@ -55,10 +57,42 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   if (imageUri.startsWith('train-images-idx3') || imageUri.startsWith('t10k-images-idx3')) resolverName = 'mnist'
   if (imageUri.startsWith('http')) resolverName = 'url'
 
+  let firstAnnotationBbox = null
+  let leftOffset
+  let topOffset
+  let cropWidth
+  let cropHeight
+  let paddingX
+  let paddingY
+  var localAnnotationsFirstBbox
+
+  if ((annotations.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
+    firstAnnotationBbox = annotations[0].bbox
+
+    var h = firstAnnotationBbox[3]
+    var w = firstAnnotationBbox[2]
+    // define our buffer
+    var percentageBuffer = .2
+    paddingX = w * percentageBuffer
+    paddingY = h * percentageBuffer
+    // define how much space we want above to to the left of our annotation
+    // if this space doesnt exist, pillow on the backend will fill it in
+    leftOffset = firstAnnotationBbox[0] - paddingX
+    topOffset = firstAnnotationBbox[1] - paddingY
+    // define how wide and tall our image should be. the * 2 is for the extra padding on top/bottom, left/right
+    // if we want more height or width than exist in the image, pillow will add it for us
+    cropWidth = firstAnnotationBbox[2] + (paddingX * 2)
+    cropHeight = firstAnnotationBbox[3] + (paddingY * 2)
+
+    localAnnotationsFirstBbox = annotations[0].bbox.slice()
+    // @ts-ignore
+    localAnnotationsFirstBbox = [localAnnotationsFirstBbox[0] - leftOffset, localAnnotationsFirstBbox[1] - topOffset, localAnnotationsFirstBbox[2], localAnnotationsFirstBbox[3]]
+  }
+
   // fetch the image
   const [result, reexecuteQuery] = useQuery({
     query: ImageQuery,
-    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": resolverName },
+    variables: { "identifier": imageUri, "thumbnail": thumbnail, "resolverName": resolverName, "topOffset": topOffset, "cropWidth": cropWidth, "cropHeight": cropHeight, "leftOffset": leftOffset },
   });
 
   const { data, fetching, error } = result;
@@ -68,15 +102,31 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
     if (data === undefined) return
     // var imageOriginalDimensions = new Image()
     // imageOriginalDimensions.src = 'data:image/jpeg;base64,' + data.imageResolver.imageData
-    // @ts-ignore
-    setOriginalImageDimensions([data.imageResolver.originalWidth, data.imageResolver.originalHeight])
+    if (data && data.imageResolver) {
+      // @ts-ignore
+      setOriginalImageDimensions([data.imageResolver.originalWidth, data.imageResolver.originalHeight])
+    }
+
   }, [data])
 
   if (error) return <p>Oh no... {error.message}</p>;
 
   let boundingBoxes: any[] = []
-  if ((annotations.length > 0) && (annotations[0].bbox !== undefined)) {
+
+
+  if ((annotations.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
+    // @ts-ignore
+    originalImageDimensions = [cropWidth, cropHeight]
+  }
+
+  if ((annotations.length > 0) && hasBoundingBoxes) {
     boundingBoxes = annotations.map(a => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
+  }
+  if ((boundingBoxes.length == 1) && (thumbnail == true)) {
+    // @ts-ignore
+    boundingBoxes[0][0] = (paddingX) * boundingBoxes[0][5]// left
+    //@ts-ignore
+    boundingBoxes[0][1] = (paddingY) * boundingBoxes[0][6] // top
   }
 
   if (data == undefined) return (<Skeleton width={200} height={200} />)
@@ -88,7 +138,6 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
       {((imageDimensions.length > 0) && (originalImageDimensions.length > 0)) ?
 
         <div style={{ backgroundColor: "rgba(255,0,0,0.0)", width: imageDimensions[0], height: imageDimensions[1], position: 'absolute' }}>
-
           {boundingBoxes.map((a, index) => {
             // @ts-ignore
             let filterCategoryOption = categoryFilter?.options!.find(o => o.id == a[4].category_id)
@@ -153,5 +202,7 @@ function scaleToFittedImage(originalSize: number[], plottedSize: number[], annot
     bbox[2] * scaleWidth,
     bbox[3] * scaleHeight,
     annotation,
+    scaleWidth,
+    scaleHeight
   ]
 }

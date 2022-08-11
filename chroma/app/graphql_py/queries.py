@@ -7,6 +7,8 @@ import requests
 import base64
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
 from strawberry.scalars import JSON 
+from math import floor, ceil
+import numpy as np
 
 from io import BytesIO
 import io
@@ -85,8 +87,19 @@ class Query:
 
     # Abstract
     @strawberry.field
-    async def image_resolver(self, identifier: str, thumbnail: bool, resolver_name: str) -> ImageAndSize:
+    async def image_resolver(self, 
+            identifier: str, 
+            thumbnail: bool, 
+            resolver_name: str, 
+            leftOffset: float = None, 
+            topOffset: float = None, 
+            cropWidth: float = None, 
+            cropHeight: float = None
+        ) -> ImageAndSize:
 
+        image = ""
+        width = 0
+        height = 0
         if (resolver_name == 'mnist'):
             test_data = read_image_file('../../examples/data/MNIST/raw/t10k-images-idx3-ubyte')
             train_data = read_image_file('../../examples/data/MNIST/raw/train-images-idx3-ubyte')
@@ -100,25 +113,51 @@ class Query:
             img = torch.Tensor.numpy(img)
             image = Image.fromarray(img)
             width, height = image.size
-            inverted_image = ImageOps.invert(image)
-            my_encoded_img = base64.encodebytes(image_to_byte_array(inverted_image)).decode('ascii')
-            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
+            image = ImageOps.invert(image)
 
         if (resolver_name == 'filepath'):
             image = Image.open(identifier)
             width, height = image.size
-            if (thumbnail == True):
-                image.thumbnail([120, 120])
-            my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')
-            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
 
         if (resolver_name == 'url'):
             response = requests.get('http://i.imgur.com/1T6nTzl.jpg')
             image = Image.open(BytesIO(response.content))
-            if (thumbnail == True):
-                image.thumbnail([120, 120])
-            my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')
-            return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
+            width, height = image.size
+
+        # apply custom crop
+        if ((leftOffset != None) and (topOffset != None) and (cropHeight != None) and (cropWidth != None)):
+
+            max_dimension = 0
+            if (cropWidth > cropHeight):
+                max_dimension = floor(cropWidth)
+            else:
+                max_dimension = floor(cropHeight)
+            
+            squares_in_max_dimension = 10
+            n = ceil(max_dimension/squares_in_max_dimension)
+
+            segment_black = np.ones(shape = [n,n])*120 # gray scale value
+            segment_white = np.ones(shape = [n,n])*150 # gray scale value
+            chessboard = np.hstack((segment_black,segment_white))
+            for i in range(4):
+                chessboard = np.hstack((chessboard,segment_black))
+                chessboard = np.hstack((chessboard,segment_white))
+            temp = chessboard
+            for i in range(11):
+                chessboard = np.concatenate((np.fliplr(chessboard),temp))
+            img = Image.fromarray(chessboard.astype(np.uint8))
+
+            result = Image.new(image.mode, (floor(cropWidth), floor(cropHeight)), (0, 0, 255))
+            result.paste(img, (0,0))
+            result.paste(image, (-floor(leftOffset), -floor(topOffset)))
+            image = result
+
+        # apply thumbnail
+        if (thumbnail == True):
+            image.thumbnail([120, 120])
+
+        my_encoded_img = base64.encodebytes(image_to_byte_array(image)).decode('ascii')
+        return ImageAndSize(imageData=my_encoded_img, original_height=height, original_width=width)
 
     # Project
     @strawberry.field

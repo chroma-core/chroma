@@ -7,7 +7,7 @@ import DataPanel from './DataPanel';
 import { getDatapointsForProject, GetProjectAndProjectionSets, getProjectionsForProjectionSet, getTotalDatapointsToFetch } from './DataViewerApi';
 import { getMostRecentCreatedAt } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
-import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom } from './atoms';
+import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom, globalDatapointAtom, labelLabelsAtom, labelTagsAtom, labelResourcesAtom, labelInferenceFilterAtom, labelDatasetsAtom, labelCategoriesAtom, labelProjectionsAtom, labelMetadataFiltersAtom, labelDatapointsAtom } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
 import FilterSidebar from './FilterSidebar';
@@ -48,8 +48,53 @@ export function mergeDeep(target, ...sources) {
   return mergeDeep(target, ...sources);
 }
 
+function resetIds(start: number, object: {}) {
+  var iterator = start
+  var returnObj = {}
+  Object.keys(object).forEach(key => {
+    // @ts-ignore
+    returnObj[iterator] = object[key]
+    // @ts-ignore
+    returnObj[iterator].id = iterator
+    iterator += 1
+  })
+  return returnObj
+}
+
+function resetDatapointIds(start: number, resourceStart: number, object: {}) {
+  var iterator = start
+  var returnObj = {}
+  Object.keys(object).forEach(key => {
+    // @ts-ignore
+    returnObj[iterator] = object[key]
+    // @ts-ignore
+    returnObj[iterator].id = iterator
+    // @ts-ignore
+    returnObj[iterator].resource_id += resourceStart
+    iterator += 1
+  })
+  return returnObj
+}
+
+function bumpIds(start: number, object: {}) {
+  var returnObj = {}
+  Object.keys(object).forEach(key => {
+    // @ts-ignore 
+    // @ts-ignore 
+    returnObj[key] = object[key]
+    // @ts-ignore
+    if (object[key].datapoint_ids === undefined) return
+    // @ts-ignore
+    returnObj[key].datapoint_ids = object[key].datapoint_ids.slice().map(dp => dp + start)
+    // iterator += 1
+    // @ts-ignore
+  })
+  return returnObj
+}
+
 const SERVER_PAGE_SIZE = 10000
 const projectionsWorker: Worker = new Worker('/workers/processProjections.js')
+const projectionsWorker2: Worker = new Worker('/workers/processProjections.js')
 
 const DataViewer = () => {
   const theme = useTheme()
@@ -57,7 +102,8 @@ const DataViewer = () => {
   const projectId = parseInt(params.project_id!, 10)
 
   // Atoms
-  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
+  const [datapoints, updatedatapoints] = useAtom(globalDatapointAtom)
+
   const [labels, updatelabels] = useAtom(labelsAtom)
   const [tags, updatetags] = useAtom(tagsAtom)
   const [resources, updateresources] = useAtom(resourcesAtom)
@@ -65,8 +111,17 @@ const DataViewer = () => {
   const [datasets, updatedatasets] = useAtom(datasetsAtom)
   const [categories, updatecategories] = useAtom(categoriesAtom)
   const [projections, updateprojections] = useAtom(projectionsAtom)
-  const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
   const [metadataFilters, updateMetadataFilters] = useAtom(metadataFiltersAtom)
+
+  const [labeldatapoints, updatelabeldatapoints] = useAtom(labelDatapointsAtom)
+  const [labellabels, updatelabellabels] = useAtom(labelLabelsAtom)
+  const [labeltags, updatelabeltags] = useAtom(labelTagsAtom)
+  const [labelresources, updatelabelresources] = useAtom(labelResourcesAtom)
+  const [labelinferences, updatelabelinferences] = useAtom(labelInferenceFilterAtom)
+  const [labeldatasets, updatelabeldatasets] = useAtom(labelDatasetsAtom)
+  const [labelcategories, updatelabelcategories] = useAtom(labelCategoriesAtom)
+  const [labelprojections, updatelabelprojections] = useAtom(labelProjectionsAtom)
+  const [labelmetadataFilters, updatelabelMetadataFilters] = useAtom(labelMetadataFiltersAtom)
 
   // UI State
   const [totalDatapointsToFetch, setTotalDatapointsToFetch] = useState<number | null>(null)
@@ -88,13 +143,54 @@ const DataViewer = () => {
   // once complete, fetch datapoints for the project, and the most recent set of projections
   useEffect(() => {
     if (result.data === undefined) return
-    if (result.data.projectionSets.length === 0) return
     if (allFetched != true) return
+    if (result.data.projectionSets.length === 0) {
+      // normally would return, but we are going to shove in some data here...... 
+
+      let stubbedProjections: any[] = []
+      Object.values(datapoints).map(dp => {
+        stubbedProjections.push({
+          id: dp.id,
+          x: Math.random() * 100,
+          y: Math.random() * 100,
+          embedding: {
+            datapoint_id: dp.id
+          }
+        })
+      })
+      projectionsWorker.postMessage({ projections: stubbedProjections, datapoints: datapoints })
+      projectionsWorker.onmessage = (e: MessageEvent) => {
+        updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
+        updateprojections(e.data.projections)
+        setProcessingProjections(false)
+        setProcessingDatapoints(false)
+      }
+
+      let labelstubbedProjections: any[] = []
+      Object.values(labeldatapoints).map(dp => {
+        labelstubbedProjections.push({
+          id: dp.id,
+          x: Math.random() * 100,
+          y: Math.random() * 100,
+          embedding: {
+            datapoint_id: dp.id
+          }
+        })
+      })
+      projectionsWorker2.postMessage({ projections: labelstubbedProjections, datapoints: labeldatapoints })
+      projectionsWorker2.onmessage = (e: MessageEvent) => {
+        updatelabeldatapoints({ ...{ ...labeldatapoints }, ...e.data.datapoints })
+        updatelabelprojections(e.data.projections)
+        setProcessingProjections(false)
+        setProcessingDatapoints(false)
+      }
+      return
+    }
+
     setProcessingProjections(true)
 
     const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
     getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
-
       projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: datapoints })
       projectionsWorker.onmessage = (e: MessageEvent) => {
         updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
@@ -103,16 +199,26 @@ const DataViewer = () => {
       }
 
     });
-  }, [result, datapointsFetched]);
+  }, [datapointsFetched]);
 
   const hydrateAtoms = (normalizedData: any, len: number, prevPage: number) => {
-    // console.log('normalizedData.metadataFilters', normalizedData.metadataFilters)
+
+    // @ts-ignore
+    normalizedData.labelDatapoints = resetDatapointIds(Object.values(labeldatapoints).length, Object.values(labelresources).length, normalizedData.labelDatapoints)
+    normalizedData.labelResources = resetIds(Object.values(labelresources).length, normalizedData.labelResources)
+    normalizedData.labelLabels = resetIds(Object.values(labellabels).length, normalizedData.labelLabels)
+    normalizedData.labelCategories = bumpIds(Object.values(labeldatapoints).length, normalizedData.labelCategories)
 
     // deep merge datapoint id lists for tags and categories and datasets
     Object.keys(normalizedData.categories).map((item: any, index: number) => {
       let category = categories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
       normalizedData.categories[item].datapoint_ids = [...normalizedData.categories[item].datapoint_ids, ...existing]
+    })
+    Object.keys(normalizedData.labelCategories).map((item: any, index: number) => {
+      let category = labelcategories[item]
+      let existing = (category !== undefined) ? category.datapoint_ids : []
+      normalizedData.labelCategories[item].datapoint_ids = [...normalizedData.labelCategories[item].datapoint_ids, ...existing]
     })
     Object.keys(normalizedData.tags).map((key: any, index: number) => {
       let item = tags[key]
@@ -173,6 +279,7 @@ const DataViewer = () => {
       }
 
     })
+    console.log('normalizedData.metadataFilters', normalizedData.metadataFilters)
 
     updateMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.metadataFilters })
     updatedatapoints({ ...{ ...datapoints }, ...normalizedData.datapoints })
@@ -182,6 +289,16 @@ const DataViewer = () => {
     updateinferences({ ...{ ...inferences }, ...normalizedData.inferences })
     updatetags({ ...{ ...tags }, ...normalizedData.tags })
     updatecategories({ ...{ ...categories }, ...normalizedData.categories })
+
+    updatelabelMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.labelMetadataFilters })
+    updatelabeldatapoints({ ...{ ...labeldatapoints }, ...normalizedData.labelDatapoints })
+    updatelabeldatasets({ ...{ ...labeldatasets }, ...normalizedData.labelDatasets })
+    updatelabellabels({ ...{ ...labellabels }, ...normalizedData.labelLabels })
+    updatelabelresources({ ...{ ...labelresources }, ...normalizedData.labelResources })
+    updatelabelinferences({ ...{ ...labelinferences }, ...normalizedData.labelInferences })
+    updatelabeltags({ ...{ ...labeltags }, ...normalizedData.labelTags })
+    updatelabelcategories({ ...{ ...labelcategories }, ...normalizedData.labelCategories })
+
     setProcessingDatapoints(false)
     setDatapointsFetched(datapointsFetched + len)
   }
@@ -193,6 +310,7 @@ const DataViewer = () => {
   // once complete, fetch datapoints for the project, and the most recent set of projections
   useEffect(() => {
     if (totalDatapointsToFetch == null) return
+    if (totalDatapointsToFetch == datapointsFetched) return
     const page = Math.ceil(datapointsFetched / SERVER_PAGE_SIZE)
     setProcessingDatapoints(true)
     getDatapointsForProject(projectId, page, hydrateAtoms);
@@ -220,12 +338,12 @@ const DataViewer = () => {
     }
   }
 
-
   let loadingModalString = ""
   const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingProjections
   let progressWidth = 0
   if (totalDatapointsToFetch) progressWidth = ((datapointsFetched) / (totalDatapointsToFetch)) * 100
   if (allFetched) loadingModalString = "Finishing loading...."
+  else if (totalDatapointsToFetch === undefined) loadingModalString = "Starting up...."
   else loadingModalString = "Fetched " + datapointsFetched.toLocaleString("en-US") + " / " + totalDatapointsToFetch?.toLocaleString("en-US")
 
   return (

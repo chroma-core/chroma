@@ -65,17 +65,17 @@ export function getDatapointsForProject(project_id: number, page_id: number, cb:
   })
     .then(response => {
       t2 = performance.now()
-      console.log(`fetch: ${(t2 - t1) / 1000} seconds.`);
+      // console.log(`fetch: ${(t2 - t1) / 1000} seconds.`);
       return response.text()
     })
     .then((response) => {
       t3 = performance.now()
-      console.log(`unpack: ${(t3 - t2) / 1000} seconds.`);
+      // console.log(`unpack: ${(t3 - t2) / 1000} seconds.`);
       worker.postMessage(response)
       worker.onmessage = (e: MessageEvent) => {
         var { data } = e
         t4 = performance.now()
-        console.log(`process: ${(t4 - t3) / 1000} seconds.`);
+        // console.log(`process: ${(t4 - t3) / 1000} seconds.`);
         cb(data, data.numberOfDatapoints, page_id)
 
       }

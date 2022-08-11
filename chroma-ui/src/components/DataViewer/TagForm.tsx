@@ -9,7 +9,7 @@ import {
 import React, { useState } from 'react'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
-import { datapointsAtom, selectedDatapointsAtom, tagsAtom } from './atoms'
+import { contextObjectSwitcherAtom, datapointsAtom, DataType, selectedDatapointsAtom, tagsAtom } from './atoms'
 import { datapointIndexToPointIndex } from './DataViewerUtils'
 import { useAtom } from 'jotai'
 import { removeItem } from './Tags'
@@ -18,6 +18,7 @@ const TagForm: React.FC = () => {
   const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
   const [tags, updatetags] = useAtom(tagsAtom)
   const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
+  const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
   const theme = useTheme()
   const textColor = useColorModeValue(theme.colors.ch_gray.dark, theme.colors.ch_gray.light)
@@ -154,7 +155,7 @@ const TagForm: React.FC = () => {
             borderWidth={2}
             size="sm"
             onChange={(e: any) => checkAndSetTag(e, e.target.value)}
-            isDisabled={noneSelected}
+            isDisabled={noneSelected || (contextObjectSwitcher == DataType.Object)}
             value={newTag}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
@@ -177,7 +178,7 @@ const TagForm: React.FC = () => {
             size="sm"
             value={newUnTag}
             onChange={(e: any) => checkAndSetUnTag(e, e.target.value)}
-            isDisabled={noneSelected}
+            isDisabled={noneSelected || (contextObjectSwitcher == DataType.Object)}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
             _placeholder={{ opacity: 1, color: textColor }}

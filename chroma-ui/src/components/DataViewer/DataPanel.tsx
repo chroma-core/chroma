@@ -13,7 +13,7 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, datapointsAtom, visibleDatapointsAtom, resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom } from './atoms';
+import { selectedDatapointsAtom, datapointsAtom, visibleDatapointsAtom, resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
@@ -27,19 +27,11 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
 
   const theme = useTheme()
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
-  const [resources] = useAtom(resourcesAtom)
+  const [resources] = useAtom(globalResourcesAtom)
   let [datapointModalIndex, updatedatapointModalIndex] = useAtom(datapointModalIndexAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
 
   const uri = resources[datapoint.resource_id].uri
-
-  // const [result, reexecuteQuery] = useQuery({
-  //   query: ImageQuery,
-  //   variables: { "identifier": uri, "thumbnail": true, "resolverName": 'filepath' },
-  // });
-
-  // const { data, fetching, error } = result;
-  // if (error) return <p>Oh no... {error.message}</p>;
 
   const triggerModal = () => {
     updatedatapointModalIndex(index)
@@ -64,14 +56,6 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
             <BsTag color='#666' />
             <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.tag_ids.length}</Text>
           </Flex>
-          {/* <Flex alignItems="center" >
-            <BiCategoryAlt color='#666' />
-            <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.label.data.categories[0].name}</Text>
-          </Flex> */}
-          {/* <Flex alignItems="center" >
-            <BsLayers color='#666' style={{ transform: "rotate(-90deg)" }} />
-            <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.inference?.data.categories[0].name}</Text>
-          </Flex> */}
         </Flex>
       </Flex >
     </Box >
@@ -87,7 +71,7 @@ interface CellProps {
 
 const Cell: React.FC<CellProps> = ({ columnIndex, rowIndex, style, data }) => {
   const [colsPerRow] = useAtom(colsPerRowAtom)
-  const [datapoints] = useAtom(datapointsAtom)
+  const [datapoints] = useAtom(globalDatapointAtom)
   let index = (rowIndex * colsPerRow) + columnIndex
 
   return (
@@ -102,10 +86,10 @@ const DataPanel: React.FC = () => {
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
-  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
-  const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
-  const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
+  const [selectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
+  const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
   const [colsPerRow, setcolsPerRow] = useAtom(colsPerRowAtom)
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { categoryFilterAtom, cursorAtom, datapointsAtom, datasetFilterAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
+import { categoryFilterAtom, contextObjectSwitcherAtom, cursorAtom, datapointsAtom, datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterArray, FilterType } from './types';
 import { totalmem } from 'os';
@@ -20,6 +20,7 @@ const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key
   var maxY = -Infinity
 
   Object.values(datapoints).map(function (datapoint) {
+    // console.log('datapoint', datapoint, projections)
     if (projections[datapoint.projection_id!].y < minY) minY = projections[datapoint.projection_id!].y
     if (projections[datapoint.projection_id!].y > maxY) maxY = projections[datapoint.projection_id!].y
     if (projections[datapoint.projection_id!].x < minX) minX = projections[datapoint.projection_id!].x
@@ -57,14 +58,15 @@ interface PlotterProps {
 }
 
 const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
-  const [datapoints] = useAtom(datapointsAtom)
-  const [readDatapoints] = useAtom(readDatapointsAtom)
-  const [selectedDatapoints, updateselectedDatapoints] = useAtom(selectedDatapointsAtom)
-  const [visibleDatapoints] = useAtom(visibleDatapointsAtom)
-  const [projections] = useAtom(projectionsAtom)
+  const [datapoints] = useAtom(globalDatapointAtom)
+  // const [readDatapoints] = useAtom(readDatapointsAtom)
+  const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [projections] = useAtom(globalProjectionsAtom)
   const [cursor] = useAtom(cursorAtom)
   const [toolSelected] = useAtom(toolSelectedAtom)
   const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
   let [reglInitialized, setReglInitialized] = useState(false);
   let [boundsSet, setBoundsSet] = useState(false);
@@ -141,15 +143,25 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (!allFetched) return
     const t3 = performance.now();
     if (Object.values(datapoints).length == 0) return
-    if (Object.values(projections).length == 0) return
+    if (Object.values(projections).length == 0) {
+      setPoints([])
+      return
+    }
     let bounds = getBounds(datapoints, projections)
     setTarget([bounds.centerX, bounds.centerY])
     setMaxSize(bounds.maxSize)
     calculateColorsAndDrawPoints()
     setBoundsSet(true)
     const t4 = performance.now();
-    console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
-  }, [datapoints])
+    // console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
+  }, [datapoints, contextObjectSwitcher])
+
+  useEffect(() => {
+    if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
+      // right now we wipe selection when you switch modes
+      config.scatterplot.select([])
+    }
+  }, [contextObjectSwitcher])
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 3 times! every time a new batch of data is loaded in
@@ -160,7 +172,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (Object.values(projections).length == 0) return
     calculateColorsAndDrawPoints()
     const t4 = performance.now();
-    console.log(`datapoints, visibleDatapoints hook: ${(t4 - t3) / 1000} seconds.`);
+    // console.log(`datapoints, visibleDatapoints hook: ${(t4 - t3) / 1000} seconds.`);
   }, [visibleDatapoints])
 
   useEffect(() => {
@@ -177,7 +189,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       setpointsToSelect([])
     }
     const t4 = performance.now();
-    console.log(`pointsToSelect hook: ${(t4 - t3) / 1000} seconds.`);
+    // console.log(`pointsToSelect hook: ${(t4 - t3) / 1000} seconds.`);
   }, [pointsToSelect])
 
   if (reglInitialized && (points !== null)) {
@@ -238,7 +250,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     setpointdatapointMap(pointdatapointObject)
     if (points.length > 1) setPoints(points)
     const t4 = performance.now();
-    console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
+    // console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
   }
 
   const resizeListener = () => {

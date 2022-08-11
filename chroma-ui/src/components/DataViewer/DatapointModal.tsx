@@ -1,6 +1,6 @@
 import { Modal, ModalBody, ModalCloseButton, ModalContent, useColorModeValue, useTheme } from "@chakra-ui/react"
 import { useAtom } from "jotai"
-import { colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, datapointsAtom, selectedDatapointsAtom, visibleDatapointsAtom } from "./atoms"
+import { colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, datapointsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, selectedDatapointsAtom, visibleDatapointsAtom } from "./atoms"
 import DataPanelModal from "./DataPanelModal"
 
 interface DatapointModalProps {
@@ -15,8 +15,8 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ isOpen, totalLength }) 
   const [datapoints] = useAtom(datapointsAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
 
-  const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
-  const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [selectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   var dps: number[] = []
   if (selectedDatapoints.length > 0) dps = selectedDatapoints
   else dps = visibleDatapoints

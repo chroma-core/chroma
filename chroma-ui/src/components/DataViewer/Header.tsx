@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect } from 'react'
-import { Flex, useTheme, Tooltip, useColorModeValue, IconButton } from '@chakra-ui/react'
+import { Flex, useTheme, Tooltip, useColorModeValue, IconButton, Text, Button } from '@chakra-ui/react'
 import { BsCursorFill } from 'react-icons/bs'
 import { TbLasso } from 'react-icons/tb'
 import ColorToggle from '../ColorToggle'
 import ShortcutsDrawer from './ShortcutsDrawer'
 import { useAtom } from 'jotai'
-import { toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom } from './atoms'
+import { toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, contextObjectSwitcherAtom, DataType, labelDatapointsAtom } from './atoms'
 import { CursorMap } from './types'
 
 const Header: React.FC = () => {
@@ -14,6 +14,8 @@ const Header: React.FC = () => {
   const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [labelDatapoints] = useAtom(labelDatapointsAtom)
 
   var cursorSelected = toolSelected === 'cursor'
   var lassoSelected = toolSelected === 'lasso'
@@ -86,6 +88,34 @@ const Header: React.FC = () => {
             onClick={lassoClicked}
             pl={4} />
         </Tooltip>
+      </Flex>
+      <Flex>
+        {(Object.values(labelDatapoints).length > 0) ?
+          <>
+            <Button
+              borderRadius={0}
+              height="100%"
+              variant='ghost'
+              color={(contextObjectSwitcher == DataType.Context) ? 'white' : undefined}
+              _hover={(contextObjectSwitcher == DataType.Context) ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" } : undefined}
+              _active={(contextObjectSwitcher == DataType.Context) ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" } : undefined}
+              backgroundColor={(contextObjectSwitcher == DataType.Context) ? theme.colors.ch_blue : null}
+              onClick={() => updatecontextObjectSwitcher(DataType.Context)}>
+              Context
+            </Button>
+            <Button
+              borderRadius={0}
+              height="100%"
+              variant='ghost'
+              color={(contextObjectSwitcher == DataType.Object) ? 'white' : undefined}
+              _hover={(contextObjectSwitcher == DataType.Object) ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" } : undefined}
+              _active={(contextObjectSwitcher == DataType.Object) ? { backgroundColor: theme.colors.ch_gray.ch_blue, color: "white" } : undefined}
+              backgroundColor={(contextObjectSwitcher == DataType.Object) ? theme.colors.ch_blue : null}
+              onClick={() => updatecontextObjectSwitcher(DataType.Object)}>
+              Objects
+            </Button>
+          </>
+          : null}
       </Flex>
       <Flex>
         <ShortcutsDrawer />
