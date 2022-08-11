@@ -2,7 +2,7 @@ import json
 from math import inf
 import random
 import time
-from typing import Any
+from typing import Any, Optional
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 from chroma.sdk.api.mutations import (
@@ -170,7 +170,7 @@ class ChromaSDK:
             return batch_data
 
     # Internal
-    def __init__(self, project_name: str, dataset_name: str, categories: str) -> None:
+    def __init__(self, project_name: str, dataset_name: str, categories: Optional[str] = None) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
         self._client = Client(
             transport=transport, fetch_schema_from_transport=True, execute_timeout=30
@@ -420,13 +420,13 @@ class ChromaSDK:
         result = self._client.execute(create_dataset_mutation, variable_values=params)
         return result
 
-    def create_or_get_dataset(self, name: str, project_id: int, categories: str):
+    def create_or_get_dataset(self, name: str, project_id: int, categories: Optional[str] = None):
         params = {"dataset": {"name": name, "projectId": project_id, "categories": categories}}
         result = self._client.execute(create_or_get_dataset_mutation, variable_values=params)
         return result
 
-    def update_dataset(self, id: int, name: str):
-        params = {"dataset": {"id": id, "name": name}}
+    def update_dataset(self, id: int, name: Optional[str] = None, categories: Optional[str] = None):
+        params = {"dataset": {"id": id, "name": name, "categories": categories}}
         result = self._client.execute(update_dataset_mutation, variable_values=params)
         return result
 

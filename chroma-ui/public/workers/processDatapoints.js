@@ -182,7 +182,6 @@ self.onmessage = (message) => {
         labelCategoriesObject[c].datapoint_ids = [...dps]
     })
 
-    console.log('labelDatapointsObject', labelDatapointsObject)
     // if we dont have any bounding boxes... wipe out the other data structures
     if (Object.values(labelDatapointsObject).length === 0) {
         labelCategoriesObject = {}

@@ -17,7 +17,7 @@ query getProjectionSets($filter: FilterProjectionSets!, $projectId: ID!) {
 `
 
 export function getProjectionsForProjectionSet(projection_set_id: number, cb: (projections: any) => void) {
-  fetch(`/api/projection_set_data_viewer/` + projection_set_id, {
+  fetch(`/api/projections/` + projection_set_id, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',

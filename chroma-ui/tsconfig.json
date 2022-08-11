@@ -22,6 +22,7 @@
   },
   "include": [
     "src",
-    "public/process.js"
+    "public/processDatapoints.js",
+    "public/processProjections.js"
   ]
 }

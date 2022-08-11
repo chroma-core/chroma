@@ -1,9 +1,7 @@
-import resource
 from termios import ECHOE
 import strawberry
 import os
 from os.path import getsize, isfile
-from chroma.app.profile2 import profiled
 import models
 import asyncio, concurrent.futures
 from sqlalchemy import func, select
@@ -11,7 +9,7 @@ from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload, load_
 import time
 # from ddtrace.contrib.asgi import TraceMiddleware
 
-from typing import Optional, Union, Any
+from typing import Optional, Union
 
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -21,13 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from strawberry.extensions import Extension
 from strawberry.fastapi import GraphQLRouter
 from fastapi.responses import FileResponse
-
-# import ujson
-# from starlette.responses import JSONResponse
-
-# class UJSONResponse(JSONResponse):
-#     def render(self, content: Any) -> bytes:
-#         return ujson.dumps(content, ensure_ascii=False).encode("utf-8")
 
 from graphql_py.queries import Query
 from graphql_py.mutations import Mutation, get_context
@@ -59,46 +50,9 @@ graphql_app = GraphQLRouter(schema, context_getter=get_context)
 
 app = FastAPI(title="AppBackend")
 
-@app.get("/test")
-async def root():
-    async with models.get_session() as s:
-        sql = select(models.Project)
-        result = (await s.execute(sql)).scalars().unique().all()
-    return result
-
-# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
-# because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/api/projection_set_data/{projection_set_id}")
-async def get_projection_set_data(projection_set_id: str):
-    async with models.get_session() as s:
-
-        start = time.process_time()
-        # benchmarked difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
-        sql = (select(models.ProjectionSet).where(models.ProjectionSet.id == int(projection_set_id))
-            .options(joinedload(models.ProjectionSet.projections).load_only("id", "x", "y", "embedding_id")
-                .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
-                    .options(joinedload(models.Embedding.datapoint)
-                        .options(
-                            joinedload(models.Datapoint.label), 
-                            joinedload(models.Datapoint.resource),
-                            joinedload(models.Datapoint.dataset)
-                        )
-                        .options(joinedload(models.Datapoint.tags)
-                            .options(joinedload(models.Tagdatapoint.tag))
-                        )
-                    )
-                )
-            )
-        )
-        val = (await s.execute(sql)).scalars().first()
-        elapsedtime = time.process_time() - start
-        print("got records in " + str(elapsedtime) + " seconds")
-
-    return val
-
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM 
-@app.get("/api/projection_set_data_viewer/{projection_set_id}")
+@app.get("/api/projections/{projection_set_id}")
 async def get_projection_set_data_viewer(projection_set_id: str):
     print("get_projection_set_data_viewer!")
     async with models.get_session() as s:
@@ -123,78 +77,12 @@ async def get_projection_set_data_viewer(projection_set_id: str):
 
     return val
 
-# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
-# because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/api/datapoints_old/{project_id}&page={page_id}")
-async def get_datapoints_data_viewer(project_id: str, page_id: int):
-    print("get_datapoints_data_viewer for project" + str(project_id) + " and page " + str(page_id))
-    
-    async with models.get_session() as s:
-        print("get_datapoints_data_viewer models.get_session! " + str(s))
-        start = time.process_time()
-
-        # page is 0 index
-        page_size = 20000
-        offset = page_size * page_id 
-
-        sql = (
-            select(models.Datapoint)
-                .where(models.Datapoint.project_id == int(project_id))
-                    .options(
-                        load_only(models.Datapoint.id, models.Datapoint.metadata_), 
-                        joinedload(models.Datapoint.dataset)
-                            .options(load_only(models.Dataset.id, models.Dataset.name)),
-                        joinedload(models.Datapoint.resource)
-                            .options(load_only(models.Resource.id, models.Resource.uri)),
-                        joinedload(models.Datapoint.label)
-                            .options(load_only(models.Label.id, models.Label.data)),
-                        joinedload(models.Datapoint.inference)
-                            .options(load_only(models.Inference.id, models.Inference.data)),
-                        joinedload(models.Datapoint.tags)
-                            .options(joinedload(models.Tagdatapoint.tag))
-                        )
-                ).limit(page_size).offset(offset)
-
-        val = {}
-        with profiled():
-            res = (await s.execute(sql))
-        
-        val = res.scalars().unique().all()
-
-        elapsedtime = time.process_time() - start
-        print("got datapoints in " + str(elapsedtime) + " seconds")
-
-    return val
-
 @app.get("/api/datapoints_count/{project_id}")
 async def get_datapoints_data_viewer(project_id: str):
     async with models.get_session() as s:
         query = select(func.count(models.Datapoint.id)).filter(models.Datapoint.project_id == project_id)
         res = (await s.execute(query)).scalar()
     return res
-
-@app.get("/api/projections/{projection_set_id}")
-async def get_projections_data_viewer(projection_set_id: str):
-    async with models.get_session() as s:
-        print("get_projections_data_viewer models.get_session! " + str(s))
-        start = time.process_time()
-
-        sql = (select(models.Projection).where(models.ProjectionSet.id == int(projection_set_id))
-                    .options(
-                        load_only(models.Projection.x, models.Projection.y), 
-                        joinedload(models.Projection.embedding)
-                            .options(load_only(models.Embedding.id, models.Embedding.datapoint_id))
-                        )
-        )
-        projections = (await s.execute(sql)).scalars().unique().all()
-
-        elapsedtime = time.process_time() - start
-        print("got projections in " + str(elapsedtime) + " seconds")
-
-        return {
-            'projections': projections
-        }
-
 
 @app.get("/api/datapoints/{project_id}&page={page_id}")#, response_class=UJSONResponse)
 async def get_datapoints_data_viewer(project_id: str, page_id: int):

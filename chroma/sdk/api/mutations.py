@@ -70,7 +70,6 @@ create_or_get_dataset_mutation = gql(
         createOrGetDataset(dataset: $dataset) {
             id
             name
-            categories
         }
     }
     """

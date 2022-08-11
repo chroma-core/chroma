@@ -120,11 +120,11 @@ class Query:
             width, height = image.size
 
         if (resolver_name == 'url'):
-            response = requests.get('http://i.imgur.com/1T6nTzl.jpg')
+            response = requests.get(identifier)
             image = Image.open(BytesIO(response.content))
             width, height = image.size
 
-        # apply custom crop
+        # apply custom crop and add chessboard at edges if needed
         if ((leftOffset != None) and (topOffset != None) and (cropHeight != None) and (cropWidth != None)):
 
             max_dimension = 0

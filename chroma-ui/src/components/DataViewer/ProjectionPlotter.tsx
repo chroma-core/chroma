@@ -11,8 +11,6 @@ interface ConfigProps {
   scatterplot?: any
 }
 
-const readDatapointsAtom = atom((get) => get(datapointsAtom))
-
 const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
   var minY = Infinity
@@ -20,7 +18,6 @@ const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key
   var maxY = -Infinity
 
   Object.values(datapoints).map(function (datapoint) {
-    // console.log('datapoint', datapoint, projections)
     if (projections[datapoint.projection_id!].y < minY) minY = projections[datapoint.projection_id!].y
     if (projections[datapoint.projection_id!].y > maxY) maxY = projections[datapoint.projection_id!].y
     if (projections[datapoint.projection_id!].x < minX) minX = projections[datapoint.projection_id!].x
@@ -59,7 +56,6 @@ interface PlotterProps {
 
 const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const [datapoints] = useAtom(globalDatapointAtom)
-  // const [readDatapoints] = useAtom(readDatapointsAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [projections] = useAtom(globalProjectionsAtom)
@@ -117,7 +113,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     })
     updateselectedDatapoints(sdp)
     const t4 = performance.now();
-    console.log(`selectHandler hook: ${(t4 - t3) / 1000} seconds.`);
+    // console.log(`selectHandler hook: ${(t4 - t3) / 1000} seconds.`);
   }
 
   // @ts-ignore

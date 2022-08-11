@@ -32,8 +32,6 @@
     "framer-motion": "^6",
     "graphql": "^16.5.0",
     "jotai": "^1.7.6",
-    "normalizr": "^3.6.2",
-    "optics-ts": "^2.3.0",
     "pub-sub-es": "^2.0.1",
     "re-resizable": "^6.9.9",
     "react": "^18.1.0",

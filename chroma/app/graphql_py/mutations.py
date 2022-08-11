@@ -11,7 +11,7 @@ from celery.result import AsyncResult
 from tasks import process_embeddings, compute_class_distances
 from celery import chain, group
 
-from typing import Optional, List, Annotated
+from typing import Optional, List, Annotated, Union
 from graphql_py.types import (
     Embedding,
     AddEmbeddingResponse,
@@ -112,7 +112,7 @@ class UpdateProjectInput:
 class CreateDatasetInput:
     name: str
     project_id: int
-    categories: str
+    categories: Optional[str] = None
 
 
 @strawberry.input
@@ -635,6 +635,8 @@ class Mutation:
                 return ProjectDoesNotExist
 
             res = models.Dataset(name=dataset.name, project=project)
+            if dataset.categories:
+                res = res.values(categories=dataset.categories)
             s.add(res)
             await s.commit()
         return Dataset.marshal(res)
@@ -654,7 +656,10 @@ class Mutation:
             result = (await s.execute(sql)).scalars().first()
 
             if result is None:
-                ret = models.Dataset(name=dataset.name, project=project, categories=dataset.categories)
+                ret = models.Dataset(name=dataset.name, project=project)
+                if dataset.categories:
+                    ret = ret.values(categories=dataset.categories)
+
                 s.add(ret)
                 await s.commit()
             else:

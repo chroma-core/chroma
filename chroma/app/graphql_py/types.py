@@ -52,7 +52,7 @@ class Dataset:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     project_id: Optional[int]
-    categories: JSON
+    categories: Optional[JSON] = None
 
     # belongs_to project
     @strawberry.field
@@ -88,7 +88,7 @@ class Dataset:
             created_at=model.created_at,
             updated_at=model.updated_at,
             project_id=model.project_id,
-            categories=json.loads(model.categories),
+            categories=json.loads(model.categories) if model.categories else None,
         )
 
 
@@ -175,7 +175,6 @@ class Datapoint:
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
         return cls(
             id=strawberry.ID(str(model.id)),
-            #dataset=Dataset.marshal(model.dataset) if model.dataset else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
             metadata_=model.metadata_,

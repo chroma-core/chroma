@@ -279,7 +279,6 @@ const DataViewer = () => {
       }
 
     })
-    console.log('normalizedData.metadataFilters', normalizedData.metadataFilters)
 
     updateMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.metadataFilters })
     updatedatapoints({ ...{ ...datapoints }, ...normalizedData.datapoints })

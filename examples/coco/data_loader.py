@@ -8,9 +8,9 @@ from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 import json
 
-chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014',categories=json.dumps({}))
+chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014')
 
-project = nn(chroma.create_or_get_project('COCO - all - 2'))
+project = nn(chroma.create_or_get_project('cat data later6'))
 
 ann_file = "/Users/jeff/data/annotations/instances_train2014.json"
 coco=COCO(ann_file)
@@ -19,8 +19,10 @@ coco=COCO(ann_file)
 # category_ids = coco.getCatIds(['bicycle'])
 cat_ids = coco.getCatIds()
 cats = coco.loadCats(cat_ids)
-dataset = nn(chroma.create_or_get_dataset("Train2014-10 - all - 2", int(project.createOrGetProject.id), json.dumps(cats)))
+dataset = nn(chroma.create_or_get_dataset("cat data later6", int(project.createOrGetProject.id)))
 embedding_set = nn(chroma.create_embedding_set(int(dataset.createOrGetDataset.id)))
+
+chroma.update_dataset(int(dataset.createOrGetDataset.id), None, json.dumps(cats))
 
 # Get list of image_ids which contain bicycles
 # image_ids = coco.getImgIds(catIds=[2])
@@ -82,10 +84,10 @@ for image_id in image_ids:
         chroma.create_batch_datapoint_embedding_set(add_data_batch)
         print (str(i))
 
-    if(not i % 10_000):
+    if(not i % 1_000):
         chroma.create_batch_datapoint_embedding_set(add_data_batch)
         add_data_batch = []
         print (str(i))
         
-    # if (i > 21_000):
-    #     raise Exception("stop")
+    if (i > 1_100):
+        raise Exception("stop")
