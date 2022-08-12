@@ -7,17 +7,19 @@ from pycocotools.coco import COCO
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 import json
+import os
+file_location = os.path.dirname(os.path.abspath(__file__))
 
-chroma = chroma_manager.ChromaSDK(project_name= 'COCO', dataset_name='Train2014')
+chroma = chroma_manager.ChromaSDK(project_name='COCO', dataset_name='Train2014')
 
-project = nn(chroma.create_or_get_project('COCO Data'))
+project = nn(chroma.create_or_get_project('COCO Data3'))
 
-ann_file = "/Users/jeff/data/annotations/instances_train2014.json"
+ann_file = file_location + "/data/annotations/instances_train2014.json"
 coco=COCO(ann_file)
  
 cat_ids = coco.getCatIds()
 cats = coco.loadCats(cat_ids)
-dataset = nn(chroma.create_or_get_dataset("COCO Data", int(project.createOrGetProject.id)))
+dataset = nn(chroma.create_or_get_dataset("COCO Data3", int(project.createOrGetProject.id)))
 embedding_set = nn(chroma.create_embedding_set(int(dataset.createOrGetDataset.id)))
 
 chroma.update_dataset(int(dataset.createOrGetDataset.id), None, json.dumps(cats))
@@ -30,7 +32,7 @@ str_options = ['New York', 'San Francisco', 'Atlanta', 'Miami', 'Dallas', 'Chica
 i = 0
 add_data_batch = []
 for image_id in image_ids:
-    uri = "/Users/jeff/data/train2014/COCO_train2014_" + str(image_id).zfill(12)+".jpg"
+    uri = file_location + "/data/train2014/COCO_train2014_" + str(image_id).zfill(12)+".jpg"
 
     annotation_ids = coco.getAnnIds(imgIds=image_id)
     anns = coco.loadAnns(annotation_ids)
@@ -77,5 +79,5 @@ for image_id in image_ids:
         add_data_batch = []
         print (str(i))
         
-    # if (i > 1_100):
-    #     raise Exception("stop")
+    if (i > 3_100):
+        raise Exception("stop")

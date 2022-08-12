@@ -13,8 +13,8 @@ project = nn(chroma.create_project("my first project"))
 dataset1 = nn(chroma.create_dataset("training", int(project.createProject.id)))
 dataset2 = nn(chroma.create_dataset("production", int(project.createProject.id)))
 
-dataset3 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id), "{}"))
-dataset4 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id), "{}"))
+dataset3 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id)))
+dataset4 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject.id)))
 
 embedding_set = nn(chroma.create_embedding_set(int(dataset1.createDataset.id)))
 

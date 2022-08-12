@@ -636,7 +636,7 @@ class Mutation:
 
             res = models.Dataset(name=dataset.name, project=project)
             if dataset.categories:
-                res = res.values(categories=dataset.categories)
+                res.categories=dataset.categories
             s.add(res)
             await s.commit()
         return Dataset.marshal(res)
@@ -658,7 +658,7 @@ class Mutation:
             if result is None:
                 ret = models.Dataset(name=dataset.name, project=project)
                 if dataset.categories:
-                    ret = ret.values(categories=dataset.categories)
+                    ret.categories=dataset.categories
 
                 s.add(ret)
                 await s.commit()

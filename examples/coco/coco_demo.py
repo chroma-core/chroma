@@ -3,8 +3,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 from pycocotools.coco import COCO
+import os
+file_location = os.path.dirname(os.path.abspath(__file__))
 
-ann_file = "/Users/jeff/data/annotations/instances_train2014.json"
+ann_file = file_location + "/data/annotations/instances_train2014.json"
 coco=COCO(ann_file)
  
 # Get list of category_ids, here [2] for bicycle
@@ -14,7 +16,7 @@ category_ids = coco.getCatIds(['bicycle'])
 image_ids = coco.getImgIds(catIds=[2])
 image_id = image_ids[0]
  
-images_path = "/Users/jeff/data/train2014/COCO_train2014_"
+images_path = file_location + "/data/train2014/COCO_train2014_"
 image_name = str(image_id).zfill(12)+".jpg" # Image names are 12 characters long
 image = Image.open(images_path+image_name)
  
