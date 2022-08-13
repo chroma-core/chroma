@@ -144,29 +144,9 @@ class ChromaSDK:
                 {
                     "datasetId": self._dataset_id,
                     "embeddingSetId": self._embedding_set_id,
-                    "labelData": json.dumps(
-                        {
-                            "categories": [
-                                {
-                                    "id": int(self._labels[index]),
-                                    "name": str(self._labels[index]),
-                                    "supercategory": "none",
-                                }
-                            ]
-                        }
-                    ),
-                    "inferenceData": json.dumps(
-                        {
-                            "categories": [
-                                {
-                                    "id": int(self._inferences[index]),
-                                    "name": str(self._inferences[index]),
-                                    "supercategory": "none",
-                                }
-                            ]
-                        }
-                    ),
-                    "embeddingData": json.dumps(self._embeddings[index]),
+                    "labelData": json.dumps(self._labels[index]),
+                    "inferenceData": json.dumps(self._inferences[index]),
+                    "embeddingData": [json.dumps(emb) for emb in self._embeddings[index]],
                     "resourceUri": self._resource_uris[index],
                 }
                 for index in range(self._count)
@@ -211,21 +191,22 @@ class ChromaSDK:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # TODO(anton) Make chroma context exit a programmatic set of post-run tasks
-        self._forward_hook.remove()
+        if hasattr(self, "_forward_hook"):
+            self._forward_hook.remove()
         self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
 
         # TODO(anton) We just automatically treat the first (by id) dataset for a project as the 'training' dataset.
         # This is also really ugly, we should be able to get the right training set by knowing which
         # model we're getting inferences from.
-        project = nn(self.get_project(id=self._project_id))
-        min_dataset_id = inf
-        for dataset in project.project.datasets:
-            dataset_id = int(dataset["id"])
-            if dataset_id < min_dataset_id:
-                min_dataset_id = dataset_id
-        self.run_compute_class_distance_mutation(
-            trainingDatasetId=min_dataset_id, targetDatasetId=self._data_buffer._dataset_id
-        )
+        # project = nn(self.get_project(id=self._project_id))
+        # min_dataset_id = inf
+        # for dataset in project.project.datasets:
+        #     dataset_id = int(dataset["id"])
+        #     if dataset_id < min_dataset_id:
+        #         min_dataset_id = dataset_id
+        # self.run_compute_class_distance_mutation(
+        #     trainingDatasetId=min_dataset_id, targetDatasetId=self._data_buffer._dataset_id
+        # )
 
     def set_resource_uris(self, uris):
         self._data_buffer.set_data("_resource_uris", uris)

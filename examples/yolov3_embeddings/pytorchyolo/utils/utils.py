@@ -102,7 +102,7 @@ def xywh2xyxy_np(x):
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls):
-    """ Compute the average precision, given the recall and precision curves.
+    """Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
         tp:    True positives (list).
@@ -157,7 +157,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
 
 
 def compute_ap(recall, precision):
-    """ Compute the average precision, given the recall and precision curves.
+    """Compute the average precision, given the recall and precision curves.
     Code originally from https://github.com/rbgirshick/py-faster-rcnn.
 
     # Arguments
@@ -185,7 +185,7 @@ def compute_ap(recall, precision):
 
 
 def get_batch_statistics(outputs, targets, iou_threshold):
-    """ Compute true positives, predicted scores and predicted labels per sample """
+    """Compute true positives, predicted scores and predicted labels per sample"""
     batch_metrics = []
     for sample_i in range(len(outputs)):
 
@@ -216,10 +216,14 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                     continue
 
                 # Filter target_boxes by pred_label so that we only match against boxes of our own label
-                filtered_target_position, filtered_targets = zip(*filter(lambda x: target_labels[x[0]] == pred_label, enumerate(target_boxes)))
+                filtered_target_position, filtered_targets = zip(
+                    *filter(lambda x: target_labels[x[0]] == pred_label, enumerate(target_boxes))
+                )
 
                 # Find the best matching target for our predicted box
-                iou, box_filtered_index = bbox_iou(pred_box.unsqueeze(0), torch.stack(filtered_targets)).max(0)
+                iou, box_filtered_index = bbox_iou(
+                    pred_box.unsqueeze(0), torch.stack(filtered_targets)
+                ).max(0)
 
                 # Remap the index in the list of filtered targets for that label to the index in the list with all targets.
                 box_index = filtered_target_position[box_filtered_index]
@@ -253,10 +257,8 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
         b2_y1, b2_y2 = box2[:, 1] - box2[:, 3] / 2, box2[:, 1] + box2[:, 3] / 2
     else:
         # Get the coordinates of bounding boxes
-        b1_x1, b1_y1, b1_x2, b1_y2 = \
-            box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
-        b2_x1, b2_y1, b2_x2, b2_y2 = \
-            box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]
 
     # get the corrdinates of the intersection rectangle
     inter_rect_x1 = torch.max(b1_x1, b2_x1)
@@ -297,8 +299,11 @@ def box_iou(box1, box2):
     area2 = box_area(box2.T)
 
     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
-    inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) -
-             torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
+    inter = (
+        (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2]))
+        .clamp(0)
+        .prod(2)
+    )
     # iou = inter / (area1 + area2 - inter)
     return inter / (area1[:, None] + area2 - inter)
 
@@ -329,8 +334,8 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        indices = (x[..., 4] > conf_thres)
-        if(x.device.type == "mps"):
+        indices = x[..., 4] > conf_thres
+        if x.device.type == "mps":
             indices = indices.to("cpu")
         x = x[indices]  # confidence
         remaining_indices = remaining_indices[indices]
@@ -348,7 +353,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
             i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
-            if(x.device.type == "mps"):
+            if x.device.type == "mps":
                 i = i.to("cpu")
                 j = j.to("cpu")
             x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float().to(x.device)), 1)
@@ -382,17 +387,17 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
-        if(x.device.type == "mps"):
-            i = i.to("cpu")    
+        if x.device.type == "mps":
+            i = i.to("cpu")
         output[xi] = to_cpu(x[i])
         if isinstance(remaining_indices, np.ndarray):
             output_indices[xi] = remaining_indices[i]
         else:
             output_indices[xi] = [remaining_indices]
-            
+
         if (time.time() - t) > time_limit:
-            print(f'WARNING: NMS time limit {time_limit}s exceeded')
-            break  # time limit exceeded
+            print(f"WARNING: NMS time limit {time_limit}s exceeded")
+            # break  # time limit exceeded
     return output, output_indices
 
 
@@ -409,12 +414,16 @@ def print_environment_info():
 
     # Print poetry package version
     try:
-        print(f"Current Version: {subprocess.check_output(['poetry', 'version'], stderr=subprocess.DEVNULL).decode('ascii').strip()}")
+        print(
+            f"Current Version: {subprocess.check_output(['poetry', 'version'], stderr=subprocess.DEVNULL).decode('ascii').strip()}"
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Not using the poetry package")
 
     # Print commit hash if possible
     try:
-        print(f"Current Commit Hash: {subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], stderr=subprocess.DEVNULL).decode('ascii').strip()}")
+        print(
+            f"Current Commit Hash: {subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], stderr=subprocess.DEVNULL).decode('ascii').strip()}"
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("No git or repo found")

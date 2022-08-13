@@ -57,7 +57,7 @@ def process_embeddings(embedding_set_id):
     sql = select(models.Embedding).where(models.Embedding.embedding_set == embedding_set)
     embeddings = (db_session.execute(sql)).scalars().unique().all()
 
-    vectors = [json.loads(emb.data) for emb in embeddings]
+    vectors = [json.loads(emb.data)["data"] for emb in embeddings]
 
     celery_log.info(f"Fetched data")
 

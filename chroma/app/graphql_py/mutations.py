@@ -284,7 +284,7 @@ class CreateDatapointEmbeddingSetInput:
     label_data: str
     inference_data: str
     resource_uri: str
-    embedding_data: str
+    embedding_data: List[str]
     embedding_set_id: int
     metadata: Optional[str] = ""
 
@@ -546,10 +546,13 @@ class Mutation:
                 label = models.Label(data=datapoint_embedding_set.label_data)
                 inference = models.Inference(data=datapoint_embedding_set.inference_data)
                 resource = models.Resource(uri=datapoint_embedding_set.resource_uri)
-                embedding = models.Embedding(
-                    data=datapoint_embedding_set.embedding_data, embedding_set=embedding_set
-                )
-                objs_to_add.extend([label, inference, resource, embedding])
+                objs_to_add.extend([label, inference, resource])
+
+                embeddings = [
+                    models.Embedding(data=embedding_data, embedding_set=embedding_set)
+                    for embedding_data in datapoint_embedding_set.embedding_data
+                ]
+                objs_to_add.extend(embeddings)
 
                 datapoint = models.Datapoint(
                     project_id=dataset.project_id,
@@ -559,7 +562,7 @@ class Mutation:
                     resource=resource,
                     metadata_=datapoint_embedding_set.metadata,
                 )
-                datapoint.embeddings.append(embedding)
+                datapoint.embeddings.extend(embeddings)
                 objs_to_add.append(datapoint)
 
             # add all is very important for speed!
