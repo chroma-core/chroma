@@ -9,7 +9,6 @@ import Model from './components/Models/Model'
 import AppContainer from './components/Containers/AppContainer'
 import Jobs from './components/Jobs/Jobs'
 import Job from './components/Jobs/Job'
-import Embeddings from './components/Explorer/Embeddings'
 import DataViewer from './components/DataViewer/DataViewer'
 
 const ChromaRouter: React.FC = () => {
@@ -26,7 +25,6 @@ const ChromaRouter: React.FC = () => {
           <Route path="projects/:project_id/datasets/:dataset_id" element={<AppContainer><Dataset /></AppContainer>} />
           <Route path="projects/:project_id/models" element={<AppContainer><Models /></AppContainer>} />
           <Route path="projects/:project_id/models/:model_id" element={<AppContainer><Model /></AppContainer>} />
-          <Route path="projection_set/:projection_set_id" element={<Embeddings />} />
         </Route>
       </Routes>
 

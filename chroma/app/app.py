@@ -4,9 +4,10 @@ import os
 from os.path import getsize, isfile
 import models
 import asyncio, concurrent.futures
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload, load_only
 import time
+# from ddtrace.contrib.asgi import TraceMiddleware
 
 from typing import Optional, Union
 
@@ -49,46 +50,9 @@ graphql_app = GraphQLRouter(schema, context_getter=get_context)
 
 app = FastAPI(title="AppBackend")
 
-@app.get("/test")
-async def root():
-    async with models.get_session() as s:
-        sql = select(models.Project)
-        result = (await s.execute(sql)).scalars().unique().all()
-    return result
-
-# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
-# because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/api/projection_set_data/{projection_set_id}")
-async def get_projection_set_data(projection_set_id: str):
-    async with models.get_session() as s:
-
-        start = time.process_time()
-        # benchmarked difference between selectinload (1s), subqueryload (~1.2s), joinedload (~.7) 
-        sql = (select(models.ProjectionSet).where(models.ProjectionSet.id == int(projection_set_id))
-            .options(joinedload(models.ProjectionSet.projections).load_only("id", "x", "y", "embedding_id")
-                .options(joinedload(models.Projection.embedding).load_only("id", "datapoint_id")
-                    .options(joinedload(models.Embedding.datapoint)
-                        .options(
-                            joinedload(models.Datapoint.label), 
-                            joinedload(models.Datapoint.resource),
-                            joinedload(models.Datapoint.dataset)
-                        )
-                        .options(joinedload(models.Datapoint.tags)
-                            .options(joinedload(models.Tagdatapoint.tag))
-                        )
-                    )
-                )
-            )
-        )
-        val = (await s.execute(sql)).scalars().first()
-        elapsedtime = time.process_time() - start
-        print("got records in " + str(elapsedtime) + " seconds")
-
-    return val
-
 # we go directly to sqlalchemy and skip graphql for fetching projections and their related data
 # because it massively cuts down on the time to return data to the DOM 
-@app.get("/api/projection_set_data_viewer/{projection_set_id}")
+@app.get("/api/projections/{projection_set_id}")
 async def get_projection_set_data_viewer(projection_set_id: str):
     print("get_projection_set_data_viewer!")
     async with models.get_session() as s:
@@ -113,40 +77,74 @@ async def get_projection_set_data_viewer(projection_set_id: str):
 
     return val
 
-# we go directly to sqlalchemy and skip graphql for fetching projections and their related data
-# because it massively cuts down on the time to return data to the DOM, by ~3x! 
-@app.get("/api/datapoints/{project_id}")
+@app.get("/api/datapoints_count/{project_id}")
 async def get_datapoints_data_viewer(project_id: str):
-    print("get_datapoints_data_viewer!")
+    async with models.get_session() as s:
+        query = select(func.count(models.Datapoint.id)).filter(models.Datapoint.project_id == project_id)
+        res = (await s.execute(query)).scalar()
+    return res
+
+@app.get("/api/datapoints/{project_id}&page={page_id}")#, response_class=UJSONResponse)
+async def get_datapoints_data_viewer(project_id: str, page_id: int):
     async with models.get_session() as s:
         print("get_datapoints_data_viewer models.get_session! " + str(s))
         start = time.process_time()
 
-        sql = (
-            select(models.Project)
-                .where(models.Project.id == int(project_id))
-                .options(joinedload(models.Project.datapoints)
-                    .options(
-                        load_only(models.Datapoint.id, models.Datapoint.metadata_), 
-                        joinedload(models.Datapoint.dataset)
-                            .options(load_only(models.Dataset.id, models.Dataset.name)),
-                        joinedload(models.Datapoint.resource)
-                            .options(load_only(models.Resource.id, models.Resource.uri)),
-                        joinedload(models.Datapoint.label)
-                            .options(load_only(models.Label.id, models.Label.data)),
-                        joinedload(models.Datapoint.inference)
-                            .options(load_only(models.Inference.id, models.Inference.data)),
-                        joinedload(models.Datapoint.tags)
-                            .options(joinedload(models.Tagdatapoint.tag))#.options(load_only(models.Tagdatapoint.id, models.Tagdatapoint.data))
-                        )
+        page_size = 10000
+        offset = page_size * page_id 
+
+        sql = (select(models.Datapoint).where(models.Datapoint.project_id == int(project_id))
+                .options(
+                    load_only(
+                        models.Datapoint.id, 
+                        models.Datapoint.resource_id, 
+                        models.Datapoint.dataset_id,
+                        models.Datapoint.metadata_
                     )
-                )
-        val = (await s.execute(sql)).scalars().first()
+                )).limit(page_size).offset(offset)
+        datapoints = (await s.execute(sql)).scalars().unique().all()
+
+        datapoint_ids = []
+        resource_ids = []
+        dataset_list = {}
+
+        for dp in datapoints:
+            datapoint_ids.append(dp.id)
+            resource_ids.append(dp.id)
+            dataset_list[dp.dataset_id] = True # eg {4: True}, use this to prevent dupes
+        
+        # Labels
+        sql = (select(models.Label).filter(models.Label.datapoint_id.in_(datapoint_ids)).options(load_only(models.Label.id, models.Label.data, models.Label.datapoint_id)))
+        labels = (await s.execute(sql)).scalars().unique().all()
+
+        # Resources
+        sql = (select(models.Resource).filter(models.Resource.id.in_(resource_ids)).options(load_only(models.Resource.id, models.Resource.uri)))
+        resources = (await s.execute(sql)).scalars().unique().all()
+
+        # Inferences
+        sql = (select(models.Inference).filter(models.Inference.datapoint_id.in_(datapoint_ids)).options(load_only(models.Inference.id, models.Inference.data, models.Inference.datapoint_id)))
+        inferences = (await s.execute(sql)).scalars().unique().all()
+
+        # Datasets
+        sql = (select(models.Dataset).filter(models.Dataset.id.in_(dataset_list.keys())).options(load_only(models.Dataset.id, models.Dataset.name, models.Dataset.categories)))
+        datasets = (await s.execute(sql)).scalars().unique().all()
+        
+        # Tags
+        sql = (select(models.Tagdatapoint).filter(models.Tagdatapoint.right_id.in_(datapoint_ids)).options(joinedload(models.Tagdatapoint.tag)))
+        tags = (await s.execute(sql)).scalars().unique().all()
 
         elapsedtime = time.process_time() - start
         print("got datapoints in " + str(elapsedtime) + " seconds")
 
-    return val
+    return ({
+        'datapoints': datapoints,
+        'labels': labels,
+        'resources': resources,
+        'inferences': inferences,
+        'datasets': datasets,
+        'tags': tags
+    })
+
 
 app.include_router(graphql_app, prefix="/graphql")
 app.add_middleware(
@@ -200,3 +198,5 @@ if os.path.isdir('static/'):
 
 else:
     print("NOTICE: the frontend has not been built into the static directory. Serving frontend from localhost:8000 will be disabled.")
+
+# app = TraceMiddleware(app)

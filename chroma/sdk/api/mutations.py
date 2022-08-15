@@ -121,10 +121,6 @@ create_datapoint_set_mutation = gql(
                 id
                 data
             }
-            inference {
-                id
-                data
-            }
             resource {
                 id
                 uri

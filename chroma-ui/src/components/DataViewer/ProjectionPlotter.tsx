@@ -1,36 +1,27 @@
 import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
-import { Datapoint } from './DataViewTypes'
 import useResizeObserver from "use-resize-observer";
-
-interface ProjectionPlotterProps {
-  datapoints?: Datapoint[]
-  toolSelected: string
-  showLoading: boolean
-  filters?: any
-  insertedProjections: boolean
-  deselectHandler: () => void
-  selectHandler: () => void
-  cursor: string
-  pointsToSelect: []
-}
+import { categoryFilterAtom, contextObjectSwitcherAtom, cursorAtom, datapointsAtom, datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
+import { atom, useAtom } from 'jotai'
+import { Projection, Datapoint, FilterArray, FilterType } from './types';
+import { totalmem } from 'os';
 
 interface ConfigProps {
   scatterplot?: any
 }
 
-const getBounds = (datapoints: Datapoint[]) => {
+const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
   var minY = Infinity
   var maxX = -Infinity
   var maxY = -Infinity
 
-  datapoints.forEach((datapoint) => {
-    if (datapoint.projection!.y < minY) minY = datapoint.projection!.y
-    if (datapoint.projection!.y > maxY) maxY = datapoint.projection!.y
-    if (datapoint.projection!.x < minX) minX = datapoint.projection!.x
-    if (datapoint.projection!.x > maxX) maxX = datapoint.projection!.x
+  Object.values(datapoints).map(function (datapoint) {
+    if (projections[datapoint.projection_id!].y < minY) minY = projections[datapoint.projection_id!].y
+    if (projections[datapoint.projection_id!].y > maxY) maxY = projections[datapoint.projection_id!].y
+    if (projections[datapoint.projection_id!].x < minX) minX = projections[datapoint.projection_id!].x
+    if (projections[datapoint.projection_id!].x > maxX) maxX = projections[datapoint.projection_id!].x
   })
 
   var centerX = (maxX + minX) / 2
@@ -54,25 +45,36 @@ function minMaxNormalization(value: number, min: number, max: number) {
   return (value - min) / (max - min)
 }
 
-const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
-  cursor,
-  insertedProjections,
-  datapoints,
-  showLoading,
-  toolSelected,
-  filters,
-  selectHandler,
-  deselectHandler,
-  pointsToSelect }
-) => {
+function selectCallbackOutsideReact(points: any) {
+  // @ts-ignore
+  window.selectHandler(points)
+}
+
+interface PlotterProps {
+  allFetched: boolean
+}
+
+const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
+  const [datapoints] = useAtom(globalDatapointAtom)
+  const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [projections] = useAtom(globalProjectionsAtom)
+  const [cursor] = useAtom(cursorAtom)
+  const [toolSelected] = useAtom(toolSelectedAtom)
+  const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+
   let [reglInitialized, setReglInitialized] = useState(false);
   let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
   let [points, setPoints] = useState<any>(undefined)
+  let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
+  let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
+
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
   let [colorByFilterString, setColorByFilterString] = useState('Inferences')
-  let [colorByOptions, setColorByOptions] = useState([])
+  let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
   const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
   const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
     onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
@@ -83,40 +85,107 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     }
   })
 
-  // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   useEffect(() => {
-    if (insertedProjections !== true) return
-    if (datapoints === undefined) return
-    if (boundsSet) return
-
-    let bounds = getBounds(datapoints)
-    setTarget([bounds.centerX, bounds.centerY])
-    setMaxSize(bounds.maxSize)
-    calculateColorsAndDrawPoints()
-
+    if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) return
+    if (!allFetched) return
+    if (config.scatterplot == undefined) return
     if (boundsSet == false) {
+      let bounds = getBounds(datapoints, projections)
       config.scatterplot.set({
-        cameraDistance: (bounds.maxSize * 1.4),
+        cameraDistance: (bounds.maxSize * 1.4) * 3,
         minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
-        maxCameraDistance: (bounds.maxSize * 1.4) * 3,
+        maxCameraDistance: (bounds.maxSize * 1.4) * 8,
         cameraTarget: [bounds.centerX, bounds.centerY],
       })
       setBoundsSet(true)
     }
+  }, [config])
 
-  }, [insertedProjections, datapoints])
+  // Callback functions that are fired by regl-scatterplot
+  // @ts-ignore
+  const selectHandler = ({ points: newSelectedPoints }) => {
+    const t3 = performance.now();
+    if (pointsToSelect.length > 0) return
+    var sdp: number[] = []
+    newSelectedPoints.map((pointId: any) => {
+      sdp.push(pointdatapointMap[pointId])
+    })
+    updateselectedDatapoints(sdp)
+    const t4 = performance.now();
+    // console.log(`selectHandler hook: ${(t4 - t3) / 1000} seconds.`);
+  }
+
+  // @ts-ignore
+  window.selectHandler = selectHandler; // eslint-disable-line @typescript-eslint/no-this-alias
+
+  const deselectHandler = () => {
+    updateselectedDatapoints([])
+    setpointsToSelect([])
+  };
+
+  // const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
+  // const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
+  // const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
+  // const filterArray: FilterArray[] = [
+  //   { filter: categoryFilter!, update: updatecategoryFilter },
+  //   { filter: tagFilter!, update: updatetagFilter },
+  //   { filter: datasetFilter!, update: updatedatasetFilter }
+  // ]
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
+  // 1.5s across 70k datapoints, running 2 times! every time a new batch of data is loaded in
   useEffect(() => {
-    if (insertedProjections !== true) return
-    if (datapoints === undefined) return
+    if (!allFetched) return
+    const t3 = performance.now();
+    if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) {
+      setPoints([])
+      return
+    }
+    let bounds = getBounds(datapoints, projections)
+    setTarget([bounds.centerX, bounds.centerY])
+    setMaxSize(bounds.maxSize)
     calculateColorsAndDrawPoints()
-  }, [datapoints])
+    setBoundsSet(true)
+    const t4 = performance.now();
+    // console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
+  }, [datapoints, contextObjectSwitcher])
 
   useEffect(() => {
     if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
-      config.scatterplot.select(pointsToSelect)
+      // right now we wipe selection when you switch modes
+      config.scatterplot.select([])
     }
+  }, [contextObjectSwitcher])
+
+  // whenever datapoints changes, we want to regenerate out points and send them down to plotter
+  // 1.5s across 70k datapoints, running 3 times! every time a new batch of data is loaded in
+  useEffect(() => {
+    if (!allFetched) return
+    const t3 = performance.now();
+    if (Object.values(datapoints).length == 0) return
+    if (Object.values(projections).length == 0) return
+    calculateColorsAndDrawPoints()
+    const t4 = performance.now();
+    // console.log(`datapoints, visibleDatapoints hook: ${(t4 - t3) / 1000} seconds.`);
+  }, [visibleDatapoints])
+
+  useEffect(() => {
+    const t3 = performance.now();
+    if (pointsToSelect.length === 0) return
+    if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
+
+      let selectionPoints: number[] = []
+      pointsToSelect.map(dpid => {
+        selectionPoints.push(datapointPointMap[dpid])
+      })
+
+      config.scatterplot.select(selectionPoints)
+      setpointsToSelect([])
+    }
+    const t4 = performance.now();
+    // console.log(`pointsToSelect hook: ${(t4 - t3) / 1000} seconds.`);
   }, [pointsToSelect])
 
   if (reglInitialized && (points !== null)) {
@@ -128,6 +197,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   }
 
   // whenever points change, redraw
+  // fast, 0.0001s fast
   useEffect(() => {
     if (reglInitialized && points !== null) {
       config.scatterplot.set({ pointColor: colorByOptions });
@@ -136,32 +206,47 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   }, [points])
 
   // whenever colorByFilterString change, redraw
-  useEffect(() => {
-    if (insertedProjections !== true) return
-    if (datapoints === undefined) return
-    calculateColorsAndDrawPoints()
-  }, [colorByFilterString])
+  // useEffect(() => {
+  //   if (insertedProjections !== true) return
+  //   if (datapoints === undefined) return
+  //   calculateColorsAndDrawPoints()
+  // }, [colorByFilterString])
 
+  // 95% of the time cost of the datapoints hookS is in this fn
   const calculateColorsAndDrawPoints = () => {
-    let colorByFilter = filters.find((a: any) => a.name == colorByFilterString)
+    const t3 = performance.now();
+    // let colorByFilter = filterArray.find((a: any) => a.filter.name == colorByFilterString)
 
-    let colorByOptionsSave
-    if (colorByFilter.type == 'discrete') colorByOptionsSave = colorByFilter.optionsSet.map((option: any) => option.color)
-    if (colorByFilter.type == 'continuous') colorByOptionsSave = colorByFilter.optionsSet.colors
-    setColorByOptions(colorByOptionsSave)
+    // let colorByOptionsSave
+    // if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
+    // if (colorByFilter?.filter.type == FilterType.Continuous) colorByOptionsSave = colorByFilter.filter.range!.colorScale
+    // // @ts-ignore
+    // setColorByOptions(colorByOptionsSave)
+    let datapointsClone = Object.assign({}, datapoints)
+    Object.values(datapointsClone).map(function (datapoint) {
+      datapoint.visible = false
+    })
+    visibleDatapoints.forEach(vdp => datapointsClone[vdp].visible = true)
+
+    let datapointPointMapObject: { [key: number]: number } = {}
+    let pointdatapointObject: { [key: number]: number } = {}
 
     points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
-    datapoints!.map(datapoint => {
-      let datapointColorByProp = colorByFilter.fetchFn(datapoint)[0]
-
-      let datapointColorIndex
-      if (colorByFilter.type == 'discrete') datapointColorIndex = colorByFilter.optionsSet.findIndex((option: any) => option.name == datapointColorByProp)
-      if (colorByFilter.type == 'continuous') datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter.optionsSet.min, colorByFilter.optionsSet.max) // normalize
-
-      const visible = datapoint.visible ? 1 : 0
-      return points.push([datapoint.projection?.x, datapoint.projection?.y, visible, datapointColorIndex])
+    Object.values(datapointsClone).map(function (datapoint) {
+      datapointPointMapObject[datapoint.id] = points.length //+ 1
+      pointdatapointObject[points.length] = datapoint.id
+      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
+      // let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)[0]
+      // let datapointColorIndex
+      // if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.name == datapointColorByProp)
+      // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
+      // return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
     })
-    setPoints(points)
+    setdatapointPointMap(datapointPointMapObject)
+    setpointdatapointMap(pointdatapointObject)
+    if (points.length > 1) setPoints(points)
+    const t4 = performance.now();
+    // console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
   }
 
   const resizeListener = () => {
@@ -182,7 +267,8 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
   }, [])
 
   function getRef(canvasRef: any) {
-    if (!canvasRef) return;
+    if (!canvasRef) return
+    if (!boundsSet) return
     if (!reglInitialized && (points !== null)) {
       scatterplot(points,
         colorByOptions,
@@ -190,7 +276,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
           pixelRatio: Math.min(1.5, window.devicePixelRatio),
           canvas: canvasRef,
           deselectHandler: deselectHandler,
-          selectHandler: selectHandler,
+          selectHandler: selectCallbackOutsideReact,
           target: target,
           distance: maxSize * 1.2
         }
@@ -208,20 +294,21 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
     setColorByFilterString(event.target.value)
   }
 
-  if (points === null) showLoading = true
+  let showLoading = false
+  if (Object.values(datapoints).length === 0) showLoading = true
 
-  let validFilters
-  if (filters !== undefined) {
-    const noFilterList = ["Tags"]
-    validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
-  }
+  // let validFilters
+  // if (filters !== undefined) {
+  //   const noFilterList = ["Tags"]
+  //   validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
+  // }
 
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
   return (
     <Box flex='1' ref={ref} cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
-      {(filters !== undefined) ?
+      {/* {(filters !== undefined) ?
         <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
           {validFilters.map((filterb: any) => {
             return (
@@ -229,7 +316,7 @@ const ProjectionPlotter: React.FC<ProjectionPlotterProps> = ({
             )
           })}
         </Select>
-        : null}
+        : null} */}
       {
         showLoading ?
           <Center height="100vh" bgColor={bgColor} >

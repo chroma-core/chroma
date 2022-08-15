@@ -56,6 +56,7 @@ class Dataset(Base):
     embedding_sets: list["EmbeddingSet"] = relationship(
         "EmbeddingSet", lazy="select", back_populates="dataset"
     )  # has_many embedding_sets
+    categories = Column(Text)
 
 
 class Resource(Base):
@@ -116,7 +117,7 @@ class Datapoint(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     # belongs to dataset, has one resource, has one label, has one inference, habtm tags, habtm slices
     dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
-    dataset: Optional[Dataset] = relationship("Dataset", lazy="joined", back_populates="datapoints")
+    dataset: Optional[Dataset] = relationship("Dataset", lazy="select", back_populates="datapoints")
     resource_id: Optional[int] = Column(Integer, ForeignKey(Resource.id), nullable=True)
     resource: Optional[Resource] = relationship(
         "Resource", lazy="select", back_populates="datapoints"
@@ -132,7 +133,7 @@ class Datapoint(Base):
     )
     metadata_ = Column("metadata", Text)
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
-    project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datapoints")
+    project: Optional[Project] = relationship("Project", lazy="select", back_populates="datapoints")
 
 
 class Tag(Base):
@@ -350,7 +351,7 @@ class Projection(Base):
 
 engine = create_async_engine(
     "sqlite+aiosqlite:///./chroma.db",
-    connect_args={"check_same_thread": False},  # echo=True,
+    connect_args={"check_same_thread": False}, #echo=True,
 )
 
 async_session = sessionmaker(

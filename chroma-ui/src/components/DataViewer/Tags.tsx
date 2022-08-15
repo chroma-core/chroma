@@ -1,26 +1,35 @@
-import React, { useState, useEffect } from 'react'
+// @ts-nocheck
+import { v4 as uuidv4 } from 'uuid';
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   useTheme,
   Textarea,
   Box,
   Text,
+  Button,
 } from '@chakra-ui/react'
 import TagButton from './TagButton'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
-import { TagItem } from './DataPanel'
+import { datapointsAtom, tagsAtom } from './atoms'
+import { useAtom } from 'jotai'
+import { useUpdateAtom } from 'jotai/utils'
+import { focusAtom } from "jotai/optics";
+// import { TagItem } from './DataPanel'
 
 interface TagsProps {
-  tags: TagItem[]
   datapointId: number
-  setServerData: (datapoints: any) => void
-  datapoints:any
 }
 
-interface IOptions {
-  options: []
+export function removeItem<T>(arr: Array<T>, value: T): Array<T> {
+  const index = arr.indexOf(value);
+  if (index > -1) {
+    arr.splice(index, 1);
+  }
+  return arr;
 }
 
-const Tags: React.FC<TagsProps> = ({ tags, datapointId, datapoints, setServerData }) => {
+const Tags: React.FC<TagsProps> = ({ datapointId }) => {
+  const [tags, setTags] = useAtom(tagsAtom)
   const theme = useTheme()
   const [isEditing, setIsEditing] = useState(false)
   const [originalTagString, setOriginalTagString] = useState('') // used to diff against the input
@@ -30,8 +39,11 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId, datapoints, setServerDat
   const [addTagResult, addTag] = useAppendTagByNameToDatapointsMutation()
   const [unTagResult, unTag] = useRemoveTagFromDatapointsMutation()
 
+  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
+  const datapoint = datapoints[datapointId]
+
   useEffect(() => {
-    var tagStrings = tags.map(tag => tag.tag.name)
+    var tagStrings = datapoint.tag_ids.map(tid => tags[tid].name)
     setTagsArray(tagStrings)
     const allTags = tagStrings.join(", ")
     setTagString(allTags)
@@ -65,16 +77,52 @@ const Tags: React.FC<TagsProps> = ({ tags, datapointId, datapoints, setServerDat
       unTag(variables)
     })
 
-    let tagsPush: any[] = []
-    keep.map(t => tagsPush.push({ "right_id": undefined, "tag": { "name": t.trim() } }))
-    add.map(t => tagsPush.push({ "right_id": undefined, "tag": { "name": t.trim() } }))
+    var newTags = Object.assign({}, tags)
+    var newDatapoints = Object.assign({}, datapoints)
+    var dp = newDatapoints[datapointId]
 
-    var datapointIndex = datapoints.findIndex((dp:any) => dp.id == datapointId)
-    datapoints[datapointIndex].tags = tagsPush 
+    // for every tag we want to add
+    // 1. see if the tag already exists, if so, add its id to this list, and also add it to the tags list?
+    // else create the tag, add it, and then add its id 
+    var tempUUid = uuidv4()
+    add.forEach(t => {
+      var exists = Object.values(newTags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
+      if (exists < 0) {
+        // add and get the index
+        tempUUid += 1
+        newTags[tempUUid] = { id: tempUUid, name: t.trim(), datapoint_ids: [dp.id] }
+        dp.tag_ids.push(tempUUid)
+      } else {
+        if (Object.values(newTags)[exists].datapoint_ids.indexOf(dp.id < 0)) { // cant add twice
+          // add to the tag
+          Object.values(newTags)[exists].datapoint_ids.push(dp.id)
+          // @ts-ignore
+          dp.tag_ids.push(Object.keys(newTags)[exists])
+        }
 
-    // optimistic update
-    setTagsArray(newTagsArray)
-    setServerData([...datapoints])
+      }
+    })
+
+    var markForDeletion: number[] = []
+    remove.map(t => {
+      if (t == '') return
+      var exists = Object.values(newTags).findIndex(existingTag => existingTag.name == t.trim()) // -1 means it doesnt exist yet, otherwise we need the index
+      var id = Object.values(newTags)[exists].id
+      dp.tag_ids.splice(dp.tag_ids.indexOf(id), 1)
+      if (exists > -1) {
+        removeItem(newTags[id].datapoint_ids, dp.id)
+        removeItem(dp.tag_ids, id)
+        if (newTags[id].datapoint_ids.length === 0) {
+          markForDeletion.push(id)
+        }
+      }
+    })
+    markForDeletion.map(deleteTagId => {
+      delete newTags[deleteTagId]
+    })
+
+    setTags({ ...newTags })
+    setDatapoints({ ...newDatapoints })
   }
 
   const onKeyPress = (e: any) => {
