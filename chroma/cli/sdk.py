@@ -40,32 +40,6 @@ def delete_project(id: str = typer.Argument(...)):
     chroma_sdk = chroma_manager.ChromaSDK()
     _print(chroma_sdk.delete_project(id=id))
 
-# model architecture cli
-@typer_app.command()
-def get_model_architecture(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_model_architecture(id=id))
-
-@typer_app.command()
-def get_model_architectures():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_model_architectures())
-
-@typer_app.command()
-def create_model_architecture(name: str = typer.Argument(...), project_id: int = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_model_architecture(name=name, project_id=project_id))
-
-@typer_app.command()
-def update_model_architecture(id: str = typer.Argument(...), name: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.update_model_architecture(id=id, name=name))
-
-@typer_app.command()
-def delete_model_architecture(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_model_architecture(id=id))
-
 # dataset cli
 @typer_app.command()
 def get_dataset(id: str = typer.Argument(...)):
@@ -91,32 +65,6 @@ def update_dataset(id: str = typer.Argument(...), name: str = typer.Argument(...
 def delete_dataset(id: str = typer.Argument(...)):
     chroma_sdk = chroma_manager.ChromaSDK()
     _print(chroma_sdk.delete_dataset(id=id))
-
-# slice cli
-@typer_app.command()
-def get_slice(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_slice(id=id))
-
-@typer_app.command()
-def get_slices():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_slices())
-
-@typer_app.command()
-def create_slice(name: str = typer.Argument(...), dataset_id: int = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_slice(name=name, dataset_id=dataset_id))
-
-@typer_app.command()
-def update_slice(id: str = typer.Argument(...), name: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.update_slice(id=id, name=name))
-
-@typer_app.command()
-def delete_slice(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_slice(id=id))
 
 # tag cli
 @typer_app.command()
@@ -181,73 +129,6 @@ def get_trained_models():
     chroma_sdk = chroma_manager.ChromaSDK()
     _print(chroma_sdk.get_trained_models())
 
-@typer_app.command()
-def create_trained_model(model_architecture_id: int = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_trained_model(model_architecture_id=model_architecture_id))
-
-# @typer_app.command()
-# def update_trained_model(id: str = typer.Argument(...)):
-#     chroma_sdk = chroma_manager.ChromaSDK()
-#     _print(chroma_sdk.update_trained_model(id=id))
-
-@typer_app.command()
-def delete_trained_model(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_trained_model(id=id))
-
-# layer set cli
-@typer_app.command()
-def get_layer_set(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_layer_set(id=id))
-
-@typer_app.command()
-def get_layer_sets():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_layer_sets())
-
-@typer_app.command()
-def create_layer_set(trained_model_id: int = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_layer_set(trained_model_id=trained_model_id))
-
-# @typer_app.command()
-# def update_layer_set(id: str = typer.Argument(...)):
-#     chroma_sdk = chroma_manager.ChromaSDK()
-#     _print(chroma_sdk.update_layer_set(id=id))
-
-@typer_app.command()
-def delete_layer_set(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_layer_set(id=id))
-
-# layer cli
-@typer_app.command()
-def get_layer(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_layer(id=id))
-
-@typer_app.command()
-def get_layers():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_layers())
-
-@typer_app.command()
-def create_layer(layer_set_id: int = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_layer(layer_set_id=layer_set_id))
-
-# @typer_app.command()
-# def update_layer(id: str = typer.Argument(...)):
-#     chroma_sdk = chroma_manager.ChromaSDK()
-#     _print(chroma_sdk.update_layer(id=id))
-
-@typer_app.command()
-def delete_layer(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_layer(id=id))
-
 # job cli
 @typer_app.command()
 def get_job(id: str = typer.Argument(...)):
@@ -273,32 +154,6 @@ def update_job(id: str = typer.Argument(...), name: str = typer.Argument(...)):
 def delete_job(id: str = typer.Argument(...)):
     chroma_sdk = chroma_manager.ChromaSDK()
     _print(chroma_sdk.delete_job(id=id))
-
-# projector cli
-@typer_app.command()
-def get_projector(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_projector(id=id))
-
-@typer_app.command()
-def get_projectors():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.get_projectors())
-
-@typer_app.command()
-def create_projector():
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.create_projector())
-
-@typer_app.command()
-def update_projector(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.update_projector(id=id))
-
-@typer_app.command()
-def delete_projector(id: str = typer.Argument(...)):
-    chroma_sdk = chroma_manager.ChromaSDK()
-    _print(chroma_sdk.delete_projector(id=id))
 
 # resource cli
 @typer_app.command()

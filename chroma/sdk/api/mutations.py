@@ -34,10 +34,10 @@ remove_tag_by_name_from_datapoints_mutation = gql(
 )
 
 
-run_projector_on_embedding_set_mutuation = gql(
+run_projector_on_embedding_sets_mutuation = gql(
     """
-    mutation runProjectorOnEmbeddingSet($embeddingSetId: Int!){
-        runProjectorOnEmbeddingSet(embeddingSetId: $embeddingSetId) 
+    mutation runProjectorOnEmbeddingSets($embeddingSetIds: [Int!]!){
+        runProjectorOnEmbeddingSets(embeddingSetIds: $embeddingSetIds) 
     }
     """
 )

@@ -9,33 +9,15 @@ from chroma.sdk.api.mutations import (
     create_project_mutation,
     update_project_mutation,
     delete_project_mutation,
-    create_model_architecture_mutation,
-    update_model_architecture_mutation,
-    delete_model_architecture_mutation,
     create_dataset_mutation,
     update_dataset_mutation,
     delete_dataset_mutation,
-    create_slice_mutation,
-    update_slice_mutation,
-    delete_slice_mutation,
     create_tag_mutation,
     update_tag_mutation,
     delete_tag_mutation,
-    create_trained_model_mutation,
-    update_trained_model_mutation,
-    delete_trained_model_mutation,
-    create_layer_set_mutation,
-    update_layer_set_mutation,
-    delete_layer_set_mutation,
-    create_layer_mutation,
-    update_layer_mutation,
-    delete_layer_mutation,
     create_job_mutation,
     update_job_mutation,
     delete_job_mutation,
-    create_projector_mutation,
-    update_projector_mutation,
-    delete_projector_mutation,
     create_resource_mutation,
     update_resource_mutation,
     delete_label_mutation,
@@ -53,7 +35,7 @@ from chroma.sdk.api.mutations import (
     create_embedding_set_mutation,
     create_datapoint_embedding_set_mutation,
     create_batch_datapoint_embedding_set_mutation,
-    run_projector_on_embedding_set_mutuation,
+    run_projector_on_embedding_sets_mutuation,
     append_tag_by_name_to_datapoints_mutation,
     remove_tag_by_name_from_datapoints_mutation,
     run_compute_class_distances_mutation,
@@ -61,14 +43,6 @@ from chroma.sdk.api.mutations import (
 from chroma.sdk.api.queries import (
     projects_query,
     project_query,
-    model_architecture_query,
-    model_architectures_query,
-    trained_model_query,
-    trained_models_query,
-    layer_set_query,
-    layer_sets_query,
-    layer_query,
-    layers_query,
     dataset_query,
     datasets_query,
     label_query,
@@ -79,15 +53,11 @@ from chroma.sdk.api.queries import (
     datapoints_query,
     inference_query,
     inferences_query,
-    slice_query,
-    slices_query,
     embedding_query,
     embeddings_query,
     embeddingsByPage_query,
     projection_query,
     projections_query,
-    projector_query,
-    projectors_query,
     job_query,
     jobs_query,
     tag_query,
@@ -105,9 +75,13 @@ class ChromaSDK:
     # One way to do this might be to pull in app/models but this creates a messy cross-dependency.
     # This also does not enough type checking and is (probably) not thread safe.
     class _DataBuffer:
-        def __init__(self, dataset_id: int, embedding_set_id: int) -> None:
+        def __init__(self, dataset_id: int, embedding_set_id: int, ctx_embedding_set_id:int) -> None:
             self._dataset_id = dataset_id
             self._embedding_set_id = embedding_set_id
+
+            self._ctx_embedding_set_id = ctx_embedding_set_id
+            # self._inference_object_embedding_set_id = inference_embedding_set_id
+
             self.reset()
 
         def reset(self):
@@ -116,6 +90,9 @@ class ChromaSDK:
             self._labels = None
             self._inferences = None
             self._embeddings = None
+
+            self._ctx_embeddings = None
+            self._object_embeddings = None
 
         def set_data(self, type: str, data: Any):
             # We should only ever try to set any field on the buffer once
@@ -140,33 +117,23 @@ class ChromaSDK:
                 print(f"{type} is not a valid data handle")
 
         def get_batch_data(self):
+            def return_the_right_thing(input):
+                if isinstance(input, list):
+                    return [json.dumps(emb) for emb in input]
+                else:
+                    return json.dumps(input)
+
             batch_data = [
                 {
                     "datasetId": self._dataset_id,
                     "embeddingSetId": self._embedding_set_id,
                     "labelData": json.dumps(self._labels[index]),
                     "inferenceData": json.dumps(self._inferences[index]),
-                    "embeddingData": [json.dumps(emb) for emb in self._embeddings[index]],
-                    # "labelData": json.dumps(
-                    #     {
-                    #         "annotations": [
-                    #             {
-                    #                 "category_id": int(self._labels[index]),
-                    #             }
-                    #         ]
-                    #     }
-                    # ),
-                    # "inferenceData": json.dumps(
-                    #     {
-                    #         "annotations": [
-                    #             {
-                    #                 "category_id": int(self._inferences[index]),
-                    #             }
-                    #         ]
-                    #     }
-                    # ),
-                    # "embeddingData": json.dumps(self._embeddings[index]),
+                    "embeddingData": return_the_right_thing(self._embeddings[index]), 
                     "resourceUri": self._resource_uris[index],
+
+                    "ctxEmbeddingSetId": self._ctx_embedding_set_id,
+                    "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings[index]), 
                 }
                 for index in range(self._count)
             ]
@@ -200,9 +167,11 @@ class ChromaSDK:
             embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
 
         # TODO: create model arch, trained model, layer sets, layer here...
+        ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
+        ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
 
         self._data_buffer = ChromaSDK._DataBuffer(
-            dataset_id=dataset_id, embedding_set_id=embedding_set_id
+            dataset_id=dataset_id, embedding_set_id=embedding_set_id, ctx_embedding_set_id=ctx_embedding_set_id
         )
 
     def __enter__(self):
@@ -212,7 +181,8 @@ class ChromaSDK:
         # TODO(anton) Make chroma context exit a programmatic set of post-run tasks
         if hasattr(self, "_forward_hook"):
             self._forward_hook.remove()
-        self.run_projector_on_embedding_set_mutation(self._data_buffer._embedding_set_id)
+        self.run_projector_on_embedding_sets_mutation([self._data_buffer._embedding_set_id])
+        self.run_projector_on_embedding_sets_mutation([self._data_buffer._ctx_embedding_set_id])
 
         # TODO(anton) We just automatically treat the first (by id) dataset for a project as the 'training' dataset.
         # This is also really ugly, we should be able to get the right training set by knowing which
@@ -237,9 +207,12 @@ class ChromaSDK:
     def set_embeddings(self, embeddings):
         self._data_buffer.set_data("_embeddings", embeddings)
 
+    def set_ctx_embeddings(self, embeddings):
+        self._data_buffer.set_data("_ctx_embeddings", embeddings)
+
     def attach_forward_hook(self, model):
         self._forward_hook = model.register_forward_hook(
-            lambda model, input, output: self.set_embeddings(output.data.detach().tolist())
+            lambda model, input, output: self.set_embeddings([{"target": None, "data": emb} for emb in output.data.detach().tolist()])
         )
 
     def set_inferences(self, inferences):
@@ -301,10 +274,10 @@ class ChromaSDK:
         )
         return result
 
-    def run_projector_on_embedding_set_mutation(self, embeddingSetId: int):
-        params = {"embeddingSetId": embeddingSetId}
+    def run_projector_on_embedding_sets_mutation(self, embeddingSetIds: list[int]):
+        params = {"embeddingSetIds": embeddingSetIds}
         result = self._client.execute(
-            run_projector_on_embedding_set_mutuation, variable_values=params
+            run_projector_on_embedding_sets_mutuation, variable_values=params
         )
         return result
 
@@ -349,6 +322,7 @@ class ChromaSDK:
 
     def create_batch_datapoint_embedding_set(self, new_datapoint_embedding_sets):
         params = {"batchData": {"batchData": new_datapoint_embedding_sets}}
+        
         result = self._client.execute(
             create_batch_datapoint_embedding_set_mutation, variable_values=params
         )
@@ -384,31 +358,6 @@ class ChromaSDK:
         result = self._client.execute(delete_project_mutation, variable_values=params)
         return result
 
-    # model architecture
-    def get_model_architectures(self):
-        result = self._client.execute(model_architectures_query)
-        return result
-
-    def get_model_architecture(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(model_architecture_query, variable_values=params)
-        return result
-
-    def create_model_architecture(self, name: str, project_id: int):
-        params = {"modelArchitecture": {"name": name, "projectId": project_id}}
-        result = self._client.execute(create_model_architecture_mutation, variable_values=params)
-        return result
-
-    def update_model_architecture(self, id: int, name: str):
-        params = {"modelArchitecture": {"id": id, "name": name}}
-        result = self._client.execute(update_model_architecture_mutation, variable_values=params)
-        return result
-
-    def delete_model_architecture(self, id: int):
-        params = {"modelArchitecture": {"id": id}}
-        result = self._client.execute(delete_model_architecture_mutation, variable_values=params)
-        return result
-
     # dataset
     def get_datasets(self):
         result = self._client.execute(datasets_query)
@@ -437,31 +386,6 @@ class ChromaSDK:
     def delete_dataset(self, id: int):
         params = {"dataset": {"id": id}}
         result = self._client.execute(delete_dataset_mutation, variable_values=params)
-        return result
-
-    # slice
-    def get_slices(self):
-        result = self._client.execute(slices_query)
-        return result
-
-    def get_slice(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(slice_query, variable_values=params)
-        return result
-
-    def create_slice(self, name: str, dataset_id: int):
-        params = {"slice": {"name": name, "datasetId": dataset_id}}
-        result = self._client.execute(create_slice_mutation, variable_values=params)
-        return result
-
-    def update_slice(self, id: int, name: str):
-        params = {"slice": {"id": id, "name": name}}
-        result = self._client.execute(update_slice_mutation, variable_values=params)
-        return result
-
-    def delete_slice(self, id: int):
-        params = {"slice": {"id": id}}
-        result = self._client.execute(delete_slice_mutation, variable_values=params)
         return result
 
     # tag
@@ -515,84 +439,7 @@ class ChromaSDK:
     #     result = self._client.execute(delete_resource_mutation, variable_values=params)
     #     return result
 
-    # trained model
-    def get_trained_models(self):
-        result = self._client.execute(trained_models_query)
-        return result
-
-    def get_trained_model(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(trained_model_query, variable_values=params)
-        return result
-
-    def create_trained_model(self, model_architecture_id: int):
-        params = {"trainedModel": {"modelArchitectureId": model_architecture_id}}
-        result = self._client.execute(create_trained_model_mutation, variable_values=params)
-        return result
-
-    # we dont have any fields on this object to update yet
-    # def update_trained_model(self, id: int, name: str):
-    #     params = {"trained_model": {"id": id, "name": name}}
-    #     result = self._client.execute(update_trained_model_mutation, variable_values=params)
-    #     return result
-
-    def delete_trained_model(self, id: int):
-        params = {"trainedModel": {"id": id}}
-        result = self._client.execute(delete_trained_model_mutation, variable_values=params)
-        return result
-
-    # layer set
-    def get_layer_sets(self):
-        result = self._client.execute(layer_sets_query)
-        return result
-
-    def get_layer_set(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(layer_set_query, variable_values=params)
-        return result
-
-    def create_layer_set(self, trained_model_id: int):
-        params = {"layerSet": {"trainedModelId": trained_model_id}}
-        result = self._client.execute(create_layer_set_mutation, variable_values=params)
-        return result
-
-    # we dont have any fields on this object to update yet
-    # def update_layer_set(self, id: int, name: str):
-    #     params = {"layer_set": {"id": id, "name": name}}
-    #     result = self._client.execute(update_layer_set_mutation, variable_values=params)
-    #     return result
-
-    def delete_layer_set(self, id: int):
-        params = {"layerSet": {"id": id}}
-        result = self._client.execute(delete_layer_set_mutation, variable_values=params)
-        return result
-
-    # layer
-    def get_layers(self):
-        result = self._client.execute(layers_query)
-        return result
-
-    def get_layer(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(layer_query, variable_values=params)
-        return result
-
-    def create_layer(self, layer_set_id: int):
-        params = {"layer": {"layerSetId": layer_set_id}}
-        result = self._client.execute(create_layer_mutation, variable_values=params)
-        return result
-
-    # we dont have any fields on this object to update yet
-    # def update_layer(self, id: int, name: str):
-    #     params = {"layer": {"id": id, "name": name}}
-    #     result = self._client.execute(update_layer_mutation, variable_values=params)
-    #     return result
-
-    def delete_layer(self, id: int):
-        params = {"layer": {"id": id}}
-        result = self._client.execute(delete_layer_mutation, variable_values=params)
-        return result
-
+    
     # job
     def get_jobs(self):
         result = self._client.execute(jobs_query)
@@ -616,32 +463,6 @@ class ChromaSDK:
     def delete_job(self, id: int):
         params = {"job": {"id": id}}
         result = self._client.execute(delete_job_mutation, variable_values=params)
-        return result
-
-    # projector
-    def get_projectors(self):
-        result = self._client.execute(projectors_query)
-        return result
-
-    def get_projector(self, id: int):
-        params = {"id": id}
-        result = self._client.execute(projector_query, variable_values=params)
-        return result
-
-    def create_projector(self):
-        params = {"projector": {}}
-        result = self._client.execute(create_projector_mutation, variable_values=params)
-        return result
-
-    # we dont have any fields on this object to update yet
-    # def update_projector(self, id: int, name: str):
-    #     params = {"projector": {"id": id, "name": name}}
-    #     result = self._client.execute(update_projector_mutation, variable_values=params)
-    #     return result
-
-    def delete_projector(self, id: int):
-        params = {"projector": {"id": id}}
-        result = self._client.execute(delete_projector_mutation, variable_values=params)
         return result
 
     # Resource
