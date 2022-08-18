@@ -29,7 +29,17 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
     with torch.no_grad():
         for data, target, resource_uri in data_loader:
 
-            chroma_storage.set_labels(labels=target.data.detach().tolist())
+            label_json_list = []
+            for label in target.data.detach().tolist(): 
+                label_json_list.append( {
+                            "annotations": [
+                                {
+                                    "category_id": int(label),
+                                }
+                            ]
+                        })
+
+            chroma_storage.set_labels(labels=label_json_list)
             chroma_storage.set_resource_uris(uris=list(resource_uri))
 
             data, target = data.to(device), target.to(device)
@@ -38,7 +48,17 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
-            chroma_storage.set_inferences(pred.data.detach().flatten().tolist())
+            inference_json_list = []
+            for label in pred.data.detach().flatten().tolist():
+                inference_json_list.append( {
+                            "annotations": [
+                                {
+                                    "category_id": int(label),
+                                }
+                            ]
+                        })
+
+            chroma_storage.set_inferences(inference_json_list)
             chroma_storage.store_batch_embeddings()
 
     test_loss /= len(data_loader.dataset)
@@ -101,19 +121,19 @@ def main():
     ])
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST-All", dataset_name="Train", categories=mnist_category_data) as chroma_storage:
+    # with chroma_manager.ChromaSDK(project_name="MNIST-All-7", dataset_name="Train-7", categories=mnist_category_data) as chroma_storage:
 
-        # Use the MNIST training set
-        train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
-        data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
+    #     # Use the MNIST training set
+    #     train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
+    #     data_loader = torch.utils.data.DataLoader(train_dataset, **inference_kwargs)
 
-        # Attach the hook
-        chroma_storage.attach_forward_hook(model.fc2)
+    #     # Attach the hook
+    #     chroma_storage.attach_forward_hook(model.fc2)
 
-        infer(model, device, data_loader, chroma_storage)
+    #     infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST-All", dataset_name="Test", categories=mnist_category_data) as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST-All-1", dataset_name="Test-1", categories=mnist_category_data) as chroma_storage:
 
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)
