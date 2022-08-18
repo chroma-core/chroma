@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { categoryFilterAtom, contextObjectSwitcherAtom, cursorAtom, datapointsAtom, datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
+import { categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, datapointsAtom, datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
-import { Projection, Datapoint, FilterArray, FilterType } from './types';
+import { Projection, Datapoint, FilterArray, FilterType, Filter } from './types';
 import { totalmem } from 'os';
 
 interface ConfigProps {
@@ -71,10 +71,41 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
 
+  enum ColorByOptions {
+    None,
+    Categories,
+  }
+  let [colorByFilterEnum, setColorByFilterEnum] = useState(ColorByOptions.None)
+  let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
+
+  let noneFilter: Filter = {
+    name: 'None',
+    type: FilterType.Discrete,
+    //@ts-ignore
+    options: [{ color: "#111", id: 0, visible: true, evalDatapoint: () => { } }],
+    linkedAtom: [],
+    fetchFn: (datapoint) => {
+      return datapoint.annotations[0].category_id
+    }
+  }
+  const [categoryFilter] = useAtom(categoryFilterAtom)
+  const filterArray: any[] = []
+  if (contextObjectSwitcher == DataType.Object) {
+    filterArray.push({ name: ColorByOptions.None, filter: noneFilter },
+      { name: ColorByOptions.Categories, filter: categoryFilter! })
+  }
+
+  // whenever colorByFilterString change, redraw
+  useEffect(() => {
+    if (!allFetched) return
+    calculateColorsAndDrawPoints()
+  }, [colorByFilterEnum])
+
+
+
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
-  let [colorByFilterString, setColorByFilterString] = useState('Inferences')
-  let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
+
   const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
   const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
     onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
@@ -100,7 +131,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       })
       setBoundsSet(true)
     }
-  }, [config])
+  }, [config, boundsSet])
 
   // Callback functions that are fired by regl-scatterplot
   // @ts-ignore
@@ -123,15 +154,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     updateselectedDatapoints([])
     setpointsToSelect([])
   };
-
-  // const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
-  // const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
-  // const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
-  // const filterArray: FilterArray[] = [
-  //   { filter: categoryFilter!, update: updatecategoryFilter },
-  //   { filter: tagFilter!, update: updatetagFilter },
-  //   { filter: datasetFilter!, update: updatedatasetFilter }
-  // ]
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 2 times! every time a new batch of data is loaded in
@@ -156,6 +178,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
       // right now we wipe selection when you switch modes
       config.scatterplot.select([])
+      setBoundsSet(false)
     }
   }, [contextObjectSwitcher])
 
@@ -205,23 +228,16 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     }
   }, [points])
 
-  // whenever colorByFilterString change, redraw
-  // useEffect(() => {
-  //   if (insertedProjections !== true) return
-  //   if (datapoints === undefined) return
-  //   calculateColorsAndDrawPoints()
-  // }, [colorByFilterString])
-
   // 95% of the time cost of the datapoints hookS is in this fn
   const calculateColorsAndDrawPoints = () => {
     const t3 = performance.now();
-    // let colorByFilter = filterArray.find((a: any) => a.filter.name == colorByFilterString)
+    let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptions[colorByFilterEnum])
 
-    // let colorByOptionsSave
-    // if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
-    // if (colorByFilter?.filter.type == FilterType.Continuous) colorByOptionsSave = colorByFilter.filter.range!.colorScale
-    // // @ts-ignore
-    // setColorByOptions(colorByOptionsSave)
+    let colorByOptionsSave
+    if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
+    if (colorByFilter?.filter.type == FilterType.Continuous) colorByOptionsSave = colorByFilter.filter.range!.colorScale
+    setColorByOptions(colorByOptionsSave) // sets the array of colors that the plotter should use
+
     let datapointsClone = Object.assign({}, datapoints)
     Object.values(datapointsClone).map(function (datapoint) {
       datapoint.visible = false
@@ -235,12 +251,18 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     Object.values(datapointsClone).map(function (datapoint) {
       datapointPointMapObject[datapoint.id] = points.length //+ 1
       pointdatapointObject[points.length] = datapoint.id
-      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
-      // let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)[0]
-      // let datapointColorIndex
-      // if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.name == datapointColorByProp)
+
+      // get the category id/name, whatever is relevant from the datapoint
+      let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)
+
+      // then lookup in that filter what the color should be, and its position in the list
+      let datapointColorIndex = 0
+      if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.id == datapointColorByProp)
       // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
-      // return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, 0, datapoint.id])
+      // set that position in place of the current 0 value
+      // console.log('datapoint', datapoint, 'datapointColorByProp', datapointColorByProp, colorByFilter?.filter.options, 'datapointColorIndex', datapointColorIndex)
+
+      return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, datapointColorIndex, datapoint.id])
     })
     setdatapointPointMap(datapointPointMapObject)
     setpointdatapointMap(pointdatapointObject)
@@ -291,32 +313,26 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   }
 
   const newColorBy = (event: any) => {
-    setColorByFilterString(event.target.value)
+    setColorByFilterEnum(event.target.value)
   }
 
   let showLoading = false
   if (Object.values(datapoints).length === 0) showLoading = true
-
-  // let validFilters
-  // if (filters !== undefined) {
-  //   const noFilterList = ["Tags"]
-  //   validFilters = filters.filter((f: any) => !noFilterList.includes(f.name))
-  // }
 
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
   return (
     <Box flex='1' ref={ref} cursor={cursor} className={cursor} id="regl-canvas-container" minWidth={0} marginTop="48px" width="800px">
-      {/* {(filters !== undefined) ?
-        <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterString} onChange={newColorBy}>
-          {validFilters.map((filterb: any) => {
+      {(filterArray.length > 0) ?
+        <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterEnum} onChange={newColorBy}>
+          {filterArray.map((key) => {
             return (
-              <option key={filterb.name} value={filterb.name} >{filterb.name}</option>
+              <option key={ColorByOptions[key.name]} value={ColorByOptions[key.name]} >{ColorByOptions[key.name]}</option>
             )
           })}
         </Select>
-        : null} */}
+        : null}
       {
         showLoading ?
           <Center height="100vh" bgColor={bgColor} >

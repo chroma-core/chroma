@@ -4,6 +4,7 @@ query getProjectionSets($filter: FilterProjectionSets!, $projectId: ID!) {
     id
     createdAt
     updatedAt
+    setType
   }
   project(id: $projectId) {
     id
@@ -25,7 +26,7 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
   })
     .then(res => res.json())
     .then(res => {
-      cb(res.projections)
+      cb(res)
     })
     .catch((error) => {
       cb({ error: true, message: error })

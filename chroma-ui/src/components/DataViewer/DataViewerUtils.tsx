@@ -19,6 +19,17 @@ export const getMostRecentCreatedAt = function (data: any) {
   });
 }
 
+export const getMostRecentCreatedAtObjectContext = function (data: any) {
+  return [
+    data.filter(d => d.setType == 'context').reduce((p1: any, p2: any) => {
+      return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
+    }),
+    data.filter(d => d.setType == 'object').reduce((p1: any, p2: any) => {
+      return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
+    }),
+  ]
+}
+
 // converts string JSON coming back from a REST endpoint to JSON
 export const jsonifyDatapoints = function (datapoints: any) {
   datapoints.map((datapoint: any) => {
@@ -101,10 +112,10 @@ let FILTERS = [
     }
   },
   {
-  name: 'Quality',
+    name: 'Quality',
     type: 'continuous',
     fetchFn: function (datapoint) {
-      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100]
+      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score)) * 100]
     },
     removeDupes(filterOptions) {
       return filterOptions

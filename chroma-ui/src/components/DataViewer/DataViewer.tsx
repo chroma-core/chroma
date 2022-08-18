@@ -5,7 +5,7 @@ import { useQuery } from 'urql';
 import ExplorerContainer from '../Containers/ExplorerContainer';
 import DataPanel from './DataPanel';
 import { getDatapointsForProject, GetProjectAndProjectionSets, getProjectionsForProjectionSet, getTotalDatapointsToFetch } from './DataViewerApi';
-import { getMostRecentCreatedAt } from './DataViewerUtils';
+import { getMostRecentCreatedAt, getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom, globalDatapointAtom, labelLabelsAtom, labelTagsAtom, labelResourcesAtom, labelInferenceFilterAtom, labelDatasetsAtom, labelCategoriesAtom, labelProjectionsAtom, labelMetadataFiltersAtom, labelDatapointsAtom } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
@@ -189,36 +189,61 @@ const DataViewer = () => {
 
     setProcessingProjections(true)
 
+    // console.log('result.data.projectionSets', result, getMostRecentCreatedAtObjectContext(result.data.projectionSets))
     const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
-    getProjectionsForProjectionSet(latestProjectionSetId, (projectionsResponse: any) => {
-      projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: datapoints })
-      projectionsWorker.onmessage = (e: MessageEvent) => {
-        updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
-        updateprojections(e.data.projections)
-        setProcessingProjections(false)
-      }
 
-    });
+    const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
+
+    for (let index = 0; index < projectionsSetsToFetch.length; index++) {
+      getProjectionsForProjectionSet(projectionsSetsToFetch[index].id, (projectionsResponse: any) => {
+        let contextObjectDatapoints
+        if (projectionsResponse.setType == 'object') {
+          contextObjectDatapoints = labeldatapoints
+        } else {
+          contextObjectDatapoints = datapoints
+        }
+        projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: contextObjectDatapoints })
+        projectionsWorker.onmessage = (e: MessageEvent) => {
+          if (e.data.setType == 'object') {
+            updatelabelprojections(e.data.projections)
+          } else {
+            updateprojections(e.data.projections)
+          }
+          if (e.data.setType == 'object') {
+            updatelabeldatapoints({ ...{ ...labeldatapoints }, ...e.data.datapoints })
+          } else {
+            updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
+          }
+
+          setProcessingProjections(false)
+        }
+      });
+
+    }
+
+
   }, [datapointsFetched]);
 
   const hydrateAtoms = (normalizedData: any, len: number, prevPage: number) => {
 
     // @ts-ignore
-    normalizedData.labelDatapoints = resetDatapointIds(Object.values(labeldatapoints).length, Object.values(labelresources).length, normalizedData.labelDatapoints)
-    normalizedData.labelResources = resetIds(Object.values(labelresources).length, normalizedData.labelResources)
-    normalizedData.labelLabels = resetIds(Object.values(labellabels).length, normalizedData.labelLabels)
-    normalizedData.labelCategories = bumpIds(Object.values(labeldatapoints).length, normalizedData.labelCategories)
+    normalizedData.inferenceDatapoints = resetDatapointIds(Object.values(labeldatapoints).length, Object.values(labelresources).length, normalizedData.inferenceDatapoints)
+    normalizedData.inferenceResources = resetIds(Object.values(labelresources).length, normalizedData.inferenceResources)
+    normalizedData.inferenceLabels = resetIds(Object.values(labellabels).length, normalizedData.inferenceLabels)
+    normalizedData.inferenceCategories = bumpIds(Object.values(labeldatapoints).length, normalizedData.inferenceCategories)
 
     // deep merge datapoint id lists for tags and categories and datasets
     Object.keys(normalizedData.categories).map((item: any, index: number) => {
       let category = categories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
-      normalizedData.categories[item].datapoint_ids = [...normalizedData.categories[item].datapoint_ids, ...existing]
+      let newVals = (normalizedData.categories[item].datapoint_ids !== undefined) ? normalizedData.categories[item].datapoint_ids : []
+      normalizedData.categories[item].datapoint_ids = [...newVals, ...existing]
     })
-    Object.keys(normalizedData.labelCategories).map((item: any, index: number) => {
+    Object.keys(normalizedData.inferenceCategories).map((item: any, index: number) => {
       let category = labelcategories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
-      normalizedData.labelCategories[item].datapoint_ids = [...normalizedData.labelCategories[item].datapoint_ids, ...existing]
+      let newVals = (normalizedData.inferenceCategories[item].datapoint_ids !== undefined) ? normalizedData.inferenceCategories[item].datapoint_ids : []
+      normalizedData.inferenceCategories[item].datapoint_ids = [...newVals, ...existing]
     })
     Object.keys(normalizedData.tags).map((key: any, index: number) => {
       let item = tags[key]
@@ -290,13 +315,13 @@ const DataViewer = () => {
     updatecategories({ ...{ ...categories }, ...normalizedData.categories })
 
     updatelabelMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.labelMetadataFilters })
-    updatelabeldatapoints({ ...{ ...labeldatapoints }, ...normalizedData.labelDatapoints })
-    updatelabeldatasets({ ...{ ...labeldatasets }, ...normalizedData.labelDatasets })
+    updatelabeldatapoints({ ...{ ...labeldatapoints }, ...normalizedData.inferenceDatapoints })
+    updatelabeldatasets({ ...{ ...labeldatasets }, ...normalizedData.inferenceDatasets })
     updatelabellabels({ ...{ ...labellabels }, ...normalizedData.labelLabels })
-    updatelabelresources({ ...{ ...labelresources }, ...normalizedData.labelResources })
+    updatelabelresources({ ...{ ...labelresources }, ...normalizedData.inferenceResources })
     updatelabelinferences({ ...{ ...labelinferences }, ...normalizedData.labelInferences })
     updatelabeltags({ ...{ ...labeltags }, ...normalizedData.labelTags })
-    updatelabelcategories({ ...{ ...labelcategories }, ...normalizedData.labelCategories })
+    updatelabelcategories({ ...{ ...labelcategories }, ...normalizedData.inferenceCategories })
 
     setProcessingDatapoints(false)
     setDatapointsFetched(datapointsFetched + len)

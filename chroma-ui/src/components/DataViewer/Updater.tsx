@@ -111,7 +111,10 @@ const Updater: React.FC = () => {
       name: 'Category',
       type: FilterType.Discrete,
       options: options,
-      linkedAtom: categories
+      linkedAtom: categories,
+      fetchFn: (datapoint) => {
+        return datapoint.annotations[0].category_id
+      }
     }
     updatecategoryFilter(newCategoryFilter)
   }, [categories])

@@ -114,6 +114,7 @@ export interface Filter {
   options?: FilterOption[]
   range?: FilterRange
   linkedAtom?: any
+  fetchFn?: (datapoint: Datapoint) => {}
 }
 
 // dataset, category (inference, and labeled), tag, <-- these are actual collections that have ids associated...... 

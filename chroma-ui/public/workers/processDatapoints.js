@@ -6,12 +6,16 @@ self.onmessage = (message) => {
     let categoriesObject = {} // { [key: number]: {} } =
     let datapointsObject = {} // { [key: number]: Datapoint } =
     let datasetsObject = {} // { [key: number]: {} } =
-    let labeldatasetsObject = {} // { [key: number]: {} } =
     let labelsObject = {} // { [key: number]: {} } =
     let resourcesObject = {} // { [key: number]: {} } =
     let tagsObject = {} // { [key: number]: {} } =
     let inferencesObject = {} // { [key: number]: {} } =
+
+    let labeldatasetsObject = {} // { [key: number]: {} } =
     let labelCategoriesObject = {}
+
+    let inferencedatasetsObject = {} // { [key: number]: {} } =
+    let inferenceCategoriesObject = {}
 
     // destructure data out of json response
     const { datapoints, labels, resources, inferences, datasets, tags } = dataRead;
@@ -26,6 +30,10 @@ self.onmessage = (message) => {
             ...dataset,
             datapoint_ids: []
         }
+        inferencedatasetsObject[dataset.id] = {
+            ...dataset,
+            datapoint_ids: []
+        }
 
         let categoriesData = JSON.parse(dataset.categories)
 
@@ -33,6 +41,7 @@ self.onmessage = (message) => {
             if (categoriesObject[category.id] === undefined) {
                 categoriesObject[category.id] = { ...category }
                 labelCategoriesObject[category.id] = { ...category }
+                inferenceCategoriesObject[category.id] = { ...category }
             }
         })
     })
@@ -137,7 +146,7 @@ self.onmessage = (message) => {
         if (inferenceData.annotations) datapointsObject[inference.datapoint_id].inferences = inferenceData.annotations
     })
 
-    // create the object version of things.......... 
+    // create the object version of things for labels
     // has to come after datapoints object and its annotations have been filled
     var i = 0
     var j = 0
@@ -189,8 +198,64 @@ self.onmessage = (message) => {
         labeldatasetsObject = {}
     }
 
+    // create the object version of things for inferences
+    // has to come after datapoints object and its annotations have been filled
+    var i = 0
+    var j = 0
+    let inferenceDatapointsObject = {}
+    let inferenceResourcesObject = {}
+    Object.values(datapointsObject).map(dp => {
+        dp.inferences.map(ann => {
+            let hasBoundingBoxes = (ann.bbox !== undefined)
+            if (hasBoundingBoxes) {
+                inferenceResourcesObject[j] = {
+                    id: j,
+                    uri: resourcesObject[dp.id].uri
+                }
+                inferenceDatapointsObject[i] = {
+                    annotations: [ann],
+                    dataset_id: dp.dataset_id,
+                    id: i,
+                    inferences: [],
+                    metadata: {},
+                    tag_ids: [],
+                    resource_id: j,
+                    inference: true
+                }
+                inferencedatasetsObject[dp.dataset_id].datapoint_ids.push(i)
+                i++
+                j++
+            }
+
+        })
+    })
+
+    let annsInferenceIdsToAdd = {}
+    Object.values(inferenceDatapointsObject).map(inferenceDp => {
+        let categoryId = inferenceDp.annotations[0].category_id
+        if (annsInferenceIdsToAdd[categoryId] === undefined) annsInferenceIdsToAdd[categoryId] = new Set()
+        annsInferenceIdsToAdd[categoryId].add(inferenceDp.id)
+    })
+
+    Object.keys(annsInferenceIdsToAdd).map((c) => {
+        // @ts-ignore
+        const dps = (annsInferenceIdsToAdd[c]).keys()
+        // @ts-ignore
+        inferenceCategoriesObject[c].datapoint_ids = [...dps]
+    })
+
+    // if we dont have any bounding boxes... wipe out the other data structures
+    if (Object.values(inferenceDatapointsObject).length === 0) {
+        inferenceCategoriesObject = {}
+        inferenceResourcesObject = {}
+        inferencedatasetsObject = {}
+    }
+
+
+
     // let labelCategoriesObject = categoriesObject
     let labelLabelsObject = {}
+    let inferenceLabelsObject = {}
     let labelTagsObject = {}
     let labelInferencesObject = {}
     let labelMetadataFiltersObject = {}
@@ -215,5 +280,15 @@ self.onmessage = (message) => {
         labelTags: labelTagsObject,
         labelInferences: labelInferencesObject,
         labelMetadataFilters: labelMetadataFiltersObject,
+        // inferences stuff
+        inferenceCategories: inferenceCategoriesObject,
+        // labelLabels: labelLabelsObject,
+        inferenceDatapoints: inferenceDatapointsObject,
+        inferenceDatasets: inferencedatasetsObject,
+        inferenceResources: inferenceResourcesObject,
+        inferenceLabels: inferenceLabelsObject,
+        // labelTags: labelTagsObject,
+        // labelInferences: labelInferencesObject,
+        // labelMetadataFilters: labelMetadataFiltersObject,
     })
 }
