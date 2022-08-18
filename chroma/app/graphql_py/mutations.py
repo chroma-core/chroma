@@ -199,8 +199,8 @@ class CreateDatapointEmbeddingSetInput:
     embedding_data: List[str]
     embedding_set_id: int
 
-    ctx_embedding_data: List[str]
-    ctx_embedding_set_id: int
+    ctx_embedding_data: Optional[List[str]] = None
+    ctx_embedding_set_id: Optional[int] = None
 
     metadata: Optional[str] = ""
 
@@ -453,11 +453,6 @@ class Mutation:
             )
             dataset = (await s.execute(sql)).scalars().first()
 
-            # sql = select(models.EmbeddingSet).where(
-            #     models.EmbeddingSet.id == batch_data.batch_data[0].embedding_set_id
-            # )
-            # embedding_set = (await s.execute(sql)).scalars().first()
-
             for datapoint_embedding_set in batch_data.batch_data:
                 label = models.Label(data=datapoint_embedding_set.label_data)
                 inference = models.Inference(data=datapoint_embedding_set.inference_data)
@@ -470,11 +465,13 @@ class Mutation:
                 ]
                 objs_to_add.extend(embeddings)
 
-                ctx_embeddings = [
-                    models.Embedding(data=ctx_embedding_data, embedding_set_id=datapoint_embedding_set.ctx_embedding_set_id)
-                    for ctx_embedding_data in datapoint_embedding_set.ctx_embedding_data
-                ]
-                objs_to_add.extend(ctx_embeddings)
+                ctx_embeddings = []
+                if (datapoint_embedding_set.ctx_embedding_data != None):
+                    ctx_embeddings = [
+                        models.Embedding(data=ctx_embedding_data, embedding_set_id=datapoint_embedding_set.ctx_embedding_set_id)
+                        for ctx_embedding_data in datapoint_embedding_set.ctx_embedding_data
+                    ]
+                    objs_to_add.extend(ctx_embeddings)
 
                 datapoint = models.Datapoint(
                     project_id=dataset.project_id,

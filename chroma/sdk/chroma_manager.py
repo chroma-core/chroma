@@ -117,11 +117,13 @@ class ChromaSDK:
                 print(f"{type} is not a valid data handle")
 
         def get_batch_data(self):
-            def return_the_right_thing(input):
-                if isinstance(input, list):
-                    return [json.dumps(emb) for emb in input]
+            def return_the_right_thing(input, index):
+                if (input == None): 
+                    return None
+                if isinstance(input[index], list):
+                    return [json.dumps(emb) for emb in input[index]]
                 else:
-                    return json.dumps(input)
+                    return json.dumps(input[index])
 
             batch_data = [
                 {
@@ -129,11 +131,11 @@ class ChromaSDK:
                     "embeddingSetId": self._embedding_set_id,
                     "labelData": json.dumps(self._labels[index]),
                     "inferenceData": json.dumps(self._inferences[index]),
-                    "embeddingData": return_the_right_thing(self._embeddings[index]), 
+                    "embeddingData": return_the_right_thing(self._embeddings, index), 
                     "resourceUri": self._resource_uris[index],
 
                     "ctxEmbeddingSetId": self._ctx_embedding_set_id,
-                    "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings[index]), 
+                    "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings, index), 
                 }
                 for index in range(self._count)
             ]

@@ -59,10 +59,8 @@ def process_embeddings(embedding_set_ids):
         sql = select(models.Embedding).where(models.Embedding.embedding_set == embedding_set)
         embeddings = embeddings + ((db_session.execute(sql)).scalars().unique().all())
 
-    # for emb in embeddings:
-    #     raise Exception(str(emb.id))
     vectors = [json.loads(emb.data)["data"] for emb in embeddings]
-    targets = [json.loads(emb.data)["target"] for emb in embeddings]
+    targets = [json.loads(emb.data)["target"] for emb in embeddings] # load targets to pass them down to Projections
 
     celery_log.info(f"Fetched data")
 
@@ -73,8 +71,6 @@ def process_embeddings(embedding_set_ids):
     setType = "context"
     if (targets[0] != None):
         setType = "object"
-
-    # raise Exception(str(setType))
 
     # TODO: adding these records actually takes a quite a while, look for opps to speed up
     # create the projection set

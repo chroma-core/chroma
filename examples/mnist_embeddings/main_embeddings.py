@@ -133,7 +133,7 @@ def main():
     #     infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST-All-1", dataset_name="Test-1", categories=mnist_category_data) as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="MNIST-All-3", dataset_name="Test-3", categories=mnist_category_data) as chroma_storage:
 
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)

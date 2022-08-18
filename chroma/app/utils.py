@@ -1,5 +1,6 @@
 from os.path import getsize, isfile
 
+# checks to make sure a sqlite db exists where we expect it
 def isSQLite3(filename):
     if not isfile(filename):
         return False

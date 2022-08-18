@@ -259,8 +259,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       let datapointColorIndex = 0
       if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.id == datapointColorByProp)
       // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
-      // set that position in place of the current 0 value
-      // console.log('datapoint', datapoint, 'datapointColorByProp', datapointColorByProp, colorByFilter?.filter.options, 'datapointColorIndex', datapointColorIndex)
 
       return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, datapointColorIndex, datapoint.id])
     })

@@ -5,7 +5,7 @@ import { useQuery } from 'urql';
 import ExplorerContainer from '../Containers/ExplorerContainer';
 import DataPanel from './DataPanel';
 import { getDatapointsForProject, GetProjectAndProjectionSets, getProjectionsForProjectionSet, getTotalDatapointsToFetch } from './DataViewerApi';
-import { getMostRecentCreatedAt, getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
+import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom, globalDatapointAtom, labelLabelsAtom, labelTagsAtom, labelResourcesAtom, labelInferenceFilterAtom, labelDatasetsAtom, labelCategoriesAtom, labelProjectionsAtom, labelMetadataFiltersAtom, labelDatapointsAtom } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
@@ -188,9 +188,6 @@ const DataViewer = () => {
     }
 
     setProcessingProjections(true)
-
-    // console.log('result.data.projectionSets', result, getMostRecentCreatedAtObjectContext(result.data.projectionSets))
-    const latestProjectionSetId = parseInt(getMostRecentCreatedAt(result.data.projectionSets).id, 10)
 
     const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
 

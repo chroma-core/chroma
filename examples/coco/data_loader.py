@@ -79,5 +79,6 @@ for image_id in image_ids:
         add_data_batch = []
         print (str(i))
         
+    # early stop useful for testing
     if (i > 3_100):
         raise Exception("stop")

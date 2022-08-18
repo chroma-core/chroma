@@ -82,7 +82,6 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             # Process detections
             det_boxes = rescale_boxes(output, imgs.shape[-1], img_sizes[i, :2])[:, :4]
             det_boxes[:, 2:4] = det_boxes[:, 2:4] - det_boxes[:, 0:2]  # xyxy2xywh
-            # raise Exception(str(det_boxes[:, 2:4]))
             det_category_ids = output[:, -1].numpy().astype(int)
             det_category_names = class_names[det_category_ids]
             det_uids = [str(uuid.uuid4()) for i in range(len(det_category_ids))]
@@ -96,11 +95,10 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             target_boxes = rescale_boxes(
                 xywh2xyxy(target[:, 2:]) * imgs.shape[-1], imgs.shape[-1], img_sizes[i, :2]
             )
+            # convert back to xywh... I am sure there is a better way of doing this
             for target_box in target_boxes:
-                # print(str(target_box))
                 target_box[2] = target_box[2] - target_box[0]
                 target_box[3] = target_box[3] - target_box[1]
-                # raise Exception(str(target_box))
             target_cat_ids = target[:, 1].numpy().astype(int)
             target_cat_names = class_names[target_cat_ids]
             target_uids = [str(uuid.uuid4()) for i in range(len(target_cat_ids))]
