@@ -30,125 +30,6 @@ project_query = gql(
     """
 )
 
-# model architecture
-model_architectures_query = gql(
-    """
-    query modelArchitecturesQuery {
-        modelArchitectures {
-            id
-            name
-            createdAt
-            updatedAt
-            project {
-                id
-            }
-        }
-    }
-    """
-)
-
-model_architecture_query = gql(
-    """
-    query modelArchitectureQuery($id: ID!) {
-        modelArchitecture(id: $id) {
-            id
-            name
-            createdAt
-            updatedAt
-        }
-    }
-    """
-)
-
-# trained model
-trained_model_query = gql(
-    """
-    query trainedModelQuery($id: ID!) {
-        trainedModel(id: $id) {
-            id
-            createdAt
-            updatedAt
-            modelArchitecture {
-                id
-            }
-        }
-    }
-    """
-)
-trained_models_query = gql(
-    """
-    query trainedModelsQuery {
-        trainedModels {
-            id
-            createdAt
-            updatedAt
-            modelArchitecture {
-                id
-            }
-        }
-    }
-    """
-)
-
-# layer set
-layer_set_query = gql(
-    """
-    query layerSetQuery($id: ID!) {
-        layerSet(id: $id) {
-            id
-            createdAt
-            updatedAt
-            trainedModel {
-                id
-            }
-        }
-    }
-    """
-)
-layer_sets_query = gql(
-    """
-    query layerSetsQuery {
-        layerSets {
-            id
-            createdAt
-            updatedAt
-            trainedModel {
-                id
-            }
-        }
-    }
-    """
-)
-
-# layer
-layer_query = gql(
-    """
-    query layerQuery($id: ID!) {
-        layer(id: $id) {
-            id
-            createdAt
-            updatedAt
-            layerSet {
-                id
-            }
-        }
-    }
-    """
-)
-layers_query = gql(
-    """
-    query layersQuery {
-        layers {
-            id
-            createdAt
-            updatedAt
-            layerSet {
-                id
-            }
-        }
-    }
-    """
-)
 # dataset
 dataset_query = gql(
     """
@@ -317,34 +198,6 @@ inferences_query = gql(
     """
 )
 
-
-# slice
-slice_query = gql(
-    """
-    query sliceQuery($id: ID!) {
-        slice(id: $id) {
-            id
-            name
-            createdAt
-            updatedAt
-        }
-    }
-    """
-)
-slices_query = gql(
-    """
-    query slicesQuery {
-        slices {
-            id
-            name
-            createdAt
-            updatedAt
-        }
-    }
-    """
-)
-
-
 # embedding
 embeddings_query = gql(
     """
@@ -434,31 +287,6 @@ projections_query = gql(
     """
     query projectionsQuery {
         projections {
-            id
-            createdAt
-            updatedAt
-        }
-    }
-    """
-)
-
-
-# projector
-projector_query = gql(
-    """
-    query projectorQuery($id: ID!) {
-        projector(id: $id) {
-            id
-            createdAt
-            updatedAt
-        }
-    }
-    """
-)
-projectors_query = gql(
-    """
-    query projectorsQuery {
-        projectors {
             id
             createdAt
             updatedAt

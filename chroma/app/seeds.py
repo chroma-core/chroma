@@ -18,8 +18,8 @@ dataset4 = nn(chroma.create_or_get_dataset("dontdupe", int(project.createProject
 
 embedding_set = nn(chroma.create_embedding_set(int(dataset1.createDataset.id)))
 
-slice1 = nn(chroma.create_slice("favorites", int(dataset1.createDataset.id)))
-slice2 = nn(chroma.create_slice("bad labels", int(dataset1.createDataset.id)))
+# slice1 = nn(chroma.create_slice("favorites", int(dataset1.createDataset.id)))
+# slice2 = nn(chroma.create_slice("bad labels", int(dataset1.createDataset.id)))
 
 label = nn(chroma.create_label('{"asdf":"1234"}'))
 resource = nn(chroma.create_resource('file://123.png'))
@@ -32,13 +32,13 @@ remove_tag = nn(chroma.remove_tag_from_datapoint_mutation(int(tag.createTag.id),
 append_tag = nn(chroma.append_tag_to_datapoint_mutation(int(tag.createTag.id), int(datapoint.createDatapoint.id)))
 
 # ML stuff
-mlarch1 = nn(chroma.create_model_architecture("yolov3", int(project.createProject.id)))
-trainedmodel1 = nn(chroma.create_trained_model(int(mlarch1.createModelArchitecture.id)))
-layerset1 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
-layerset2 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
-layer1 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
-layer2 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
-layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+# mlarch1 = nn(chroma.create_model_architecture("yolov3", int(project.createProject.id)))
+# trainedmodel1 = nn(chroma.create_trained_model(int(mlarch1.createModelArchitecture.id)))
+# layerset1 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
+# layerset2 = nn(chroma.create_layer_set(int(trainedmodel1.createTrainedModel.id)))
+# layer1 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+# layer2 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
+# layer3 = nn(chroma.create_layer(int(layerset1.createLayerSet.id)))
 
 create_project_dedupe = nn(chroma.create_or_get_project("one project one project"))
 

@@ -30,17 +30,11 @@ from graphql_py.types import (
     get_embeddings,
     Project, 
     Dataset,
-    Slice,
     Datapoint, 
     Resource,
     Label,
     Tag, 
     Inference, 
-    ModelArchitecture,
-    TrainedModel,
-    LayerSet, 
-    Layer, 
-    Projector,
     Job, 
  ) 
 from strawberry.dataloader import DataLoader
@@ -189,21 +183,6 @@ class Query:
             val = (await s.execute(sql)).scalars().first()
         return Dataset.marshal(val)  
 
-    # Slice
-    @strawberry.field
-    async def slices(self) -> list[Slice]:
-        async with models.get_session() as s:
-            sql = select(models.Slice)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [Slice.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def slice(self, id: strawberry.ID) -> Slice:
-        async with models.get_session() as s:
-            sql = select(models.Slice).where(models.Slice.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return Slice.marshal(val)    
-    
     # Datapoint
     @strawberry.field
     async def datapoints(self, filter: FilterDatapoints = None) -> list[Datapoint]:
@@ -286,81 +265,6 @@ class Query:
             val = (await s.execute(sql)).scalars().first()
         return Inference.marshal(val)  
     
-    # ModelArchitecture
-    @strawberry.field
-    async def model_architectures(self) -> list[ModelArchitecture]:
-        async with models.get_session() as s:
-            sql = select(models.ModelArchitecture)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [ModelArchitecture.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def model_architecture(self, id: strawberry.ID) -> ModelArchitecture:
-        async with models.get_session() as s:
-            sql = select(models.ModelArchitecture).where(models.ModelArchitecture.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return ModelArchitecture.marshal(val)  
-
-    # TrainedModel
-    @strawberry.field
-    async def trained_models(self) -> list[TrainedModel]:
-        async with models.get_session() as s:
-            sql = select(models.TrainedModel)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [TrainedModel.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def trained_model(self, id: strawberry.ID) -> TrainedModel:
-        async with models.get_session() as s:
-            sql = select(models.TrainedModel).where(models.TrainedModel.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return TrainedModel.marshal(val)  
-
-    # LayerSet
-    @strawberry.field
-    async def layer_sets(self) -> list[LayerSet]:
-        async with models.get_session() as s:
-            sql = select(models.LayerSet)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [LayerSet.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def layer_set(self, id: strawberry.ID) -> LayerSet:
-        async with models.get_session() as s:
-            sql = select(models.LayerSet).where(models.LayerSet.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return LayerSet.marshal(val)  
-
-    # Layer
-    @strawberry.field
-    async def layers(self) -> list[Layer]:
-        async with models.get_session() as s:
-            sql = select(models.Layer)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [Layer.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def layer(self, id: strawberry.ID) -> Layer:
-        async with models.get_session() as s:
-            sql = select(models.Layer).where(models.Layer.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return Layer.marshal(val)  
-
-    # Projector
-    @strawberry.field
-    async def projectors(self) -> list[Projector]:
-        async with models.get_session() as s:
-            sql = select(models.Projector)
-            result = (await s.execute(sql)).scalars().unique().all()
-        return [Projector.marshal(loc) for loc in result]
-
-    @strawberry.field
-    async def projector(self, id: strawberry.ID) -> Projector:
-        async with models.get_session() as s:
-            sql = select(models.Projector).where(models.Projector.id == id)
-            val = (await s.execute(sql)).scalars().first()
-        return Projector.marshal(val)  
-
     # Job
     @strawberry.field
     async def jobs(self) -> list[Job]:
