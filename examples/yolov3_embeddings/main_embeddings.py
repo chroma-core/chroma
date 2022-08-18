@@ -1,5 +1,6 @@
 from __future__ import annotations
 import uuid
+import json
 
 import tqdm
 import numpy as np
@@ -81,6 +82,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             # Process detections
             det_boxes = rescale_boxes(output, imgs.shape[-1], img_sizes[i, :2])[:, :4]
             det_boxes[:, 2:4] = det_boxes[:, 2:4] - det_boxes[:, 0:2]  # xyxy2xywh
+            # raise Exception(str(det_boxes[:, 2:4]))
             det_category_ids = output[:, -1].numpy().astype(int)
             det_category_names = class_names[det_category_ids]
             det_uids = [str(uuid.uuid4()) for i in range(len(det_category_ids))]
@@ -94,6 +96,11 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             target_boxes = rescale_boxes(
                 xywh2xyxy(target[:, 2:]) * imgs.shape[-1], imgs.shape[-1], img_sizes[i, :2]
             )
+            for target_box in target_boxes:
+                # print(str(target_box))
+                target_box[2] = target_box[2] - target_box[0]
+                target_box[3] = target_box[3] - target_box[1]
+                # raise Exception(str(target_box))
             target_cat_ids = target[:, 1].numpy().astype(int)
             target_cat_names = class_names[target_cat_ids]
             target_uids = [str(uuid.uuid4()) for i in range(len(target_cat_ids))]
@@ -106,6 +113,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
         chroma_storage.set_labels(labels)
 
         ctx_embedding = reshape_context(layer_outputs[context_layer_index]).detach().cpu().numpy()
+        
 
         detection_embeddings = (
             torch.cat(
@@ -139,6 +147,14 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             ]
             annotated_embs.append(annotated_emb)
 
+        annotated_ctx_embs = []
+        for ctx in ctx_embedding:
+            annotated_ctx_emb = [
+                {"target": None, "data": ctx.tolist()}
+            ]
+            annotated_ctx_embs.append(annotated_ctx_emb)
+
+        chroma_storage.set_ctx_embeddings(annotated_ctx_embs)
         chroma_storage.set_embeddings(annotated_embs)
         chroma_storage.store_batch_embeddings()
 
@@ -149,7 +165,7 @@ def main():
     # Setup params
     model_path = "config/yolov3.cfg"
     weights_path = "weights/yolov3.weights"
-    data = "config/coco.data"
+    data = "config/coco1000.data"
     batch_size = 8
     img_size = 416
     n_cpu = 8
@@ -160,6 +176,12 @@ def main():
     data_config = parse_data_config(data)
     valid_path = data_config["valid"]
     class_names = load_classes(data_config["names"])
+
+    class_object = []
+    i = 0
+    for class_name in class_names:
+        class_object.append({'supercategory': '', 'id': i, 'name': class_name})
+        i = i+1
 
     # Set the device
     device_name = "cpu"
@@ -184,9 +206,8 @@ def main():
     model = load_model(model_path=model_path, device=device, weights_path=weights_path)
     model.eval()
 
-    with chroma_manager.ChromaSDK(project_name="YOLO", dataset_name="Test") as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="YOLO-1000", dataset_name="TestYolo1000", categories=json.dumps(class_object)) as chroma_storage:
         infer(model, device, dataloader, class_names, chroma_storage=chroma_storage)
-
 
 if __name__ == "__main__":
     main()
