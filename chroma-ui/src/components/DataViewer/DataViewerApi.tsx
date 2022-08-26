@@ -18,6 +18,7 @@ query getProjectionSets($filter: FilterProjectionSets!, $projectId: ID!) {
 `
 
 export function getProjectionsForProjectionSet(projection_set_id: number, cb: (projections: any) => void) {
+  // console.log('fetchin projection set', projection_set_id)
   fetch(`/api/projections/` + projection_set_id, {
     method: 'GET',
     headers: {
@@ -26,6 +27,7 @@ export function getProjectionsForProjectionSet(projection_set_id: number, cb: (p
   })
     .then(res => res.json())
     .then(res => {
+      // console.log('getProjectionsForProjectionSet', projection_set_id, res)
       cb(res)
     })
     .catch((error) => {

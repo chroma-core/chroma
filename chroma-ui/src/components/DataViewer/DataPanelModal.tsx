@@ -1,7 +1,7 @@
 import { ButtonGroup, useColorModeValue, Text, Box, GridItem, Grid as ChakraGrid, Center, Skeleton, TableContainer, Table, Tbody, Tr, Td, Flex, useTheme, Button } from "@chakra-ui/react"
 import { BiCategoryAlt } from "react-icons/bi"
 import { BsLayers, BsTag } from "react-icons/bs"
-import { categoriesAtom, contextObjectSwitcherAtom, datapointsAtom, datasetsAtom, DataType, globalDatapointAtom, globalResourcesAtom, inferencesAtom, labelsAtom, resourcesAtom, visibleDatapointsAtom } from "./atoms"
+import { context__categoriesAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetsAtom, DataType, globalDatapointAtom, globalResourcesAtom, context__inferencesAtom, context__labelsAtom, context__resourcesAtom, visibleDatapointsAtom, globalCategoriesAtom } from "./atoms"
 import Tags from "./Tags"
 import { useAtom } from 'jotai';
 import ImageRenderer from "./ImageRenderer"
@@ -15,7 +15,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
   if (datapointId === undefined) return <></> // handle this case though we dont expect to run into it
   const [datapoints] = useAtom(globalDatapointAtom)
   const [resources] = useAtom(globalResourcesAtom)
-  const [categories] = useAtom(categoriesAtom)
+  const [categories] = useAtom(globalCategoriesAtom)
   const datapoint = datapoints[datapointId]
   const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
@@ -31,6 +31,12 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
 
   const theme = useTheme()
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
+  // inject metadata into a standard place
+  if (contextObjectSwitcher == DataType.Object) {
+    // @ts-ignore
+    datapoint.metadata = datapoint.annotations[0].metadata
+  }
 
   return (
     <Box
@@ -61,7 +67,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
           </Flex>
         </GridItem>
         <GridItem colSpan={1} rowSpan={8}>
-          <Box h="100%" position="absolute" w="25%" overflowX="scroll">
+          <Box h="90%" position="absolute" w="25%" overflowX="scroll">
             <Text fontWeight={600} pb={2}>Data</Text>
             <TableContainer>
               <Table variant='simple' size="sm">
@@ -85,6 +91,16 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
                 </Tbody>
               </Table>
             </TableContainer>
+
+            <>
+              <Flex pt={5} alignItems="center">
+                <BsTag color='#666' />
+                <Text ml={1} fontWeight={600}>Tags</Text>
+              </Flex>
+              <Flex mt={3}>
+                <Tags datapointId={datapoint.id} />
+              </Flex>
+            </>
 
             <Flex pt={5} alignItems="center">
               <Text fontWeight={600}>Metadata</Text>
@@ -156,17 +172,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
               </Table>
             </TableContainer>
 
-            {(contextObjectSwitcher == DataType.Context) ?
-              <>
-                <Flex pt={5} alignItems="center">
-                  <BsTag color='#666' />
-                  <Text ml={1} fontWeight={600}>Tags</Text>
-                </Flex>
-                <Flex mt={3}>
-                  <Tags datapointId={datapoint.id} />
-                </Flex>
-              </>
-              : null}
+
           </Box>
         </GridItem>
 

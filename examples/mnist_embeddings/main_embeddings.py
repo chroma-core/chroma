@@ -2,6 +2,7 @@ import argparse
 from functools import partial
 
 import torch
+import random
 import torch.nn.functional as F
 from PIL import Image
 
@@ -13,6 +14,8 @@ from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 
 import json
+
+str_options = ['New York', 'San Francisco', 'Atlanta', 'Miami', 'Dallas', 'Chicago', 'DC']
 
 # We modify the MNIST dataset to expose some information about the source data
 # to allow us to uniquely identify an input in a way that we can recover it later
@@ -59,6 +62,15 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
                         })
 
             chroma_storage.set_inferences(inference_json_list)
+
+            metadata_list = []
+            for label in pred.data.detach().flatten().tolist():
+                metadata_list.append( {
+                'quality': random.randint(0, 100),
+                'location': str_options[random.randint(0, 6)]
+            })
+
+            chroma_storage.set_metadata(metadata_list)
             chroma_storage.store_batch_embeddings()
 
     test_loss /= len(data_loader.dataset)

@@ -10,7 +10,8 @@ import {
 } from '@chakra-ui/react'
 import TagButton from './TagButton'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
-import { datapointsAtom, tagsAtom } from './atoms'
+
+import { datapointsAtom, globalDatapointAtom, context__tagsAtom, contextObjectSwitcherAtom, DataType, globalTagsAtom } from './atoms'
 import { useAtom } from 'jotai'
 import { useUpdateAtom } from 'jotai/utils'
 import { focusAtom } from "jotai/optics";
@@ -29,7 +30,7 @@ export function removeItem<T>(arr: Array<T>, value: T): Array<T> {
 }
 
 const Tags: React.FC<TagsProps> = ({ datapointId }) => {
-  const [tags, setTags] = useAtom(tagsAtom)
+  const [tags, setTags] = useAtom(globalTagsAtom)
   const theme = useTheme()
   const [isEditing, setIsEditing] = useState(false)
   const [originalTagString, setOriginalTagString] = useState('') // used to diff against the input
@@ -38,8 +39,9 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
 
   const [addTagResult, addTag] = useAppendTagByNameToDatapointsMutation()
   const [unTagResult, unTag] = useRemoveTagFromDatapointsMutation()
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
-  const [datapoints, setDatapoints] = useAtom(datapointsAtom);
+  const [datapoints, setDatapoints] = useAtom(globalDatapointAtom);
   const datapoint = datapoints[datapointId]
 
   useEffect(() => {
@@ -63,17 +65,20 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
     let originalTagsArray = originalTagString.split(",").map(tag => tag.trim())
     if (tagString === originalTagString) return
 
-    let remove = originalTagsArray.filter(x => !newTagsArray.includes(x)) // tags to remove
+    let remove = originalTagsArray.filter(x => !newTagsArray.includes(x)).filter(y => (y !== "")) // tags to remove
     let add = newTagsArray.filter(x => !originalTagsArray.includes(x)) // tags to add
     let keep = originalTagsArray.filter(x => newTagsArray.includes(x)) // tags to keep
 
+    let target = (contextObjectSwitcher == DataType.Object) ? [datapoint.annotations[0].id] : null
+    let datapointIds = (contextObjectSwitcher == DataType.Object) ? [datapoint.source_datapoint_id] : [datapointId]
+
     add.map(tagToAdd => {
-      const variables = { tagName: tagToAdd, datapointIds: [datapointId] }
+      const variables = { tagName: tagToAdd, datapointIds: datapointIds, target: target }
       addTag(variables)
     })
 
     remove.map(tagToRemove => {
-      const variables = { tagName: tagToRemove, datapointIds: [datapointId] }
+      const variables = { tagName: tagToRemove, datapointIds: datapointIds, target: target }
       unTag(variables)
     })
 

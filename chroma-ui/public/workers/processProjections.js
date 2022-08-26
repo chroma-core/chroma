@@ -4,7 +4,12 @@ self.onmessage = (message) => {
 
     var datapointsCopy = Object.assign({}, data.datapoints)
 
-    data.projections.projections.map((proj) => {
+    let targetIdDatapointIdMap = {}
+    if (data.projections.setType == 'object') {
+        Object.values(datapointsCopy).forEach(d => targetIdDatapointIdMap[d.annotations[0].id] = d.id)
+    }
+
+    data.projections.projections.map((proj, index) => {
         projectionsObject[proj.id] = {
             id: proj.id,
             x: proj.x,
@@ -14,8 +19,7 @@ self.onmessage = (message) => {
         }
 
         if (data.projections.setType == 'object') {
-            let inferenceDatapointId = Object.values(datapointsCopy).find(d => d.annotations[0].id == proj.target)
-            datapointsCopy[inferenceDatapointId.id].projection_id = proj.id
+            datapointsCopy[targetIdDatapointIdMap[proj.target]].projection_id = proj.id
         } else {
             datapointsCopy[proj.embedding.datapoint_id].projection_id = proj.id
         }

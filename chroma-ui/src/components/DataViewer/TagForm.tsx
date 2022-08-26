@@ -9,15 +9,15 @@ import {
 import React, { useState } from 'react'
 import { BsTagFill, BsTag } from 'react-icons/bs'
 import { useAppendTagByNameToDatapointsMutation, useRemoveTagFromDatapointsMutation } from '../../graphql/graphql'
-import { contextObjectSwitcherAtom, datapointsAtom, DataType, selectedDatapointsAtom, tagsAtom } from './atoms'
+import { contextObjectSwitcherAtom, context__datapointsAtom, DataType, selectedDatapointsAtom, context__tagsAtom, globalSelectedDatapointsAtom, globalTagsAtom, globalDatapointAtom } from './atoms'
 import { datapointIndexToPointIndex } from './DataViewerUtils'
 import { useAtom } from 'jotai'
 import { removeItem } from './Tags'
 
 const TagForm: React.FC = () => {
-  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
-  const [tags, updatetags] = useAtom(tagsAtom)
-  const [selectedDatapoints] = useAtom(selectedDatapointsAtom)
+  const [datapoints, updatedatapoints] = useAtom(globalDatapointAtom)
+  const [tags, updatetags] = useAtom(globalTagsAtom)
+  const [selectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
   const theme = useTheme()
@@ -37,15 +37,26 @@ const TagForm: React.FC = () => {
     e.preventDefault()
 
     let splitNewTags = newTag.split(",")
+    var selectedDatapointsCopy = selectedDatapoints.slice()
 
     // get selected datapoint ids from selected projection ids
     var selectedPointsIds = selectedDatapoints.slice().map(selectedPointId => {
       return datapointIndexToPointIndex(selectedPointId)
     })
 
+    var targetIds: any = null
+    var objectDpIds: any = null
+    if (contextObjectSwitcher == DataType.Object) {
+      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].annotations[0].id)
+      // @ts-ignore
+      objectDpIds = selectedDatapointsCopy.map(sd => datapoints[sd].source_datapoint_id)
+    }
+
     // add the new tags to each datapoint
     splitNewTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapoints }
+      let target = (contextObjectSwitcher == DataType.Object) ? targetIds : null
+      let datapointIds = (contextObjectSwitcher == DataType.Object) ? objectDpIds : selectedDatapointsCopy
+      const variables = { tagName: tag, datapointIds: datapointIds, target: target }
       addTag(variables)
 
       var tempUUid = uuidv4()
@@ -86,9 +97,20 @@ const TagForm: React.FC = () => {
     var newTags = Object.assign({}, tags)
     var newDatapoints = Object.assign({}, datapoints)
 
+    var targetIds: any = null
+    var objectDpIds: any = null
+    if (contextObjectSwitcher == DataType.Object) {
+      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].annotations[0].id)
+      // @ts-ignore
+      objectDpIds = selectedDatapointsCopy.map(sd => datapoints[sd].source_datapoint_id)
+    }
+
     var markForDeletion: number[] = []
     splitNewUnTags.map(tag => {
-      const variables = { tagName: tag, datapointIds: selectedDatapointsCopy }
+
+      let target = (contextObjectSwitcher == DataType.Object) ? targetIds : null
+      let datapointIds = (contextObjectSwitcher == DataType.Object) ? objectDpIds : selectedDatapointsCopy
+      const variables = { tagName: tag, datapointIds: datapointIds, target: target }
       unTag(variables)
 
       var tagIndex = Object.values(newTags).findIndex(existingTag => existingTag.name == tag) // -1 means it doesnt exist yet, otherwise we need the index
@@ -155,7 +177,7 @@ const TagForm: React.FC = () => {
             borderWidth={2}
             size="sm"
             onChange={(e: any) => checkAndSetTag(e, e.target.value)}
-            isDisabled={noneSelected || (contextObjectSwitcher == DataType.Object)}
+            isDisabled={noneSelected}
             value={newTag}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
@@ -178,7 +200,7 @@ const TagForm: React.FC = () => {
             size="sm"
             value={newUnTag}
             onChange={(e: any) => checkAndSetUnTag(e, e.target.value)}
-            isDisabled={noneSelected || (contextObjectSwitcher == DataType.Object)}
+            isDisabled={noneSelected}
             _hover={{ borderColor: theme.colors.ch_gray.light }}
             _focus={{ borderColor: theme.colors.ch_blue }}
             _placeholder={{ opacity: 1, color: textColor }}

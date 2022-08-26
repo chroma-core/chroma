@@ -1,60 +1,77 @@
+//
+// this webworker takes raw data from the server and loads it up into data structures that our frontend can consume
+// 
+
 self.onmessage = (message) => {
     var { data } = message
-    var dataRead = JSON.parse(data)
+    var parsedJson = JSON.parse(data)
+    const { datapoints, labels, resources, inferences, datasets, tags } = parsedJson;
 
-    // create data structures
-    let categoriesObject = {} // { [key: number]: {} } =
-    let datapointsObject = {} // { [key: number]: Datapoint } =
-    let datasetsObject = {} // { [key: number]: {} } =
-    let labelsObject = {} // { [key: number]: {} } =
-    let resourcesObject = {} // { [key: number]: {} } =
-    let tagsObject = {} // { [key: number]: {} } =
-    let inferencesObject = {} // { [key: number]: {} } =
+    // we have 2 versions of every object... 1 for contexts and 1 for objects
 
-    let labeldatasetsObject = {} // { [key: number]: {} } =
-    let labelCategoriesObject = {}
+    // create context structures
+    let context__categoriesObject = {}
+    let context__datapointsObject = {}
+    let context__datasetsObject = {}
+    let context__labelsObject = {}
+    let context__resourcesObject = {}
+    let context__tagsObject = {}
+    let context__inferencesObject = {}
+    let context__metadataFilters = {}
 
-    let inferencedatasetsObject = {} // { [key: number]: {} } =
-    let inferenceCategoriesObject = {}
+    // create object data structures
+    let object__categoriesObject = {}
+    let object__datapointsObject = {}
+    let object__datasetsObject = {}
+    let object__labelsObject = {}
+    let object__resourcesObject = {}
+    let object__tagsObject = {}
+    // no object__inferencesObject
+    let object__metadataFiltersObject = {}
 
-    // destructure data out of json response
-    const { datapoints, labels, resources, inferences, datasets, tags } = dataRead;
 
-    // load datasets object and unpack valid categories from dataset categories column
     datasets.forEach((dataset) => {
-        datasetsObject[dataset.id] = {
+
+        // set up the basic dataset objects
+        context__datasetsObject[dataset.id] = {
             ...dataset,
             datapoint_ids: []
         }
-        labeldatasetsObject[dataset.id] = {
-            ...dataset,
-            datapoint_ids: []
-        }
-        inferencedatasetsObject[dataset.id] = {
+        object__datasetsObject[dataset.id] = {
             ...dataset,
             datapoint_ids: []
         }
 
+        // set up the basic category objects
         let categoriesData = JSON.parse(dataset.categories)
-
         categoriesData.forEach((category) => {
-            if (categoriesObject[category.id] === undefined) {
-                categoriesObject[category.id] = { ...category }
-                labelCategoriesObject[category.id] = { ...category }
-                inferenceCategoriesObject[category.id] = { ...category }
+            if (context__categoriesObject[category.id] === undefined) {
+                context__categoriesObject[category.id] = { ...category }
+                object__categoriesObject[category.id] = { ...category }
             }
         })
     })
 
     // load tags object and fill in the datapoints that have that tag
     tags.forEach((tag) => {
-        tagsObject[tag.tag.id] = {
-            ...tag.tag,
-            datapoint_ids: ((tagsObject[tag.tag.id]?.datapoint_ids === undefined ? [tag.right_id] : [...tagsObject[tag.tag.id].datapoint_ids, tag.right_id]))
+        var datapointList
+
+        // filter out cases where the tagdatapoint is actually on the label annotation and not the datapoint
+        if ((tag.target === null)) {
+
+            if (context__tagsObject[tag.tag.id]?.datapoint_ids === undefined) {
+                datapointList = [tag.right_id]
+            } else {
+                datapointList = [...context__tagsObject[tag.tag.id].datapoint_ids, tag.right_id]
+            }
+
+            context__tagsObject[tag.tag.id] = {
+                ...tag.tag,
+                datapoint_ids: datapointList
+            }
+
         }
     })
-
-    metadataFilters = {}
 
     // load datapoints object, and also use datapoint metadata to create custom filters
     datapoints.forEach((datapoint) => {
@@ -63,24 +80,23 @@ self.onmessage = (message) => {
         if (datapoint.metadata_ == '') datapoint.metadata_ = "{}"
         var datapointaMetadata = JSON.parse(datapoint.metadata_)
         Object.keys(datapointaMetadata).map(key => {
-            if (metadataFilters[key] === undefined) metadataFilters[key] = { name: key, options: {}, type: 0, linkedAtom: {} }
-            if (metadataFilters[key].linkedAtom[datapointaMetadata[key]] === undefined) metadataFilters[key].linkedAtom[datapointaMetadata[key]] = { datapoint_ids: [] }
+            if (context__metadataFilters[key] === undefined) context__metadataFilters[key] = { name: key, options: {}, type: 0, linkedAtom: {} }
+            if (context__metadataFilters[key].linkedAtom[datapointaMetadata[key]] === undefined) context__metadataFilters[key].linkedAtom[datapointaMetadata[key]] = { datapoint_ids: [] }
 
-            metadataFilters[key].options[datapointaMetadata[key]] = {
+            context__metadataFilters[key].options[datapointaMetadata[key]] = {
                 id: datapointaMetadata[key],
                 visible: true,
                 color: "#333333",
             }
-            metadataFilters[key].linkedAtom[datapointaMetadata[key]] = {
+            context__metadataFilters[key].linkedAtom[datapointaMetadata[key]] = {
                 id: datapointaMetadata[key],
                 name: datapointaMetadata[key],
-                datapoint_ids: [...metadataFilters[key].linkedAtom[datapointaMetadata[key]].datapoint_ids, datapoint.id]
+                datapoint_ids: [...context__metadataFilters[key].linkedAtom[datapointaMetadata[key]].datapoint_ids, datapoint.id]
             }
         })
 
-        // this is used to stub out projection data
-        //projectionsObject[datapoint.id] = { id: datapoint.id, x: Math.random() * 10, y: Math.random() * 10, datapoint_id: datapoint.id }
-        datapointsObject[datapoint.id] = {
+        // set up our datapoint object
+        context__datapointsObject[datapoint.id] = {
             ...datapoint,
             tag_ids: [],
             inferences: [],
@@ -88,14 +104,14 @@ self.onmessage = (message) => {
             metadata: datapointaMetadata
         }
 
-        // @ts-ignore
-        datasetsObject[datapoint.dataset_id].datapoint_ids.push(datapoint.id)
+        // add our datapoint to its dataset
+        context__datasetsObject[datapoint.dataset_id].datapoint_ids.push(datapoint.id)
     })
 
     // add our cross link from tags back onto datapoints
-    Object.values(tagsObject).map(function (tag) {
+    Object.values(context__tagsObject).map(function (tag) {
         tag.datapoint_ids.map(dpid => {
-            datapointsObject[dpid].tag_ids.push(tag.id)
+            context__datapointsObject[dpid].tag_ids.push(tag.id)
         })
     })
 
@@ -103,34 +119,29 @@ self.onmessage = (message) => {
     let annsIdsToAdd = {}
     labels.forEach((label) => {
         const labelData = JSON.parse(label.data)
-        labelsObject[label.id] = {
+        context__labelsObject[label.id] = {
             ...label,
             data: labelData
         }
 
-        datapointsObject[label.datapoint_id].annotations = labelData.annotations
+        context__datapointsObject[label.datapoint_id].annotations = labelData.annotations
 
         labelData.annotations.forEach((annotation) => {
             const categoryId = annotation.category_id
-            // @ts-ignore
             if (annsIdsToAdd[categoryId] === undefined) annsIdsToAdd[categoryId] = new Set()
-            // @ts-ignore
             annsIdsToAdd[categoryId].add(label.datapoint_id)
         })
-
-        // @ts-ignore
-        // labeldatasetsObject[datapointsObject[label.datapoint_id].dataset_id].datapoint_ids.push(label.id)
     })
+
+    // load up our datapoint ids into categories
     Object.keys(annsIdsToAdd).map((c) => {
-        // @ts-ignore
         const dps = (annsIdsToAdd[c]).keys()
-        // @ts-ignore
-        categoriesObject[c].datapoint_ids = [...dps]
+        context__categoriesObject[c].datapoint_ids = [...dps]
     })
 
-    // load resources object
+    // create resources object
     resources.forEach((resource) => {
-        resourcesObject[resource.id] = {
+        context__resourcesObject[resource.id] = {
             ...resource
         }
     })
@@ -138,91 +149,53 @@ self.onmessage = (message) => {
     // load inferences object
     inferences.forEach((inference) => {
         const inferenceData = JSON.parse(inference.data)
-        inferencesObject[inference.id] = {
+        context__inferencesObject[inference.id] = {
             ...inference,
             data: inferenceData
         }
 
-        if (inferenceData.annotations) datapointsObject[inference.datapoint_id].inferences = inferenceData.annotations
+        if (inferenceData.annotations) context__datapointsObject[inference.datapoint_id].inferences = inferenceData.annotations
     })
 
-    // create the object version of things for labels
-    // has to come after datapoints object and its annotations have been filled
-    var i = 0
-    var j = 0
-    let labelDatapointsObject = {}
-    let labelResourcesObject = {}
-    Object.values(datapointsObject).map(dp => {
-        dp.annotations.map(ann => {
-            let hasBoundingBoxes = (ann.bbox !== undefined)
-            if (hasBoundingBoxes) {
-                labelResourcesObject[j] = {
-                    id: j,
-                    uri: resourcesObject[dp.id].uri
-                }
-                labelDatapointsObject[i] = {
-                    annotations: [ann],
-                    dataset_id: dp.dataset_id,
-                    id: i,
-                    inferences: [],
-                    metadata: {},
-                    tag_ids: [],
-                    resource_id: j
-                }
-                labeldatasetsObject[dp.dataset_id].datapoint_ids.push(i)
-                i++
-                j++
-            }
-
-        })
-    })
-
-    let annsLabelIdsToAdd = {}
-    Object.values(labelDatapointsObject).map(labelDp => {
-        let categoryId = labelDp.annotations[0].category_id
-        if (annsLabelIdsToAdd[categoryId] === undefined) annsLabelIdsToAdd[categoryId] = new Set()
-        annsLabelIdsToAdd[categoryId].add(labelDp.id)
-    })
-
-    Object.keys(annsLabelIdsToAdd).map((c) => {
-        // @ts-ignore
-        const dps = (annsLabelIdsToAdd[c]).keys()
-        // @ts-ignore
-        labelCategoriesObject[c].datapoint_ids = [...dps]
-    })
-
-    // if we dont have any bounding boxes... wipe out the other data structures
-    if (Object.values(labelDatapointsObject).length === 0) {
-        labelCategoriesObject = {}
-        labelResourcesObject = {}
-        labeldatasetsObject = {}
-    }
+    // Specifically synthetically create our object datapoints
+    // they don't 'exist' in the backend as such right now... but we want to use the rest of the UI components
 
     // create the object version of things for inferences
     // has to come after datapoints object and its annotations have been filled
     var i = 0
     var j = 0
-    let inferenceDatapointsObject = {}
-    let inferenceResourcesObject = {}
-    Object.values(datapointsObject).map(dp => {
+    var targetDatapointIdMap = {}
+    Object.values(context__datapointsObject).map(dp => {
         dp.inferences.map(ann => {
             let hasBoundingBoxes = (ann.bbox !== undefined)
             if (hasBoundingBoxes) {
-                inferenceResourcesObject[j] = {
+
+                // console.log('ann', ann)
+
+                // create the resource
+                object__resourcesObject[j] = {
                     id: j,
-                    uri: resourcesObject[dp.id].uri
+                    uri: context__resourcesObject[dp.id].uri
                 }
-                inferenceDatapointsObject[i] = {
+
+                targetDatapointIdMap[ann.id] = i
+
+                // create the points
+                object__datapointsObject[i] = {
                     annotations: [ann],
                     dataset_id: dp.dataset_id,
                     id: i,
                     inferences: [],
                     metadata: {},
                     tag_ids: [],
+                    source_datapoint_id: dp.id,
                     resource_id: j,
                     inference: true
                 }
-                inferencedatasetsObject[dp.dataset_id].datapoint_ids.push(i)
+
+                // add itself to the dataset
+                object__datasetsObject[dp.dataset_id].datapoint_ids.push(i)
+
                 i++
                 j++
             }
@@ -230,65 +203,93 @@ self.onmessage = (message) => {
         })
     })
 
+    // load tags object and fill in the object datapoints that have that tag 
+    tags.forEach((tag) => {
+        var datapointList
+
+        // filter out cases where the tagdatapoint is actually on the label annotation and not the datapoint
+        if ((tag.target !== null)) {
+            var objectDatapointId = targetDatapointIdMap[tag.target]
+
+            if (object__tagsObject[tag.tag.id]?.datapoint_ids === undefined) {
+                datapointList = [objectDatapointId]
+            } else {
+                datapointList = [...object__tagsObject[tag.tag.id].datapoint_ids, objectDatapointId]
+            }
+
+            object__tagsObject[tag.tag.id] = {
+                ...tag.tag,
+                datapoint_ids: datapointList
+            }
+
+        }
+    })
+    // add our cross link from tags back onto datapoints
+    Object.values(object__tagsObject).map(function (tag) {
+        tag.datapoint_ids.map(dpid => {
+            object__datapointsObject[dpid].tag_ids.push(tag.id)
+        })
+    })
+
+    // create our filters based on the metadata set on the inference annotation
     let annsInferenceIdsToAdd = {}
-    Object.values(inferenceDatapointsObject).map(inferenceDp => {
+    Object.values(object__datapointsObject).map(inferenceDp => {
         let categoryId = inferenceDp.annotations[0].category_id
         if (annsInferenceIdsToAdd[categoryId] === undefined) annsInferenceIdsToAdd[categoryId] = new Set()
         annsInferenceIdsToAdd[categoryId].add(inferenceDp.id)
+
+        inferenceDp.annotations.map(ann => {
+            Object.keys(ann.metadata).map(key => {
+                if (object__metadataFiltersObject[key] === undefined) object__metadataFiltersObject[key] = { name: key, options: {}, type: 0, linkedAtom: {} }
+                if (object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]] === undefined) object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]] = { datapoint_ids: [] }
+
+                object__metadataFiltersObject[key].options[ann.metadata[key]] = {
+                    id: ann.metadata[key],
+                    visible: true,
+                    color: "#333333",
+                }
+                object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]] = {
+                    id: ann.metadata[key],
+                    name: ann.metadata[key],
+                    datapoint_ids: [...object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]].datapoint_ids, inferenceDp.id]
+                }
+            })
+        })
     })
 
     Object.keys(annsInferenceIdsToAdd).map((c) => {
-        // @ts-ignore
         const dps = (annsInferenceIdsToAdd[c]).keys()
-        // @ts-ignore
-        inferenceCategoriesObject[c].datapoint_ids = [...dps]
+        object__categoriesObject[c].datapoint_ids = [...dps]
     })
 
     // if we dont have any bounding boxes... wipe out the other data structures
-    if (Object.values(inferenceDatapointsObject).length === 0) {
-        inferenceCategoriesObject = {}
-        inferenceResourcesObject = {}
-        inferencedatasetsObject = {}
+    if (Object.values(object__datapointsObject).length === 0) {
+        object__categoriesObject = {}
+        object__resourcesObject = {}
+        object__datasetsObject = {}
     }
 
 
-
-    // let labelCategoriesObject = categoriesObject
-    let labelLabelsObject = {}
-    let inferenceLabelsObject = {}
-    let labelTagsObject = {}
-    let labelInferencesObject = {}
-    let labelMetadataFiltersObject = {}
-
     self.postMessage({
-        // datapoints stuff
-        categories: categoriesObject,
-        labels: labelsObject,
-        datapoints: datapointsObject,
-        datasets: datasetsObject,
-        resources: resourcesObject,
-        tags: tagsObject || {},
-        inferences: inferencesObject,
         numberOfDatapoints: datapoints.length,
-        metadataFilters: metadataFilters,
-        // labels stuff
-        labelCategories: labelCategoriesObject,
-        labelLabels: labelLabelsObject,
-        labelDatapoints: labelDatapointsObject,
-        labelDatasets: labeldatasetsObject,
-        labelResources: labelResourcesObject,
-        labelTags: labelTagsObject,
-        labelInferences: labelInferencesObject,
-        labelMetadataFilters: labelMetadataFiltersObject,
-        // inferences stuff
-        inferenceCategories: inferenceCategoriesObject,
-        // labelLabels: labelLabelsObject,
-        inferenceDatapoints: inferenceDatapointsObject,
-        inferenceDatasets: inferencedatasetsObject,
-        inferenceResources: inferenceResourcesObject,
-        inferenceLabels: inferenceLabelsObject,
-        // labelTags: labelTagsObject,
-        // labelInferences: labelInferencesObject,
-        // labelMetadataFilters: labelMetadataFiltersObject,
+
+        // datapoints stuff
+        context__datapoints: context__datapointsObject,
+        context__datasets: context__datasetsObject,
+        context__labels: context__labelsObject,
+        context__inferences: context__inferencesObject,
+        context__resources: context__resourcesObject,
+        context__tags: context__tagsObject,
+        context__categories: context__categoriesObject,
+        context__metadataFilters: context__metadataFilters,
+
+        // object__s stuff
+        object__datapoints: object__datapointsObject,
+        object__datasets: object__datasetsObject,
+        object__labels: object__labelsObject, // just an empty object right now, only here for consistency
+        object__resources: object__resourcesObject,
+        object__tags: object__tagsObject,
+        object__categories: object__categoriesObject,
+        object__metadataFilters: object__metadataFiltersObject,
     })
 }

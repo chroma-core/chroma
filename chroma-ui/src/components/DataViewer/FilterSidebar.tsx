@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { categoryFilterAtom, contextObjectSwitcherAtom, datapointsAtom, datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, tagFilterAtom, visibleDatapointsAtom } from './atoms';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -39,7 +39,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
   const [datasetFilter, updatedatasetFilter] = useAtom(globalDatasetFilterAtom)
-  const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
   const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
@@ -61,14 +61,14 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   var metatadataFilterMap = Object.values(metadataFilters).map(m => {
     return { filter: m, update: updateMetadata }
   })
-  if (contextObjectSwitcher == DataType.Object) metatadataFilterMap = []
 
   const filterArray: FilterArray[] = [
     { filter: categoryFilter!, update: updateCategory },
-    { filter: tagFilter!, update: updateTag },
     { filter: datasetFilter!, update: updateDataset },
+    { filter: tagFilter!, update: updateTag },
     ...metatadataFilterMap
   ]
+  // if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: tagFilter!, update: updateTag })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)

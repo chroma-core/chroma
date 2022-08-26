@@ -1,15 +1,34 @@
 import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
-import { Box, useColorModeValue, Center, Spinner, Select } from '@chakra-ui/react'
+import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, datapointsAtom, datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, projectionsAtom, selectedDatapointsAtom, tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom } from './atoms';
+import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterArray, FilterType, Filter } from './types';
 import { totalmem } from 'os';
+import ImageRenderer from './ImageRenderer';
+import { DataPanelGrid } from './DataPanel'
 
 interface ConfigProps {
   scatterplot?: any
 }
+
+const useMousePosition = () => {
+  const [
+    mousePosition,
+    setMousePosition
+  ] = React.useState({ x: null, y: null });
+  React.useEffect(() => {
+    const updateMousePosition = (ev: any) => {
+      setMousePosition({ x: ev.clientX, y: ev.clientY });
+    };
+    window.addEventListener('mousemove', updateMousePosition);
+    return () => {
+      window.removeEventListener('mousemove', updateMousePosition);
+    };
+  }, []);
+  return mousePosition;
+};
 
 const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
@@ -56,6 +75,8 @@ interface PlotterProps {
 
 const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const [datapoints] = useAtom(globalDatapointAtom)
+  const [categories] = useAtom(globalCategoriesAtom)
+  const [resources] = useAtom(globalResourcesAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [projections] = useAtom(globalProjectionsAtom)
@@ -70,6 +91,9 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let [points, setPoints] = useState<any>(undefined)
   let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
+
+  const [hoverPointId, setHoverPointId] = useState<number | undefined>(undefined)
+  const mousePosition = useMousePosition()
 
   enum ColorByOptions {
     None,
@@ -88,7 +112,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       return datapoint.annotations[0].category_id
     }
   }
-  const [categoryFilter] = useAtom(categoryFilterAtom)
+  const [categoryFilter] = useAtom(context__categoryFilterAtom)
   const filterArray: any[] = []
   if (contextObjectSwitcher == DataType.Object) {
     filterArray.push({ name: ColorByOptions.None, filter: noneFilter },
@@ -100,8 +124,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (!allFetched) return
     calculateColorsAndDrawPoints()
   }, [colorByFilterEnum])
-
-
 
   let [target, setTarget] = useState<any>(undefined)
   let [maxSize, setMaxSize] = useState<any>(undefined)
@@ -153,6 +175,14 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const deselectHandler = () => {
     updateselectedDatapoints([])
     setpointsToSelect([])
+  };
+
+  const pointOverHandler = (pointId: number) => {
+    setHoverPointId(pointId)
+  };
+
+  const pointOutHandler = () => {
+    setHoverPointId(undefined)
   };
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
@@ -269,6 +299,9 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     // console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
   }
 
+  // console.log('datapointPointMap', datapointPointMap)
+  // console.log('pointdatapointMap', pointdatapointMap)
+
   const resizeListener = () => {
     var canvas = document.getElementById("regl-canvas")
     var container = document.getElementById("regl-canvas-container")
@@ -297,6 +330,8 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
           canvas: canvasRef,
           deselectHandler: deselectHandler,
           selectHandler: selectCallbackOutsideReact,
+          pointOverHandler: pointOverHandler,
+          pointOutHandler: pointOutHandler,
           target: target,
           distance: maxSize * 1.2
         }
@@ -317,6 +352,9 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let showLoading = false
   if (Object.values(datapoints).length === 0) showLoading = true
 
+  const hoverDatapointObject = (hoverPointId !== undefined) ? datapoints[pointdatapointMap[hoverPointId]] : undefined
+  const uri = (hoverDatapointObject !== undefined) ? resources[hoverDatapointObject.resource_id].uri : undefined
+
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it
   // and vice versa
@@ -330,6 +368,11 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
             )
           })}
         </Select>
+        : null}
+      {(hoverPointId !== undefined) ?
+        <Box zIndex={999} width="150px" height="150px" pos="absolute" top={(mousePosition.y !== null) ? mousePosition.y + 10 : 0} left={(mousePosition.x !== null) ? mousePosition.x + 10 : 0}>
+          <DataPanelGrid datapoint={datapoints[pointdatapointMap[hoverPointId]]} index={0} />
+        </Box>
         : null}
       {
         showLoading ?

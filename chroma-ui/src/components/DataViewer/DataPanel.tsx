@@ -13,7 +13,7 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, datapointsAtom, visibleDatapointsAtom, resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom } from './atoms';
+import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
@@ -22,7 +22,7 @@ interface DataPanelGridProps {
   index: number
 }
 
-const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
+export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
   if (datapoint === undefined) return <></> // this is the case of not having a "full" row. the grid will still query for the item, but it does not exist
 
   const theme = useTheme()
@@ -30,6 +30,8 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
   const [resources] = useAtom(globalResourcesAtom)
   let [datapointModalIndex, updatedatapointModalIndex] = useAtom(datapointModalIndexAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
+  const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [labelCategories] = useAtom(object__categoriesAtom)
 
   const uri = resources[datapoint.resource_id].uri
 
@@ -52,10 +54,15 @@ const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
           <ImageRenderer imageUri={uri} annotations={datapoint.annotations} thumbnail={true} />
         </Flex>
         <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">
-          <Flex alignItems="center" >
+          <Flex alignItems="center">
             <BsTag color='#666' />
             <Text fontWeight={600} fontSize="sm" color="#666">{datapoint.tag_ids.length}</Text>
           </Flex>
+          {(contextObjectSwitcher == DataType.Object) ?
+            <Flex>
+              <Text fontWeight={600} fontSize="sm" color="#666">{labelCategories[datapoint.annotations[0].category_id].name}</Text>
+            </Flex>
+            : null}
         </Flex>
       </Flex >
     </Box >

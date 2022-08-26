@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import relationship, sessionmaker
@@ -74,15 +74,20 @@ class Resource(BaseModel, Base):
     datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="resource")
 
 
-class Tagdatapoint(BaseModel, Base):
+class Tagdatapoint(Base):
     """
     Tagdatapoint: has and belongs to many mapping table between tags and datapoints
     """
     __tablename__ = "tagdatapoints"
-    left_id = Column(ForeignKey("tags.id"), primary_key=True)
-    right_id = Column(ForeignKey("datapoints.id"), primary_key=True)
+    __table_args__ = (
+        UniqueConstraint('left_id', 'right_id', 'target'),
+    )
+    id: int = Column(Integer, primary_key=True, index=True)
+    left_id = Column(ForeignKey("tags.id"))
+    right_id = Column(ForeignKey("datapoints.id"))
     tag = relationship("Tag", back_populates="datapoints")
     datapoint = relationship("Datapoint", back_populates="tags")
+    target = Column(String, nullable=True)
 
 
 class Datapoint(BaseModel, Base):

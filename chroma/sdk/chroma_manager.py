@@ -90,6 +90,7 @@ class ChromaSDK:
             self._labels = None
             self._inferences = None
             self._embeddings = None
+            self._metadata = None
 
             self._ctx_embeddings = None
             self._object_embeddings = None
@@ -133,6 +134,7 @@ class ChromaSDK:
                     "inferenceData": json.dumps(self._inferences[index]),
                     "embeddingData": return_the_right_thing(self._embeddings, index), 
                     "resourceUri": self._resource_uris[index],
+                    'metadata': json.dumps(self._metadata[index]),
 
                     "ctxEmbeddingSetId": self._ctx_embedding_set_id,
                     "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings, index), 
@@ -204,6 +206,9 @@ class ChromaSDK:
 
     def set_labels(self, labels):
         self._data_buffer.set_data("_labels", labels)
+    
+    def set_metadata(self, metadata):
+        self._data_buffer.set_data("_metadata", metadata)
 
     # Users can call this directly, or use the forward hook
     def set_embeddings(self, embeddings):

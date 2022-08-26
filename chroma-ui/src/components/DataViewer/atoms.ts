@@ -2,37 +2,67 @@ import { atom } from "jotai"
 import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter } from "./types"
 
 // Core data atoms
-export const datapointsAtom = atom<{ [key: number]: Datapoint }>({})
-export const datasetsAtom = atom<{ [key: number]: Dataset }>({})
-export const labelsAtom = atom<{ [key: number]: Label }>({})
-export const tagsAtom = atom<{ [key: number]: Tag }>({})
-export const resourcesAtom = atom<{ [key: number]: Resource }>({})
-export const inferencesAtom = atom<{ [key: number]: Inference }>({})
-export const categoriesAtom = atom<{ [key: number]: Category }>({})
-export const projectionsAtom = atom<{ [key: number]: Projection }>({})
-export const metadataFiltersAtom = atom<{ [key: number]: any }>({})
+export const context__datapointsAtom = atom<{ [key: number]: Datapoint }>({})
+export const context__datasetsAtom = atom<{ [key: number]: Dataset }>({})
+export const context__labelsAtom = atom<{ [key: number]: Label }>({})
+export const context__tagsAtom = atom<{ [key: number]: Tag }>({})
+export const context__resourcesAtom = atom<{ [key: number]: Resource }>({})
+export const context__inferencesAtom = atom<{ [key: number]: Inference }>({})
+export const context__categoriesAtom = atom<{ [key: number]: Category }>({})
+export const context__projectionsAtom = atom<{ [key: number]: Projection }>({})
+export const context__metadataFiltersAtom = atom<{ [key: number]: any }>({})
 
-export const labelDatapointsAtom = atom<{ [key: number]: Datapoint }>({})
-export const labelDatasetsAtom = atom<{ [key: number]: Dataset }>({})
-export const labelLabelsAtom = atom<{ [key: number]: Label }>({})
-export const labelTagsAtom = atom<{ [key: number]: Tag }>({})
-export const labelResourcesAtom = atom<{ [key: number]: Resource }>({})
-export const labelInferencesAtom = atom<{ [key: number]: Inference }>({})
-export const labelCategoriesAtom = atom<{ [key: number]: Category }>({})
-export const labelProjectionsAtom = atom<{ [key: number]: Projection }>({})
-export const labelMetadataFiltersAtom = atom<{ [key: number]: any }>({})
+export const object__datapointsAtom = atom<{ [key: number]: Datapoint }>({})
+export const object__datasetsAtom = atom<{ [key: number]: Dataset }>({})
+export const object__labelsAtom = atom<{ [key: number]: Label }>({})
+export const object__tagsAtom = atom<{ [key: number]: Tag }>({})
+export const object__resourcesAtom = atom<{ [key: number]: Resource }>({})
+export const object__inferencesAtom = atom<{ [key: number]: Inference }>({})
+export const object__categoriesAtom = atom<{ [key: number]: Category }>({})
+export const object__projectionsAtom = atom<{ [key: number]: Projection }>({})
+export const object__metadataFiltersAtom = atom<{ [key: number]: any }>({})
 
 export const globalProjectionsAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(projectionsAtom)
-        return get(labelProjectionsAtom)
+        if (contextObject == DataType.Context) return get(context__projectionsAtom)
+        return get(object__projectionsAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = projectionsAtom
-        if (contextObject == DataType.Object) localAtom = labelProjectionsAtom
+        if (contextObject == DataType.Context) localAtom = context__projectionsAtom
+        if (contextObject == DataType.Object) localAtom = object__labelsAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
+export const globalTagsAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__tagsAtom)
+        return get(object__tagsAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__tagsAtom
+        if (contextObject == DataType.Object) localAtom = object__tagsAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
+export const globalCategoriesAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__categoriesAtom)
+        return get(object__categoriesAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__categoriesAtom
+        if (contextObject == DataType.Object) localAtom = object__categoriesAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -40,14 +70,14 @@ export const globalProjectionsAtom = atom(
 export const globalDatapointAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(datapointsAtom)
-        return get(labelDatapointsAtom)
+        if (contextObject == DataType.Context) return get(context__datapointsAtom)
+        return get(object__datapointsAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = datapointsAtom
-        if (contextObject == DataType.Object) localAtom = labelDatapointsAtom
+        if (contextObject == DataType.Context) localAtom = context__datapointsAtom
+        if (contextObject == DataType.Object) localAtom = object__datapointsAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -55,14 +85,14 @@ export const globalDatapointAtom = atom(
 export const globalResourcesAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(resourcesAtom)
-        return get(labelResourcesAtom)
+        if (contextObject == DataType.Context) return get(context__resourcesAtom)
+        return get(object__resourcesAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = resourcesAtom
-        if (contextObject == DataType.Object) localAtom = labelResourcesAtom
+        if (contextObject == DataType.Context) localAtom = context__resourcesAtom
+        if (contextObject == DataType.Object) localAtom = object__resourcesAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -120,29 +150,29 @@ export enum DataType {
 export const contextObjectSwitcherAtom = atom<number>(DataType.Context)
 
 // Filter state
-export const inferenceFilterAtom = atom<Filter | undefined>(undefined)
-export const categoryFilterAtom = atom<Filter | undefined>(undefined)
-export const tagFilterAtom = atom<Filter | undefined>(undefined)
-export const qualityFilterAtom = atom<Filter | undefined>(undefined)
-export const datasetFilterAtom = atom<Filter | undefined>(undefined)
+export const context__inferenceFilterAtom = atom<Filter | undefined>(undefined)
+export const context__categoryFilterAtom = atom<Filter | undefined>(undefined)
+export const context__tagFilterAtom = atom<Filter | undefined>(undefined)
+export const context__qualityFilterAtom = atom<Filter | undefined>(undefined)
+export const context__datasetFilterAtom = atom<Filter | undefined>(undefined)
 
-export const labelInferenceFilterAtom = atom<Filter | undefined>(undefined)
-export const labelCategoryFilterAtom = atom<Filter | undefined>(undefined)
-export const labelTagFilterAtom = atom<Filter | undefined>(undefined)
-export const labelQualityFilterAtom = atom<Filter | undefined>(undefined)
-export const labelDatasetFilterAtom = atom<Filter | undefined>(undefined)
+export const object__inferenceFilterAtom = atom<Filter | undefined>(undefined)
+export const object__categoryFilterAtom = atom<Filter | undefined>(undefined)
+export const object__tagFilterAtom = atom<Filter | undefined>(undefined)
+export const object__qualityFilterAtom = atom<Filter | undefined>(undefined)
+export const object__datasetFilterAtom = atom<Filter | undefined>(undefined)
 
 export const globalCategoryFilterAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(categoryFilterAtom)
-        return get(labelCategoryFilterAtom)
+        if (contextObject == DataType.Context) return get(context__categoryFilterAtom)
+        return get(object__categoryFilterAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = categoryFilterAtom
-        if (contextObject == DataType.Object) localAtom = labelCategoryFilterAtom
+        if (contextObject == DataType.Context) localAtom = context__categoryFilterAtom
+        if (contextObject == DataType.Object) localAtom = object__categoryFilterAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -150,14 +180,14 @@ export const globalCategoryFilterAtom = atom(
 export const globalDatasetFilterAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(datasetFilterAtom)
-        return get(labelDatasetFilterAtom)
+        if (contextObject == DataType.Context) return get(context__datasetFilterAtom)
+        return get(object__datasetFilterAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = datasetFilterAtom
-        if (contextObject == DataType.Object) localAtom = labelDatasetFilterAtom
+        if (contextObject == DataType.Context) localAtom = context__datasetFilterAtom
+        if (contextObject == DataType.Object) localAtom = object__datasetFilterAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -165,14 +195,14 @@ export const globalDatasetFilterAtom = atom(
 export const globalMetadataFilterAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(metadataFiltersAtom)
-        return get(labelMetadataFiltersAtom)
+        if (contextObject == DataType.Context) return get(context__metadataFiltersAtom)
+        return get(object__metadataFiltersAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = metadataFiltersAtom
-        if (contextObject == DataType.Object) localAtom = labelMetadataFiltersAtom
+        if (contextObject == DataType.Context) localAtom = context__metadataFiltersAtom
+        if (contextObject == DataType.Object) localAtom = object__metadataFiltersAtom
         // @ts-ignore
         set(localAtom, dps!)
     })
@@ -180,14 +210,15 @@ export const globalMetadataFilterAtom = atom(
 export const globalTagFilterAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
-        if (contextObject == DataType.Context) return get(tagFilterAtom)
+        if (contextObject == DataType.Context) return get(context__tagFilterAtom)
+        if (contextObject == DataType.Object) return get(object__tagFilterAtom)
         return undefined
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = tagsAtom
-        if (contextObject == DataType.Object) localAtom = undefined
+        if (contextObject == DataType.Context) localAtom = context__tagsAtom
+        if (contextObject == DataType.Object) localAtom = object__tagsAtom
         // @ts-ignore
         set(localAtom, dps!)
     })

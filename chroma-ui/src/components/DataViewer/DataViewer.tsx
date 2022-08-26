@@ -7,7 +7,10 @@ import DataPanel from './DataPanel';
 import { getDatapointsForProject, GetProjectAndProjectionSets, getProjectionsForProjectionSet, getTotalDatapointsToFetch } from './DataViewerApi';
 import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
-import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, inferenceFilterAtom, categoryFilterAtom, metadataFiltersAtom, globalDatapointAtom, labelLabelsAtom, labelTagsAtom, labelResourcesAtom, labelInferenceFilterAtom, labelDatasetsAtom, labelCategoriesAtom, labelProjectionsAtom, labelMetadataFiltersAtom, labelDatapointsAtom } from './atoms';
+import {
+  context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, context__metadataFiltersAtom, globalDatapointAtom,
+  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom
+} from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
 import FilterSidebar from './FilterSidebar';
@@ -93,8 +96,7 @@ function bumpIds(start: number, object: {}) {
 }
 
 const SERVER_PAGE_SIZE = 10000
-const projectionsWorker: Worker = new Worker('/workers/processProjections.js')
-const projectionsWorker2: Worker = new Worker('/workers/processProjections.js')
+
 
 const DataViewer = () => {
   const theme = useTheme()
@@ -102,26 +104,25 @@ const DataViewer = () => {
   const projectId = parseInt(params.project_id!, 10)
 
   // Atoms
-  const [datapoints, updatedatapoints] = useAtom(globalDatapointAtom)
+  const [context__datapoints, updatedatapoints] = useAtom(globalDatapointAtom)
+  const [context__labels, updatelabels] = useAtom(context__labelsAtom)
+  const [context__tags, updatetags] = useAtom(context__tagsAtom)
+  const [context__resources, updateresources] = useAtom(context__resourcesAtom)
+  const [context__inferences, updateinferences] = useAtom(context__inferencesAtom)
+  const [context__datasets, updatedatasets] = useAtom(context__datasetsAtom)
+  const [context__categories, updatecategories] = useAtom(context__categoriesAtom)
+  const [context__projections, updateprojections] = useAtom(context__projectionsAtom)
+  const [context__metadataFilters, updateMetadataFilters] = useAtom(context__metadataFiltersAtom)
 
-  const [labels, updatelabels] = useAtom(labelsAtom)
-  const [tags, updatetags] = useAtom(tagsAtom)
-  const [resources, updateresources] = useAtom(resourcesAtom)
-  const [inferences, updateinferences] = useAtom(inferencesAtom)
-  const [datasets, updatedatasets] = useAtom(datasetsAtom)
-  const [categories, updatecategories] = useAtom(categoriesAtom)
-  const [projections, updateprojections] = useAtom(projectionsAtom)
-  const [metadataFilters, updateMetadataFilters] = useAtom(metadataFiltersAtom)
-
-  const [labeldatapoints, updatelabeldatapoints] = useAtom(labelDatapointsAtom)
-  const [labellabels, updatelabellabels] = useAtom(labelLabelsAtom)
-  const [labeltags, updatelabeltags] = useAtom(labelTagsAtom)
-  const [labelresources, updatelabelresources] = useAtom(labelResourcesAtom)
-  const [labelinferences, updatelabelinferences] = useAtom(labelInferenceFilterAtom)
-  const [labeldatasets, updatelabeldatasets] = useAtom(labelDatasetsAtom)
-  const [labelcategories, updatelabelcategories] = useAtom(labelCategoriesAtom)
-  const [labelprojections, updatelabelprojections] = useAtom(labelProjectionsAtom)
-  const [labelmetadataFilters, updatelabelMetadataFilters] = useAtom(labelMetadataFiltersAtom)
+  const [object__datapoints, updateobjectdatapoints] = useAtom(object__datapointsAtom)
+  const [object__labels, updateobjectlabels] = useAtom(object__labelsAtom)
+  const [object__tags, updateobjecttags] = useAtom(object__tagsAtom)
+  const [object__resources, updateobjectresources] = useAtom(object__resourcesAtom)
+  // const [object__inferences, updateobjectinferences] = useAtom(labelInferenceFilterAtom)
+  const [object__datasets, updateobjectdatasets] = useAtom(object__datasetsAtom)
+  const [object__categories, updateobjectcategories] = useAtom(object__categoriesAtom)
+  const [object__projections, updateobjectprojections] = useAtom(object__projectionsAtom)
+  const [object__metadataFilters, updateobjectMetadataFilters] = useAtom(object__metadataFiltersAtom)
 
   // UI State
   const [totalDatapointsToFetch, setTotalDatapointsToFetch] = useState<number | null>(null)
@@ -146,44 +147,43 @@ const DataViewer = () => {
     if (allFetched != true) return
     if (result.data.projectionSets.length === 0) {
       // normally would return, but we are going to shove in some data here...... 
+      // let stubbedProjections: any[] = []
+      // Object.values(datapoints).map(dp => {
+      //   stubbedProjections.push({
+      //     id: dp.id,
+      //     x: Math.random() * 100,
+      //     y: Math.random() * 100,
+      //     embedding: {
+      //       datapoint_id: dp.id
+      //     }
+      //   })
+      // })
+      // projectionsWorker.postMessage({ projections: stubbedProjections, datapoints: datapoints })
+      // projectionsWorker.onmessage = (e: MessageEvent) => {
+      //   updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
+      //   updateprojections(e.data.projections)
+      //   setProcessingProjections(false)
+      //   setProcessingDatapoints(false)
+      // }
 
-      let stubbedProjections: any[] = []
-      Object.values(datapoints).map(dp => {
-        stubbedProjections.push({
-          id: dp.id,
-          x: Math.random() * 100,
-          y: Math.random() * 100,
-          embedding: {
-            datapoint_id: dp.id
-          }
-        })
-      })
-      projectionsWorker.postMessage({ projections: stubbedProjections, datapoints: datapoints })
-      projectionsWorker.onmessage = (e: MessageEvent) => {
-        updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
-        updateprojections(e.data.projections)
-        setProcessingProjections(false)
-        setProcessingDatapoints(false)
-      }
-
-      let labelstubbedProjections: any[] = []
-      Object.values(labeldatapoints).map(dp => {
-        labelstubbedProjections.push({
-          id: dp.id,
-          x: Math.random() * 100,
-          y: Math.random() * 100,
-          embedding: {
-            datapoint_id: dp.id
-          }
-        })
-      })
-      projectionsWorker2.postMessage({ projections: labelstubbedProjections, datapoints: labeldatapoints })
-      projectionsWorker2.onmessage = (e: MessageEvent) => {
-        updatelabeldatapoints({ ...{ ...labeldatapoints }, ...e.data.datapoints })
-        updatelabelprojections(e.data.projections)
-        setProcessingProjections(false)
-        setProcessingDatapoints(false)
-      }
+      // let labelstubbedProjections: any[] = []
+      // Object.values(labeldatapoints).map(dp => {
+      //   labelstubbedProjections.push({
+      //     id: dp.id,
+      //     x: Math.random() * 100,
+      //     y: Math.random() * 100,
+      //     embedding: {
+      //       datapoint_id: dp.id
+      //     }
+      //   })
+      // })
+      // projectionsWorker2.postMessage({ projections: labelstubbedProjections, datapoints: labeldatapoints })
+      // projectionsWorker2.onmessage = (e: MessageEvent) => {
+      //   updatecontextdatapoints({ ...{ ...labeldatapoints }, ...e.data.datapoints })
+      //   updatelabelprojections(e.data.projections)
+      //   setProcessingProjections(false)
+      //   setProcessingDatapoints(false)
+      // }
       return
     }
 
@@ -192,24 +192,28 @@ const DataViewer = () => {
     const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
 
     for (let index = 0; index < projectionsSetsToFetch.length; index++) {
+      let projectionsWorker: Worker = new Worker('/workers/processProjections.js')
       getProjectionsForProjectionSet(projectionsSetsToFetch[index].id, (projectionsResponse: any) => {
         let contextObjectDatapoints
         if (projectionsResponse.setType == 'object') {
-          contextObjectDatapoints = labeldatapoints
+          contextObjectDatapoints = object__datapoints
         } else {
-          contextObjectDatapoints = datapoints
+          contextObjectDatapoints = context__datapoints
         }
         projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: contextObjectDatapoints })
         projectionsWorker.onmessage = (e: MessageEvent) => {
+          // console.log('onmessage callback', e)
           if (e.data.setType == 'object') {
-            updatelabelprojections(e.data.projections)
+            console.log('setting object projections')
+            updateobjectprojections(e.data.projections)
           } else {
+            console.log('setting context projections')
             updateprojections(e.data.projections)
           }
           if (e.data.setType == 'object') {
-            updatelabeldatapoints({ ...{ ...labeldatapoints }, ...e.data.datapoints })
+            updateobjectdatapoints({ ...{ ...object__datapoints }, ...e.data.datapoints })
           } else {
-            updatedatapoints({ ...{ ...datapoints }, ...e.data.datapoints })
+            updatedatapoints({ ...{ ...context__datapoints }, ...e.data.datapoints })
           }
 
           setProcessingProjections(false)
@@ -223,73 +227,92 @@ const DataViewer = () => {
 
   const hydrateAtoms = (normalizedData: any, len: number, prevPage: number) => {
 
+    // since our object__ ids are created on the fly, but our webworker is currently ignorant of existing ides
+    // when paging in new data, we want to adjust the ids so they don't collide with existing data
+
     // @ts-ignore
-    normalizedData.inferenceDatapoints = resetDatapointIds(Object.values(labeldatapoints).length, Object.values(labelresources).length, normalizedData.inferenceDatapoints)
-    normalizedData.inferenceResources = resetIds(Object.values(labelresources).length, normalizedData.inferenceResources)
-    normalizedData.inferenceLabels = resetIds(Object.values(labellabels).length, normalizedData.inferenceLabels)
-    normalizedData.inferenceCategories = bumpIds(Object.values(labeldatapoints).length, normalizedData.inferenceCategories)
+    normalizedData.object__datapoints = resetDatapointIds(Object.values(object__datapoints).length, Object.values(object__resources).length, normalizedData.object__datapoints)
+    normalizedData.object__resources = resetIds(Object.values(object__resources).length, normalizedData.object__resources)
+    normalizedData.object__labels = resetIds(Object.values(object__labels).length, normalizedData.object__labels)
+    normalizedData.object__categories = bumpIds(Object.values(object__datapoints).length, normalizedData.object__categories)
+
+    // for new data that is paged in, we want to merge it in cleanly...... 
+    // but deep merge doesn't work, so we have to do that manually for a bunch of objects
 
     // deep merge datapoint id lists for tags and categories and datasets
-    Object.keys(normalizedData.categories).map((item: any, index: number) => {
-      let category = categories[item]
+    Object.keys(normalizedData.context__categories).map((item: any, index: number) => {
+      let category = context__categories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
-      let newVals = (normalizedData.categories[item].datapoint_ids !== undefined) ? normalizedData.categories[item].datapoint_ids : []
-      normalizedData.categories[item].datapoint_ids = [...newVals, ...existing]
+      let newVals = (normalizedData.context__categories[item].datapoint_ids !== undefined) ? normalizedData.context__categories[item].datapoint_ids : []
+      normalizedData.context__categories[item].datapoint_ids = [...newVals, ...existing]
     })
-    Object.keys(normalizedData.inferenceCategories).map((item: any, index: number) => {
-      let category = labelcategories[item]
+    Object.keys(normalizedData.object__categories).map((item: any, index: number) => {
+      let category = object__categories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
-      let newVals = (normalizedData.inferenceCategories[item].datapoint_ids !== undefined) ? normalizedData.inferenceCategories[item].datapoint_ids : []
-      normalizedData.inferenceCategories[item].datapoint_ids = [...newVals, ...existing]
+      let newVals = (normalizedData.object__categories[item].datapoint_ids !== undefined) ? normalizedData.object__categories[item].datapoint_ids : []
+      normalizedData.object__categories[item].datapoint_ids = [...newVals, ...existing]
     })
-    Object.keys(normalizedData.tags).map((key: any, index: number) => {
-      let item = tags[key]
+    Object.keys(normalizedData.context__tags).map((key: any, index: number) => {
+      let item = context__tags[key]
       let existing = (item !== undefined) ? item.datapoint_ids : []
-      normalizedData.tags[key].datapoint_ids = [...normalizedData.tags[key].datapoint_ids, ...existing]
+      normalizedData.context__tags[key].datapoint_ids = [...normalizedData.context__tags[key].datapoint_ids, ...existing]
     })
-    Object.keys(normalizedData.datasets).map((key: any, index: number) => {
-      let item = datasets[key]
+    Object.keys(normalizedData.object__tags).map((key: any, index: number) => {
+      let item = object__tags[key]
       let existing = (item !== undefined) ? item.datapoint_ids : []
-      normalizedData.datasets[key].datapoint_ids = [...normalizedData.datasets[key].datapoint_ids, ...existing]
+      normalizedData.object__tags[key].datapoint_ids = [...normalizedData.object__tags[key].datapoint_ids, ...existing]
     })
-    Object.keys(normalizedData.metadataFilters).map((key: any, index: number) => {
-      let item = metadataFilters[key]
+    Object.keys(normalizedData.context__datasets).map((key: any, index: number) => {
+      let item = context__datasets[key]
+      let existing = (item !== undefined) ? item.datapoint_ids : []
+      normalizedData.context__datasets[key].datapoint_ids = [...normalizedData.context__datasets[key].datapoint_ids, ...existing]
+    })
+    // TODO: do this for object__datasets?
+
+    // Now we want to take our metadata filters and post process them
+
+    Object.keys(normalizedData.context__metadataFilters).map((key: any, index: number) => {
+      let item = context__metadataFilters[key]
       if (item === undefined) item = { options: {} }
 
-      var allNumbers = Object.values(item.options).map((op: any) => !(typeof op.id === 'number')).includes(false)
+      // see if all the options are numbers, and if so change this over to a range slider from a discrete pick list
+      var allNumbers = Object.values(normalizedData.context__metadataFilters[key].options).map((op: any) => !(typeof op.id === 'number')).includes(false)
       if (allNumbers) {
-        normalizedData.metadataFilters[key].type = FilterType.Continuous
-        normalizedData.metadataFilters[key].range = { min: Infinity, max: -Infinity, minVisible: Infinity, maxVisible: -Infinity }
-        Object.values(normalizedData.metadataFilters[key].options).map((op: any) => {
-          if (op.id < normalizedData.metadataFilters[key].range.min) {
-            normalizedData.metadataFilters[key].range.min = op.id
-            normalizedData.metadataFilters[key].range.minVisible = normalizedData.metadataFilters[key].range.min
+        normalizedData.context__metadataFilters[key].type = FilterType.Continuous
+        normalizedData.context__metadataFilters[key].range = { min: Infinity, max: -Infinity, minVisible: Infinity, maxVisible: -Infinity }
+        Object.values(normalizedData.context__metadataFilters[key].options).map((op: any) => {
+          if (op.id < normalizedData.context__metadataFilters[key].range.min) {
+            normalizedData.context__metadataFilters[key].range.min = op.id
+            normalizedData.context__metadataFilters[key].range.minVisible = normalizedData.context__metadataFilters[key].range.min
           }
-          if (op.id > normalizedData.metadataFilters[key].range.max) {
-            normalizedData.metadataFilters[key].range.max = op.id
-            normalizedData.metadataFilters[key].range.maxVisible = normalizedData.metadataFilters[key].range.max
+          if (op.id > normalizedData.context__metadataFilters[key].range.max) {
+            normalizedData.context__metadataFilters[key].range.max = op.id
+            normalizedData.context__metadataFilters[key].range.maxVisible = normalizedData.context__metadataFilters[key].range.max
           }
         })
       }
 
+      // deep merge datapoints ids with existing data
       Object.values(item.options).map((option: any) => {
         let item2 = item.linkedAtom[option.id]
         let existing = (item2 !== undefined) ? item2.datapoint_ids : []
-        normalizedData.metadataFilters[key].linkedAtom[option.id].datapoint_ids = [...normalizedData.metadataFilters[key].linkedAtom[option.id].datapoint_ids, ...existing]
+        normalizedData.context__metadataFilters[key].linkedAtom[option.id].datapoint_ids = [...normalizedData.context__metadataFilters[key].linkedAtom[option.id].datapoint_ids, ...existing]
       })
 
-      normalizedData.metadataFilters[key].options = Object.values(normalizedData.metadataFilters[key].options)
+      // convert from object key-value to array
+      normalizedData.context__metadataFilters[key].options = Object.values(normalizedData.context__metadataFilters[key].options)
 
-      if (normalizedData.metadataFilters[key].type == FilterType.Discrete) {
-        normalizedData.metadataFilters[key].options.map((option: any) => {
+      // add the eval function for this metadata filter
+      if (normalizedData.context__metadataFilters[key].type == FilterType.Discrete) {
+        normalizedData.context__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
             // @ts-ignore
             if ((option.visible == false) && (datapoint.metadata[key] == option.id)) return true
             else return false
           }
         })
-      } else if (normalizedData.metadataFilters[key].type == FilterType.Continuous) {
-        normalizedData.metadataFilters[key].options.map((option: any) => {
+      } else if (normalizedData.context__metadataFilters[key].type == FilterType.Continuous) {
+        normalizedData.context__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
             if ((datapoint.metadata[key] >= f.range.maxVisible) || (datapoint.metadata[key] <= f.range.minVisible)) {
@@ -299,26 +322,77 @@ const DataViewer = () => {
           }
         })
       }
-
     })
 
-    updateMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.metadataFilters })
-    updatedatapoints({ ...{ ...datapoints }, ...normalizedData.datapoints })
-    updatedatasets({ ...{ ...datasets }, ...normalizedData.datasets })
-    updatelabels({ ...{ ...labels }, ...normalizedData.labels })
-    updateresources({ ...{ ...resources }, ...normalizedData.resources })
-    updateinferences({ ...{ ...inferences }, ...normalizedData.inferences })
-    updatetags({ ...{ ...tags }, ...normalizedData.tags })
-    updatecategories({ ...{ ...categories }, ...normalizedData.categories })
+    Object.keys(normalizedData.object__metadataFilters).map((key: any, index: number) => {
+      let item = context__metadataFilters[key]
+      if (item === undefined) item = { options: {} }
 
-    updatelabelMetadataFilters({ ...{ ...metadataFilters }, ...normalizedData.labelMetadataFilters })
-    updatelabeldatapoints({ ...{ ...labeldatapoints }, ...normalizedData.inferenceDatapoints })
-    updatelabeldatasets({ ...{ ...labeldatasets }, ...normalizedData.inferenceDatasets })
-    updatelabellabels({ ...{ ...labellabels }, ...normalizedData.labelLabels })
-    updatelabelresources({ ...{ ...labelresources }, ...normalizedData.inferenceResources })
-    updatelabelinferences({ ...{ ...labelinferences }, ...normalizedData.labelInferences })
-    updatelabeltags({ ...{ ...labeltags }, ...normalizedData.labelTags })
-    updatelabelcategories({ ...{ ...labelcategories }, ...normalizedData.inferenceCategories })
+      // see if all the options are numbers, and if so change this over to a range slider from a discrete pick list
+      var allNumbers = Object.values(normalizedData.object__metadataFilters[key].options).map((op: any) => !(typeof op.id === 'number')).includes(false)
+      if (allNumbers) {
+        normalizedData.object__metadataFilters[key].type = FilterType.Continuous
+        normalizedData.object__metadataFilters[key].range = { min: Infinity, max: -Infinity, minVisible: Infinity, maxVisible: -Infinity }
+        Object.values(normalizedData.object__metadataFilters[key].options).map((op: any) => {
+          if (op.id < normalizedData.object__metadataFilters[key].range.min) {
+            normalizedData.object__metadataFilters[key].range.min = op.id
+            normalizedData.object__metadataFilters[key].range.minVisible = normalizedData.object__metadataFilters[key].range.min
+          }
+          if (op.id > normalizedData.object__metadataFilters[key].range.max) {
+            normalizedData.object__metadataFilters[key].range.max = op.id
+            normalizedData.object__metadataFilters[key].range.maxVisible = normalizedData.object__metadataFilters[key].range.max
+          }
+        })
+      }
+
+      // deep merge datapoints ids with existing data
+      Object.values(item.options).map((option: any) => {
+        let item2 = item.linkedAtom[option.id]
+        let existing = (item2 !== undefined) ? item2.datapoint_ids : []
+        normalizedData.object__metadataFilters[key].linkedAtom[option.id].datapoint_ids = [...normalizedData.object__metadataFilters[key].linkedAtom[option.id].datapoint_ids, ...existing]
+      })
+
+      // convert from object key-value to array
+      normalizedData.object__metadataFilters[key].options = Object.values(normalizedData.object__metadataFilters[key].options)
+
+      // add the eval function for this metadata filter
+      if (normalizedData.object__metadataFilters[key].type == FilterType.Discrete) {
+        normalizedData.object__metadataFilters[key].options.map((option: any) => {
+          option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
+            // @ts-ignore
+            if ((option.visible == false) && (datapoint.annotations[0].metadata[key] == option.id)) return true
+            else return false
+          }
+        })
+      } else if (normalizedData.object__metadataFilters[key].type == FilterType.Continuous) {
+        normalizedData.object__metadataFilters[key].options.map((option: any) => {
+          option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
+            // @ts-ignore
+            if ((datapoint.annotations[0].metadata[key] >= f.range.maxVisible) || (datapoint.annotations[0].metadata[key] <= f.range.minVisible)) {
+              return true
+            }
+            else return false
+          }
+        })
+      }
+    })
+
+    updateMetadataFilters({ ...{ ...context__metadataFilters }, ...normalizedData.context__metadataFilters })
+    updatedatapoints({ ...{ ...context__datapoints }, ...normalizedData.context__datapoints })
+    updatedatasets({ ...{ ...context__datasets }, ...normalizedData.context__datasets })
+    updatelabels({ ...{ ...context__labels }, ...normalizedData.context__labels })
+    updateresources({ ...{ ...context__resources }, ...normalizedData.context__resources })
+    updateinferences({ ...{ ...context__inferences }, ...normalizedData.context__inferences })
+    updatetags({ ...{ ...context__tags }, ...normalizedData.context__tags })
+    updatecategories({ ...{ ...context__categories }, ...normalizedData.context__categories })
+
+    updateobjectMetadataFilters({ ...{ ...object__metadataFilters }, ...normalizedData.object__metadataFilters })
+    updateobjectdatapoints({ ...{ ...object__datapoints }, ...normalizedData.object__datapoints })
+    updateobjectdatasets({ ...{ ...object__datasets }, ...normalizedData.object__datasets })
+    updateobjectlabels({ ...{ ...object__labels }, ...normalizedData.object__labels })
+    updateobjectresources({ ...{ ...object__resources }, ...normalizedData.object__resources })
+    updateobjecttags({ ...{ ...object__tags }, ...normalizedData.object__tags })
+    updateobjectcategories({ ...{ ...object__categories }, ...normalizedData.object__categories })
 
     setProcessingDatapoints(false)
     setDatapointsFetched(datapointsFetched + len)

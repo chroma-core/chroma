@@ -84,20 +84,12 @@ fragment ProjectionSetFields on ProjectionSet {
   }
 }
 
-fragment ProjectionSetLightFields on ProjectionSetLight {
-  id
-  projections {
-    id
-    x
-    y
-  }
-}
 
-query getProjectionSets {
-  projectionSets {
-    ...ProjectionSetFields
-  }
-}
+# query getProjectionSets {
+#   projectionSets {
+#     ...ProjectionSetFields
+#   }
+# }
 
 input ProjectionSetInput {
   embeddingSetId: Int
@@ -116,9 +108,7 @@ mutation AddProjectionSet($projectionSetInput: ProjectionSetInput!) {
 # Embeddings
 fragment EmbeddingFields on Embedding {
   id
-  label
-  inputIdentifier
-  inferenceIdentifier
+  data
 }
 
 query getEmbeddings {
@@ -167,57 +157,57 @@ query embeddingsByPage ($pageInput: PageInput!) {
     }
 }
 
-input EmbeddingInput {
-  data: String
-  inferenceIdentifier: String
-  label: String
-  inputIdentifier: String
-  embeddingSetId: Int
-}
+# input EmbeddingInput {
+#   data: String
+#   inferenceIdentifier: String
+#   label: String
+#   inputIdentifier: String
+#   embeddingSetId: Int
+# }
 
-input EmbeddingsInput {
-    embeddings: [EmbeddingInput!]! 
-}
+# input EmbeddingsInput {
+#     embeddings: [EmbeddingInput!]! 
+# }
 
-mutation AddEmbedding($embeddingInput: EmbeddingInput!) {
-  addEmbedding(embeddingInput: $embeddingInput) {
-    __typename
-    ... on EmbeddingExists {
-      __typename
-      message
-    }
-    ... on Embedding {
-      __typename
-      ...EmbeddingFields
-    }
-  }
-}
+# mutation AddEmbedding($embeddingInput: EmbeddingInput!) {
+#   addEmbedding(embeddingInput: $embeddingInput) {
+#     __typename
+#     ... on EmbeddingExists {
+#       __typename
+#       message
+#     }
+#     ... on Embedding {
+#       __typename
+#       ...EmbeddingFields
+#     }
+#   }
+# }
 
 # EmbeddingSet
-fragment EmbeddingSetFields on EmbeddingSet {
-  id
-}
+# fragment EmbeddingSetFields on EmbeddingSet {
+#   id
+# }
 
-query getEmbeddingSets {
-  embeddingSets {
-    ...EmbeddingSetFields
-  }
-}
+# query getEmbeddingSets {
+#   embeddingSets {
+#     ...EmbeddingSetFields
+#   }
+# }
 
-query getEmbeddingSet($id: ID!) {
-  embeddingSet(id: $id) {
-    ...EmbeddingSetFields
-  }
-}
+# query getEmbeddingSet($id: ID!) {
+#   embeddingSet(id: $id) {
+#     ...EmbeddingSetFields
+#   }
+# }
 
 # leave in as part of subscription example
 # subscription getCounter {
 #   count(target: 50)
 # }
 
-mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
 	appendTagByNameToDatapoints(data: {
-		tagName: $tagName, datapointIds: $datapointIds
+		tagName: $tagName, datapointIds: $datapointIds, target: $target
 	} ) {
 		id
 		tags {
@@ -227,9 +217,9 @@ mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
 	}
 }
 
-mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
 	removeTagFromDatapoints(data: {
-		tagName: $tagName, datapointIds: $datapointIds
+		tagName: $tagName, datapointIds: $datapointIds, target: $target
 	} ) {
 		... on ObjectDeleted {
       message

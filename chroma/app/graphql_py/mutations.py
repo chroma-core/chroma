@@ -225,8 +225,8 @@ class TagToDataPointsInput:
 @strawberry.input
 class TagByNameToDataPointsInput:
     tagName: str
+    target: Optional[list[str]]
     datapointIds: Optional[list[int]]
-
 
 @strawberry.type
 class Mutation:
@@ -254,7 +254,11 @@ class Mutation:
             tag = (await s.execute(sql)).scalars().first()
             await s.flush()
 
-            for datapointId in data.datapointIds:
+            targetData = [None for element in range(len(data.datapointIds))]
+            if (data.target != None):
+                targetData = data.target
+
+            for datapointId, target in zip(data.datapointIds, targetData):
                 sql = (
                     select(models.Datapoint)
                     .where(models.Datapoint.id == datapointId)
@@ -267,6 +271,7 @@ class Mutation:
                 query = (
                     delete(models.Tagdatapoint)
                     .where(models.Tagdatapoint.tag == tag)
+                    .where(models.Tagdatapoint.target == target)
                     .where(models.Tagdatapoint.datapoint == datapoint)
                 )
                 await s.execute(query)
@@ -279,32 +284,32 @@ class Mutation:
 
         return ObjectDeleted
 
-    @strawberry.mutation
-    async def remove_tag_from_datapoint(self, data: TagToDataPointInput) -> ObjectDeleted:
-        async with models.get_session() as s:
-            sql = select(models.Tag).where(models.Tag.id == data.tagId)
-            tag = (await s.execute(sql)).scalar_one()
-            sql = (
-                select(models.Datapoint)
-                .where(models.Datapoint.id == data.datapointId)
-                .options(selectinload(models.Datapoint.tags))
-            )
-            datapoint = (await s.execute(sql)).scalar_one()
+    # @strawberry.mutation
+    # async def remove_tag_from_datapoint(self, data: TagToDataPointInput) -> ObjectDeleted:
+    #     async with models.get_session() as s:
+    #         sql = select(models.Tag).where(models.Tag.id == data.tagId)
+    #         tag = (await s.execute(sql)).scalar_one()
+    #         sql = (
+    #             select(models.Datapoint)
+    #             .where(models.Datapoint.id == data.datapointId)
+    #             .options(selectinload(models.Datapoint.tags))
+    #         )
+    #         datapoint = (await s.execute(sql)).scalar_one()
 
-            # you have to explicitly delete this via the association
-            # there has to be a better way of doing this......
-            query = (
-                delete(models.Tagdatapoint)
-                .where(models.Tagdatapoint.tag == tag)
-                .where(models.Tagdatapoint.datapoint == datapoint)
-            )
-            await s.execute(query)
-            try:
-                await s.commit()
-            except Exception:
-                await s.rollback()
-                raise
-        return ObjectDeleted
+    #         # you have to explicitly delete this via the association
+    #         # there has to be a better way of doing this......
+    #         query = (
+    #             delete(models.Tagdatapoint)
+    #             .where(models.Tagdatapoint.tag == tag)
+    #             .where(models.Tagdatapoint.datapoint == datapoint)
+    #         )
+    #         await s.execute(query)
+    #         try:
+    #             await s.commit()
+    #         except Exception:
+    #             await s.rollback()
+    #             raise
+    #     return ObjectDeleted
 
     @strawberry.mutation
     async def append_tag_by_name_to_datapoints(
@@ -319,9 +324,13 @@ class Mutation:
                 s.add(tag)
                 await s.flush()
 
+            targetData = [None for element in range(len(data.datapointIds))]
+            if (data.target != None):
+                targetData = data.target
+
             datapoints = []
             tagdatapoints_to_add = []
-            for datapointId in data.datapointIds:
+            for datapointId, target in zip(data.datapointIds, targetData):
                 sql = (
                     select(models.Datapoint)
                     .where(models.Datapoint.id == datapointId)
@@ -329,10 +338,11 @@ class Mutation:
                 )
                 datapoint = (await s.execute(sql)).scalar_one()
 
-                tagdatapoints_to_add.append(dict(left_id=tag.id, right_id=datapoint.id))
+                tagdatapoints_to_add.append(dict(left_id=tag.id, right_id=datapoint.id, target=target))
                 s.add(datapoint)
                 datapoints.append(datapoint)
 
+            # raise Exception(str(tagdatapoints_to_add))
             # we have to add things this way to avoid the key constraint
             # throwing an error if there is a duplicate. we just want to ignore that case
             await s.execute(
@@ -340,55 +350,56 @@ class Mutation:
             )
             await s.flush()
             await s.commit()
+
         return [Datapoint.marshal(loc) for loc in datapoints]
 
-    @strawberry.mutation
-    async def append_tag_to_datapoints(self, data: TagToDataPointsInput) -> list[Datapoint]:
-        async with models.get_session() as s:
-            sql = select(models.Tag).where(models.Tag.id == data.tagId)
-            tag = (await s.execute(sql)).scalar_one()
+    # @strawberry.mutation
+    # async def append_tag_to_datapoints(self, data: TagToDataPointsInput) -> list[Datapoint]:
+    #     async with models.get_session() as s:
+    #         sql = select(models.Tag).where(models.Tag.id == data.tagId)
+    #         tag = (await s.execute(sql)).scalar_one()
 
-            datapoints = []
-            for datapointId in data.datapointIds:
-                sql = (
-                    select(models.Datapoint)
-                    .where(models.Datapoint.id == datapointId)
-                    .options(selectinload(models.Datapoint.tags))
-                )
-                datapoint = (await s.execute(sql)).scalar_one()
+    #         datapoints = []
+    #         for datapointId in data.datapointIds:
+    #             sql = (
+    #                 select(models.Datapoint)
+    #                 .where(models.Datapoint.id == datapointId)
+    #                 .options(selectinload(models.Datapoint.tags))
+    #             )
+    #             datapoint = (await s.execute(sql)).scalar_one()
 
-                # you have to explicitly add this via the association
-                # there has to be a better way of doing this......
-                datapoint.tags.append(models.Tagdatapoint(tag=tag))
-                s.add(datapoint)
-                datapoints.append(datapoint)
+    #             # you have to explicitly add this via the association
+    #             # there has to be a better way of doing this......
+    #             datapoint.tags.append(models.Tagdatapoint(tag=tag))
+    #             s.add(datapoint)
+    #             datapoints.append(datapoint)
 
-            await s.flush()
-            await s.commit()
-        return [Datapoint.marshal(loc) for loc in datapoints]
+    #         await s.flush()
+    #         await s.commit()
+    #     return [Datapoint.marshal(loc) for loc in datapoints]
 
-    @strawberry.mutation
-    async def append_tag_to_datapoint(self, data: TagToDataPointInput) -> Datapoint:
-        async with models.get_session() as s:
-            sql = select(models.Tag).where(models.Tag.id == data.tagId)
-            tag = (await s.execute(sql)).scalar_one()
+    # @strawberry.mutation
+    # async def append_tag_to_datapoint(self, data: TagToDataPointInput) -> Datapoint:
+    #     async with models.get_session() as s:
+    #         sql = select(models.Tag).where(models.Tag.id == data.tagId)
+    #         tag = (await s.execute(sql)).scalar_one()
 
-            sql = (
-                select(models.Datapoint)
-                .where(models.Datapoint.id == data.datapointId)
-                .options(selectinload(models.Datapoint.tags))
-            )
-            datapoint = (await s.execute(sql)).scalar_one()
+    #         sql = (
+    #             select(models.Datapoint)
+    #             .where(models.Datapoint.id == data.datapointId)
+    #             .options(selectinload(models.Datapoint.tags))
+    #         )
+    #         datapoint = (await s.execute(sql)).scalar_one()
 
-            # you have to explicitly add this via the association
-            # there has to be a better way of doing this......
-            datapoint.tags.append(models.Tagdatapoint(tag=tag))
+    #         # you have to explicitly add this via the association
+    #         # there has to be a better way of doing this......
+    #         datapoint.tags.append(models.Tagdatapoint(tag=tag))
 
-            s.add(datapoint)
+    #         s.add(datapoint)
 
-            await s.flush()
-            await s.commit()
-        return Datapoint.marshal(datapoint)
+    #         await s.flush()
+    #         await s.commit()
+    #     return Datapoint.marshal(datapoint)
 
     @strawberry.mutation
     async def create_datapoint_set(self, data: CreateDatapointSetInput) -> Datapoint:

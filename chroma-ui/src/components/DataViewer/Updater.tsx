@@ -1,6 +1,9 @@
 import { useAtom } from 'jotai'
 import React, { useCallback, useEffect } from 'react'
-import { datapointsAtom, labelsAtom, tagsAtom, resourcesAtom, inferencesAtom, datasetsAtom, categoriesAtom, projectionsAtom, inferenceFilterAtom, categoryFilterAtom, tagFilterAtom, datasetFilterAtom, visibleDatapointsAtom, metadataFiltersAtom, labelVisibleDatapointsAtom, labelMetadataFiltersAtom, labelDatapointsAtom, labelCategoryFilterAtom, labelCategoriesAtom, labelDatasetsAtom, labelDatasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom } from './atoms'
+import {
+  context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, context__inferenceFilterAtom, context__categoryFilterAtom, context__tagFilterAtom, context__datasetFilterAtom, visibleDatapointsAtom, context__metadataFiltersAtom, labelVisibleDatapointsAtom,
+  object__metadataFiltersAtom, object__datapointsAtom, object__categoryFilterAtom, object__categoriesAtom, object__datasetsAtom, object__datasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom, object__tagFilterAtom, object__tagsAtom
+} from './atoms'
 import { FilterOption, Filter, FilterType, Datapoint } from './types'
 
 import chroma from 'chroma-js'
@@ -8,32 +11,44 @@ import distinctColors from 'distinct-colors'
 
 const Updater: React.FC = () => {
   // Atoms
-  const [datapoints, updatedatapoints] = useAtom(datapointsAtom)
-  const [labeldatapoints, updatelabeldatapoints] = useAtom(labelDatapointsAtom)
-  const [labels, updatelabels] = useAtom(labelsAtom)
-  const [tags, updatetags] = useAtom(tagsAtom)
-  const [resources, updateresources] = useAtom(resourcesAtom)
-  const [inferences, updateinferences] = useAtom(inferencesAtom)
-  const [datasets, updatedatasets] = useAtom(datasetsAtom)
-  const [labeldatasets, updatelabeldatasets] = useAtom(labelDatasetsAtom)
-  const [categories, updatecategories] = useAtom(categoriesAtom)
-  const [labelcategories, updatelabelcategories] = useAtom(labelCategoriesAtom)
-  const [projections, updateprojections] = useAtom(projectionsAtom)
+  const [datapoints, updatedatapoints] = useAtom(context__datapointsAtom)
+  const [labeldatapoints, updatelabeldatapoints] = useAtom(object__datapointsAtom)
+
+  const [labels, updatelabels] = useAtom(context__labelsAtom)
+
+  const [tags, updatetags] = useAtom(context__tagsAtom)
+  const [object__tags, updateobjecttags] = useAtom(object__tagsAtom)
+
+  const [resources, updateresources] = useAtom(context__resourcesAtom)
+
+  const [inferences, updateinferences] = useAtom(context__inferencesAtom)
+
+  const [datasets, updatedatasets] = useAtom(context__datasetsAtom)
+  const [labeldatasets, updatelabeldatasets] = useAtom(object__datasetsAtom)
+
+  const [categories, updatecategories] = useAtom(context__categoriesAtom)
+  const [labelcategories, updatelabelcategories] = useAtom(object__categoriesAtom)
+
+  const [projections, updateprojections] = useAtom(context__projectionsAtom)
   const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
   const [labelvisibleDatapoints, updatelabelvisibleDatapoints] = useAtom(labelVisibleDatapointsAtom)
 
   // Filter Atoms
   // const [inferenceFilter, updateinferenceFilter] = useAtom(inferenceFilterAtom)
-  const [categoryFilter, updatecategoryFilter] = useAtom(categoryFilterAtom)
-  const [labelcategoryFilter, updatelabelcategoryFilter] = useAtom(labelCategoryFilterAtom)
-  const [datasetFilter, updatedatasetFilter] = useAtom(datasetFilterAtom)
-  const [labeldatasetFilter, updatelabeldatasetFilter] = useAtom(labelDatasetFilterAtom)
-  const [tagFilter, updatetagFilter] = useAtom(tagFilterAtom)
-  const [metadataFilters, updateMetadataFilter] = useAtom(metadataFiltersAtom)
+  const [categoryFilter, updatecategoryFilter] = useAtom(context__categoryFilterAtom)
+  const [labelcategoryFilter, updatelabelcategoryFilter] = useAtom(object__categoryFilterAtom)
+  const [datasetFilter, updatedatasetFilter] = useAtom(context__datasetFilterAtom)
+  const [labeldatasetFilter, updatelabeldatasetFilter] = useAtom(object__datasetFilterAtom)
+
+  const [tagFilter, updatetagFilter] = useAtom(context__tagFilterAtom)
+  const [object__tagFilter, updateobjecttagFilter] = useAtom(object__tagFilterAtom)
+
+  const [context__metadataFilters, updateMetadataFilter] = useAtom(context__metadataFiltersAtom)
+  const [object__metadataFilters, updatelabelMetadataFilter] = useAtom(object__metadataFiltersAtom)
 
   // whenever a filter is changed... generate the list of datapoints ids to hide
   const filtersToWatch = [categoryFilter, datasetFilter, tagFilter]
-  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(metadataFilters)]
+  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(context__metadataFilters)]
   useEffect(() => {
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
@@ -55,10 +70,10 @@ const Updater: React.FC = () => {
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatevisibleDatapoints(visibleDps)
-  }, [...filtersToWatch, metadataFilters])
+  }, [...filtersToWatch, context__metadataFilters])
 
   // // whenever a filter is changed... generate the list of datapoints ids to hide
-  const labelfiltersToObserve = [labelcategoryFilter, labeldatasetFilter]
+  const labelfiltersToObserve = [labelcategoryFilter, labeldatasetFilter, object__tagFilter, ...Object.values(object__metadataFilters)]
   useEffect(() => {
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
@@ -81,7 +96,7 @@ const Updater: React.FC = () => {
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatelabelvisibleDatapoints(visibleDps)
-  }, [labelcategoryFilter, labeldatasetFilter])
+  }, [labelcategoryFilter, labeldatasetFilter, object__metadataFilters, object__tagFilter])
 
   // categories filter
   useEffect(() => {
@@ -183,6 +198,38 @@ const Updater: React.FC = () => {
     }
     updatetagFilter(newTagFilter)
   }, [tags])
+
+  // object tags filter
+  useEffect(() => {
+    var colors = distinctColors({
+      "count": Object.values(object__tags).length,
+      "lightMin": 20,
+      "lightMax": 85,
+      "chromaMin": 50
+    }).map(color => color.hex())
+
+    let options: FilterOption[] = Object.values(object__tags).map((c, i) => {
+      let option: FilterOption = {
+        // @ts-ignore
+        id: c.id,
+        visible: true,
+        color: colors[i],
+        evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
+          if ((option.visible == false) && (datapoint.tag_ids.includes(option.id))) return true
+          else return false
+        }
+      }
+      return option
+    })
+
+    let newTagFilter: Filter = {
+      name: 'Tags',
+      type: FilterType.Discrete,
+      options: options,
+      linkedAtom: object__tags,
+    }
+    updateobjecttagFilter(newTagFilter)
+  }, [object__tags])
 
   // dataset filter
   useEffect(() => {

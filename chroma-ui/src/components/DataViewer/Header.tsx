@@ -5,7 +5,7 @@ import { TbLasso } from 'react-icons/tb'
 import ColorToggle from '../ColorToggle'
 import ShortcutsDrawer from './ShortcutsDrawer'
 import { useAtom } from 'jotai'
-import { toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, contextObjectSwitcherAtom, DataType, labelDatapointsAtom } from './atoms'
+import { toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, contextObjectSwitcherAtom, DataType, object__datapointsAtom } from './atoms'
 import { CursorMap } from './types'
 
 const Header: React.FC = () => {
@@ -15,7 +15,7 @@ const Header: React.FC = () => {
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
-  const [labelDatapoints] = useAtom(labelDatapointsAtom)
+  const [object__datapoints] = useAtom(object__datapointsAtom)
 
   var cursorSelected = toolSelected === 'cursor'
   var lassoSelected = toolSelected === 'lasso'
@@ -90,7 +90,7 @@ const Header: React.FC = () => {
         </Tooltip>
       </Flex>
       <Flex>
-        {(Object.values(labelDatapoints).length > 0) ?
+        {(Object.values(object__datapoints).length > 0) ?
           <>
             <Button
               borderRadius={0}

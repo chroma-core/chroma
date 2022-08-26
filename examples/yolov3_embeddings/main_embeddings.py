@@ -1,6 +1,9 @@
 from __future__ import annotations
+from curses import meta
+from importlib.metadata import metadata
 import uuid
 import json
+import random
 
 import tqdm
 import numpy as np
@@ -18,6 +21,7 @@ from pytorchyolo.utils.parse_config import parse_data_config
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
 
+str_options = ['New York', 'San Francisco', 'Atlanta', 'Miami', 'Dallas', 'Chicago', 'DC']
 
 def reshape_detections(inputs, num_anchors, no):
     bs, _, ny, nx = inputs.shape  # x(bs,255,_,_) to x(bs,3,_,_,85)
@@ -31,15 +35,16 @@ def reshape_context(inputs):
     return avg_pool_module(inputs)[:, :, -1, -1]
 
 
-def to_annotations_dict(boxes, category_ids, category_names, uids):
+def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas):
     annotations = []
 
-    for box, category_id, category_name, uid in zip(boxes, category_ids, category_names, uids):
+    for box, category_id, category_name, uid, metadata in zip(boxes, category_ids, category_names, uids, metadatas):
         annotation = {
             "id": uid,
             "bbox": box.tolist(),
             "category_id": str(category_id),
             "category_name": category_name,
+            "metadata": metadata
         }
         annotations.append(annotation)
 
@@ -78,6 +83,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
 
         detection_inferences = []
         labels = []
+        metadata_list = []
         for i, output in enumerate(outputs):
             # Process detections
             det_boxes = rescale_boxes(output, imgs.shape[-1], img_sizes[i, :2])[:, :4]
@@ -85,8 +91,12 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             det_category_ids = output[:, -1].numpy().astype(int)
             det_category_names = class_names[det_category_ids]
             det_uids = [str(uuid.uuid4()) for i in range(len(det_category_ids))]
+            metadatas = [{
+                'quality': random.randint(0, 100),
+                'location': str_options[random.randint(0, 6)],
+            } for i in range(len(det_category_ids))]
             det_annotations = to_annotations_dict(
-                det_boxes, det_category_ids, det_category_names, det_uids
+                det_boxes, det_category_ids, det_category_names, det_uids, metadatas
             )
             detection_inferences.append(det_annotations)
 
@@ -102,13 +112,23 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             target_cat_ids = target[:, 1].numpy().astype(int)
             target_cat_names = class_names[target_cat_ids]
             target_uids = [str(uuid.uuid4()) for i in range(len(target_cat_ids))]
+            metadatas = [{
+                'quality': random.randint(0, 100),
+                'location': str_options[random.randint(0, 6)]
+            } for i in range(len(target_cat_ids))]
             target_annotations = to_annotations_dict(
-                target_boxes, target_cat_ids, target_cat_names, target_uids
+                target_boxes, target_cat_ids, target_cat_names, target_uids, metadatas
             )
             labels.append(target_annotations)
+            metadata_list.append( {
+                'quality': random.randint(0, 100),
+                'location': str_options[random.randint(0, 6)]
+            })
 
+        # raise Exception(str(labels))
         chroma_storage.set_inferences(detection_inferences)
         chroma_storage.set_labels(labels)
+        chroma_storage.set_metadata(metadata_list)
 
         ctx_embedding = reshape_context(layer_outputs[context_layer_index]).detach().cpu().numpy()
         
@@ -204,7 +224,7 @@ def main():
     model = load_model(model_path=model_path, device=device, weights_path=weights_path)
     model.eval()
 
-    with chroma_manager.ChromaSDK(project_name="YOLO-1000", dataset_name="TestYolo1000", categories=json.dumps(class_object)) as chroma_storage:
+    with chroma_manager.ChromaSDK(project_name="YOLO-1k", dataset_name="TestYolo1k", categories=json.dumps(class_object)) as chroma_storage:
         infer(model, device, dataloader, class_names, chroma_storage=chroma_storage)
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import { Skeleton, Box } from "@chakra-ui/react"
 import { useState, useRef, useEffect } from "react"
 import { Category } from "regl-scatterplot/dist/types"
 import { useQuery } from "urql"
-import { categoriesAtom, categoryFilterAtom } from "./atoms"
+import { context__categoriesAtom, context__categoryFilterAtom } from "./atoms"
 import { Annotation } from "./types"
 import { useAtom } from 'jotai'
 import { slice } from "lodash"
@@ -31,8 +31,8 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   let [imageDimensions, setImageDimensions] = useState([]) // [width, height]
   let [originalImageDimensions, setOriginalImageDimensions] = useState([]) // [width, height]
   const imageRef = useRef<HTMLImageElement>(null);
-  const [categories] = useAtom(categoriesAtom)
-  const [categoryFilter] = useAtom(categoryFilterAtom)
+  const [categories] = useAtom(context__categoriesAtom)
+  const [categoryFilter] = useAtom(context__categoryFilterAtom)
   var hasBoundingBoxes = (annotations[0].bbox !== undefined)
 
   // sets image dimensons on load

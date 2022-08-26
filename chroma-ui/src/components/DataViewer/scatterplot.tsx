@@ -28,6 +28,9 @@ export default function scatterplot(points, colorsScale, opts) {
       scatterplotInstance.subscribe('select', opts.selectHandler)
       scatterplotInstance.subscribe('deselect', opts.deselectHandler)
 
+      scatterplotInstance.subscribe('pointover', opts.pointOverHandler);
+      scatterplotInstance.subscribe('pointout', opts.pointOutHandler);
+
       var defaultDistance = config.distance * 1.2
 
       scatterplotInstance.set({
