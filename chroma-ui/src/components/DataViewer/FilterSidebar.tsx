@@ -53,7 +53,6 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     updatedatasetFilter(fn)
   }
   const updateMetadata = (data: any, fn: any) => {
-    // let findMatchedFilter = metatadataFilterMap.find(f => f.filter.name === data.filter.filter.name)
     // this is a bit of a hack
     updateMetadataFilter({ ...metadataFilters })
   }

@@ -211,14 +211,13 @@ export const globalTagFilterAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
         if (contextObject == DataType.Context) return get(context__tagFilterAtom)
-        if (contextObject == DataType.Object) return get(object__tagFilterAtom)
-        return undefined
+        return get(object__tagFilterAtom)
     },
     (get, set, dps?: any) => {
         const contextObject = get(contextObjectSwitcherAtom)
         let localAtom
-        if (contextObject == DataType.Context) localAtom = context__tagsAtom
-        if (contextObject == DataType.Object) localAtom = object__tagsAtom
+        if (contextObject == DataType.Context) localAtom = context__tagFilterAtom
+        if (contextObject == DataType.Object) localAtom = object__tagFilterAtom
         // @ts-ignore
         set(localAtom, dps!)
     })

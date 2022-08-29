@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom } from './atoms';
+import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterArray, FilterType, Filter } from './types';
 import { totalmem } from 'os';
@@ -13,6 +13,7 @@ interface ConfigProps {
   scatterplot?: any
 }
 
+// we use this to figure out where to display the on-hover datapoint preview
 const useMousePosition = () => {
   const [
     mousePosition,
@@ -30,6 +31,7 @@ const useMousePosition = () => {
   return mousePosition;
 };
 
+// used to find the extents of the plotted points for automatic centering, setting zoom, and setting min/max zoom
 const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
   var minX = Infinity
   var minY = Infinity
@@ -60,10 +62,12 @@ const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key
   }
 }
 
+// used with continuous filters and color interpolation
 function minMaxNormalization(value: number, min: number, max: number) {
   return (value - min) / (max - min)
 }
 
+// this has to be out side of react because we need to keep its reference constant
 function selectCallbackOutsideReact(points: any) {
   // @ts-ignore
   window.selectHandler(points)
@@ -74,34 +78,57 @@ interface PlotterProps {
 }
 
 const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
+  // bring in our atom data
   const [datapoints] = useAtom(globalDatapointAtom)
   const [categories] = useAtom(globalCategoriesAtom)
   const [resources] = useAtom(globalResourcesAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [projections] = useAtom(globalProjectionsAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
+
+  // ui state atoms
   const [cursor] = useAtom(cursorAtom)
   const [toolSelected] = useAtom(toolSelectedAtom)
   const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
+  // local state
   let [reglInitialized, setReglInitialized] = useState(false);
   let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
   let [points, setPoints] = useState<any>(undefined)
   let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
-
   const [hoverPointId, setHoverPointId] = useState<number | undefined>(undefined)
+
+  // hook
   const mousePosition = useMousePosition()
 
-  enum ColorByOptions {
-    None,
-    Categories,
+  const updateMetadata = (data: any, fn: any) => {
+    // this is a bit of a hack
+    updateMetadataFilter({ ...metadataFilters })
   }
-  let [colorByFilterEnum, setColorByFilterEnum] = useState(ColorByOptions.None)
+
+  // fetch and prep metadata filters for color by
+  var metatadataFilterMap = Object.values(metadataFilters).map(m => {
+    return { filter: m, update: updateMetadata, name: m.name }
+  })
+
+  // my own custom enum class so i can add to it at runtime
+  let totalColorByOptions = 2;
+  let ColorByOptionsArr: { [key: string | number]: string | number; } = {
+    0: 'None',
+    1: 'Categories',
+    'None': 0,
+    'Categories': 1,
+  }
+
+  // local state for which color by option we currently have selected and what the color options are for it
+  let [colorByFilterEnum, setColorByFilterEnum] = useState(ColorByOptionsArr.None)
   let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
 
+  // this is a dummy filter we create here to let the user color by None (all gray)
   let noneFilter: Filter = {
     name: 'None',
     type: FilterType.Discrete,
@@ -112,11 +139,31 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       return datapoint.annotations[0].category_id
     }
   }
+
   const [categoryFilter] = useAtom(context__categoryFilterAtom)
   const filterArray: any[] = []
   if (contextObjectSwitcher == DataType.Object) {
-    filterArray.push({ name: ColorByOptions.None, filter: noneFilter },
-      { name: ColorByOptions.Categories, filter: categoryFilter! })
+    filterArray.push(
+      { name: ColorByOptionsArr.None, filter: noneFilter },
+      { name: ColorByOptionsArr.Categories, filter: categoryFilter! },
+      ...metatadataFilterMap
+    )
+    metatadataFilterMap.forEach(mF => {
+      totalColorByOptions++
+      ColorByOptionsArr[mF.filter.name] = mF.filter.name
+      ColorByOptionsArr[totalColorByOptions] = mF.filter.name
+    })
+  }
+  if (contextObjectSwitcher == DataType.Context) {
+    filterArray.push(
+      { name: ColorByOptionsArr.None, filter: noneFilter },
+      ...metatadataFilterMap
+    )
+    metatadataFilterMap.forEach(mF => {
+      totalColorByOptions++
+      ColorByOptionsArr[mF.filter.name] = mF.filter.name
+      ColorByOptionsArr[totalColorByOptions] = mF.filter.name
+    })
   }
 
   // whenever colorByFilterString change, redraw
@@ -168,19 +215,15 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     const t4 = performance.now();
     // console.log(`selectHandler hook: ${(t4 - t3) / 1000} seconds.`);
   }
-
   // @ts-ignore
   window.selectHandler = selectHandler; // eslint-disable-line @typescript-eslint/no-this-alias
-
   const deselectHandler = () => {
     updateselectedDatapoints([])
     setpointsToSelect([])
   };
-
   const pointOverHandler = (pointId: number) => {
     setHoverPointId(pointId)
   };
-
   const pointOutHandler = () => {
     setHoverPointId(undefined)
   };
@@ -204,6 +247,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     // console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
   }, [datapoints, contextObjectSwitcher])
 
+  // fired when we switch between object and context
   useEffect(() => {
     if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
       // right now we wipe selection when you switch modes
@@ -261,7 +305,8 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   // 95% of the time cost of the datapoints hookS is in this fn
   const calculateColorsAndDrawPoints = () => {
     const t3 = performance.now();
-    let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptions[colorByFilterEnum])
+    let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptionsArr[colorByFilterEnum])
+    console.log('colorByFilter', colorByFilter)
 
     let colorByOptionsSave
     if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
@@ -278,17 +323,22 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     let pointdatapointObject: { [key: number]: number } = {}
 
     points = [[0, 0, 0, 0]] // this make the ids in regl-scatterplot (zero-indexed) match our database ids (not zero-indexed)
+    var i = 0
     Object.values(datapointsClone).map(function (datapoint) {
       datapointPointMapObject[datapoint.id] = points.length //+ 1
       pointdatapointObject[points.length] = datapoint.id
 
       // get the category id/name, whatever is relevant from the datapoint
       let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)
+      // if (i < 10) {
+      //   console.log('datapointColorByProp', datapointColorByProp)
+      //   i++
+      // }
 
       // then lookup in that filter what the color should be, and its position in the list
       let datapointColorIndex = 0
       if (colorByFilter?.filter.type == FilterType.Discrete) datapointColorIndex = colorByFilter?.filter.options!.findIndex((option: any) => option.id == datapointColorByProp)
-      // if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
+      if (colorByFilter?.filter.type == FilterType.Continuous) datapointColorIndex = minMaxNormalization(datapointColorByProp, colorByFilter?.filter.range!.min, colorByFilter?.filter.range!.max) // normalize
 
       return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, datapointColorIndex, datapoint.id])
     })
@@ -298,9 +348,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     const t4 = performance.now();
     // console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
   }
-
-  // console.log('datapointPointMap', datapointPointMap)
-  // console.log('pointdatapointMap', pointdatapointMap)
 
   const resizeListener = () => {
     var canvas = document.getElementById("regl-canvas")
@@ -364,7 +411,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
         <Select pos="absolute" width={150} marginTop="10px" marginLeft="10px" value={colorByFilterEnum} onChange={newColorBy}>
           {filterArray.map((key) => {
             return (
-              <option key={ColorByOptions[key.name]} value={ColorByOptions[key.name]} >{ColorByOptions[key.name]}</option>
+              <option key={ColorByOptionsArr[key.name]} value={ColorByOptionsArr[key.name]} >{ColorByOptionsArr[key.name]}</option>
             )
           })}
         </Select>

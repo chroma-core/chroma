@@ -16,6 +16,8 @@ import Header from './Header';
 import FilterSidebar from './FilterSidebar';
 import Updater from './Updater';
 import ProjectionPlotter from './ProjectionPlotter';
+import distinctColors from 'distinct-colors';
+import chroma from 'chroma-js';
 
 /**
  * Simple object check.
@@ -291,6 +293,9 @@ const DataViewer = () => {
           }
         })
       }
+      normalizedData.context__metadataFilters[key].fetchFn = (datapoint: any) => {
+        return datapoint.metadata[normalizedData.context__metadataFilters[key].name]
+      }
 
       // deep merge datapoints ids with existing data
       Object.values(item.options).map((option: any) => {
@@ -304,7 +309,14 @@ const DataViewer = () => {
 
       // add the eval function for this metadata filter
       if (normalizedData.context__metadataFilters[key].type == FilterType.Discrete) {
-        normalizedData.context__metadataFilters[key].options.map((option: any) => {
+        var colors = distinctColors({
+          "count": normalizedData.context__metadataFilters[key].options.length,
+          "lightMin": 20,
+          "lightMax": 85,
+          "chromaMin": 50
+        }).map(color => color.hex())
+        normalizedData.context__metadataFilters[key].options.map((option: any, i: number) => {
+          option.color = colors[i]
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
             // @ts-ignore
             if ((option.visible == false) && (datapoint.metadata[key] == option.id)) return true
@@ -312,6 +324,7 @@ const DataViewer = () => {
           }
         })
       } else if (normalizedData.context__metadataFilters[key].type == FilterType.Continuous) {
+        normalizedData.context__metadataFilters[key].range.colorScale = chroma.scale(["5B68A8", "5CC8C6", "87DF9C", "E4ED58", "F8EB49", "FACE31", "F79A17", "DE500F"]).colors(50)
         normalizedData.context__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
@@ -344,6 +357,9 @@ const DataViewer = () => {
           }
         })
       }
+      normalizedData.object__metadataFilters[key].fetchFn = (datapoint: any) => {
+        return datapoint.annotations[0].metadata[normalizedData.object__metadataFilters[key].name]
+      }
 
       // deep merge datapoints ids with existing data
       Object.values(item.options).map((option: any) => {
@@ -357,14 +373,25 @@ const DataViewer = () => {
 
       // add the eval function for this metadata filter
       if (normalizedData.object__metadataFilters[key].type == FilterType.Discrete) {
-        normalizedData.object__metadataFilters[key].options.map((option: any) => {
+        var colors = distinctColors({
+          "count": normalizedData.object__metadataFilters[key].options.length,
+          "lightMin": 20,
+          "lightMax": 85,
+          "chromaMin": 50
+        }).map(color => color.hex())
+
+        normalizedData.object__metadataFilters[key].options.map((option: any, i: number) => {
+          option.color = colors[i]
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
             // @ts-ignore
             if ((option.visible == false) && (datapoint.annotations[0].metadata[key] == option.id)) return true
             else return false
           }
         })
+
       } else if (normalizedData.object__metadataFilters[key].type == FilterType.Continuous) {
+        normalizedData.object__metadataFilters[key].range.colorScale = chroma.scale(["5B68A8", "5CC8C6", "87DF9C", "E4ED58", "F8EB49", "FACE31", "F79A17", "DE500F"]).colors(50)
+
         normalizedData.object__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
