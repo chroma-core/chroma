@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom } from './atoms';
+import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, toolSelectedAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, globalDatasetFilterAtom, object__datapointsAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
-import { Projection, Datapoint, FilterArray, FilterType, Filter } from './types';
+import { Projection, Datapoint, FilterType, Filter } from './types';
 import { totalmem } from 'os';
 import ImageRenderer from './ImageRenderer';
 import { DataPanelGrid } from './DataPanel'
@@ -120,8 +120,10 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let ColorByOptionsArr: { [key: string | number]: string | number; } = {
     0: 'None',
     1: 'Categories',
+    2: 'Datasets',
     'None': 0,
     'Categories': 1,
+    'Datasets': 2,
   }
 
   // local state for which color by option we currently have selected and what the color options are for it
@@ -141,11 +143,13 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   }
 
   const [categoryFilter] = useAtom(context__categoryFilterAtom)
+  const [datasetFilter] = useAtom(globalDatasetFilterAtom)
   const filterArray: any[] = []
   if (contextObjectSwitcher == DataType.Object) {
     filterArray.push(
       { name: ColorByOptionsArr.None, filter: noneFilter },
       { name: ColorByOptionsArr.Categories, filter: categoryFilter! },
+      { name: ColorByOptionsArr.Datasets, filter: datasetFilter! },
       ...metatadataFilterMap
     )
     metatadataFilterMap.forEach(mF => {
@@ -157,6 +161,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   if (contextObjectSwitcher == DataType.Context) {
     filterArray.push(
       { name: ColorByOptionsArr.None, filter: noneFilter },
+      { name: ColorByOptionsArr.Datasets, filter: datasetFilter! },
       ...metatadataFilterMap
     )
     metatadataFilterMap.forEach(mF => {
@@ -306,7 +311,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const calculateColorsAndDrawPoints = () => {
     const t3 = performance.now();
     let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptionsArr[colorByFilterEnum])
-    console.log('colorByFilter', colorByFilter)
 
     let colorByOptionsSave
     if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
