@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom } from './atoms';
+import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, object__datapointsAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterArray, FilterType, Filter } from './types';
 import { totalmem } from 'os';
@@ -102,6 +102,8 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
   const [hoverPointId, setHoverPointId] = useState<number | undefined>(undefined)
 
+  const [object__datapoints] = useAtom(object__datapointsAtom)
+
   // hook
   const mousePosition = useMousePosition()
 
@@ -159,11 +161,15 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       { name: ColorByOptionsArr.None, filter: noneFilter },
       ...metatadataFilterMap
     )
+    if (Object.values(object__datapoints).length === 0) {
+      filterArray.push({ name: ColorByOptionsArr.Categories, filter: categoryFilter! })
+    }
     metatadataFilterMap.forEach(mF => {
       totalColorByOptions++
       ColorByOptionsArr[mF.filter.name] = mF.filter.name
       ColorByOptionsArr[totalColorByOptions] = mF.filter.name
     })
+
   }
 
   // whenever colorByFilterString change, redraw
