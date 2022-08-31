@@ -101,7 +101,8 @@ self.onmessage = (message) => {
             tag_ids: [],
             inferences: [],
             annotations: [],
-            metadata: datapointaMetadata
+            metadata: datapointaMetadata,
+            object_datapoint_ids: []
         }
 
         // add our datapoint to its dataset
@@ -192,6 +193,7 @@ self.onmessage = (message) => {
                     resource_id: j,
                     inference: true
                 }
+                dp.object_datapoint_ids.push(i)
 
                 // add itself to the dataset
                 object__datasetsObject[dp.dataset_id].datapoint_ids.push(i)
