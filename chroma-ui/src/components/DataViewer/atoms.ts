@@ -1,5 +1,5 @@
 import { atom } from "jotai"
-import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter } from "./types"
+import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter, PlotterBounds } from "./types"
 
 // Core data atoms
 export const context__datapointsAtom = atom<{ [key: number]: Datapoint }>({})
@@ -142,6 +142,44 @@ export const colsPerRowAtom = atom<number>(3)
 export const datapointModalIndexAtom = atom<number>(0)
 export const datapointModalOpenAtom = atom<boolean>(false)
 export const pointsToSelectAtom = atom<number[]>([])
+
+export const hoverToHighlightInPlotterDatapointIdAtom = atom<number>(0)
+
+export const context__datapointToPointMapAtom = atom<number[]>([])
+export const object_datapointToPointMapAtom = atom<number[]>([])
+
+export const globaldatapointToPointMapAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__datapointToPointMapAtom)
+        return get(object_datapointToPointMapAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__datapointToPointMapAtom
+        if (contextObject == DataType.Object) localAtom = object_datapointToPointMapAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
+export const context__plotterBoundsAtom = atom<PlotterBounds>({})
+export const object_plotterBoundsAtom = atom<PlotterBounds>({})
+
+export const globalplotterBoundsAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__plotterBoundsAtom)
+        return get(object_plotterBoundsAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__plotterBoundsAtom
+        if (contextObject == DataType.Object) localAtom = object_plotterBoundsAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
 
 export enum DataType {
     Context,
