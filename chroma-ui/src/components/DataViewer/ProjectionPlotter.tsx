@@ -38,7 +38,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
   // local state
   let [reglInitialized, setReglInitialized] = useState(false);
-  // let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
   let [datapointPointMap, setdatapointPointMap] = useAtom(globaldatapointToPointMapAtom)//useState<{ [key: number]: number }>({})
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
@@ -52,10 +51,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   if (hoverPoint !== 0) {
     config.scatterplot.forceHover(datapointPointMap[hoverPoint])
   }
-
-  // points that another application has told us to select
-
-  // point that are cur
 
   // 
   // Related to our color by dropdown
@@ -178,12 +173,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   // Drawing stuff
   // 
 
-  // for context and objects...
-  // - maintain bounds
-  // - everything else should be available elsewhere
-
-
-
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 2 times! every time a new batch of data is loaded in
   useEffect(() => {
@@ -225,7 +214,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (Object.values(projections).length == 0) return
     calculateColorsAndDrawPoints()
     const t4 = performance.now();
-  }, [visibleDatapoints]) // this smells bad
+  }, [visibleDatapoints])
 
   // when we select points from elsewhere in the application
   // this triggers them being selected in the plotter
