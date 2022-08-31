@@ -11,6 +11,7 @@ self.onmessage = (message) => {
 
     // create context structures
     let context__categoriesObject = {}
+    let context__inferenceCategoriesObject = {}
     let context__datapointsObject = {}
     let context__datasetsObject = {}
     let context__labelsObject = {}
@@ -48,8 +49,11 @@ self.onmessage = (message) => {
             if (context__categoriesObject[category.id] === undefined) {
                 context__categoriesObject[category.id] = { ...category }
                 object__categoriesObject[category.id] = { ...category }
+                context__inferenceCategoriesObject[category.id] = { ...category }
             }
         })
+
+
     })
 
     // load tags object and fill in the datapoints that have that tag
@@ -147,6 +151,7 @@ self.onmessage = (message) => {
     })
 
     // load inferences object
+    let context_inference_categories = {}
     inferences.forEach((inference) => {
         const inferenceData = JSON.parse(inference.data)
         context__inferencesObject[inference.id] = {
@@ -155,6 +160,19 @@ self.onmessage = (message) => {
         }
 
         if (inferenceData.annotations) context__datapointsObject[inference.datapoint_id].inferences = inferenceData.annotations
+
+        inferenceData.annotations.forEach((annotation) => {
+            const categoryId = annotation.category_id
+            if (context_inference_categories[categoryId] === undefined) context_inference_categories[categoryId] = new Set()
+            context_inference_categories[categoryId].add(inference.datapoint_id)
+        })
+    })
+
+    // take datapoint annotation data and add it to the category datapoint list
+    // load up our datapoint ids into categories
+    Object.keys(context_inference_categories).map((c) => {
+        const dps = (context_inference_categories[c]).keys()
+        context__inferenceCategoriesObject[c].datapoint_ids = [...dps]
     })
 
     // Specifically synthetically create our object datapoints
@@ -269,7 +287,6 @@ self.onmessage = (message) => {
         object__datasetsObject = {}
     }
 
-
     self.postMessage({
         numberOfDatapoints: datapoints.length,
 
@@ -282,6 +299,8 @@ self.onmessage = (message) => {
         context__tags: context__tagsObject,
         context__categories: context__categoriesObject,
         context__metadataFilters: context__metadataFilters,
+
+        context__inferenceCategories: context__inferenceCategoriesObject,
 
         // object__s stuff
         object__datapoints: object__datapointsObject,

@@ -306,7 +306,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const calculateColorsAndDrawPoints = () => {
     const t3 = performance.now();
     let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptionsArr[colorByFilterEnum])
-    console.log('colorByFilter', colorByFilter)
 
     let colorByOptionsSave
     if (colorByFilter?.filter.type == FilterType.Discrete) colorByOptionsSave = colorByFilter.filter.options!.map((option: any) => option.color)
@@ -330,10 +329,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
       // get the category id/name, whatever is relevant from the datapoint
       let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)
-      // if (i < 10) {
-      //   console.log('datapointColorByProp', datapointColorByProp)
-      //   i++
-      // }
 
       // then lookup in that filter what the color should be, and its position in the list
       let datapointColorIndex = 0

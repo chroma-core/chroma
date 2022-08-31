@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom } from './atoms';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -42,6 +42,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
   const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+
+  const [inferencecategoryFilter, updateinferencecategoryFilter] = useAtom(globalInferenceCategoryFilterAtom)
 
   const updateCategory = (data: any, fn: any) => {
     updatecategoryFilter(fn)
@@ -67,7 +69,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     { filter: tagFilter!, update: updateTag },
     ...metatadataFilterMap
   ]
-  // if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: tagFilter!, update: updateTag })
+  if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: inferencecategoryFilter!, update: updateinferencecategoryFilter })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)
