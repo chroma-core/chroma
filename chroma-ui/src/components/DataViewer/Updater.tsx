@@ -49,8 +49,8 @@ const Updater: React.FC = () => {
   const [object__metadataFilters, updatelabelMetadataFilter] = useAtom(object__metadataFiltersAtom)
 
   // whenever a filter is changed... generate the list of datapoints ids to hide
-  const filtersToWatch = [categoryFilter, datasetFilter, tagFilter]
-  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, ...Object.values(context__metadataFilters)]
+  const filtersToWatch = [categoryFilter, datasetFilter, tagFilter, inferenceCategoryFilter]
+  const filtersToObserve = [categoryFilter, datasetFilter, tagFilter, inferenceCategoryFilter, ...Object.values(context__metadataFilters)]
   useEffect(() => {
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []

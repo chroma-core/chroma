@@ -54,6 +54,9 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const updateDataset = (data: any, fn: any) => {
     updatedatasetFilter(fn)
   }
+  const updateInferenceCategory = (data: any, fn: any) => {
+    updateinferencecategoryFilter(fn)
+  }
   const updateMetadata = (data: any, fn: any) => {
     // this is a bit of a hack
     updateMetadataFilter({ ...metadataFilters })
@@ -69,7 +72,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     { filter: tagFilter!, update: updateTag },
     ...metatadataFilterMap
   ]
-  if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: inferencecategoryFilter!, update: updateinferencecategoryFilter })
+  if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)
