@@ -66,7 +66,7 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
       borderColor={((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "rgba(0,0,0,0)"}
       onClick={triggerModal}
       onMouseEnter={() => setHoverPoint(datapoint.id)}
-      onMouseLeave={() => setHoverPoint(0)}
+      onMouseLeave={() => setHoverPoint(undefined)}
       _hover={{
         borderColor: ((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "#87d4ff"
       }}
