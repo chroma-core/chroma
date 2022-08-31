@@ -13,7 +13,7 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom } from './atoms';
+import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
