@@ -33,6 +33,8 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
   const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
   const [labelCategories] = useAtom(object__categoriesAtom)
 
+  const [hoverPoint, setHoverPoint] = useAtom(hoverToHighlightInPlotterDatapointIdAtom)
+
   const uri = resources[datapoint.resource_id].uri
 
   const triggerModal = () => {
@@ -46,6 +48,8 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
       key={datapoint.id}
       borderColor={((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "rgba(0,0,0,0)"}
       onClick={triggerModal}
+      onMouseEnter={() => setHoverPoint(datapoint.id)}
+      onMouseLeave={() => setHoverPoint(0)}
       borderWidth="2px"
       borderRadius={3}
     >
