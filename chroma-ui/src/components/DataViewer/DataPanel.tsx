@@ -13,7 +13,7 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom } from './atoms';
+import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom, object__datapointsAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
@@ -122,6 +122,7 @@ const DataPanel: React.FC = () => {
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [object__datapoints] = useAtom(object__datapointsAtom)
 
   const [colsPerRow, setcolsPerRow] = useAtom(colsPerRowAtom)
 
@@ -235,7 +236,9 @@ const DataPanel: React.FC = () => {
       >
         <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
           <Text fontWeight={600}>Inspect</Text>
-          <Button onClick={showRelated} variant="ghost" size="sm">Show {(contextObjectSwitcher == DataType.Context) ? "related objects" : "source contexts"}</Button>
+          {(Object.values(object__datapoints).length > 0) ?
+            <Button onClick={showRelated} variant="ghost" size="sm">Show {(contextObjectSwitcher == DataType.Context) ? "related objects" : "source contexts"}</Button>
+            : null}
           <Text fontSize="sm" px={3} py={1}>{dps.length} selected</Text>
           {/* {(filters !== undefined) ?
             <Select variant="ghost" size="xs" fontWeight={600} width="120px" value={sortByFilterString} onChange={newSortBy}>
