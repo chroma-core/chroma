@@ -328,7 +328,7 @@ const DataViewer = () => {
         normalizedData.context__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
-            if ((datapoint.metadata[key] >= f.range.maxVisible) || (datapoint.metadata[key] <= f.range.minVisible)) {
+            if ((datapoint.metadata[key] > f.range.maxVisible) || (datapoint.metadata[key] < f.range.minVisible)) {
               return true
             }
             else return false
@@ -395,7 +395,7 @@ const DataViewer = () => {
         normalizedData.object__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
-            if ((datapoint.annotations[0].metadata[key] >= f.range.maxVisible) || (datapoint.annotations[0].metadata[key] <= f.range.minVisible)) {
+            if ((datapoint.annotations[0].metadata[key] > f.range.maxVisible) || (datapoint.annotations[0].metadata[key] < f.range.minVisible)) {
               return true
             }
             else return false
