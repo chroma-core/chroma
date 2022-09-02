@@ -17,7 +17,6 @@ from utils.transforms import DEFAULT_TRANSFORMS
 from utils.parse_config import parse_data_config
 
 from chroma.sdk import chroma_manager
-from chroma.sdk.utils import nn
 
 str_options = ["New York", "San Francisco", "Atlanta", "Miami", "Dallas", "Chicago", "DC"]
 
@@ -177,7 +176,6 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
                 {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
             )
 
-        # raise Exception(str(labels))
         chroma_storage.set_inferences(detection_inferences)
         chroma_storage.set_labels(labels)
         chroma_storage.set_metadata(metadata_list)
