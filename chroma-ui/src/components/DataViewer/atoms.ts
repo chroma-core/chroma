@@ -312,3 +312,8 @@ export const globalTagFilterAtom = atom(
         // @ts-ignore
         set(localAtom, dps!)
     })
+
+
+export const shiftKeyPressedAtom = atom<boolean>(false)
+export const controlKeyPressedAtom = atom<boolean>(false)
+export const optionKeyPressedAtom = atom<boolean>(false)

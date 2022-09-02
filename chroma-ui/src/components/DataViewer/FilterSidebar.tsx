@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Flex,
   Text,
@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom } from './atoms';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -42,6 +42,10 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
   const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+
+  const [optionKeyDown] = useAtom(shiftKeyPressedAtom)
+  const [commandKeyDown] = useAtom(controlKeyPressedAtom)
+  const [shiftKeyDown] = useAtom(optionKeyPressedAtom)
 
   const [inferencecategoryFilter, updateinferencecategoryFilter] = useAtom(globalInferenceCategoryFilterAtom)
 
@@ -93,9 +97,22 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   }
 
   function selectPoints(dps: number[]) {
-    updatepointsToSelect(dps)
-    updateselectedDatapoints(dps)
+
+    var common
+    if (optionKeyDown) common = dps.filter(x => selectedDatapoints.indexOf(x) !== -1) // intersection
+    else if (commandKeyDown) common = selectedDatapoints.filter((el) => !dps.includes(el)); // remove
+    // @ts-ignore
+    else if (shiftKeyDown) common = [...new Set([...dps, ...selectedDatapoints])] // union
+    else common = dps
+
+    updatepointsToSelect(common)
+    setselectedDatapoints(common)
   }
+
+  var sidebarButtonIcon = 'select'
+  if (shiftKeyDown) sidebarButtonIcon = "plus"
+  if (commandKeyDown) sidebarButtonIcon = "minus"
+  if (optionKeyDown) sidebarButtonIcon = "intersection"
 
   return (
     <Flex
@@ -177,6 +194,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
                                   keyName={f.filter.name + "." + link.name}
                                   showHide={() => updateDiscreteFilter(f.filter, option)}
                                   selectBy={() => selectPoints(link.datapoint_ids)}// selectByFilter(filter, option)}
+                                  iconOverride={sidebarButtonIcon}
                                 />
                               )
                             })
