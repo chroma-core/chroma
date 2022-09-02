@@ -197,7 +197,7 @@ const Updater: React.FC = () => {
     })
 
     let newCategoryFilter: Filter = {
-      name: 'Category',
+      name: 'Label Category',
       type: FilterType.Discrete,
       options: options,
       linkedAtom: categories,
@@ -233,7 +233,7 @@ const Updater: React.FC = () => {
     })
 
     let newCategoryFilter: Filter = {
-      name: 'Category',
+      name: 'Label Category',
       type: FilterType.Discrete,
       options: options,
       linkedAtom: labelcategories
