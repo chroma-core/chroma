@@ -9,13 +9,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
-from pytorchyolo.utils.utils import bbox_iou
 
-from pytorchyolo.models import load_model
-from pytorchyolo.utils.utils import load_classes, non_max_suppression, xywh2xyxy, rescale_boxes
-from pytorchyolo.utils.datasets import ListDataset
-from pytorchyolo.utils.transforms import DEFAULT_TRANSFORMS
-from pytorchyolo.utils.parse_config import parse_data_config
+from utils.models import load_model
+from utils.utils import load_classes, non_max_suppression, xywh2xyxy, rescale_boxes, bbox_iou
+from utils.datasets import ListDataset
+from utils.transforms import DEFAULT_TRANSFORMS
+from utils.parse_config import parse_data_config
 
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
