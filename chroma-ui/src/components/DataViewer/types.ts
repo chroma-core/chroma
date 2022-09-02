@@ -126,3 +126,11 @@ export interface FilterArray {
   filter: Filter
   update: (data: any, updateObject: any) => void
 }
+
+export interface PlotterBounds {
+  cameraDistance?: number,
+  minCameraDistance?: number,
+  maxCameraDistance?: number,
+  cameraTarget?: number[],
+  maxSize?: number
+}
