@@ -130,7 +130,8 @@ const DataViewer = () => {
   const [totalDatapointsToFetch, setTotalDatapointsToFetch] = useState<number | null>(null)
   const [datapointsFetched, setDatapointsFetched] = useState<number>(0)
   const [processingDatapoints, setProcessingDatapoints] = useState<boolean>(false)
-  const [processingProjections, setProcessingProjections] = useState<boolean>(false)
+  const [processingContextProjections, setProcessingContextProjections] = useState<boolean>(false)
+  const [processingObjectProjections, setProcessingObjectProjections] = useState<boolean>(false)
   const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
@@ -189,7 +190,8 @@ const DataViewer = () => {
       return
     }
 
-    setProcessingProjections(true)
+    setProcessingObjectProjections(true)
+    setProcessingContextProjections(true)
 
     const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
 
@@ -204,26 +206,22 @@ const DataViewer = () => {
         }
         projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: contextObjectDatapoints })
         projectionsWorker.onmessage = (e: MessageEvent) => {
-          // console.log('onmessage callback', e)
           if (e.data.setType == 'object') {
-            console.log('setting object projections')
             updateobjectprojections(e.data.projections)
           } else {
-            console.log('setting context projections')
             updateprojections(e.data.projections)
           }
           if (e.data.setType == 'object') {
             updateobjectdatapoints({ ...{ ...object__datapoints }, ...e.data.datapoints })
+            setProcessingObjectProjections(false)
           } else {
             updatedatapoints({ ...{ ...context__datapoints }, ...e.data.datapoints })
+            setProcessingContextProjections(false)
           }
 
-          setProcessingProjections(false)
         }
       });
-
     }
-
 
   }, [datapointsFetched]);
 
@@ -461,7 +459,7 @@ const DataViewer = () => {
   }
 
   let loadingModalString = ""
-  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingProjections
+  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingObjectProjections || processingContextProjections
   let progressWidth = 0
   if (totalDatapointsToFetch) progressWidth = ((datapointsFetched) / (totalDatapointsToFetch)) * 100
   if (allFetched) loadingModalString = "Finishing loading...."
