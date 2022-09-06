@@ -975,11 +975,8 @@ async def load_datapoints_by_dataset(keys: list) -> list[Datapoint]:
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
 
-
-
 async def load_tags_by_datapoints(keys: list) -> list[Tag]:
     async with models.get_session() as s:
-        # you have to preload tags through the association
         # there has to be a better way of doing this......
         all_queries = [
             select(models.Tagdatapoint)
@@ -992,12 +989,9 @@ async def load_tags_by_datapoints(keys: list) -> list[Tag]:
 
 async def load_tagdatapoints_by_datapoints(keys: list) -> list[TagDatapoint]:
     async with models.get_session() as s:
-        # you have to preload tags through the association
-        # there has to be a better way of doing this......
         all_queries = [
             select(models.Tagdatapoint)
             .where(models.Tagdatapoint.right_id == key)
-            # .options(selectinload(models.Tagdatapoint.tag))
             for key in keys
         ]
         data = [(await s.execute(sql)).scalars().all() for sql in all_queries]

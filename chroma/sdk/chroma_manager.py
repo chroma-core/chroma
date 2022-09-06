@@ -268,15 +268,15 @@ class ChromaSDK:
         return result
 
     # Abstract
-    def append_tag_by_name_to_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
-        params = {"tagName": tag_name, "datapointIds": datapointIds}
+    def append_tag_by_name_to_datapoints_mutation(self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None):
+        params = {"tagName": tag_name, "datapointIds": datapointIds, "target": targetIds}
         result = self._client.execute(
             append_tag_by_name_to_datapoints_mutation, variable_values=params
         )
         return result
 
-    def remove_tag_by_name_from_datapoints_mutation(self, tag_name: str, datapointIds: list[int]):
-        params = {"tagName": tag_name, "datapointIds": datapointIds}
+    def remove_tag_by_name_from_datapoints_mutation(self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None):
+        params = {"tagName": tag_name, "datapointIds": datapointIds, "target": targetIds}
         result = self._client.execute(
             remove_tag_by_name_from_datapoints_mutation, variable_values=params
         )

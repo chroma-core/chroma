@@ -5,9 +5,9 @@ from gql import gql
 # Abstract mutations
 append_tag_by_name_to_datapoints_mutation = gql(
     """
-    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
         appendTagByNameToDatapoints(data: {
-            tagName: $tagName, datapointIds: $datapointIds
+            tagName: $tagName, datapointIds: $datapointIds,  target: $target
         } ) {
             id
             tags {
@@ -21,9 +21,9 @@ append_tag_by_name_to_datapoints_mutation = gql(
 
 remove_tag_by_name_from_datapoints_mutation = gql(
     """
-    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
         removeTagFromDatapoints(data: {
-            tagName: $tagName, datapointIds: $datapointIds
+            tagName: $tagName, datapointIds: $datapointIds,  target: $target
         } ) {
             ... on ObjectDeleted {
         message
