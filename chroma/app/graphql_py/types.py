@@ -97,6 +97,11 @@ class Datapoint:
     async def tags(self, info: Info) -> list["Tag"]:
         associations = await info.context["tags_by_datapoints"].load(self.id)
         return [Tag.marshal(association.tag) for association in associations]
+    
+    @strawberry.field
+    async def tagdatapoints(self, info: Info) -> list["TagDatapoint"]:
+        tds = await info.context["tags_by_datapoints"].load(self.id)
+        return [TagDatapoint.marshal(td) for td in tds]
 
     # has_one label
     @strawberry.field
@@ -105,6 +110,7 @@ class Datapoint:
         return Label.marshal(labels[0])
 
     # has_one inference
+    @strawberry.field
     async def inference(self, info: Info) -> "Inference":
         inferences = await info.context["inference_by_datapoint"].load(self.id)
         return Inference.marshal(inferences[0])
@@ -175,6 +181,30 @@ class Label:
             data=json.loads(model.data),
         )
 
+@strawberry.type
+class TagDatapoint:
+    id: strawberry.ID
+    target: Optional[str]
+    left_id: int
+    right_id: int
+    tag: Optional["Tag"] = None
+
+    @strawberry.field
+    async def tag(self, info: Info) -> "Tag":
+        async with models.get_session() as s:
+            sql = select(models.Tag).where(models.Tag.id == self.left_id)
+            tag = (await s.execute(sql)).scalars().first()
+        return Tag.marshal(tag)
+
+    @classmethod
+    def marshal(cls, model: models.Tagdatapoint) -> "TagDatapoint":
+        return cls(
+            id=strawberry.ID(str(model.id)),
+            target=model.target if model.target else None,
+            left_id=model.left_id,
+            right_id=model.right_id
+        )
+
 
 @strawberry.type
 class Tag:
@@ -204,15 +234,24 @@ class Inference:
     id: strawberry.ID
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    data: JSON
     datapoint: Optional[Datapoint] = None
+
+     # belongs_to datapoint
+    @strawberry.field
+    async def datapoint(self, info: Info) -> "Datapoint":
+        async with models.get_session() as s:
+            sql = select(models.Datapoint).where(models.Datapoint.id == self.datapoint_id)
+            datapoint = (await s.execute(sql)).scalars().first()
+        return Datapoint.marshal(datapoint)
 
     @classmethod
     def marshal(cls, model: models.Inference) -> "Inference":
         return cls(
             id=strawberry.ID(str(model.id)),
-            datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            data=json.loads(model.data),
         )
 
 @strawberry.type

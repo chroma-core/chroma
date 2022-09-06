@@ -190,7 +190,7 @@ class Query:
 
     # Datapoint
     @strawberry.field
-    async def datapoints(self, filter: FilterDatapoints = None) -> list[Datapoint]:
+    async def datapoints(self, filter: Optional[FilterDatapoints] = None) -> list[Datapoint]:
         async with models.get_session() as s:
             sql = select(models.Datapoint)
             

@@ -144,39 +144,40 @@ class ChromaSDK:
             return batch_data
 
     # Internal
-    def __init__(self, project_name: str, dataset_name: str, categories: Optional[str] = None) -> None:
+    def __init__(self, project_name: Optional[str] = None, dataset_name: Optional[str] = None, categories: Optional[str] = None) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
         self._client = Client(
             transport=transport, fetch_schema_from_transport=True, execute_timeout=30
         )
 
-        project = nn(self.create_or_get_project(project_name))
-        self._project_id = int(project.createOrGetProject.id)
+        if (project_name != None) and (dataset_name != None):
+            project = nn(self.create_or_get_project(project_name))
+            self._project_id = int(project.createOrGetProject.id)
 
-        dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id, categories))
-        dataset_id = int(dataset.createOrGetDataset.id)
+            dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id, categories))
+            dataset_id = int(dataset.createOrGetDataset.id)
 
-        # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
-        # TODO(anton) Rationalize or remove EmbeddingSet. EmbeddingSets don't necessarily have any correspondence
-        # to datasets.
-        if len(project.createOrGetProject.datasets) == 0:
-            embedding_set = nn(self.create_embedding_set(dataset_id))
-            embedding_set_id = int(embedding_set.createEmbeddingSet.id)
-        else:
-            first_dataset_id = project.createOrGetProject.datasets[0]["id"]
-            first_dataset = nn(self.get_dataset(int(first_dataset_id)))
-            assert (
-                len(first_dataset.dataset.embeddingSets) != 0
-            ), f"Global embedding set for project {self._project_id} not present!"
-            embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
+            # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
+            # TODO(anton) Rationalize or remove EmbeddingSet. EmbeddingSets don't necessarily have any correspondence
+            # to datasets.
+            if len(project.createOrGetProject.datasets) == 0:
+                embedding_set = nn(self.create_embedding_set(dataset_id))
+                embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+            else:
+                first_dataset_id = project.createOrGetProject.datasets[0]["id"]
+                first_dataset = nn(self.get_dataset(int(first_dataset_id)))
+                assert (
+                    len(first_dataset.dataset.embeddingSets) != 0
+                ), f"Global embedding set for project {self._project_id} not present!"
+                embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
 
-        # TODO: create model arch, trained model, layer sets, layer here...
-        ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
-        ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
+            # TODO: create model arch, trained model, layer sets, layer here...
+            ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
+            ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
 
-        self._data_buffer = ChromaSDK._DataBuffer(
-            dataset_id=dataset_id, embedding_set_id=embedding_set_id, ctx_embedding_set_id=ctx_embedding_set_id
-        )
+            self._data_buffer = ChromaSDK._DataBuffer(
+                dataset_id=dataset_id, embedding_set_id=embedding_set_id, ctx_embedding_set_id=ctx_embedding_set_id
+            )
 
     def __enter__(self):
         return self
