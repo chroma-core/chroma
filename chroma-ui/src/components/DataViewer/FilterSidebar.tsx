@@ -34,8 +34,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
   const [datapoints] = useAtom(globalDatapointAtom)
-  const [selectedDatapoints, setselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
-  const [visibleDatapoints, setvisibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
   const [datasetFilter, updatedatasetFilter] = useAtom(globalDatasetFilterAtom)
@@ -94,7 +94,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
 
   function selectPoints(dps: number[]) {
     updatepointsToSelect(dps)
-    setselectedDatapoints(dps)
+    updateselectedDatapoints(dps)
   }
 
   return (

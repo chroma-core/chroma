@@ -22,6 +22,8 @@ export interface Datapoint {
   inferences: Annotation[]
   projection_id: number
   visible: boolean
+  object_datapoint_ids?: number[]
+  source_datapoint_id?: number
 }
 
 export interface Dataset {

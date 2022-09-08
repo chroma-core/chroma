@@ -234,10 +234,16 @@ const DataViewer = () => {
     // when paging in new data, we want to adjust the ids so they don't collide with existing data
 
     // @ts-ignore
-    normalizedData.object__datapoints = resetDatapointIds(Object.values(object__datapoints).length, Object.values(object__resources).length, normalizedData.object__datapoints)
+    let datapointBumpLength = Object.values(object__datapoints).length
+    normalizedData.object__datapoints = resetDatapointIds(datapointBumpLength, Object.values(object__resources).length, normalizedData.object__datapoints)
     normalizedData.object__resources = resetIds(Object.values(object__resources).length, normalizedData.object__resources)
     normalizedData.object__labels = resetIds(Object.values(object__labels).length, normalizedData.object__labels)
-    normalizedData.object__categories = bumpIds(Object.values(object__datapoints).length, normalizedData.object__categories)
+    normalizedData.object__categories = bumpIds(datapointBumpLength, normalizedData.object__categories)
+
+    // bump object_datapoint_ids
+    Object.values(normalizedData.context__datapoints).map((ctxdp: any) => {
+      ctxdp.object_datapoint_ids = ctxdp.object_datapoint_ids.map((d: any) => d + datapointBumpLength)
+    })
 
     // for new data that is paged in, we want to merge it in cleanly...... 
     // but deep merge doesn't work, so we have to do that manually for a bunch of objects

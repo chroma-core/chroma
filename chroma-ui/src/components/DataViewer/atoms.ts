@@ -161,7 +161,7 @@ export const datapointModalIndexAtom = atom<number>(0)
 export const datapointModalOpenAtom = atom<boolean>(false)
 export const pointsToSelectAtom = atom<number[]>([])
 
-export const hoverToHighlightInPlotterDatapointIdAtom = atom<number>(0)
+export const hoverToHighlightInPlotterDatapointIdAtom = atom<number | undefined>(undefined)
 
 export const context__datapointToPointMapAtom = atom<number[]>([])
 export const object_datapointToPointMapAtom = atom<number[]>([])

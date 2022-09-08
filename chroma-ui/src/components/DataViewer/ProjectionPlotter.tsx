@@ -50,7 +50,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   let showLoading = false
   if (Object.values(datapoints).length === 0) showLoading = true
 
-  if (hoverPoint !== 0) {
+  if (hoverPoint !== undefined) {
     config.scatterplot.forceHover(datapointPointMap[hoverPoint])
   }
 
@@ -166,6 +166,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   // this is running more often than i want..... even just a mouse move triggers it
   // i really only want the event where the camera updates
   const viewChangedHandler = (viewData: any) => {
+    setHoverPoint(undefined)
     if (plotterBounds.cameraDistance === undefined) return
     let plotterBoundsToUpdate = Object.assign({}, plotterBounds)
     plotterBoundsToUpdate.cameraDistance = viewData.camera.distance[0]
