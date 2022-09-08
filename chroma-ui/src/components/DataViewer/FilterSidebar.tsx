@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom } from './atoms';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -34,14 +34,16 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
   const [datapoints] = useAtom(globalDatapointAtom)
-  const [selectedDatapoints, setselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
-  const [visibleDatapoints, setvisibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
   const [datasetFilter, updatedatasetFilter] = useAtom(globalDatasetFilterAtom)
   const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
   const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+
+  const [inferencecategoryFilter, updateinferencecategoryFilter] = useAtom(globalInferenceCategoryFilterAtom)
 
   const updateCategory = (data: any, fn: any) => {
     updatecategoryFilter(fn)
@@ -51,6 +53,9 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   }
   const updateDataset = (data: any, fn: any) => {
     updatedatasetFilter(fn)
+  }
+  const updateInferenceCategory = (data: any, fn: any) => {
+    updateinferencecategoryFilter(fn)
   }
   const updateMetadata = (data: any, fn: any) => {
     // this is a bit of a hack
@@ -67,7 +72,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     { filter: tagFilter!, update: updateTag },
     ...metatadataFilterMap
   ]
-  // if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: tagFilter!, update: updateTag })
+  if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)
@@ -89,7 +94,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
 
   function selectPoints(dps: number[]) {
     updatepointsToSelect(dps)
-    setselectedDatapoints(dps)
+    updateselectedDatapoints(dps)
   }
 
   return (

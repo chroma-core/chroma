@@ -1,5 +1,5 @@
 import { atom } from "jotai"
-import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter } from "./types"
+import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter, PlotterBounds } from "./types"
 
 // Core data atoms
 export const context__datapointsAtom = atom<{ [key: number]: Datapoint }>({})
@@ -21,6 +21,24 @@ export const object__inferencesAtom = atom<{ [key: number]: Inference }>({})
 export const object__categoriesAtom = atom<{ [key: number]: Category }>({})
 export const object__projectionsAtom = atom<{ [key: number]: Projection }>({})
 export const object__metadataFiltersAtom = atom<{ [key: number]: any }>({})
+
+export const context__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
+export const object__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
+
+export const globalInferenceCategoriesAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__inferencecategoriesAtom)
+        return get(object__inferencecategoriesAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__inferencecategoriesAtom
+        if (contextObject == DataType.Object) localAtom = object__inferencecategoriesAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
 
 export const globalProjectionsAtom = atom(
     (get) => {
@@ -143,6 +161,44 @@ export const datapointModalIndexAtom = atom<number>(0)
 export const datapointModalOpenAtom = atom<boolean>(false)
 export const pointsToSelectAtom = atom<number[]>([])
 
+export const hoverToHighlightInPlotterDatapointIdAtom = atom<number | undefined>(undefined)
+
+export const context__datapointToPointMapAtom = atom<number[]>([])
+export const object_datapointToPointMapAtom = atom<number[]>([])
+
+export const globaldatapointToPointMapAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__datapointToPointMapAtom)
+        return get(object_datapointToPointMapAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__datapointToPointMapAtom
+        if (contextObject == DataType.Object) localAtom = object_datapointToPointMapAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
+export const context__plotterBoundsAtom = atom<PlotterBounds>({})
+export const object_plotterBoundsAtom = atom<PlotterBounds>({})
+
+export const globalplotterBoundsAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__plotterBoundsAtom)
+        return get(object_plotterBoundsAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__plotterBoundsAtom
+        if (contextObject == DataType.Object) localAtom = object_plotterBoundsAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
 export enum DataType {
     Context,
     Object,
@@ -155,12 +211,28 @@ export const context__categoryFilterAtom = atom<Filter | undefined>(undefined)
 export const context__tagFilterAtom = atom<Filter | undefined>(undefined)
 export const context__qualityFilterAtom = atom<Filter | undefined>(undefined)
 export const context__datasetFilterAtom = atom<Filter | undefined>(undefined)
+export const context__inferenceCategoryFilterAtom = atom<Filter | undefined>(undefined)
 
 export const object__inferenceFilterAtom = atom<Filter | undefined>(undefined)
 export const object__categoryFilterAtom = atom<Filter | undefined>(undefined)
 export const object__tagFilterAtom = atom<Filter | undefined>(undefined)
 export const object__qualityFilterAtom = atom<Filter | undefined>(undefined)
 export const object__datasetFilterAtom = atom<Filter | undefined>(undefined)
+
+export const globalInferenceCategoryFilterAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__inferenceCategoryFilterAtom)
+        return undefined
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__inferenceCategoryFilterAtom
+        if (contextObject == DataType.Object) localAtom = undefined
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
 
 export const globalCategoryFilterAtom = atom(
     (get) => {

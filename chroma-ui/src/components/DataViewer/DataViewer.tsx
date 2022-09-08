@@ -9,7 +9,7 @@ import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, context__metadataFiltersAtom, globalDatapointAtom,
-  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom
+  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom
 } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
@@ -126,11 +126,15 @@ const DataViewer = () => {
   const [object__projections, updateobjectprojections] = useAtom(object__projectionsAtom)
   const [object__metadataFilters, updateobjectMetadataFilters] = useAtom(object__metadataFiltersAtom)
 
+  const [context__inferencecategories, updatecontextinferencecategories] = useAtom(context__inferencecategoriesAtom)
+  const [object__inferencecategories, updateobjectinferencecategories] = useAtom(object__inferencecategoriesAtom)
+
   // UI State
   const [totalDatapointsToFetch, setTotalDatapointsToFetch] = useState<number | null>(null)
   const [datapointsFetched, setDatapointsFetched] = useState<number>(0)
   const [processingDatapoints, setProcessingDatapoints] = useState<boolean>(false)
-  const [processingProjections, setProcessingProjections] = useState<boolean>(false)
+  const [processingContextProjections, setProcessingContextProjections] = useState<boolean>(false)
+  const [processingObjectProjections, setProcessingObjectProjections] = useState<boolean>(false)
   const [toolSelected, setToolSelected] = useAtom(toolSelectedAtom)
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
@@ -189,7 +193,8 @@ const DataViewer = () => {
       return
     }
 
-    setProcessingProjections(true)
+    setProcessingObjectProjections(true)
+    setProcessingContextProjections(true)
 
     const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
 
@@ -204,26 +209,22 @@ const DataViewer = () => {
         }
         projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: contextObjectDatapoints })
         projectionsWorker.onmessage = (e: MessageEvent) => {
-          // console.log('onmessage callback', e)
           if (e.data.setType == 'object') {
-            console.log('setting object projections')
             updateobjectprojections(e.data.projections)
           } else {
-            console.log('setting context projections')
             updateprojections(e.data.projections)
           }
           if (e.data.setType == 'object') {
             updateobjectdatapoints({ ...{ ...object__datapoints }, ...e.data.datapoints })
+            setProcessingObjectProjections(false)
           } else {
             updatedatapoints({ ...{ ...context__datapoints }, ...e.data.datapoints })
+            setProcessingContextProjections(false)
           }
 
-          setProcessingProjections(false)
         }
       });
-
     }
-
 
   }, [datapointsFetched]);
 
@@ -233,10 +234,16 @@ const DataViewer = () => {
     // when paging in new data, we want to adjust the ids so they don't collide with existing data
 
     // @ts-ignore
-    normalizedData.object__datapoints = resetDatapointIds(Object.values(object__datapoints).length, Object.values(object__resources).length, normalizedData.object__datapoints)
+    let datapointBumpLength = Object.values(object__datapoints).length
+    normalizedData.object__datapoints = resetDatapointIds(datapointBumpLength, Object.values(object__resources).length, normalizedData.object__datapoints)
     normalizedData.object__resources = resetIds(Object.values(object__resources).length, normalizedData.object__resources)
     normalizedData.object__labels = resetIds(Object.values(object__labels).length, normalizedData.object__labels)
-    normalizedData.object__categories = bumpIds(Object.values(object__datapoints).length, normalizedData.object__categories)
+    normalizedData.object__categories = bumpIds(datapointBumpLength, normalizedData.object__categories)
+
+    // bump object_datapoint_ids
+    Object.values(normalizedData.context__datapoints).map((ctxdp: any) => {
+      ctxdp.object_datapoint_ids = ctxdp.object_datapoint_ids.map((d: any) => d + datapointBumpLength)
+    })
 
     // for new data that is paged in, we want to merge it in cleanly...... 
     // but deep merge doesn't work, so we have to do that manually for a bunch of objects
@@ -247,6 +254,12 @@ const DataViewer = () => {
       let existing = (category !== undefined) ? category.datapoint_ids : []
       let newVals = (normalizedData.context__categories[item].datapoint_ids !== undefined) ? normalizedData.context__categories[item].datapoint_ids : []
       normalizedData.context__categories[item].datapoint_ids = [...newVals, ...existing]
+    })
+    Object.keys(normalizedData.context__inferenceCategories).map((item: any, index: number) => {
+      let category = context__inferencecategories[item]
+      let existing = (category !== undefined) ? category.datapoint_ids : []
+      let newVals = (normalizedData.context__inferenceCategories[item].datapoint_ids !== undefined) ? normalizedData.context__inferenceCategories[item].datapoint_ids : []
+      normalizedData.context__inferenceCategories[item].datapoint_ids = [...newVals, ...existing]
     })
     Object.keys(normalizedData.object__categories).map((item: any, index: number) => {
       let category = object__categories[item]
@@ -328,7 +341,7 @@ const DataViewer = () => {
         normalizedData.context__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
-            if ((datapoint.metadata[key] >= f.range.maxVisible) || (datapoint.metadata[key] <= f.range.minVisible)) {
+            if ((datapoint.metadata[key] > f.range.maxVisible) || (datapoint.metadata[key] < f.range.minVisible)) {
               return true
             }
             else return false
@@ -395,7 +408,7 @@ const DataViewer = () => {
         normalizedData.object__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
-            if ((datapoint.annotations[0].metadata[key] >= f.range.maxVisible) || (datapoint.annotations[0].metadata[key] <= f.range.minVisible)) {
+            if ((datapoint.annotations[0].metadata[key] > f.range.maxVisible) || (datapoint.annotations[0].metadata[key] < f.range.minVisible)) {
               return true
             }
             else return false
@@ -412,6 +425,8 @@ const DataViewer = () => {
     updateinferences({ ...{ ...context__inferences }, ...normalizedData.context__inferences })
     updatetags({ ...{ ...context__tags }, ...normalizedData.context__tags })
     updatecategories({ ...{ ...context__categories }, ...normalizedData.context__categories })
+
+    updatecontextinferencecategories({ ...{ ...context__inferencecategories }, ...normalizedData.context__inferenceCategories })
 
     updateobjectMetadataFilters({ ...{ ...object__metadataFilters }, ...normalizedData.object__metadataFilters })
     updateobjectdatapoints({ ...{ ...object__datapoints }, ...normalizedData.object__datapoints })
@@ -461,7 +476,7 @@ const DataViewer = () => {
   }
 
   let loadingModalString = ""
-  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingProjections
+  const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingObjectProjections || processingContextProjections
   let progressWidth = 0
   if (totalDatapointsToFetch) progressWidth = ((datapointsFetched) / (totalDatapointsToFetch)) * 100
   if (allFetched) loadingModalString = "Finishing loading...."

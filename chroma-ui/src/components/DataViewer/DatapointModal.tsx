@@ -66,9 +66,9 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ isOpen, totalLength }) 
         variant="datapoint"
         scrollBehavior="inside"
       >
-        <ModalContent bgColor={bgColor}>
+        <ModalContent bgColor={bgColor} p={0} overflow="hidden">
           <ModalCloseButton />
-          <ModalBody display="flex">
+          <ModalBody display="flex" p={0}>
             <DataPanelModal datapointId={datapoint} />
           </ModalBody>
         </ModalContent>

@@ -2,85 +2,19 @@ import React, { useState, useEffect } from 'react'
 import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
-import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, toolSelectedAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, globalDatasetFilterAtom, object__datapointsAtom } from './atoms';
+// import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, toolSelectedAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, globalDatasetFilterAtom, object__datapointsAtom } from './atoms';
+import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatasetFilterAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, object__datapointsAtom, globaldatapointToPointMapAtom, globalplotterBoundsAtom, hoverToHighlightInPlotterDatapointIdAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterType, Filter } from './types';
 import { totalmem } from 'os';
 import ImageRenderer from './ImageRenderer';
 import { DataPanelGrid } from './DataPanel'
+import { ConfigProps, getBounds, minMaxNormalization, PlotterProps, selectCallbackOutsideReact, useMousePosition, viewCallbackOutsideReact } from './PlotterUtils';
 
-interface ConfigProps {
-  scatterplot?: any
-}
-
-// we use this to figure out where to display the on-hover datapoint preview
-const useMousePosition = () => {
-  const [
-    mousePosition,
-    setMousePosition
-  ] = React.useState({ x: null, y: null });
-  React.useEffect(() => {
-    const updateMousePosition = (ev: any) => {
-      setMousePosition({ x: ev.clientX, y: ev.clientY });
-    };
-    window.addEventListener('mousemove', updateMousePosition);
-    return () => {
-      window.removeEventListener('mousemove', updateMousePosition);
-    };
-  }, []);
-  return mousePosition;
-};
-
-// used to find the extents of the plotted points for automatic centering, setting zoom, and setting min/max zoom
-const getBounds = (datapoints: { [key: number]: Datapoint }, projections: { [key: number]: Projection }) => {
-  var minX = Infinity
-  var minY = Infinity
-  var maxX = -Infinity
-  var maxY = -Infinity
-
-  Object.values(datapoints).map(function (datapoint) {
-    if (projections[datapoint.projection_id!].y < minY) minY = projections[datapoint.projection_id!].y
-    if (projections[datapoint.projection_id!].y > maxY) maxY = projections[datapoint.projection_id!].y
-    if (projections[datapoint.projection_id!].x < minX) minX = projections[datapoint.projection_id!].x
-    if (projections[datapoint.projection_id!].x > maxX) maxX = projections[datapoint.projection_id!].x
-  })
-
-  var centerX = (maxX + minX) / 2
-  var centerY = (maxY + minY) / 2
-
-  var sizeX = (maxX - minX) / 2
-  var sizeY = (maxY - minY) / 2
-
-  return {
-    minX: minX,
-    maxX: maxX,
-    minY: minY,
-    maxY: maxY,
-    centerX: centerX,
-    centerY: centerY,
-    maxSize: (sizeX > sizeY) ? sizeX : sizeY
-  }
-}
-
-// used with continuous filters and color interpolation
-function minMaxNormalization(value: number, min: number, max: number) {
-  return (value - min) / (max - min)
-}
-
-// this has to be out side of react because we need to keep its reference constant
-function selectCallbackOutsideReact(points: any) {
-  // @ts-ignore
-  window.selectHandler(points)
-}
-
-interface PlotterProps {
-  allFetched: boolean
-}
 
 const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   // bring in our atom data
   const [datapoints] = useAtom(globalDatapointAtom)
-  const [categories] = useAtom(globalCategoriesAtom)
   const [resources] = useAtom(globalResourcesAtom)
   const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
@@ -92,18 +26,38 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const [toolSelected] = useAtom(toolSelectedAtom)
   const [pointsToSelect, setpointsToSelect] = useAtom(pointsToSelectAtom)
   const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [hoverPoint, setHoverPoint] = useAtom(hoverToHighlightInPlotterDatapointIdAtom)
+
+  const [hoverPointId, setHoverPointId] = useState<number | undefined>(undefined)
+  let [points, setPoints] = useState<any>(undefined)
+  let [target, setTarget] = useState<any>(undefined)
+  let [maxSize, setMaxSize] = useState<any>(undefined)
+
+  const [plotterBounds, setPlotterBounds] = useAtom(globalplotterBoundsAtom)
+
+  const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
 
   // local state
   let [reglInitialized, setReglInitialized] = useState(false);
-  let [boundsSet, setBoundsSet] = useState(false);
   let [config, setConfig] = useState<ConfigProps>({})
-  let [points, setPoints] = useState<any>(undefined)
-  let [datapointPointMap, setdatapointPointMap] = useState<{ [key: number]: number }>({})
+  let [datapointPointMap, setdatapointPointMap] = useAtom(globaldatapointToPointMapAtom)//useState<{ [key: number]: number }>({})
   let [pointdatapointMap, setpointdatapointMap] = useState<{ [key: number]: number }>({})
-  const [hoverPointId, setHoverPointId] = useState<number | undefined>(undefined)
+
+  const [object__datapoints] = useAtom(object__datapointsAtom)
 
   // hook
   const mousePosition = useMousePosition()
+
+  let showLoading = false
+  if (Object.values(datapoints).length === 0) showLoading = true
+
+  if (hoverPoint !== undefined) {
+    config.scatterplot.forceHover(datapointPointMap[hoverPoint])
+  }
+
+  // 
+  // Related to our color by dropdown
+  // 
 
   const updateMetadata = (data: any, fn: any) => {
     // this is a bit of a hack
@@ -128,7 +82,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
   // local state for which color by option we currently have selected and what the color options are for it
   let [colorByFilterEnum, setColorByFilterEnum] = useState(ColorByOptionsArr.None)
-  let [colorByOptions, setColorByOptions] = useState(['#fe115d', '#65c00c', '#6641de', '#fa6d09', '#015be8', '#d84500', '#3b21b3', '#e90042', '#8e63f8', '#f338c2'])
+  let [colorByOptions, setColorByOptions] = useState(['#111'])
 
   // this is a dummy filter we create here to let the user color by None (all gray)
   let noneFilter: Filter = {
@@ -164,11 +118,15 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       { name: ColorByOptionsArr.Datasets, filter: datasetFilter! },
       ...metatadataFilterMap
     )
+    if (Object.values(object__datapoints).length === 0) {
+      filterArray.push({ name: ColorByOptionsArr.Categories, filter: categoryFilter! })
+    }
     metatadataFilterMap.forEach(mF => {
       totalColorByOptions++
       ColorByOptionsArr[mF.filter.name] = mF.filter.name
       ColorByOptionsArr[totalColorByOptions] = mF.filter.name
     })
+
   }
 
   // whenever colorByFilterString change, redraw
@@ -177,35 +135,14 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     calculateColorsAndDrawPoints()
   }, [colorByFilterEnum])
 
-  let [target, setTarget] = useState<any>(undefined)
-  let [maxSize, setMaxSize] = useState<any>(undefined)
+  const newColorBy = (event: any) => {
+    setColorByFilterEnum(event.target.value)
+  }
 
-  const bgColor = useColorModeValue("#F3F5F6", '#0c0c0b')
-  const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
-    onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
-      if (config.scatterplot !== undefined) {
-        config.scatterplot.resizeHandler()
-        resizeListener()
-      }
-    }
-  })
 
-  useEffect(() => {
-    if (Object.values(datapoints).length == 0) return
-    if (Object.values(projections).length == 0) return
-    if (!allFetched) return
-    if (config.scatterplot == undefined) return
-    if (boundsSet == false) {
-      let bounds = getBounds(datapoints, projections)
-      config.scatterplot.set({
-        cameraDistance: (bounds.maxSize * 1.4) * 3,
-        minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
-        maxCameraDistance: (bounds.maxSize * 1.4) * 8,
-        cameraTarget: [bounds.centerX, bounds.centerY],
-      })
-      setBoundsSet(true)
-    }
-  }, [config, boundsSet])
+  // 
+  // callbacks
+  // 
 
   // Callback functions that are fired by regl-scatterplot
   // @ts-ignore
@@ -225,13 +162,29 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   const deselectHandler = () => {
     updateselectedDatapoints([])
     setpointsToSelect([])
-  };
+  }
   const pointOverHandler = (pointId: number) => {
     setHoverPointId(pointId)
-  };
+  }
   const pointOutHandler = () => {
     setHoverPointId(undefined)
-  };
+  }
+  // this is running more often than i want..... even just a mouse move triggers it
+  // i really only want the event where the camera updates
+  const viewChangedHandler = (viewData: any) => {
+    setHoverPoint(undefined)
+    if (plotterBounds.cameraDistance === undefined) return
+    let plotterBoundsToUpdate = Object.assign({}, plotterBounds)
+    plotterBoundsToUpdate.cameraDistance = viewData.camera.distance[0]
+    plotterBoundsToUpdate.cameraTarget = [viewData.camera.target[0], viewData.camera.target[1]]
+    setPlotterBounds(plotterBoundsToUpdate)
+  }
+  // @ts-ignore
+  window.viewHandler = viewChangedHandler; // eslint-disable-line @typescript-eslint/no-this-alias
+
+  // 
+  // Drawing stuff
+  // 
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
   // 1.5s across 70k datapoints, running 2 times! every time a new batch of data is loaded in
@@ -243,26 +196,30 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       setPoints([])
       return
     }
-    let bounds = getBounds(datapoints, projections)
-    setTarget([bounds.centerX, bounds.centerY])
-    setMaxSize(bounds.maxSize)
-    calculateColorsAndDrawPoints()
-    setBoundsSet(true)
-    const t4 = performance.now();
-    // console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
-  }, [datapoints, contextObjectSwitcher])
 
-  // fired when we switch between object and context
-  useEffect(() => {
-    if (reglInitialized && (points !== null) && (config.scatterplot !== undefined)) {
-      // right now we wipe selection when you switch modes
-      config.scatterplot.select([])
-      setBoundsSet(false)
+    let localPlotterBounds
+    if (plotterBounds.cameraDistance !== undefined) {
+      localPlotterBounds = plotterBounds
+    } else {
+      let bounds = getBounds(datapoints, projections)
+      localPlotterBounds = {
+        cameraDistance: (bounds.maxSize * 1.4) * 1,
+        minCameraDistance: (bounds.maxSize * 1.4) * (1 / 20),
+        maxCameraDistance: (bounds.maxSize * 1.4) * 8,
+        cameraTarget: [bounds.centerX, bounds.centerY],
+        maxSize: bounds.maxSize
+      }
+      setPlotterBounds(localPlotterBounds)
     }
-  }, [contextObjectSwitcher])
+    config.scatterplot.set(localPlotterBounds)
+    setTarget([localPlotterBounds.cameraTarget![0], localPlotterBounds.cameraTarget![1]])
+    setMaxSize(localPlotterBounds.maxSize)
+    calculateColorsAndDrawPoints()
+    // const t4 = performance.now();
+    // console.log(`datapoints hook: ${(t4 - t3) / 1000} seconds.`);
+  }, [datapoints])
 
   // whenever datapoints changes, we want to regenerate out points and send them down to plotter
-  // 1.5s across 70k datapoints, running 3 times! every time a new batch of data is loaded in
   useEffect(() => {
     if (!allFetched) return
     const t3 = performance.now();
@@ -270,9 +227,10 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     if (Object.values(projections).length == 0) return
     calculateColorsAndDrawPoints()
     const t4 = performance.now();
-    // console.log(`datapoints, visibleDatapoints hook: ${(t4 - t3) / 1000} seconds.`);
   }, [visibleDatapoints])
 
+  // when we select points from elsewhere in the application
+  // this triggers them being selected in the plotter
   useEffect(() => {
     const t3 = performance.now();
     if (pointsToSelect.length === 0) return
@@ -290,24 +248,25 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     // console.log(`pointsToSelect hook: ${(t4 - t3) / 1000} seconds.`);
   }, [pointsToSelect])
 
-  if (reglInitialized && (points !== null)) {
-    if (toolSelected == 'lasso') {
-      config.scatterplot.setLassoOverride(true)
-    } else {
-      config.scatterplot.setLassoOverride(false)
-    }
-  }
-
   // whenever points change, redraw
-  // fast, 0.0001s fast
   useEffect(() => {
     if (reglInitialized && points !== null) {
       config.scatterplot.set({ pointColor: colorByOptions });
       config.scatterplot.draw(points)
+
+      // i have to wait until the redraw happens... this is a dumb hack
+      window.requestAnimationFrame(() => {
+        let selectionPoints: number[] = []
+        selectedDatapoints.map(dpid => {
+          selectionPoints.push(datapointPointMap[dpid])
+        })
+        config.scatterplot.select(selectionPoints)
+      })
+
     }
   }, [points])
 
-  // 95% of the time cost of the datapoints hookS is in this fn
+  // this converts datapoints into points, including their color and whether or not they are visible
   const calculateColorsAndDrawPoints = () => {
     const t3 = performance.now();
     let colorByFilter = filterArray.find((a: any) => a.name == ColorByOptionsArr[colorByFilterEnum])
@@ -319,7 +278,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
     let datapointsClone = Object.assign({}, datapoints)
     Object.values(datapointsClone).map(function (datapoint) {
-      datapoint.visible = false
+      datapoint.visible = false // reset them all to hidden
     })
     visibleDatapoints.forEach(vdp => datapointsClone[vdp].visible = true)
 
@@ -334,10 +293,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
       // get the category id/name, whatever is relevant from the datapoint
       let datapointColorByProp = colorByFilter?.filter.fetchFn(datapoint)
-      // if (i < 10) {
-      //   console.log('datapointColorByProp', datapointColorByProp)
-      //   i++
-      // }
 
       // then lookup in that filter what the color should be, and its position in the list
       let datapointColorIndex = 0
@@ -346,12 +301,27 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
 
       return points.push([projections[datapoint.projection_id].x, projections[datapoint.projection_id].y, datapoint.visible, datapointColorIndex, datapoint.id])
     })
+
+    // useful for going from point to datapoint and datapoint to point quickly
     setdatapointPointMap(datapointPointMapObject)
     setpointdatapointMap(pointdatapointObject)
+
     if (points.length > 1) setPoints(points)
     const t4 = performance.now();
     // console.log(`calculateColorsAndDrawPoints: ${(t4 - t3) / 1000} seconds.`);
   }
+
+  if (reglInitialized && (points !== null)) {
+    if (toolSelected == 'lasso') {
+      config.scatterplot.setLassoOverride(true)
+    } else {
+      config.scatterplot.setLassoOverride(false)
+    }
+  }
+
+  // 
+  // Resize stuff
+  // 
 
   const resizeListener = () => {
     var canvas = document.getElementById("regl-canvas")
@@ -370,9 +340,18 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     }
   }, [])
 
+  const { ref, width = 1, height = 1 } = useResizeObserver<HTMLDivElement>({
+    onResize: ({ width, height }) => { // eslint-disable-line @typescript-eslint/no-shadow
+      if (config.scatterplot !== undefined) {
+        config.scatterplot.resizeHandler()
+        resizeListener()
+      }
+    }
+  })
+
   function getRef(canvasRef: any) {
     if (!canvasRef) return
-    if (!boundsSet) return
+    // if (!boundsSet) return
     if (!reglInitialized && (points !== null)) {
       scatterplot(points,
         colorByOptions,
@@ -383,6 +362,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
           selectHandler: selectCallbackOutsideReact,
           pointOverHandler: pointOverHandler,
           pointOutHandler: pointOutHandler,
+          viewChangedHandler: viewCallbackOutsideReact,
           target: target,
           distance: maxSize * 1.2
         }
@@ -395,16 +375,6 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       });
     }
   }
-
-  const newColorBy = (event: any) => {
-    setColorByFilterEnum(event.target.value)
-  }
-
-  let showLoading = false
-  if (Object.values(datapoints).length === 0) showLoading = true
-
-  const hoverDatapointObject = (hoverPointId !== undefined) ? datapoints[pointdatapointMap[hoverPointId]] : undefined
-  const uri = (hoverDatapointObject !== undefined) ? resources[hoverDatapointObject.resource_id].uri : undefined
 
   // how we set the cursor is a bit of a hack. if we have a custom cursor name
   // the cursor setting will fail, but our class will succeed in setting it

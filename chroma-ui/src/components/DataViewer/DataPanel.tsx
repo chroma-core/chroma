@@ -13,13 +13,30 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom } from './atoms';
+import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom, object__datapointsAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
 interface DataPanelGridProps {
   datapoint: Datapoint
   index: number
+}
+
+function uniq_fast(a: any) {
+  var seen = {};
+  var out = [];
+  var len = a.length;
+  var j = 0;
+  for (var i = 0; i < len; i++) {
+    var item = a[i];
+    // @ts-ignore
+    if (seen[item] !== 1) {
+      // @ts-ignore
+      seen[item] = 1;
+      out[j++] = item;
+    }
+  }
+  return out;
 }
 
 export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }) => {
@@ -32,6 +49,8 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
   const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
   const [labelCategories] = useAtom(object__categoriesAtom)
+
+  const [hoverPoint, setHoverPoint] = useAtom(hoverToHighlightInPlotterDatapointIdAtom)
 
   const uri = resources[datapoint.resource_id].uri
 
@@ -46,6 +65,11 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
       key={datapoint.id}
       borderColor={((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "rgba(0,0,0,0)"}
       onClick={triggerModal}
+      onMouseEnter={() => setHoverPoint(datapoint.id)}
+      onMouseLeave={() => setHoverPoint(undefined)}
+      _hover={{
+        borderColor: ((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "#87d4ff"
+      }}
       borderWidth="2px"
       borderRadius={3}
     >
@@ -93,12 +117,17 @@ const DataPanel: React.FC = () => {
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
+  const [datapoints] = useAtom(globalDatapointAtom)
   const [selectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
-  const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+  const [object__datapoints] = useAtom(object__datapointsAtom)
 
   const [colsPerRow, setcolsPerRow] = useAtom(colsPerRowAtom)
+
+  const [selectedContextDatapoints, setSelectedContextDatapoints] = useAtom(selectedDatapointsAtom)
+  const [selectedObjectDatapoints, setSelectedObjectDatapoints] = useAtom(labelSelectedDatapointsAtom)
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 
@@ -148,6 +177,37 @@ const DataPanel: React.FC = () => {
   }
   else dps = visibleDatapoints
 
+  const showRelated = () => {
+    if (contextObjectSwitcher == DataType.Context) {
+      // build a list of the associated records
+      var objectDatapointIds: number[] = []
+      dps.forEach(dp => {
+        objectDatapointIds.push(...datapoints[dp].object_datapoint_ids!)
+      })
+      objectDatapointIds = uniq_fast(objectDatapointIds) // remove dupes
+
+      // select them
+      setSelectedObjectDatapoints(objectDatapointIds)
+
+      // switch to the other view
+      updatecontextObjectSwitcher(DataType.Object)
+    } else {
+      // build a list of the associated records
+      var objectDatapointIds2: number[] = []
+      dps.forEach(dp => {
+        objectDatapointIds2.push(datapoints[dp].source_datapoint_id!)
+      })
+      objectDatapointIds2 = uniq_fast(objectDatapointIds2) // remove dupes
+
+      // select them
+      setSelectedContextDatapoints(objectDatapointIds2)
+
+      // switch to the other view
+      updatecontextObjectSwitcher(DataType.Context)
+    }
+
+  }
+
   // dps.sort(function (a, b) { return a - b });
 
   return (
@@ -176,6 +236,9 @@ const DataPanel: React.FC = () => {
       >
         <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
           <Text fontWeight={600}>Inspect</Text>
+          {(Object.values(object__datapoints).length > 0) ?
+            <Button onClick={showRelated} variant="ghost" size="sm">Show {(contextObjectSwitcher == DataType.Context) ? "related objects" : "source contexts"}</Button>
+            : null}
           <Text fontSize="sm" px={3} py={1}>{dps.length} selected</Text>
           {/* {(filters !== undefined) ?
             <Select variant="ghost" size="xs" fontWeight={600} width="120px" value={sortByFilterString} onChange={newSortBy}>

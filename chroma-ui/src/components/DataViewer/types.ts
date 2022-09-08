@@ -22,6 +22,8 @@ export interface Datapoint {
   inferences: Annotation[]
   projection_id: number
   visible: boolean
+  object_datapoint_ids?: number[]
+  source_datapoint_id?: number
 }
 
 export interface Dataset {
@@ -125,4 +127,12 @@ export interface Filter {
 export interface FilterArray {
   filter: Filter
   update: (data: any, updateObject: any) => void
+}
+
+export interface PlotterBounds {
+  cameraDistance?: number,
+  minCameraDistance?: number,
+  maxCameraDistance?: number,
+  cameraTarget?: number[],
+  maxSize?: number
 }

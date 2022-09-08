@@ -30,8 +30,6 @@ examples/yolov3_embeddings/data/*
 !examples/yolov3_embeddings/data/get_coco_dataset.sh
 examples/coco/data/
 
-examples/yolov3_embeddings/pytorchyolo/*
-
 # ignore python notebooks
 *.ipynb
 

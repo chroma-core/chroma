@@ -3,6 +3,7 @@ import strawberry
 import models
 import json
 import time
+import os
 import requests
 import base64
 from sqlalchemy.orm import selectinload, joinedload, noload, subqueryload
@@ -110,6 +111,10 @@ class Query:
             image = ImageOps.invert(image)
 
         if (resolver_name == 'filepath'):
+            # if the resource uri starts with ./, we assume it is relative to /chroma
+            if (identifier.startswith('./')):
+                chroma_dir = os.path.dirname(os.path.dirname(os.getcwd()))
+                identifier = chroma_dir + identifier[1:]
             image = Image.open(identifier)
             width, height = image.size
 
@@ -185,7 +190,7 @@ class Query:
 
     # Datapoint
     @strawberry.field
-    async def datapoints(self, filter: FilterDatapoints = None) -> list[Datapoint]:
+    async def datapoints(self, filter: Optional[FilterDatapoints] = None) -> list[Datapoint]:
         async with models.get_session() as s:
             sql = select(models.Datapoint)
             
