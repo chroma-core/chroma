@@ -22,6 +22,24 @@ export const object__categoriesAtom = atom<{ [key: number]: Category }>({})
 export const object__projectionsAtom = atom<{ [key: number]: Projection }>({})
 export const object__metadataFiltersAtom = atom<{ [key: number]: any }>({})
 
+export const context__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
+export const object__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
+
+export const globalInferenceCategoriesAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__inferencecategoriesAtom)
+        return get(object__inferencecategoriesAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__inferencecategoriesAtom
+        if (contextObject == DataType.Object) localAtom = object__inferencecategoriesAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
 export const globalProjectionsAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
@@ -193,12 +211,28 @@ export const context__categoryFilterAtom = atom<Filter | undefined>(undefined)
 export const context__tagFilterAtom = atom<Filter | undefined>(undefined)
 export const context__qualityFilterAtom = atom<Filter | undefined>(undefined)
 export const context__datasetFilterAtom = atom<Filter | undefined>(undefined)
+export const context__inferenceCategoryFilterAtom = atom<Filter | undefined>(undefined)
 
 export const object__inferenceFilterAtom = atom<Filter | undefined>(undefined)
 export const object__categoryFilterAtom = atom<Filter | undefined>(undefined)
 export const object__tagFilterAtom = atom<Filter | undefined>(undefined)
 export const object__qualityFilterAtom = atom<Filter | undefined>(undefined)
 export const object__datasetFilterAtom = atom<Filter | undefined>(undefined)
+
+export const globalInferenceCategoryFilterAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__inferenceCategoryFilterAtom)
+        return undefined
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__inferenceCategoryFilterAtom
+        if (contextObject == DataType.Object) localAtom = undefined
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
 
 export const globalCategoryFilterAtom = atom(
     (get) => {
