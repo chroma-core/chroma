@@ -205,7 +205,7 @@ query embeddingsByPage ($pageInput: PageInput!) {
 #   count(target: 50)
 # }
 
-mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
+mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String] = nll) {
 	appendTagByNameToDatapoints(data: {
 		tagName: $tagName, datapointIds: $datapointIds, target: $target
 	} ) {

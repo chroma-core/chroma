@@ -87,6 +87,7 @@ export type Datapoint = {
   metadata_?: Maybe<Scalars['String']>;
   resource: Resource;
   resourceId?: Maybe<Scalars['Int']>;
+  tagdatapoints: Array<TagDatapoint>;
   tags: Array<Tag>;
   updatedAt: Scalars['DateTime'];
 };
@@ -490,7 +491,7 @@ export type QueryDatapointArgs = {
 
 
 export type QueryDatapointsArgs = {
-  filter: FilterDatapoints;
+  filter?: InputMaybe<FilterDatapoints>;
 };
 
 
@@ -596,6 +597,15 @@ export type TagByNameToDataPointsInput = {
   datapointIds?: InputMaybe<Array<Scalars['Int']>>;
   tagName: Scalars['String'];
   target?: InputMaybe<Array<Scalars['String']>>;
+};
+
+export type TagDatapoint = {
+  __typename?: 'TagDatapoint';
+  id: Scalars['ID'];
+  leftId: Scalars['Int'];
+  rightId: Scalars['Int'];
+  tag: Tag;
+  target?: Maybe<Scalars['String']>;
 };
 
 export type UpdateDatapointInput = {
