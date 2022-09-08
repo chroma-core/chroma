@@ -331,7 +331,10 @@ const Updater: React.FC = () => {
       name: 'Datasets',
       type: FilterType.Discrete,
       options: options,
-      linkedAtom: datasets
+      linkedAtom: datasets,
+      fetchFn: (datapoint) => {
+        return datapoint.dataset_id
+      }
     }
     updatedatasetFilter(newDatasetFilter)
   }, [datasets])
@@ -362,7 +365,10 @@ const Updater: React.FC = () => {
       name: 'Datasets',
       type: FilterType.Discrete,
       options: options,
-      linkedAtom: labeldatasets
+      linkedAtom: labeldatasets,
+      fetchFn: (datapoint) => {
+        return datapoint.dataset_id
+      }
     }
     updatelabeldatasetFilter(newDatasetFilter)
   }, [labeldatasets])
