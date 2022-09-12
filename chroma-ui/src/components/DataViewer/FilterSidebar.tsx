@@ -34,7 +34,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
   const [datapoints] = useAtom(globalDatapointAtom)
-  const [selectedDatapoints, updateselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [selectedDatapoints, setselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
   const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
   const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
   const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
