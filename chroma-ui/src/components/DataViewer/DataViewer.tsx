@@ -9,7 +9,7 @@ import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, context__metadataFiltersAtom, globalDatapointAtom,
-  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom
+  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom, contextObjectSwitcherAtom, DataType
 } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
@@ -106,7 +106,7 @@ const DataViewer = () => {
   const projectId = parseInt(params.project_id!, 10)
 
   // Atoms
-  const [context__datapoints, updatedatapoints] = useAtom(globalDatapointAtom)
+  const [context__datapoints, updatedatapoints] = useAtom(context__datapointsAtom)
   const [context__labels, updatelabels] = useAtom(context__labelsAtom)
   const [context__tags, updatetags] = useAtom(context__tagsAtom)
   const [context__resources, updateresources] = useAtom(context__resourcesAtom)
@@ -125,6 +125,8 @@ const DataViewer = () => {
   const [object__categories, updateobjectcategories] = useAtom(object__categoriesAtom)
   const [object__projections, updateobjectprojections] = useAtom(object__projectionsAtom)
   const [object__metadataFilters, updateobjectMetadataFilters] = useAtom(object__metadataFiltersAtom)
+
+  const [contextObjectSwitcher, updateContextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
 
   const [context__inferencecategories, updatecontextinferencecategories] = useAtom(context__inferencecategoriesAtom)
   const [object__inferencecategories, updateobjectinferencecategories] = useAtom(object__inferencecategoriesAtom)
@@ -193,10 +195,9 @@ const DataViewer = () => {
       return
     }
 
-    setProcessingObjectProjections(true)
-    setProcessingContextProjections(true)
-
     const projectionsSetsToFetch = getMostRecentCreatedAtObjectContext(result.data.projectionSets)
+    if (projectionsSetsToFetch.find(p => p.setType === 'context')) setProcessingContextProjections(true)
+    if (projectionsSetsToFetch.find(p => p.setType === 'object')) setProcessingObjectProjections(true)
 
     for (let index = 0; index < projectionsSetsToFetch.length; index++) {
       let projectionsWorker: Worker = new Worker('/workers/processProjections.js')
@@ -204,20 +205,20 @@ const DataViewer = () => {
         let contextObjectDatapoints
         if (projectionsResponse.setType == 'object') {
           contextObjectDatapoints = object__datapoints
-        } else {
+        } else if (projectionsResponse.setType == 'context') {
           contextObjectDatapoints = context__datapoints
         }
         projectionsWorker.postMessage({ projections: projectionsResponse, datapoints: contextObjectDatapoints })
         projectionsWorker.onmessage = (e: MessageEvent) => {
           if (e.data.setType == 'object') {
             updateobjectprojections(e.data.projections)
-          } else {
+          } else if (e.data.setType == 'context') {
             updateprojections(e.data.projections)
           }
           if (e.data.setType == 'object') {
             updateobjectdatapoints({ ...{ ...object__datapoints }, ...e.data.datapoints })
             setProcessingObjectProjections(false)
-          } else {
+          } else if (e.data.setType == 'context') {
             updatedatapoints({ ...{ ...context__datapoints }, ...e.data.datapoints })
             setProcessingContextProjections(false)
           }
@@ -482,6 +483,8 @@ const DataViewer = () => {
   if (allFetched) loadingModalString = "Finishing loading...."
   else if (totalDatapointsToFetch === undefined) loadingModalString = "Starting up...."
   else loadingModalString = "Fetched " + datapointsFetched.toLocaleString("en-US") + " / " + totalDatapointsToFetch?.toLocaleString("en-US")
+
+  if (!progressModalOpen && Object.values(object__datapoints).length === 0) updateContextObjectSwitcher(DataType.Context)
 
   return (
     // tabIndex is required to fire event https://stackoverflow.com/questions/43503964/onkeydown-event-not-working-on-divs-in-react
