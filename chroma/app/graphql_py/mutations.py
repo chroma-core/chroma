@@ -242,12 +242,10 @@ class Mutation:
         return True
 
     @strawberry.mutation
-    def compute_class_distances(
-        self, training_embedding_set_id: int, target_embedding_set_id: int
-    ) -> Boolean:
+    def compute_class_distances(self, training_dataset_id: int, target_dataset_id: int) -> Boolean:
         compute_class_distances.delay(
-            training_embedding_set_id=training_embedding_set_id,
-            target_embedding_set_id=target_embedding_set_id,
+            training_dataset_id=training_dataset_id,
+            target_dataset_id=target_dataset_id,
         )
         return True
 

@@ -207,15 +207,9 @@ class ChromaSDK:
             dataset_id = int(dataset["id"])
             if dataset_id < first_dataset_id:
                 first_dataset_id = dataset_id
-        training_dataset = nn(self.get_dataset(id=first_dataset_id))
-        first_embedding_set_id = inf
-        for embedding_set in training_dataset.dataset.embedding_sets:
-            embedding_set_id = int(embedding_set["id"])
-            if embedding_set_id < first_embedding_set_id:
-                first_embedding_set_id = embedding_set_id
         self.run_compute_class_distance_mutation(
-            trainingEmbeddingSetId=first_embedding_set_id,
-            targetEmbeddingSetId=self._data_buffer._embedding_set_id,
+            trainingDatasetId=first_dataset_id,
+            targetDatasetId=self._data_buffer._dataset_id,
         )
 
     def set_resource_uris(self, uris):
@@ -311,12 +305,10 @@ class ChromaSDK:
         )
         return result
 
-    def run_compute_class_distance_mutation(
-        self, trainingEmbeddingSetId: int, targetEmbeddingSetId: int
-    ):
+    def run_compute_class_distance_mutation(self, trainingDatasetId: int, targetDatasetId: int):
         params = {
-            "trainingEmbeddingSetId": trainingEmbeddingSetId,
-            "targetEmbeddingSetId": targetEmbeddingSetId,
+            "trainingDatasetId": trainingDatasetId,
+            "targetDatasetId": targetDatasetId,
         }
         result = self._client.execute(run_compute_class_distances_mutation, variable_values=params)
         return result

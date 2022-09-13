@@ -103,7 +103,7 @@ def process_embeddings(embedding_set_ids):
 
 
 @celery.task(base=SqlAlchemyTask, max_retries=3, default_retry_delay=60)
-def compute_class_distances(training_embedding_set_id: int, target_embedding_set_id: int):
+def compute_class_distances(training_dataset_id: int, target_dataset_id: int):
     def unpack_annotations(embeddings):
         # Get and unpack inference data
         annotations = [
@@ -135,11 +135,22 @@ def compute_class_distances(training_embedding_set_id: int, target_embedding_set
         return embedding_vectors_by_category
 
     celery_log.info(
-        f"Started computing class distances for training set {training_embedding_set_id}, target set {target_embedding_set_id}"
+        f"Started computing class distances for training set {training_dataset_id}, target set {target_dataset_id}"
     )
 
-    sql = select(models.Embedding).where(
-        models.Embedding.embedding_set_id == training_embedding_set_id
+    # Get the training embeddings. This is the set of embeddings belonging to datapoints of the training dataset, and to the first created embedding set.
+    sql = select(models.Dataset).filter(models.Dataset.id == training_dataset_id)
+    training_dataset = (db_session.execute(sql)).scalars().unique().all()
+    object_embedding_set_id = training_dataset.embedding_sets[0].id
+
+    sql = (
+        select(models.Embedding)
+        .join(models.Datapoint)
+        .join(models.EmbeddingSet)
+        .filter(
+            models.EmbeddingSet.id == object_embedding_set_id,
+            models.Datapoint.dataset_id == training_dataset_id,
+        )
     )
     training_embeddings = (db_session.execute(sql)).scalars().unique().all()
     training_embedding_vectors_by_category = unpack_annotations(training_embeddings)
@@ -167,7 +178,10 @@ def compute_class_distances(training_embedding_set_id: int, target_embedding_set
     sql = (
         select(models.Datapoint)
         .join(models.Embedding)
-        .where(models.Embedding.embedding_set_id == target_embedding_set_id)
+        .where(
+            models.Embedding.embedding_set_id == object_embedding_set_id,
+            models.Datapoint.dataset_id == target_dataset_id,
+        )
     )
     target_datapoints = (db_session.execute(sql)).scalars().unique().all()
 

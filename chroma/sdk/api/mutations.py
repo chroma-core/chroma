@@ -44,8 +44,8 @@ run_projector_on_embedding_sets_mutuation = gql(
 
 run_compute_class_distances_mutation = gql(
     """
-    mutation computeClassDistances($trainingEmbeddingSetId: Int!, $targetEmbeddingSetId: Int!){
-        computeClassDistances(trainingEmbeddingSetId: $trainingEmbeddingSetId, targetEmbeddingSetId: $targetEmbeddingSetId)
+    mutation computeClassDistances($trainingDatasetId: Int!, $targetDatasetId: Int!){
+        computeClassDistances(trainingDatasetId: $trainingDatasetId, targetDatasetId: $targetDatasetId)
     }
     """
 )
