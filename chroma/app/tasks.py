@@ -209,7 +209,7 @@ def compute_class_distances(training_dataset_id: int, target_dataset_id: int):
                 celery_log.warning(f"squared distance for category {category} is negative")
                 continue
             distance = np.sqrt(squared_mhb)
-            inferences[i]["distance_score"] = distance
+            inferences[i]['metadata']["distance_score"] = distance
 
         datapoint.inference.data = json.dumps({"annotations": inferences})
 
