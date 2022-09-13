@@ -163,23 +163,24 @@ class ChromaSDK:
             dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id, categories))
             dataset_id = int(dataset.createOrGetDataset.id)
 
-            # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
+            # For now we have global embedding sets for objects and contexts.
+            # They belong to the first dataset we created per project.
             # TODO(anton) Rationalize or remove EmbeddingSet. EmbeddingSets don't necessarily have any correspondence
             # to datasets.
             if len(project.createOrGetProject.datasets) == 0:
                 embedding_set = nn(self.create_embedding_set(dataset_id))
                 embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+
+                ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
+                ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
             else:
                 first_dataset_id = project.createOrGetProject.datasets[0]["id"]
                 first_dataset = nn(self.get_dataset(int(first_dataset_id)))
                 assert (
-                    len(first_dataset.dataset.embeddingSets) != 0
-                ), f"Global embedding set for project {self._project_id} not present!"
+                    len(first_dataset.dataset.embeddingSets) >= 2
+                ), f"Global embedding sets for project {self._project_id} not present!"
                 embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
-
-            # TODO: create model arch, trained model, layer sets, layer here...
-            ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
-            ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
+                ctx_embedding_set_id = int(first_dataset.dataset.embeddingSets[1]["id"])
 
             self._data_buffer = ChromaSDK._DataBuffer(
                 dataset_id=dataset_id,
