@@ -203,7 +203,7 @@ export enum DataType {
     Context,
     Object,
 }
-export const contextObjectSwitcherAtom = atom<number>(DataType.Context)
+export const contextObjectSwitcherAtom = atom<number>(DataType.Object)
 
 // Filter state
 export const context__inferenceFilterAtom = atom<Filter | undefined>(undefined)
