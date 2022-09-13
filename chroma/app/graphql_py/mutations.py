@@ -228,6 +228,7 @@ class TagByNameToDataPointsInput:
     target: Optional[list[str]]
     datapointIds: Optional[list[int]]
 
+
 @strawberry.type
 class Mutation:
 
@@ -241,9 +242,12 @@ class Mutation:
         return True
 
     @strawberry.mutation
-    def compute_class_distances(self, training_dataset_id: int, target_dataset_id: int) -> Boolean:
+    def compute_class_distances(
+        self, training_embedding_set_id: int, target_embedding_set_id: int
+    ) -> Boolean:
         compute_class_distances.delay(
-            training_dataset_id=training_dataset_id, target_dataset_id=target_dataset_id
+            training_embedding_set_id=training_embedding_set_id,
+            target_embedding_set_id=target_embedding_set_id,
         )
         return True
 
@@ -255,7 +259,7 @@ class Mutation:
             await s.flush()
 
             targetData = [None for element in range(len(data.datapointIds))]
-            if (data.target != None):
+            if data.target != None:
                 targetData = data.target
 
             for datapointId, target in zip(data.datapointIds, targetData):
@@ -325,7 +329,7 @@ class Mutation:
                 await s.flush()
 
             targetData = [None for element in range(len(data.datapointIds))]
-            if (data.target != None):
+            if data.target != None:
                 targetData = data.target
 
             datapoints = []
@@ -338,7 +342,9 @@ class Mutation:
                 )
                 datapoint = (await s.execute(sql)).scalar_one()
 
-                tagdatapoints_to_add.append(dict(left_id=tag.id, right_id=datapoint.id, target=target))
+                tagdatapoints_to_add.append(
+                    dict(left_id=tag.id, right_id=datapoint.id, target=target)
+                )
                 s.add(datapoint)
                 datapoints.append(datapoint)
 
@@ -471,15 +477,21 @@ class Mutation:
                 objs_to_add.extend([label, inference, resource])
 
                 embeddings = [
-                    models.Embedding(data=embedding_data, embedding_set_id=datapoint_embedding_set.embedding_set_id)
+                    models.Embedding(
+                        data=embedding_data,
+                        embedding_set_id=datapoint_embedding_set.embedding_set_id,
+                    )
                     for embedding_data in datapoint_embedding_set.embedding_data
                 ]
                 objs_to_add.extend(embeddings)
 
                 ctx_embeddings = []
-                if (datapoint_embedding_set.ctx_embedding_data != None):
+                if datapoint_embedding_set.ctx_embedding_data != None:
                     ctx_embeddings = [
-                        models.Embedding(data=ctx_embedding_data, embedding_set_id=datapoint_embedding_set.ctx_embedding_set_id)
+                        models.Embedding(
+                            data=ctx_embedding_data,
+                            embedding_set_id=datapoint_embedding_set.ctx_embedding_set_id,
+                        )
                         for ctx_embedding_data in datapoint_embedding_set.ctx_embedding_data
                     ]
                     objs_to_add.extend(ctx_embeddings)
@@ -569,7 +581,7 @@ class Mutation:
 
             res = models.Dataset(name=dataset.name, project=project)
             if dataset.categories:
-                res.categories=dataset.categories
+                res.categories = dataset.categories
             s.add(res)
             await s.commit()
         return Dataset.marshal(res)
@@ -591,7 +603,7 @@ class Mutation:
             if result is None:
                 ret = models.Dataset(name=dataset.name, project=project)
                 if dataset.categories:
-                    ret.categories=dataset.categories
+                    ret.categories = dataset.categories
 
                 s.add(ret)
                 await s.commit()
@@ -975,6 +987,7 @@ async def load_datapoints_by_dataset(keys: list) -> list[Datapoint]:
         data = [(await s.execute(sql)).scalars().unique().all() for sql in all_queries]
     return data
 
+
 async def load_tags_by_datapoints(keys: list) -> list[Tag]:
     async with models.get_session() as s:
         # there has to be a better way of doing this......
@@ -987,12 +1000,11 @@ async def load_tags_by_datapoints(keys: list) -> list[Tag]:
         data = [(await s.execute(sql)).scalars().all() for sql in all_queries]
     return data
 
+
 async def load_tagdatapoints_by_datapoints(keys: list) -> list[TagDatapoint]:
     async with models.get_session() as s:
         all_queries = [
-            select(models.Tagdatapoint)
-            .where(models.Tagdatapoint.right_id == key)
-            for key in keys
+            select(models.Tagdatapoint).where(models.Tagdatapoint.right_id == key) for key in keys
         ]
         data = [(await s.execute(sql)).scalars().all() for sql in all_queries]
     return data

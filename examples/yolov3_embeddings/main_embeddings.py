@@ -58,7 +58,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
     num_anchors = 3
     no = 85
 
-    conf_thres = 0.01
+    conf_thres = 0.3
     nms_thres = 0.4
 
     Tensor = torch.FloatTensor
@@ -230,7 +230,7 @@ def main():
     # Setup params
     model_path = "config/yolov3.cfg"
     weights_path = "weights/yolov3.weights"
-    data = "config/coco1000.data"
+    data = "config/coco50.data"
     batch_size = 8
     img_size = 416
     n_cpu = 8
@@ -272,7 +272,7 @@ def main():
     model.eval()
 
     with chroma_manager.ChromaSDK(
-        project_name="YOLO-1k", dataset_name="TestYolo1k", categories=json.dumps(class_object)
+        project_name="YOLO", dataset_name="TestYolo50", categories=json.dumps(class_object)
     ) as chroma_storage:
         infer(model, device, dataloader, class_names, chroma_storage=chroma_storage)
 
