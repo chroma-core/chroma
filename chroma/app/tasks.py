@@ -141,7 +141,7 @@ def compute_class_distances(training_dataset_id: int, target_dataset_id: int):
     # Get the training embeddings. This is the set of embeddings belonging to datapoints of the training dataset, and to the first created embedding set.
     sql = select(models.Dataset).filter(models.Dataset.id == training_dataset_id)
     training_dataset = (db_session.execute(sql)).scalars().unique().all()
-    object_embedding_set_id = training_dataset.embedding_sets[0].id
+    object_embedding_set_id = training_dataset[0].embedding_sets[0].id
 
     sql = (
         select(models.Embedding)
