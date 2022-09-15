@@ -510,7 +510,7 @@ const DataViewer = () => {
           <ModalHeader>Downloading data</ModalHeader>
           <ModalBody pb={10}>
             <Progress value={progressWidth} borderRadius={5} sx={{
-              "& > div:first-child": {
+              "& > div:first-of-type": {
                 transitionProperty: "width",
                 transitionDuration: '4s',
                 transitionTimingFunction: 'linear'

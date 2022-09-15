@@ -208,6 +208,11 @@ const DataPanel: React.FC = () => {
 
   }
 
+  const autosizerResized = (data: any) => {
+    let columnCount = Math.ceil((data.width / 150))
+    setcolsPerRow(columnCount)
+  }
+
   // dps.sort(function (a, b) { return a - b });
 
   return (
@@ -263,10 +268,9 @@ const DataPanel: React.FC = () => {
         </Portal>
 
         {(dps.length > 0) ?
-          <AutoSizer>
+          <AutoSizer onResize={autosizerResized}>
             {({ height, width }) => {
               let columnCount = Math.ceil((width / 150))
-              setcolsPerRow(columnCount)
               return (
                 <Flex pt={2} style={{ width: width, height: height }}>
                   <Scrollbars autoHide style={{ width: width, height: height }}>
