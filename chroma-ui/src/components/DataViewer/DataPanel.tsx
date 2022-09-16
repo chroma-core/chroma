@@ -4,7 +4,7 @@ import { Grid as ChakraGrid, GridItem, Tag } from '@chakra-ui/react'
 import { Table, Tbody, Tr, Td, TableContainer, Select, Center, Image } from '@chakra-ui/react'
 import TagForm from './TagForm'
 import Tags from './Tags'
-import { Datapoint } from './types';
+import { Datapoint, Filter, FilterArray, FilterType } from './types';
 import { FixedSizeList as List, FixedSizeGrid as Grid } from "react-window";
 import AutoSizer from "react-virtualized-auto-sizer"
 import { useQuery } from 'urql'
@@ -13,7 +13,7 @@ import { Scrollbars } from 'react-custom-scrollbars'
 import { BsTagFill, BsTag, BsLayers } from 'react-icons/bs'
 import { BiCategoryAlt, BiCategory } from 'react-icons/bi'
 import { useAtom } from 'jotai';
-import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom, object__datapointsAtom } from './atoms';
+import { selectedDatapointsAtom, context__datapointsAtom, visibleDatapointsAtom, context__resourcesAtom, colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, contextObjectSwitcherAtom, DataType, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, globalDatapointAtom, globalResourcesAtom, object__categoriesAtom, labelSelectedDatapointsAtom, hoverToHighlightInPlotterDatapointIdAtom, object__datapointsAtom, globalCategoryFilterAtom, globalTagFilterAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, datapointModalRowIndexAtom } from './atoms';
 import DatapointModal from './DatapointModal';
 import ImageRenderer from './ImageRenderer';
 
@@ -46,6 +46,7 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
   const bgColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
   const [resources] = useAtom(globalResourcesAtom)
   let [datapointModalIndex, updatedatapointModalIndex] = useAtom(datapointModalIndexAtom)
+  let [datapointModalRowIndex, updatedatapointRowModalIndex] = useAtom(datapointModalRowIndexAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
   const [contextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
   const [labelCategories] = useAtom(object__categoriesAtom)
@@ -55,7 +56,8 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
   const uri = resources[datapoint.resource_id].uri
 
   const triggerModal = () => {
-    updatedatapointModalIndex(index)
+    updatedatapointRowModalIndex(index)
+    updatedatapointModalIndex(datapoint.id)
     updatedatapointModalOpen(true)
   }
 
@@ -63,12 +65,12 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
     <Box
       height={125}
       key={datapoint.id}
-      borderColor={((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "rgba(0,0,0,0)"}
+      borderColor={((datapointModalRowIndex == index) && datapointModalOpen) ? "#09a6ff" : "rgba(0,0,0,0)"}
       onClick={triggerModal}
       onMouseEnter={() => setHoverPoint(datapoint.id)}
       onMouseLeave={() => setHoverPoint(undefined)}
       _hover={{
-        borderColor: ((datapointModalIndex == index) && datapointModalOpen) ? "#09a6ff" : "#87d4ff"
+        borderColor: ((datapointModalRowIndex == index) && datapointModalOpen) ? "#09a6ff" : "#87d4ff"
       }}
       borderWidth="2px"
       borderRadius={3}
@@ -131,51 +133,36 @@ const DataPanel: React.FC = () => {
 
   const { isOpen, onOpen, onClose } = useDisclosure()
 
-  // let [sortByFilterString, setSortByFilterString] = useState('Labels')
-  // let [sortByInvert, setSortByInvert] = useState(false)
+  let [sortByFilterString, setSortByFilterString] = useState('Labels')
+  let [sortByInvert, setSortByInvert] = useState(false)
   let [datapointModalIndex, setdatapointModalIndex] = useAtom(datapointModalIndexAtom)
+  let [datapointModalRowIndex, setdatapointModalRowIndex] = useAtom(datapointModalRowIndexAtom)
 
   const [resizeState, setResizeState] = useState({ width: 600, height: '100vh' })
 
   const gridRef = React.createRef<Grid>();
 
   useEffect(() => {
-    if ((datapointModalIndex === null) || (gridRef.current === null)) return
+    if ((datapointModalRowIndex === null) || (gridRef.current === null)) return
     gridRef!.current!.scrollToItem({
-      rowIndex: Math.floor(datapointModalIndex / colsPerRow)
+      rowIndex: Math.floor(datapointModalRowIndex / colsPerRow)
     })
-  }, [datapointModalIndex])
+    setdatapointModalIndex(dps[datapointModalRowIndex]) // a bit of a hack, since this component is the only one that knows about the sorting of dps currently
+  }, [datapointModalRowIndex])
 
-  // const newSortBy = (event: any) => {
-  //   let str = event.target.value
-  //   setSortByFilterString(str)
-  //   let invert = (str.split("-")[1] === 'down')
-  //   setSortByInvert(invert)
-  // }
-  // let validFilters
-  // if (filters !== undefined) {
-  //   const noFilterList = ["Tags"]
-  //   validFilters = filters.filter(f => !noFilterList.includes(f.name))
+  const newSortBy = (event: any) => {
+    let str = event.target.value
+    setSortByFilterString(str)
+    let invert = (str.split("-")[1] === 'down')
+    setSortByInvert(invert)
+  }
 
-  //   let baseFilterName = sortByFilterString.split("-")[0]
-  //   let sortByFilter = filters.find((a: any) => a.name == baseFilterName)
-  //   var i = 0;
-  //   datapointsToRender.sort(function (a, b) {
-  //     let aVal = sortByFilter.fetchFn(a)[0]
-  //     let bVal = sortByFilter.fetchFn(b)[0]
-
-  //     if (aVal < bVal) return -1;
-  //     if (bVal > aVal) return 1;
-  //     return 0;
-  //   })
-  //   if (sortByInvert) datapointsToRender?.reverse()
-  // }
 
   var dps: number[] = []
   if (selectedDatapoints.length > 0) {
-    dps = selectedDatapoints//.filter( ( el ) => visibleDatapoints.includes( el ) );
+    dps = selectedDatapoints.slice()//.filter( ( el ) => visibleDatapoints.includes( el ) );
   }
-  else dps = visibleDatapoints
+  else dps = visibleDatapoints.slice()
 
   const showRelated = () => {
     if (contextObjectSwitcher == DataType.Context) {
@@ -207,8 +194,59 @@ const DataPanel: React.FC = () => {
     }
 
   }
+  const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
+  const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
+  const [datasetFilter, updatedatasetFilter] = useAtom(globalDatasetFilterAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
 
-  // dps.sort(function (a, b) { return a - b });
+  var metatadataFilterMap = Object.values(metadataFilters).map(m => {
+    return { filter: m, update: () => { } }
+  })
+  // this is a dummy filter we create here to let the user color by None (all gray)
+  let noneFilter: Filter = {
+    name: 'Datapoint ID',
+    type: FilterType.Discrete,
+    //@ts-ignore
+    options: [{ color: "#111", id: 0, visible: true, evalDatapoint: () => { } }],
+    linkedAtom: [],
+    fetchFn: (datapoint) => {
+      return datapoint.id
+    }
+  }
+
+  const filterArray: FilterArray[] = [
+    { filter: noneFilter!, update: () => { } },
+    { filter: categoryFilter!, update: () => { } },
+    { filter: datasetFilter!, update: () => { } },
+    ...metatadataFilterMap
+  ]
+
+  let validFilters
+  let skipFilters = ["Label Category"]
+  validFilters = filterArray.filter(f => (f.filter !== undefined) && !(skipFilters.indexOf(f.filter.name) > -1))
+  if (filterArray !== undefined) {
+    let baseFilterName = sortByFilterString.split("-")[0]
+    let sortByFilter = filterArray.find((a: any) => (a.filter !== undefined) && (a.filter.name == baseFilterName))
+    var i = 0;
+    if (sortByFilter !== undefined) {
+      dps.sort(function (a, b) {
+
+        // @ts-ignore
+        let aVal = sortByFilter.filter.fetchFn(datapoints[a])
+        // @ts-ignore
+        let bVal = sortByFilter.filter.fetchFn(datapoints[b])
+
+        if (aVal === undefined) aVal = 0
+        if (bVal === undefined) bVal = 0
+
+        if (aVal < bVal) return -1;
+        if (bVal > aVal) return 1;
+        return 0;
+      })
+      if (sortByInvert) dps?.reverse()
+      dps = dps.slice() // have to do this to trigger a render manually
+    }
+  }
 
   return (
     <Resizable
@@ -235,23 +273,24 @@ const DataPanel: React.FC = () => {
         pt={14}
       >
         <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
-          <Text fontWeight={600}>Inspect</Text>
+          <Text><span style={{ fontWeight: 600 }}>Inspect</span> - {dps.length} selected</Text>
           {(Object.values(object__datapoints).length > 0) ?
-            <Button onClick={showRelated} variant="ghost" size="sm">Show {(contextObjectSwitcher == DataType.Context) ? "related objects" : "source contexts"}</Button>
+            <Button onClick={showRelated} variant="ghost" size="xs" pt={1}>show {(contextObjectSwitcher == DataType.Context) ? "related objects" : "source contexts"}</Button>
             : null}
-          <Text fontSize="sm" px={3} py={1}>{dps.length} selected</Text>
-          {/* {(filters !== undefined) ?
-            <Select variant="ghost" size="xs" fontWeight={600} width="120px" value={sortByFilterString} onChange={newSortBy}>
+          {/* <Text fontSize="sm" px={3} py={1}></Text> */}
+          {(filterArray !== undefined) ?
+            <Select variant="ghost" size="xs" fontWeight={600} width="180px" value={sortByFilterString} onChange={newSortBy}>
               {validFilters.map((filterb: any) => {
+                if (filterb.filter === undefined) return
                 return (
                   <React.Fragment key={filterb.name}>
-                    <option key={filterb.name + "-up"} value={filterb.name + "-up"}>{filterb.name} - Up</option>
-                    <option key={filterb.name + "-down"} value={filterb.name + "-down"}>{filterb.name} - Down</option>
+                    <option key={filterb.filter.name + "-up"} value={filterb.filter.name + "-up"}>{filterb.filter.name} - up</option>
+                    <option key={filterb.filter.name + "-down"} value={filterb.filter.name + "-down"}>{filterb.filter.name} - down</option>
                   </React.Fragment>
                 )
               })}
             </Select>
-            : null} */}
+            : null}
         </Flex>
 
         <TagForm />

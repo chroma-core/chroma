@@ -25,6 +25,21 @@ export const object__metadataFiltersAtom = atom<{ [key: number]: any }>({})
 export const context__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
 export const object__inferencecategoriesAtom = atom<{ [key: number]: Category }>({})
 
+export const globalDatasetsAtom = atom(
+    (get) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        if (contextObject == DataType.Context) return get(context__datasetsAtom)
+        return get(object__datasetsAtom)
+    },
+    (get, set, dps?: any) => {
+        const contextObject = get(contextObjectSwitcherAtom)
+        let localAtom
+        if (contextObject == DataType.Context) localAtom = context__datasetsAtom
+        if (contextObject == DataType.Object) localAtom = object__datasetsAtom
+        // @ts-ignore
+        set(localAtom, dps!)
+    })
+
 export const globalInferenceCategoriesAtom = atom(
     (get) => {
         const contextObject = get(contextObjectSwitcherAtom)
@@ -157,7 +172,10 @@ export const toolSelectedAtom = atom<string>('cursor')
 export const toolWhenShiftPressedAtom = atom<string>('')
 export const cursorAtom = atom<string>(CursorMap.select)
 export const colsPerRowAtom = atom<number>(3)
+
 export const datapointModalIndexAtom = atom<number>(0)
+export const datapointModalRowIndexAtom = atom<number>(0)
+
 export const datapointModalOpenAtom = atom<boolean>(false)
 export const pointsToSelectAtom = atom<number[]>([])
 
