@@ -75,7 +75,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
                   <Td width="30%" fontSize="xs">Datapoint ID</Td>
                   <Td p={0} fontSize="xs">{datapoint.id}</Td>
                 </Tr>
-                <Tr key={"dpid"}>
+                <Tr key={"resourceid"}>
                   <Td width="30%" fontSize="xs">Resource URI</Td>
                   <Td p={0} fontSize="xs">{resources[datapoint.resource_id].uri}</Td>
                 </Tr>
@@ -139,7 +139,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
                 })}
                 {(datapoint.annotations.length === 0) ?
                   <Tr p={1} fontSize="xs" key={"category"}>
-                    None yet
+                    <Td>None yet</Td>
                   </Tr>
                   : null}
               </Tbody>
@@ -164,7 +164,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
                 })}
                 {(datapoint.inferences.length === 0) ?
                   <Tr p={1} fontSize="xs" key={"category"}>
-                    None yet
+                    <Td>None yet</Td>
                   </Tr>
                   : null}
               </Tbody>
