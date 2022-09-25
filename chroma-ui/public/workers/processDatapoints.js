@@ -189,8 +189,6 @@ self.onmessage = (message) => {
             let hasBoundingBoxes = (ann.bbox !== undefined)
             if (hasBoundingBoxes) {
 
-                // console.log('ann', ann)
-
                 // create the resource
                 object__resourcesObject[j] = {
                     id: j,

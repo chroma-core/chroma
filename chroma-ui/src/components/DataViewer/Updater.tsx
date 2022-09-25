@@ -236,7 +236,10 @@ const Updater: React.FC = () => {
       name: 'Label Category',
       type: FilterType.Discrete,
       options: options,
-      linkedAtom: labelcategories
+      linkedAtom: labelcategories,
+      fetchFn: (datapoint) => {
+        return datapoint.annotations[0].category_id
+      }
     }
     updatelabelcategoryFilter(newCategoryFilter)
   }, [labelcategories])
