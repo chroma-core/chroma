@@ -293,7 +293,7 @@ const DataPanel: React.FC = () => {
               {validFilters.map((filterb: any) => {
                 if (filterb.filter === undefined) return
                 return (
-                  <React.Fragment key={filterb.name}>
+                  <React.Fragment key={filterb.filter.name}>
                     <option key={filterb.filter.name + "-up"} value={filterb.filter.name + "-up"}>{filterb.filter.name} - up</option>
                     <option key={filterb.filter.name + "-down"} value={filterb.filter.name + "-down"}>{filterb.filter.name} - down</option>
                   </React.Fragment>
