@@ -353,7 +353,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
-            i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
+            i, j = (x[:, 5:].cpu() > conf_thres).nonzero(as_tuple=False).T
             if x.device.type == "mps":
                 i = i.to("cpu")
                 j = j.to("cpu")
@@ -369,6 +369,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         if classes is not None:
             indices = (x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)
             x = x[indices]
+            indices = indices.cpu()
             remaining_indices = remaining_indices[indices]
 
         # Check shape
@@ -379,6 +380,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             # sort by confidence
             indices = x[:, 4].argsort(descending=True)[:max_nms]
             x = x[indices]
+            indices = indices.cpu()
             remaining_indices = remaining_indices[indices]
 
         # Batched NMS

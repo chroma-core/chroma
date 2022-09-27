@@ -336,7 +336,6 @@ delete_tag_mutation = gql(
 # )
 
 
-
 # job mutations
 create_job_mutation = gql(
     """

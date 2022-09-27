@@ -75,7 +75,9 @@ class ChromaSDK:
     # One way to do this might be to pull in app/models but this creates a messy cross-dependency.
     # This also does not enough type checking and is (probably) not thread safe.
     class _DataBuffer:
-        def __init__(self, dataset_id: int, embedding_set_id: int, ctx_embedding_set_id:int) -> None:
+        def __init__(
+            self, dataset_id: int, embedding_set_id: int, ctx_embedding_set_id: int
+        ) -> None:
             self._dataset_id = dataset_id
             self._embedding_set_id = embedding_set_id
 
@@ -119,7 +121,7 @@ class ChromaSDK:
 
         def get_batch_data(self):
             def return_the_right_thing(input, index):
-                if (input == None): 
+                if input == None:
                     return None
                 if isinstance(input[index], list):
                     return [json.dumps(emb) for emb in input[index]]
@@ -132,19 +134,23 @@ class ChromaSDK:
                     "embeddingSetId": self._embedding_set_id,
                     "labelData": json.dumps(self._labels[index]),
                     "inferenceData": json.dumps(self._inferences[index]),
-                    "embeddingData": return_the_right_thing(self._embeddings, index), 
+                    "embeddingData": return_the_right_thing(self._embeddings, index),
                     "resourceUri": self._resource_uris[index],
-                    'metadata': json.dumps(self._metadata[index]),
-
+                    "metadata": json.dumps(self._metadata[index]),
                     "ctxEmbeddingSetId": self._ctx_embedding_set_id,
-                    "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings, index), 
+                    "ctxEmbeddingData": return_the_right_thing(self._ctx_embeddings, index),
                 }
                 for index in range(self._count)
             ]
             return batch_data
 
     # Internal
-    def __init__(self, project_name: Optional[str] = None, dataset_name: Optional[str] = None, categories: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        project_name: Optional[str] = None,
+        dataset_name: Optional[str] = None,
+        categories: Optional[str] = None,
+    ) -> None:
         transport = AIOHTTPTransport(url="http://127.0.0.1:8000/graphql")
         self._client = Client(
             transport=transport, fetch_schema_from_transport=True, execute_timeout=30
@@ -157,26 +163,29 @@ class ChromaSDK:
             dataset = nn(self.create_or_get_dataset(dataset_name, self._project_id, categories))
             dataset_id = int(dataset.createOrGetDataset.id)
 
-            # For now we have only a single global embedding set. It belongs to the first dataset we created per project.
+            # For now we have global embedding sets for objects and contexts.
+            # They belong to the first dataset we created per project.
             # TODO(anton) Rationalize or remove EmbeddingSet. EmbeddingSets don't necessarily have any correspondence
             # to datasets.
             if len(project.createOrGetProject.datasets) == 0:
                 embedding_set = nn(self.create_embedding_set(dataset_id))
                 embedding_set_id = int(embedding_set.createEmbeddingSet.id)
+
+                ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
+                ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
             else:
                 first_dataset_id = project.createOrGetProject.datasets[0]["id"]
                 first_dataset = nn(self.get_dataset(int(first_dataset_id)))
                 assert (
-                    len(first_dataset.dataset.embeddingSets) != 0
-                ), f"Global embedding set for project {self._project_id} not present!"
+                    len(first_dataset.dataset.embeddingSets) >= 2
+                ), f"Global embedding sets for project {self._project_id} not present!"
                 embedding_set_id = int(first_dataset.dataset.embeddingSets[0]["id"])
-
-            # TODO: create model arch, trained model, layer sets, layer here...
-            ctx_embedding_set = nn(self.create_embedding_set(dataset_id))
-            ctx_embedding_set_id = int(ctx_embedding_set.createEmbeddingSet.id)
+                ctx_embedding_set_id = int(first_dataset.dataset.embeddingSets[1]["id"])
 
             self._data_buffer = ChromaSDK._DataBuffer(
-                dataset_id=dataset_id, embedding_set_id=embedding_set_id, ctx_embedding_set_id=ctx_embedding_set_id
+                dataset_id=dataset_id,
+                embedding_set_id=embedding_set_id,
+                ctx_embedding_set_id=ctx_embedding_set_id,
             )
 
     def __enter__(self):
@@ -189,25 +198,26 @@ class ChromaSDK:
         self.run_projector_on_embedding_sets_mutation([self._data_buffer._embedding_set_id])
         self.run_projector_on_embedding_sets_mutation([self._data_buffer._ctx_embedding_set_id])
 
-        # TODO(anton) We just automatically treat the first (by id) dataset for a project as the 'training' dataset.
+        # TODO(anton) We just automatically treat the first (by id) embedding set for a project as the 'training' set.
         # This is also really ugly, we should be able to get the right training set by knowing which
         # model we're getting inferences from.
-        # project = nn(self.get_project(id=self._project_id))
-        # min_dataset_id = inf
-        # for dataset in project.project.datasets:
-        #     dataset_id = int(dataset["id"])
-        #     if dataset_id < min_dataset_id:
-        #         min_dataset_id = dataset_id
-        # self.run_compute_class_distance_mutation(
-        #     trainingDatasetId=min_dataset_id, targetDatasetId=self._data_buffer._dataset_id
-        # )
+        project = nn(self.get_project(id=self._project_id))
+        first_dataset_id = inf
+        for dataset in project.project.datasets:
+            dataset_id = int(dataset["id"])
+            if dataset_id < first_dataset_id:
+                first_dataset_id = dataset_id
+        self.run_compute_class_distance_mutation(
+            trainingDatasetId=first_dataset_id,
+            targetDatasetId=self._data_buffer._dataset_id,
+        )
 
     def set_resource_uris(self, uris):
         self._data_buffer.set_data("_resource_uris", uris)
 
     def set_labels(self, labels):
         self._data_buffer.set_data("_labels", labels)
-    
+
     def set_metadata(self, metadata):
         self._data_buffer.set_data("_metadata", metadata)
 
@@ -220,7 +230,9 @@ class ChromaSDK:
 
     def attach_forward_hook(self, model):
         self._forward_hook = model.register_forward_hook(
-            lambda model, input, output: self.set_embeddings([{"target": None, "data": emb} for emb in output.data.detach().tolist()])
+            lambda model, input, output: self.set_embeddings(
+                [{"target": None, "data": emb} for emb in output.data.detach().tolist()]
+            )
         )
 
     def set_inferences(self, inferences):
@@ -268,14 +280,18 @@ class ChromaSDK:
         return result
 
     # Abstract
-    def append_tag_by_name_to_datapoints_mutation(self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None):
+    def append_tag_by_name_to_datapoints_mutation(
+        self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None
+    ):
         params = {"tagName": tag_name, "datapointIds": datapointIds, "target": targetIds}
         result = self._client.execute(
             append_tag_by_name_to_datapoints_mutation, variable_values=params
         )
         return result
 
-    def remove_tag_by_name_from_datapoints_mutation(self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None):
+    def remove_tag_by_name_from_datapoints_mutation(
+        self, tag_name: str, datapointIds: list[int], targetIds: Optional[list[int]] = None
+    ):
         params = {"tagName": tag_name, "datapointIds": datapointIds, "target": targetIds}
         result = self._client.execute(
             remove_tag_by_name_from_datapoints_mutation, variable_values=params
@@ -290,7 +306,10 @@ class ChromaSDK:
         return result
 
     def run_compute_class_distance_mutation(self, trainingDatasetId: int, targetDatasetId: int):
-        params = {"trainingDatasetId": trainingDatasetId, "targetDatasetId": targetDatasetId}
+        params = {
+            "trainingDatasetId": trainingDatasetId,
+            "targetDatasetId": targetDatasetId,
+        }
         result = self._client.execute(run_compute_class_distances_mutation, variable_values=params)
         return result
 
@@ -330,7 +349,7 @@ class ChromaSDK:
 
     def create_batch_datapoint_embedding_set(self, new_datapoint_embedding_sets):
         params = {"batchData": {"batchData": new_datapoint_embedding_sets}}
-        
+
         result = self._client.execute(
             create_batch_datapoint_embedding_set_mutation, variable_values=params
         )
@@ -447,7 +466,6 @@ class ChromaSDK:
     #     result = self._client.execute(delete_resource_mutation, variable_values=params)
     #     return result
 
-    
     # job
     def get_jobs(self):
         result = self._client.execute(jobs_query)
