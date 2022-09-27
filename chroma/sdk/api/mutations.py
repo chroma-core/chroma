@@ -5,9 +5,9 @@ from gql import gql
 # Abstract mutations
 append_tag_by_name_to_datapoints_mutation = gql(
     """
-    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!]) {
+    mutation appendTagByNameToDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
         appendTagByNameToDatapoints(data: {
-            tagName: $tagName, datapointIds: $datapointIds
+            tagName: $tagName, datapointIds: $datapointIds,  target: $target
         } ) {
             id
             tags {
@@ -21,9 +21,9 @@ append_tag_by_name_to_datapoints_mutation = gql(
 
 remove_tag_by_name_from_datapoints_mutation = gql(
     """
-    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!]) {
+    mutation removeTagFromDatapoints($tagName: String!, $datapointIds: [Int!], $target: [String!]) {
         removeTagFromDatapoints(data: {
-            tagName: $tagName, datapointIds: $datapointIds
+            tagName: $tagName, datapointIds: $datapointIds,  target: $target
         } ) {
             ... on ObjectDeleted {
         message
@@ -34,10 +34,10 @@ remove_tag_by_name_from_datapoints_mutation = gql(
 )
 
 
-run_projector_on_embedding_set_mutuation = gql(
+run_projector_on_embedding_sets_mutuation = gql(
     """
-    mutation runProjectorOnEmbeddingSet($embeddingSetId: Int!){
-        runProjectorOnEmbeddingSet(embeddingSetId: $embeddingSetId) 
+    mutation runProjectorOnEmbeddingSets($embeddingSetIds: [Int!]!){
+        runProjectorOnEmbeddingSets(embeddingSetIds: $embeddingSetIds) 
     }
     """
 )
@@ -118,10 +118,6 @@ create_datapoint_set_mutation = gql(
         createDatapointSet(data: $data) {
             id
             label {
-                id
-                data
-            }
-            inference {
                 id
                 data
             }
@@ -261,53 +257,6 @@ delete_dataset_mutation = gql(
     """
 )
 
-# slice mutations
-create_slice_mutation = gql(
-    """
-    mutation createSlice($slice: CreateSliceInput!) {
-        createSlice(slice: $slice) {
-            ... on Slice {
-                id
-                name
-                dataset {
-                    id
-                }
-            }
-            ... on DatasetDoesNotExist {
-                message
-            }
-        }
-    }
-    """
-)
-
-update_slice_mutation = gql(
-    """
-    mutation updateSlice($slice: UpdateSliceInput!) {
-        updateSlice(slice: $slice) {
-            id
-            name
-            dataset {
-                id
-            }
-        }
-    }
-    """
-)
-
-delete_slice_mutation = gql(
-    """
-    mutation deleteSlice($slice: UpdateSliceInput!) {
-        deleteSlice(slice: $slice) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
 # tag mutations
 create_tag_mutation = gql(
     """
@@ -387,191 +336,6 @@ delete_tag_mutation = gql(
 # )
 
 
-# model architecture mutations
-create_model_architecture_mutation = gql(
-    """
-    mutation createModelArchitecture($modelArchitecture: CreateModelArchitectureInput!) {
-        createModelArchitecture(modelArchitecture: $modelArchitecture) {
-            ... on ModelArchitecture {
-                id
-                name
-                project {
-                    id
-                }
-            }
-            ... on ProjectDoesNotExist {
-                message
-            }
-        }
-    }
-    """
-)
-
-update_model_architecture_mutation = gql(
-    """
-    mutation updateModelArchitecture($modelArchitecture: UpdateModelArchitectureInput!) {
-        updateModelArchitecture(modelArchitecture: $modelArchitecture) {
-            id
-            name
-            project {
-                id
-            }
-        }
-    }
-    """
-)
-
-delete_model_architecture_mutation = gql(
-    """
-    mutation deleteModelArchitecture($modelArchitecture: UpdateModelArchitectureInput!) {
-        deleteModelArchitecture(modelArchitecture: $modelArchitecture) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
-# trained model mutations
-create_trained_model_mutation = gql(
-    """
-    mutation createTrainedModel($trainedModel: CreateTrainedModelInput!) {
-        createTrainedModel(trainedModel: $trainedModel) {
-            ... on TrainedModel {
-                id
-                modelArchitecture {
-                    id
-                }
-            }
-            ... on ModelArchitectureDoesNotExist {
-                message
-            }
-        }
-    }
-    """
-)
-
-update_trained_model_mutation = gql(
-    """
-    mutation updateTrainedModel($trainedModel: UpdateTrainedModelInput!) {
-        updateTrainedModel(trainedModel: $trainedModel) {
-            id
-            name
-            modelArchitecture {
-                id
-            }
-        }
-    }
-    """
-)
-
-delete_trained_model_mutation = gql(
-    """
-    mutation deleteTrainedModel($trainedModel: UpdateTrainedModelInput!) {
-        deleteTrainedModel(trainedModel: $trainedModel) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
-# layer set mutations
-create_layer_set_mutation = gql(
-    """
-    mutation createLayerSet($layerSet: CreateLayerSetInput!) {
-        createLayerSet(layerSet: $layerSet) {
-            ... on LayerSet {
-                id
-                trainedModel {
-                    id
-                }
-            }
-            ... on TrainedModelDoesNotExist {
-                message
-            }
-        }
-    }
-    """
-)
-
-update_layer_set_mutation = gql(
-    """
-    mutation updateLayerSet($layerSet: UpdateLayerSetInput!) {
-        updateLayerSet(layerSet: $layerSet) {
-            id
-            name
-            trainedModel {
-                id
-            }
-        }
-    }
-    """
-)
-
-delete_layer_set_mutation = gql(
-    """
-    mutation deleteLayerSet($layerSet: UpdateLayerSetInput!) {
-        deleteLayerSet(layerSet: $layerSet) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
-# layer mutations
-create_layer_mutation = gql(
-    """
-    mutation createLayer($layer: CreateLayerInput!) {
-        createLayer(layer: $layer) {
-            ... on Layer {
-                id
-                layerSet {
-                    id
-                }
-            }
-            ... on LayerSetDoesNotExist {
-                message
-            }
-        }
-    }
-    """
-)
-
-update_layer_mutation = gql(
-    """
-    mutation updateLayer($layer: UpdateLayerInput!) {
-        updateLayer(layer: $layer) {
-            id
-            name
-            layerSet {
-                id
-            }
-        }
-    }
-    """
-)
-
-delete_layer_mutation = gql(
-    """
-    mutation deleteLayer($layer: UpdateLayerInput!) {
-        deleteLayer(layer: $layer) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
 # job mutations
 create_job_mutation = gql(
     """
@@ -601,42 +365,6 @@ delete_job_mutation = gql(
     """
     mutation deleteJob($job: UpdateJobInput!) {
         deleteJob(job: $job) {
-            ... on ObjectDeleted {
-                __typename
-                message
-            }
-        }
-    }
-    """
-)
-
-# projector mutations
-create_projector_mutation = gql(
-    """
-    mutation createProjector($projector: CreateProjectorInput!) {
-        createProjector(projector: $projector) {
-            ... on Projector {
-                id
-            }
-        }
-    }
-    """
-)
-
-update_projector_mutation = gql(
-    """
-    mutation updateProjector($projector: UpdateProjectorInput!) {
-        updateProjector(projector: $projector) {
-            id
-        }
-    }
-    """
-)
-
-delete_projector_mutation = gql(
-    """
-    mutation deleteProjector($projector: UpdateProjectorInput!) {
-        deleteProjector(projector: $projector) {
             ... on ObjectDeleted {
                 __typename
                 message

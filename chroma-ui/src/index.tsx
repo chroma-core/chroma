@@ -12,6 +12,7 @@ import { createClient, Provider, defaultExchanges, subscriptionExchange } from '
 // import { SubscriptionClient } from 'subscriptions-transport-ws';
 import ChromaRouter from './Routes'
 import { HelmetProvider, Helmet } from 'react-helmet-async'
+import { Provider as JotAiProvider } from "jotai"
 
 const GlobalStyles = css`
   /*
@@ -30,7 +31,7 @@ console.log(`%c
 
 // const subscriptionClient = new SubscriptionClient('ws://localhost:8000/graphql', { reconnect: true });
 
-const client = createClient({
+export const client = createClient({
   url: 'http://localhost:8000/graphql',
   exchanges: [
     ...defaultExchanges,
@@ -42,18 +43,18 @@ const client = createClient({
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)
 root.render(
-  <React.StrictMode>
-    <ChakraProvider theme={defaultTheme}>
-      <HelmetProvider>
-        <Helmet defaultTitle="Chroma" />
-      </HelmetProvider>
-      <Global styles={GlobalStyles} />
-      <ColorModeScript initialColorMode="light" />
-      <Provider value={client}>
-        <ChromaRouter />
-      </Provider>
-    </ChakraProvider>
-  </React.StrictMode>
+  // <React.StrictMode>
+  <ChakraProvider theme={defaultTheme}>
+    <HelmetProvider>
+      <Helmet defaultTitle="Chroma" />
+    </HelmetProvider>
+    <Global styles={GlobalStyles} />
+    <ColorModeScript initialColorMode="light" />
+    <Provider value={client}>
+      <ChromaRouter />
+    </Provider>
+  </ChakraProvider>
+  //</React.StrictMode>
 )
 
 // If you want to start measuring performance in your app, pass a function

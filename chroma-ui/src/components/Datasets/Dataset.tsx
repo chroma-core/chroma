@@ -11,10 +11,6 @@ const DatasetQuery = `
       datapoints {
         id
       }
-      slices {
-        id
-        name
-      }
       project {
         id
       }
@@ -23,19 +19,18 @@ const DatasetQuery = `
 `;
 
 export default function Dataset() {
-    let params = useParams();
-    const [result, reexecuteQuery] = useQuery({query: DatasetQuery, variables: {id: params.dataset_id!}})
+  let params = useParams();
+  const [result, reexecuteQuery] = useQuery({ query: DatasetQuery, variables: { id: params.dataset_id! } })
 
-    const { data, fetching, error } = result;
-    if (fetching) return <p>Loading...</p>;
-    if (error) return <p>Oh no... {error.message}</p>;
+  const { data, fetching, error } = result;
+  if (fetching) return <p>Loading...</p>;
+  if (error) return <p>Oh no... {error.message}</p>;
 
-    return (
-      <Box mt="68px">
-        <Link to={"/projects/" + data.dataset.project.id}>&larr; Back to project</Link>
-        <Text mt={3} fontSize="xl">Dataset: {data?.dataset.name}</Text>
-        <SimpleList data={data!.dataset.slices} headerName="Slices" displayName="name" pathBase="slices"/>
-        <SimpleList data={data!.dataset.datapoints} headerName="Datapoints" displayName="id" pathBase=""/>
-      </Box>
-    )
+  return (
+    <Box mt="68px">
+      <Link to={"/projects/" + data.dataset.project.id}>&larr; Back to project</Link>
+      <Text mt={3} fontSize="xl">Dataset: {data?.dataset.name}</Text>
+      <SimpleList data={data!.dataset.datapoints} headerName="Datapoints" displayName="id" pathBase="" />
+    </Box>
+  )
 }

@@ -90,6 +90,7 @@ module.exports = {
     'no-useless-escape': 'off',
     'default-param-last': 'off',
     'no-underscore-dangle': 'off',
+    '@typescript-eslint/naming-convention': 'off',
     '@typescript-eslint/no-non-null-asserted-optional-chain': 'off',
     eqeqeq: 'off',
     //"camelcase": [2, {"properties": "always"}]

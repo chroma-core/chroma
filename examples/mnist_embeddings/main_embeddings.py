@@ -2,6 +2,7 @@ import argparse
 from functools import partial
 
 import torch
+import random
 import torch.nn.functional as F
 from PIL import Image
 
@@ -11,6 +12,10 @@ from torchvision import datasets, transforms
 
 from chroma.sdk import chroma_manager
 from chroma.sdk.utils import nn
+
+import json
+
+str_options = ["New York", "San Francisco", "Atlanta", "Miami", "Dallas", "Chicago", "DC"]
 
 # We modify the MNIST dataset to expose some information about the source data
 # to allow us to uniquely identify an input in a way that we can recover it later
@@ -27,7 +32,19 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
     with torch.no_grad():
         for data, target, resource_uri in data_loader:
 
-            chroma_storage.set_labels(labels=target.data.detach().tolist())
+            label_json_list = []
+            for label in target.data.detach().tolist():
+                label_json_list.append(
+                    {
+                        "annotations": [
+                            {
+                                "category_id": int(label),
+                            }
+                        ]
+                    }
+                )
+
+            chroma_storage.set_labels(labels=label_json_list)
             chroma_storage.set_resource_uris(uris=list(resource_uri))
 
             data, target = data.to(device), target.to(device)
@@ -36,7 +53,30 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
-            chroma_storage.set_inferences(pred.data.detach().flatten().tolist())
+            inference_json_list = []
+            for label in pred.data.detach().flatten().tolist():
+                inference_json_list.append(
+                    {
+                        "annotations": [
+                            {
+                                "category_id": int(label),
+                            }
+                        ]
+                    }
+                )
+
+            chroma_storage.set_inferences(inference_json_list)
+
+            metadata_list = []
+            for label in pred.data.detach().flatten().tolist():
+                metadata_list.append(
+                    {
+                        "quality": random.randint(0, 100),
+                        "location": str_options[random.randint(0, 6)],
+                    }
+                )
+
+            chroma_storage.set_metadata(metadata_list)
             chroma_storage.store_batch_embeddings()
 
     test_loss /= len(data_loader.dataset)
@@ -85,8 +125,25 @@ def main():
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
 
+    mnist_category_data = json.dumps(
+        [
+            {"supercategory": "none", "id": 1, "name": "1"},
+            {"supercategory": "none", "id": 2, "name": "2"},
+            {"supercategory": "none", "id": 3, "name": "3"},
+            {"supercategory": "none", "id": 4, "name": "4"},
+            {"supercategory": "none", "id": 5, "name": "5"},
+            {"supercategory": "none", "id": 6, "name": "6"},
+            {"supercategory": "none", "id": 7, "name": "7"},
+            {"supercategory": "none", "id": 8, "name": "8"},
+            {"supercategory": "none", "id": 9, "name": "9"},
+            {"supercategory": "none", "id": 0, "name": "0"},
+        ]
+    )
+
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Train") as chroma_storage:
+    with chroma_manager.ChromaSDK(
+        project_name="MNIST-All", dataset_name="Train", categories=mnist_category_data
+    ) as chroma_storage:
 
         # Use the MNIST training set
         train_dataset = CustomDataset("../data", train=True, transform=transform, download=True)
@@ -98,7 +155,9 @@ def main():
         infer(model, device, data_loader, chroma_storage)
 
     # Run in the Chroma context
-    with chroma_manager.ChromaSDK(project_name="MNIST", dataset_name="Test") as chroma_storage:
+    with chroma_manager.ChromaSDK(
+        project_name="MNIST-All", dataset_name="Test", categories=mnist_category_data
+    ) as chroma_storage:
 
         # Use the MNIST test set
         test_dataset = CustomDataset("../data", train=False, transform=transform, download=True)

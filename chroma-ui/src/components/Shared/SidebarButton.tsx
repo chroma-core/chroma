@@ -1,11 +1,12 @@
 import * as CSS from 'csstype'
 import { Flex, Button, useTheme, Icon, Box, IconButton, filter, Tag } from '@chakra-ui/react'
-import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare } from 'react-icons/bs';
+import { BsCircleFill, BsFillSquareFill, BsXLg, BsSquare, BsUnion, BsSubtract, BsIntersect } from 'react-icons/bs';
 import { AiOutlineEye, AiOutlineEyeInvisible } from 'react-icons/ai';
 import { useState } from "react";
 import { IconType } from "react-icons";
-import { TbLasso } from 'react-icons/tb';
+import { TbLasso, TbLayersUnion, TbLayersSubtract, TbLayersIntersect } from 'react-icons/tb';
 import { GiSelect } from 'react-icons/gi'
+import { GoPlus, GoDash } from 'react-icons/go'
 import { MdOutlineKeyboardArrowDown, MdOutlineKeyboardArrowRight } from 'react-icons/md'
 
 const IconMap: any = {
@@ -17,7 +18,10 @@ const IconMap: any = {
   hide: AiOutlineEyeInvisible,
   select: GiSelect,
   open: MdOutlineKeyboardArrowDown,
-  closed: MdOutlineKeyboardArrowRight
+  closed: MdOutlineKeyboardArrowRight,
+  plus: BsUnion,
+  minus: BsSubtract,
+  intersection: BsIntersect
 }
 
 interface SidebarButtonProps {
@@ -32,9 +36,10 @@ interface SidebarButtonProps {
   keyName: string
   isExpanded?: boolean
   filtersActive?: number
+  iconOverride?: string
 }
 
-const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle, isExpanded, filtersActive }) => {
+const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, color, indent, showHide, selectBy, visible = true, classTitle, isExpanded, filtersActive, iconOverride }) => {
   const theme = useTheme();
   var icon: string = (visible === true) ? 'show' : 'hide'
   var iconOpp: string = (visible === true) ? 'hide' : 'show'
@@ -100,7 +105,7 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({ keyName, symbol, text, co
               onClick={selectByFn}
               height="100%"
               opacity={eyeButtonOpacity}
-              variant="ghost" aria-label='ShowHide' as={IconMap.select as any} />
+              variant="ghost" aria-label='ShowHide' as={iconOverride ? IconMap[iconOverride] : IconMap.select as any} />
           </Flex>
           : null}
 

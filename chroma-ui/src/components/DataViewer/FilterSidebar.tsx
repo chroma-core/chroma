@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Flex,
   Text,
@@ -11,11 +11,6 @@ import {
   RangeSlider,
   RangeSliderFilledTrack,
   RangeSliderThumb,
-  Slider,
-  SliderFilledTrack,
-  SliderMark,
-  SliderThumb,
-  SliderTrack,
   Tooltip,
   Box,
   Accordion,
@@ -25,41 +20,103 @@ import {
 } from '@chakra-ui/react'
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
+import { useAtom } from 'jotai';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom, anyFilterChangedYetAtom } from './atoms';
+import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
-  filters: any[]
-  setFilters: (filters: any) => void
-  selectByFilter: (filter: any, option: any) => void
   showSkeleton: boolean
-  numVisible: number
-  numTotal: number
 }
 
-const FilterSidebar: React.FC<FilterSidebarProps> = ({
-  filters,
-  setFilters,
-  showSkeleton,
-  numVisible,
-  numTotal,
-  selectByFilter }
-) => {
+const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
 
+  const [anyFilterChangedYet, updateAnyFilterChangedYetAtom] = useAtom(anyFilterChangedYetAtom)
+
+  const [datapoints] = useAtom(globalDatapointAtom)
+  const [selectedDatapoints, setselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
+  const [visibleDatapoints] = useAtom(globalVisibleDatapointsAtom)
+  const [categoryFilter, updatecategoryFilter] = useAtom(globalCategoryFilterAtom)
+  const [tagFilter, updatetagFilter] = useAtom(globalTagFilterAtom)
+  const [datasetFilter, updatedatasetFilter] = useAtom(globalDatasetFilterAtom)
+  const [metadataFilters, updateMetadataFilter] = useAtom(globalMetadataFilterAtom)
+  const [pointsToSelect, updatepointsToSelect] = useAtom(pointsToSelectAtom)
+  const [contextObjectSwitcher, updatecontextObjectSwitcher] = useAtom(contextObjectSwitcherAtom)
+
+  const [optionKeyDown] = useAtom(shiftKeyPressedAtom)
+  const [commandKeyDown] = useAtom(controlKeyPressedAtom)
+  const [shiftKeyDown] = useAtom(optionKeyPressedAtom)
+
+  const [inferencecategoryFilter, updateinferencecategoryFilter] = useAtom(globalInferenceCategoryFilterAtom)
+
+  const updateCategory = (data: any, fn: any) => {
+    updatecategoryFilter(fn)
+  }
+  const updateTag = (data: any, fn: any) => {
+    updatetagFilter(fn)
+  }
+  const updateDataset = (data: any, fn: any) => {
+    updatedatasetFilter(fn)
+  }
+  const updateInferenceCategory = (data: any, fn: any) => {
+    updateinferencecategoryFilter(fn)
+  }
+  const updateMetadata = (data: any, fn: any) => {
+    // this is a bit of a hack
+    updateMetadataFilter({ ...metadataFilters })
+  }
+
+  var metatadataFilterMap = Object.values(metadataFilters).map(m => {
+    return { filter: m, update: updateMetadata }
+  })
+
+  const filterArray: FilterArray[] = [
+    { filter: categoryFilter!, update: updateCategory },
+    { filter: datasetFilter!, update: updateDataset },
+    { filter: tagFilter!, update: updateTag },
+    ...metatadataFilterMap
+  ]
+  filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
+
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
-    let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
-    let optionIndex = filters[filterIndex].optionsSet.findIndex((option: any) => option.name === passedOption.name)
-    filters[filterIndex].optionsSet[optionIndex].visible = !filters[filterIndex].optionsSet[optionIndex].visible
-    setFilters([...filters])
+    updateAnyFilterChangedYetAtom(true)
+    let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)
+    var options = filterArray[filterIndex].filter.options!.slice()
+    let optionIndex = filterArray[filterIndex].filter.options!.findIndex((option: any) => option.id === passedOption.id)
+
+    options[optionIndex].visible = !options[optionIndex].visible
+    filterArray[filterIndex].update({ 'filter': filterArray[filterIndex] }, (prev: any) => {
+      return ({ ...prev, options: [...options] })
+    })
   }
 
   function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
-    let filterIndex = filters.findIndex(filter => filter.name === passedFilter.name)
-    filters[filterIndex].optionsSet.minVisible = minVisible
-    filters[filterIndex].optionsSet.maxVisible = maxVisible
-    setFilters([...filters])
+    updateAnyFilterChangedYetAtom(true)
+    let findMatchedFilter = metatadataFilterMap.find(f => f.filter.name === passedFilter.name)
+    findMatchedFilter!.filter.range.minVisible = minVisible
+    findMatchedFilter!.filter.range.maxVisible = maxVisible
+    updateMetadataFilter({ ...metadataFilters })
   }
+
+  function selectPoints(dps: number[]) {
+
+    var common
+    if (optionKeyDown) common = dps.filter(x => selectedDatapoints.indexOf(x) !== -1) // intersection
+    else if (commandKeyDown) common = selectedDatapoints.filter((el) => !dps.includes(el)); // remove
+    // @ts-ignore
+    else if (shiftKeyDown) common = [...new Set([...dps, ...selectedDatapoints])] // union
+    else common = dps
+
+    updatepointsToSelect(common)
+    setselectedDatapoints(common)
+  }
+
+  var sidebarButtonIcon = 'select'
+  if (shiftKeyDown) sidebarButtonIcon = "plus"
+  if (commandKeyDown) sidebarButtonIcon = "minus"
+  if (optionKeyDown) sidebarButtonIcon = "intersection"
 
   return (
     <Flex
@@ -81,7 +138,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
       {!showSkeleton ?
         <Flex key="buttons" px={3} justifyContent="space-between" alignContent="center">
           <Text fontWeight={600}>Filter</Text>
-          <Text fontSize="sm">{numVisible} / {numTotal} total</Text>
+          <Text fontSize="sm">{visibleDatapoints.length} / {Object.values(datapoints).length} total</Text>
         </Flex>
         : null}
       <Divider w="100%" pt={2} />
@@ -96,61 +153,65 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({
               <Skeleton height='25px' style={{ marginLeft: '30px' }} />
               <Skeleton height='25px' style={{ marginLeft: '30px' }} />
             </Stack>
-            : filters.map(function (filter, index) {
+            : filterArray.map(function (f, index) {
+              if (!f.filter) return
               let filtersActive = 0
-              if (filter.type == 'discrete') {
-                filtersActive = filter.optionsSet.filter((o: any) => !o.visible).length
-              } else if (filter.type == 'continuous') {
+              if (f.filter.type == FilterType.Discrete) {
+                filtersActive = f.filter.options!.filter((o: any) => !o.visible).length
+              } else if (f.filter.type == FilterType.Continuous) {
                 filtersActive = 0
               }
 
               return (
-                <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)" key={filter.name}>
+                <AccordionItem w="100%" borderWidth={0} borderColor="rgba(0,0,0,0)" key={f.filter.name}>
                   {({ isExpanded }) => (
                     <React.Fragment key={index}>
                       <AccordionButton w="100%" p={0} m={0}>
                         <FilterSidebarHeader
-                          text={filter.name}
+                          text={f.filter.name}
                           symbol="square"
                           visible={true}
                           color="#f0f0f0"
                           indent={0}
-                          classTitle={filter.name}
-                          keyName={filter.name}
-                          key={filter.name}
+                          classTitle={f.filter.name}
+                          keyName={f.filter.name}
+                          key={f.filter.name}
                           isExpanded={isExpanded}
                           filtersActive={filtersActive}
                         ></FilterSidebarHeader>
                       </AccordionButton>
                       <AccordionPanel p={0} m={0}>
                         <Flex direction="column">
-                          {(filter.type == 'discrete') ?
-                            filter.optionsSet.map(function (option: any) {
+                          {(f.filter.type == FilterType.Discrete) ?
+                            f.filter.options!.map(function (option: any) {
+
+                              var link = f.filter.linkedAtom[option.id]
                               return (
                                 <SidebarButton
-                                  text={option.name}
+                                  text={link.name}
                                   visible={option.visible}
                                   symbol="circle"
                                   color={option.color}
-                                  classTitle={filter.title}
-                                  key={filter.name + "." + option.name}
+                                  classTitle={f.filter.name}
+                                  key={f.filter.name + "." + link.name}
                                   indent={6}
-                                  keyName={option.name}
-                                  showHide={() => updateDiscreteFilter(filter, option)}
-                                  selectBy={() => selectByFilter(filter, option)}
+                                  keyName={f.filter.name + "." + link.name}
+                                  showHide={() => updateDiscreteFilter(f.filter, option)}
+                                  selectBy={() => selectPoints(link.datapoint_ids)}// selectByFilter(filter, option)}
+                                  iconOverride={sidebarButtonIcon}
                                 />
                               )
                             })
                             : null}
 
-                          {(filter.type == 'continuous') ?
+                          {(f.filter.type == FilterType.Continuous) ?
                             <SliderThumbWithTooltip
-                              min={filter.optionsSet.min}
-                              max={filter.optionsSet.max}
-                              minVisible={filter.optionsSet.minVisible}
-                              maxVisible={filter.optionsSet.maxVisible}
+                              min={f.filter.range!.min}
+                              max={f.filter.range!.max}
+                              minVisible={f.filter.range!.minVisible}
+                              maxVisible={f.filter.range!.maxVisible}
                               update={updateContinuousFilter}
-                              filter={filter}
+                              filter={f.filter}
                             />
                             : null}
                         </Flex>

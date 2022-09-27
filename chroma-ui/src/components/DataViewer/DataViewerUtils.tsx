@@ -13,10 +13,24 @@ export const pointIndexToDataPointIndex = (id: number) => {
   return (id + 1)
 }
 
-export const getMostRecentCreatedAt = function (data: any) {
-  return data.reduce((p1: any, p2: any) => {
-    return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
-  });
+export const getMostRecentCreatedAtObjectContext = function (data: any) {
+  var contexts = data.filter(d => d.setType == 'context')
+  var objects = data.filter(d => d.setType == 'object')
+
+  var ctxreturn
+  var objreturn
+  if (contexts.length > 0) {
+    ctxreturn = contexts.reduce((p1: any, p2: any) => {
+      return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
+    })
+  }
+  if (objects.length > 0) {
+    objreturn = objects.reduce((p1: any, p2: any) => {
+      return new Date(p1.createdAt) > new Date(p2.createdAt) ? p1 : p2;
+    })
+  }
+
+  return [ctxreturn, objreturn].filter(v => v !== undefined)
 }
 
 // converts string JSON coming back from a REST endpoint to JSON
@@ -101,10 +115,10 @@ let FILTERS = [
     }
   },
   {
-  name: 'Quality',
+    name: 'Quality',
     type: 'continuous',
     fetchFn: function (datapoint) {
-      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score))*100]
+      return [Math.exp(-parseFloat(datapoint.metadata_.distance_score)) * 100]
     },
     removeDupes(filterOptions) {
       return filterOptions

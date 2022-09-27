@@ -27,6 +27,9 @@ export default function scatterplot(points, colorsScale, opts) {
       scatterplotInstance.set({ colorBy: 'valueW', opacityBy: 'valueZ', pointColor: colorsScale, pointOutlineWidth: 5, })
       scatterplotInstance.subscribe('select', opts.selectHandler)
       scatterplotInstance.subscribe('deselect', opts.deselectHandler)
+      scatterplotInstance.subscribe('pointover', opts.pointOverHandler);
+      scatterplotInstance.subscribe('pointout', opts.pointOutHandler);
+      scatterplotInstance.subscribe('view', opts.viewChangedHandler);
 
       var defaultDistance = config.distance * 1.2
 

@@ -1,356 +1,257 @@
 import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
-from click import echo
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float, Table
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Float, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker, backref, scoped_session
-from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.ext.declarative import declarative_base, declared_attr
+from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.sql import func
-from sqlalchemy import create_engine
 
 # Note to developer
-# - has_many should have lazy="select"
-# - belongs_to should have lazy="joined"
-# there are also subquery and dynamic options, but i dont know how those work
+# - use lazy="select" to prevent greedily fetching relationships, this is important for performance reasons at our scale
 
 Base = declarative_base()
 
-
-class Project(Base):
+class BaseModel(object):
+    """
+    - __mapper_args__ = {"eager_defaults": True} ensures our timestamps get written correctly
+    - every table should have id, created_at, and updated_at
+    """
     __mapper_args__ = {"eager_defaults": True}
+    id: int = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class Project(BaseModel, Base):
+    """
+    Project: a project contains all the relavent datapoints, datasets, etc relevant to a particular goal/project
+    - has many datasets
+    - has many projection_sets
+    """
     __tablename__ = "projects"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     name = Column(String)
-    # [x] has many datasets, has many model architectures
+    
+    # relationships
     datasets: list["Dataset"] = relationship("Dataset", lazy="select", back_populates="project")
-    datapoints: list["Datapoint"] = relationship(
-        "Datapoint", lazy="select", back_populates="project"
-    )
-    projection_sets: list["ProjectionSet"] = relationship(
-        "ProjectionSet", lazy="select", back_populates="project"
-    )
-    model_architectures: list["ModelArchitecture"] = relationship(
-        "ModelArchitecture", lazy="select", back_populates="project"
-    )
+    datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="project")
+    projection_sets: list["ProjectionSet"] = relationship("ProjectionSet", lazy="select", back_populates="project")
 
 
-class Dataset(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Dataset(BaseModel, Base):
+    """
+    Dataset: set of datapoints
+    - has many datapoints
+    - has many embedding_sets
+    - belongs to a project
+    """
     __tablename__ = "datasets"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # attributes
     name = Column(String)
-    # has many slices, has many datapoints, belongs_to project
-    slices: list["Slice"] = relationship("Slice", lazy="select", back_populates="dataset")
-    datapoints: list["Datapoint"] = relationship(
-        "Datapoint", lazy="select", back_populates="dataset"
-    )
+    categories = Column(Text)
+
+    # relationships
+    datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="dataset")
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
     project: Optional[Project] = relationship("Project", lazy="select", back_populates="datasets")
-    embedding_sets: list["EmbeddingSet"] = relationship(
-        "EmbeddingSet", lazy="select", back_populates="dataset"
-    )  # has_many embedding_sets
+    embedding_sets: list["EmbeddingSet"] = relationship("EmbeddingSet", lazy="select", back_populates="dataset")  
 
 
-class Resource(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Resource(BaseModel, Base):
+    """
+    Resource: points to a file, either on disk, or a URL
+    - has many datapoints
+    """
     __tablename__ = "resources"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     uri = Column(Text)
-    # has many datapoints
-    datapoints: list["Datapoint"] = relationship(
-        "Datapoint", lazy="select", back_populates="resource"
-    )
 
-
-# assocation table
-class Slice_Datapoint(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "slice_datasets"
-    id = Column(Integer, primary_key=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    slice_id = Column(Integer, ForeignKey("slices.id"), primary_key=True)
-    datapoint_id = Column(Integer, ForeignKey("datapoints.id"), primary_key=True)
-
-
-class Slice(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "slices"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    name = Column(String)
-    # habtm datapoints, belongs_to dataset, has_many trained_models
-    dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
-    dataset: Optional[Dataset] = relationship("Dataset", lazy="joined", back_populates="slices")
-    datapoints = relationship(
-        "Slice_Datapoint", backref="slice", primaryjoin=id == Slice_Datapoint.slice_id
-    )
-    trained_models: list["TrainedModel"] = relationship(
-        "TrainedModel", lazy="select", back_populates="slice"
-    )
+    # relationships
+    datapoints: list["Datapoint"] = relationship("Datapoint", lazy="select", back_populates="resource")
 
 
 class Tagdatapoint(Base):
+    """
+    Tagdatapoint: has and belongs to many mapping table between tags and datapoints
+    """
     __tablename__ = "tagdatapoints"
-    left_id = Column(ForeignKey("tags.id"), primary_key=True)
-    right_id = Column(ForeignKey("datapoints.id"), primary_key=True)
+    __table_args__ = (
+        UniqueConstraint('left_id', 'right_id', 'target'),
+    )
+    id: int = Column(Integer, primary_key=True, index=True)
+    left_id = Column(ForeignKey("tags.id"))
+    right_id = Column(ForeignKey("datapoints.id"))
     tag = relationship("Tag", back_populates="datapoints")
     datapoint = relationship("Datapoint", back_populates="tags")
+    target = Column(String, nullable=True)
 
 
-class Datapoint(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Datapoint(BaseModel, Base):
+    """
+    Datapoint: maps together things used in training, or that come out of inference
+    - belongs to project
+    - belongs to dataset
+    - has one resource
+    - has one label
+    - has one inference
+    - has and belongs to many tags
+    - has many embeddings
+    """
     __tablename__ = "datapoints"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # belongs to dataset, has one resource, has one label, has one inference, habtm tags, habtm slices
+
+    # attributes
+    metadata_ = Column("metadata", Text)
+
+    # relationships
+    project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
+    project: Optional[Project] = relationship("Project", lazy="select", back_populates="datapoints")
     dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
-    dataset: Optional[Dataset] = relationship("Dataset", lazy="joined", back_populates="datapoints")
+    dataset: Optional[Dataset] = relationship("Dataset", lazy="select", back_populates="datapoints")
     resource_id: Optional[int] = Column(Integer, ForeignKey(Resource.id), nullable=True)
-    resource: Optional[Resource] = relationship(
-        "Resource", lazy="select", back_populates="datapoints"
-    )
-    slices = relationship(
-        "Slice_Datapoint", backref="datapoint", primaryjoin=id == Slice_Datapoint.datapoint_id
-    )
+    resource: Optional[Resource] = relationship("Resource", lazy="select", back_populates="datapoints")
     label = relationship("Label", back_populates="datapoint", uselist=False)
     inference = relationship("Inference", back_populates="datapoint", uselist=False)
     tags = relationship("Tagdatapoint", back_populates="datapoint")
-    embeddings: list["Embedding"] = relationship(
-        "Embedding", lazy="select", back_populates="datapoint"
-    )
-    metadata_ = Column("metadata", Text)
-    project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
-    project: Optional[Project] = relationship("Project", lazy="joined", back_populates="datapoints")
+    embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="datapoint")
 
 
-class Tag(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Tag(BaseModel, Base):
+    """
+    Tag: semantic string on a datapoint
+    - has and belongs to many datapoints
+    """
     __tablename__ = "tags"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     name = Column(String, unique=True)
-    # habtm datapoints
+
+    # relationships
     datapoints = relationship("Tagdatapoint", back_populates="tag")
 
 
-class Label(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Label(BaseModel, Base):
+    """
+    Label: human annotations on a datapoint
+    - has one datapoint
+    """
     __tablename__ = "labels"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     data = Column(Text)
-    # has_one datapoint
+
+    # relationships
     datapoint_id: Optional[int] = Column(Integer, ForeignKey(Datapoint.id), nullable=True)
     datapoint = relationship("Datapoint", back_populates="label", uselist=False)
 
 
-class Inference(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Inference(BaseModel, Base):
+    """
+    Inference: results of inference (annotations) on a datapoint
+    - has one datapoint
+    """
     __tablename__ = "inferences"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     data = Column(Text)
-    # has one trained model, has_one datapoint
+
+    # relationships
     datapoint_id: Optional[int] = Column(Integer, ForeignKey(Datapoint.id), nullable=True)
     datapoint = relationship("Datapoint", back_populates="inference", uselist=False)
-    trained_model_id: Optional[int] = Column(
-        Integer, ForeignKey("trained_models.id"), nullable=True
-    )
-    trained_model = relationship("TrainedModel", back_populates="inferences", uselist=False)
 
 
-class ModelArchitecture(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "model_architectures"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    name = Column(String)
-    # has many trained models, belongs_to project
-    trained_models: list["TrainedModel"] = relationship(
-        "TrainedModel", lazy="select", back_populates="model_architecture"
-    )
-    project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
-    project: Optional[Project] = relationship(
-        "Project", lazy="joined", back_populates="model_architectures"
-    )
-
-
-class TrainedModel(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "trained_models"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # has many layersets, belongs_to modelarchitecture, has one slice
-    inferences: list["Inference"] = relationship(
-        "Inference", lazy="select", back_populates="trained_model"
-    )
-    slice_id: Optional[int] = Column(Integer, ForeignKey("slices.id"), nullable=True)
-    slice = relationship("Slice", back_populates="trained_models", uselist=False)
-    layer_sets: list["LayerSet"] = relationship(
-        "LayerSet", lazy="select", back_populates="trained_model"
-    )
-    model_architecture_id: Optional[int] = Column(
-        Integer, ForeignKey(ModelArchitecture.id), nullable=True
-    )
-    model_architecture: Optional[ModelArchitecture] = relationship(
-        "ModelArchitecture", lazy="joined", back_populates="trained_models"
-    )
-
-
-class LayerSet(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "layer_sets"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # has many layers, belongs_to trained model
-    layers: list["Layer"] = relationship("Layer", lazy="select", back_populates="layer_set")
-    trained_model_id: Optional[int] = Column(Integer, ForeignKey(TrainedModel.id), nullable=True)
-    trained_model: Optional[TrainedModel] = relationship(
-        "TrainedModel", lazy="joined", back_populates="layer_sets"
-    )
-
-
-class Layer(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "layers"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # has many embeddings, belongs_to layerset
-    embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="layer")
-    layer_set_id: Optional[int] = Column(Integer, ForeignKey(LayerSet.id), nullable=True)
-    layer_set: Optional[LayerSet] = relationship("LayerSet", lazy="joined", back_populates="layers")
-
-
-class Projector(Base):
-    __mapper_args__ = {"eager_defaults": True}
-    __tablename__ = "projectors"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # has many embeddings
-    # has many projections
-    # embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="projector")
-    # projections: list["Projection"] = relationship("Projection", lazy="select", back_populates="projector")
-
-
-class Job(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Job(BaseModel, Base):
+    """
+    Job: wrapper around celery job to expose status back to our users
+    """
     __tablename__ = "jobs"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     name = Column(String)
 
 
-class EmbeddingSet(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class EmbeddingSet(BaseModel, Base):
+    """
+    EmbeddingSet: a set of embeddings
+    - has many embeddings
+    - has many projections sets
+    - belongs to a dataset
+    """
     __tablename__ = "embedding_sets"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # has one slice, has one trained model
-    embeddings: list["Embedding"] = relationship(
-        "Embedding", lazy="select", back_populates="embedding_set"
-    )  # has_many embeddings
-    projection_sets: list["ProjectionSet"] = relationship(
-        "ProjectionSet", lazy="select", back_populates="embedding_set"
-    )  # has_many projection_sets
-
+    
+    # relationships
+    embeddings: list["Embedding"] = relationship("Embedding", lazy="select", back_populates="embedding_set") 
+    projection_sets: list["ProjectionSet"] = relationship("ProjectionSet", lazy="select", back_populates="embedding_set") 
     dataset_id: Optional[int] = Column(Integer, ForeignKey(Dataset.id), nullable=True)
-    dataset: Optional[Dataset] = relationship(
-        "Dataset", lazy="joined", back_populates="embedding_sets"
-    )
+    dataset: Optional[Dataset] = relationship("Dataset", lazy="select", back_populates="embedding_sets")
 
 
-class ProjectionSet(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class ProjectionSet(BaseModel, Base):
+    """
+    ProjectionSet: a set of projections
+    - belongs to an embedding set
+    - has many projections
+    - belongs to a project
+    """
     __tablename__ = "projection_sets"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # belongs_to embedding_set, has_many projections
-    embedding_set_id: Optional[int] = Column(Integer, ForeignKey(EmbeddingSet.id), nullable=True)
-    embedding_set: Optional[EmbeddingSet] = relationship(
-        "EmbeddingSet", lazy="select", back_populates="projection_sets"
-    )
-    projections: list["Projection"] = relationship(
-        "Projection", lazy="select", back_populates="projection_set"
-    )
 
+    # attributes
+    setType = Column(Text)
+    
+    # relationships
+    embedding_set_id: Optional[int] = Column(Integer, ForeignKey(EmbeddingSet.id), nullable=True)
+    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="select", back_populates="projection_sets")
+    projections: list["Projection"] = relationship("Projection", lazy="select", back_populates="projection_set")
     project_id: Optional[int] = Column(Integer, ForeignKey(Project.id), nullable=True)
-    project: Optional[Project] = relationship(
-        "Project", lazy="select", back_populates="projection_sets"
-    )
+    project: Optional[Project] = relationship("Project", lazy="select", back_populates="projection_sets")
 
 
-class Embedding(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Embedding(BaseModel, Base):
+    """
+    Embedding: the data as pertains to a datapoint at a specific layer of a network
+    - has_many projections
+    - belongs_to embedding_set
+    - belongs_to layer
+    """
     __tablename__ = "embeddings"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # specific
+    
+    # attributes
     data = Column(Text)
-    input_identifier = Column(Text)  # resource
-    inference_identifier = Column(Text)
-    label = Column(Text)  # label
-    # has_many projections, belongs_to embedding_set, belongs_to layer
-    projections: list["Projection"] = relationship(
-        "Projection", lazy="select", back_populates="embedding"
-    )
+    
+    # relationships
+    projections: list["Projection"] = relationship("Projection", lazy="select", back_populates="embedding")
     embedding_set_id: Optional[int] = Column(Integer, ForeignKey(EmbeddingSet.id), nullable=True)
-    embedding_set: Optional[EmbeddingSet] = relationship(
-        "EmbeddingSet", lazy="select", back_populates="embeddings"
-    )
-    layer_id: Optional[int] = Column(Integer, ForeignKey(Layer.id), nullable=True)
-    layer: Optional[Layer] = relationship("Layer", lazy="select", back_populates="embeddings")
+    embedding_set: Optional[EmbeddingSet] = relationship("EmbeddingSet", lazy="select", back_populates="embeddings")
     datapoint_id: Optional[int] = Column(Integer, ForeignKey(Datapoint.id), nullable=True)
-    datapoint: Optional[Datapoint] = relationship(
-        "Datapoint", lazy="select", back_populates="embeddings"
-    )
+    datapoint: Optional[Datapoint] = relationship("Datapoint", lazy="select", back_populates="embeddings")
 
 
-class Projection(Base):
-    __mapper_args__ = {"eager_defaults": True}
+class Projection(BaseModel, Base):
+    """
+    Projeciton: a xy projection of an embedding
+    - belongs to  an embedding
+    - belongs to a projection_set
+    """
     __tablename__ = "projections"
-    id: int = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # attributes
     x: float = Column(Float)
     y: float = Column(Float)
-    # belongs_to embedding, belongs_to projection_set
+    target = Column(Text)
+
+    # relationships
     embedding_id: Optional[int] = Column(Integer, ForeignKey(Embedding.id), nullable=True)
-    embedding: Optional[Embedding] = relationship(
-        "Embedding", lazy="select", back_populates="projections"
-    )
+    embedding: Optional[Embedding] = relationship("Embedding", lazy="select", back_populates="projections")
     projection_set_id: Optional[int] = Column(Integer, ForeignKey(ProjectionSet.id), nullable=True)
-    projection_set: Optional[ProjectionSet] = relationship(
-        "ProjectionSet", lazy="select", back_populates="projections"
-    )
+    projection_set: Optional[ProjectionSet] = relationship("ProjectionSet", lazy="select", back_populates="projections")
 
 
 engine = create_async_engine(
     "sqlite+aiosqlite:///./chroma.db",
-    connect_args={"check_same_thread": False},  # echo=True,
+    connect_args={"check_same_thread": False}, #echo=True,
 )
 
 async_session = sessionmaker(

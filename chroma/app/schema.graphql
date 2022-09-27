@@ -2,16 +2,6 @@ union AddDatasetResponse = Dataset | ProjectDoesNotExist
 
 union AddEmbeddingResponse = Embedding | EmbeddingExists
 
-union AddLayerResponse = Layer | LayerSetDoesNotExist
-
-union AddLayerSetResponse = LayerSet | TrainedModelDoesNotExist
-
-union AddModelArchitectureResponse = ModelArchitecture | ProjectDoesNotExist
-
-union AddSliceResponse = Slice | DatasetDoesNotExist
-
-union AddTrainedModelResponse = TrainedModel | ModelArchitectureDoesNotExist
-
 input CreateDatasetInput {
   name: String!
   projectId: Int!
@@ -21,55 +11,24 @@ input CreateJobInput {
   name: String!
 }
 
-input CreateLayerInput {
-  layerSetId: Int!
-  id: ID = null
-}
-
-input CreateLayerSetInput {
-  trainedModelId: Int!
-  id: ID = null
-}
-
-input CreateModelArchitectureInput {
-  name: String!
-  projectId: Int!
-}
-
 input CreateProjectInput {
   name: String!
-}
-
-input CreateProjectorInput {
-  id: ID = null
-}
-
-input CreateSliceInput {
-  name: String!
-  datasetId: Int!
 }
 
 input CreateTagInput {
   name: String!
 }
 
-input CreateTrainedModelInput {
-  modelArchitectureId: Int!
-  id: ID = null
-}
-
 type Datapoint {
   id: ID!
   dataset: Dataset
   tags: [Tag!]!
-  slices: [Slice!]!
 }
 
 type Dataset {
   id: ID!
   name: String
   project: Project
-  slices: [Slice!]!
   datapoints: [Datapoint!]!
 }
 
@@ -134,33 +93,6 @@ type Label {
   datapoint: Datapoint
 }
 
-type Layer {
-  id: ID!
-  layerSet: LayerSet
-  embeddings: [Embedding!]!
-}
-
-type LayerSet {
-  id: ID!
-  trainedModel: TrainedModel
-  layers: [Layer!]!
-}
-
-type LayerSetDoesNotExist {
-  message: String!
-}
-
-type ModelArchitecture {
-  id: ID!
-  name: String
-  project: Project
-  trainedModels: [TrainedModel!]!
-}
-
-type ModelArchitectureDoesNotExist {
-  message: String!
-}
-
 type Mutation {
   createProject(project: CreateProjectInput!): Project!
   updateProject(project: UpdateProjectInput!): Project!
@@ -168,23 +100,9 @@ type Mutation {
   createDataset(dataset: CreateDatasetInput!): AddDatasetResponse!
   updateDataset(dataset: UpdateDatasetInput!): Dataset!
   deleteDataset(dataset: UpdateDatasetInput!): ObjectDeleted!
-  createSlice(slice: CreateSliceInput!): AddSliceResponse!
-  updateSlice(slice: UpdateSliceInput!): Slice!
-  deleteSlice(slice: UpdateSliceInput!): ObjectDeleted!
   createTag(tag: CreateTagInput!): Tag!
   updateTag(tag: UpdateTagInput!): Tag!
   deleteTag(tag: UpdateTagInput!): ObjectDeleted!
-  createModelArchitecture(modelArchitecture: CreateModelArchitectureInput!): AddModelArchitectureResponse!
-  updateModelArchitecture(modelArchitecture: UpdateModelArchitectureInput!): ModelArchitecture!
-  deleteModelArchitecture(modelArchitecture: UpdateModelArchitectureInput!): ObjectDeleted!
-  createTrainedModel(trainedModel: CreateTrainedModelInput!): AddTrainedModelResponse!
-  deleteTrainedModel(trainedModel: UpdateTrainedModelInput!): ObjectDeleted!
-  createLayerSet(layerSet: CreateLayerSetInput!): AddLayerSetResponse!
-  deleteLayerSet(layerSet: UpdateLayerSetInput!): ObjectDeleted!
-  createLayer(layer: CreateLayerInput!): AddLayerResponse!
-  deleteLayer(layer: UpdateLayerInput!): ObjectDeleted!
-  createProjector(projector: CreateProjectorInput!): Projector!
-  deleteProjector(projector: UpdateProjectorInput!): ObjectDeleted!
   createJob(job: CreateJobInput!): Job!
   updateJob(job: UpdateJobInput!): Job!
   deleteJob(job: UpdateJobInput!): ObjectDeleted!
@@ -247,18 +165,12 @@ input ProjectionSetInput {
   projectionSetId: Int!
 }
 
-type Projector {
-  id: ID!
-}
-
 type Query {
   embeddingsByPage(pageInput: PageInput!): EmbeddingConnection!
   projects: [Project!]!
   project(id: ID!): Project!
   datasets: [Dataset!]!
   dataset(id: ID!): Dataset!
-  slices: [Slice!]!
-  slice(id: ID!): Slice!
   datapoints: [Datapoint!]!
   datapoint(id: ID!): Datapoint!
   resources: [Resource!]!
@@ -269,16 +181,6 @@ type Query {
   tag(id: ID!): Tag!
   inferences: [Inference!]!
   inference(id: ID!): Inference!
-  modelArchitectures: [ModelArchitecture!]!
-  modelArchitecture(id: ID!): ModelArchitecture!
-  trainedModels: [TrainedModel!]!
-  trainedModel(id: ID!): TrainedModel!
-  layerSets: [LayerSet!]!
-  layerSet(id: ID!): LayerSet!
-  layers: [Layer!]!
-  layer(id: ID!): Layer!
-  projectors: [Projector!]!
-  projector(id: ID!): Projector!
   jobs: [Job!]!
   job(id: ID!): Job!
   embeddingSets: [EmbeddingSet!]!
@@ -296,13 +198,6 @@ type Resource {
   datapoints: [Datapoint!]!
 }
 
-type Slice {
-  id: ID!
-  name: String
-  dataset: Dataset
-  datapoints: [Datapoint!]!
-}
-
 type Subscription {
   count(target: Int! = 100): Int!
 }
@@ -311,16 +206,6 @@ type Tag {
   id: ID!
   name: String
   datapoints: [Datapoint!]!
-}
-
-type TrainedModel {
-  id: ID!
-  modelArchitecture: ModelArchitecture
-  layerSets: [LayerSet!]!
-}
-
-type TrainedModelDoesNotExist {
-  message: String!
 }
 
 input UpdateDatasetInput {
@@ -333,29 +218,7 @@ input UpdateJobInput {
   name: String = null
 }
 
-input UpdateLayerInput {
-  id: ID!
-}
-
-input UpdateLayerSetInput {
-  id: ID!
-}
-
-input UpdateModelArchitectureInput {
-  id: ID!
-  name: String = null
-}
-
 input UpdateProjectInput {
-  id: ID!
-  name: String = null
-}
-
-input UpdateProjectorInput {
-  id: ID!
-}
-
-input UpdateSliceInput {
   id: ID!
   name: String = null
 }
@@ -363,8 +226,4 @@ input UpdateSliceInput {
 input UpdateTagInput {
   id: ID!
   name: String = null
-}
-
-input UpdateTrainedModelInput {
-  id: ID!
 }

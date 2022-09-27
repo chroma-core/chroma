@@ -26,15 +26,6 @@ class Project:
         datasets = await info.context["datasets_by_project"].load(self.id)
         return [Dataset.marshal(dataset) for dataset in datasets]
 
-    # has_many model_architectures
-    @strawberry.field
-    async def model_architectures(self, info: Info) -> list["ModelArchitecture"]:
-        model_architectures = await info.context["model_architectures_by_project"].load(self.id)
-        return [
-            ModelArchitecture.marshal(model_architecture)
-            for model_architecture in model_architectures
-        ]
-
     @classmethod
     def marshal(cls, model: models.Project) -> "Project":
         return cls(
@@ -52,6 +43,7 @@ class Dataset:
     created_at: datetime.datetime
     updated_at: datetime.datetime
     project_id: Optional[int]
+    categories: Optional[JSON] = None
 
     # belongs_to project
     @strawberry.field
@@ -60,12 +52,6 @@ class Dataset:
             sql = select(models.Project).where(models.Project.id == self.project_id)
             project = (await s.execute(sql)).scalars().first()
         return Project.marshal(project)
-
-    # has_many slices
-    @strawberry.field
-    async def slices(self, info: Info) -> list["Slice"]:
-        slices = await info.context["slices_by_dataset"].load(self.id)
-        return [Slice.marshal(slice) for slice in slices]
 
     # has_many datapoints
     @strawberry.field
@@ -87,31 +73,7 @@ class Dataset:
             created_at=model.created_at,
             updated_at=model.updated_at,
             project_id=model.project_id,
-        )
-
-
-@strawberry.type
-class Slice:
-    id: strawberry.ID
-    name: Optional[str]
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    dataset: Optional[Dataset] = None
-
-    # has_many datapoints
-    @strawberry.field
-    async def datapoints(self, info: Info) -> list["Datapoint"]:
-        datapoints = await info.context["datapoints_by_slice"].load(self.id)
-        return [Datapoint.marshal(datapoint) for datapoint in datapoints]
-
-    @classmethod
-    def marshal(cls, model: models.Slice) -> "Slice":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            dataset=Dataset.marshal(model.dataset) if model.dataset else None,
-            name=model.name if model.name else None,
-            created_at=model.created_at,
-            updated_at=model.updated_at,
+            categories=json.loads(model.categories) if model.categories else None,
         )
 
 
@@ -135,12 +97,11 @@ class Datapoint:
     async def tags(self, info: Info) -> list["Tag"]:
         associations = await info.context["tags_by_datapoints"].load(self.id)
         return [Tag.marshal(association.tag) for association in associations]
-
-    # has_many slices
+    
     @strawberry.field
-    async def slices(self, info: Info) -> list["Slice"]:
-        slices = await info.context["slices_by_datapoints"].load(self.id)
-        return [Slice.marshal(slice) for slice in slices]
+    async def tagdatapoints(self, info: Info) -> list["TagDatapoint"]:
+        tds = await info.context["tags_by_datapoints"].load(self.id)
+        return [TagDatapoint.marshal(td) for td in tds]
 
     # has_one label
     @strawberry.field
@@ -149,6 +110,7 @@ class Datapoint:
         return Label.marshal(labels[0])
 
     # has_one inference
+    @strawberry.field
     async def inference(self, info: Info) -> "Inference":
         inferences = await info.context["inference_by_datapoint"].load(self.id)
         return Inference.marshal(inferences[0])
@@ -161,11 +123,18 @@ class Datapoint:
             resource = (await s.execute(sql)).scalars().first()
         return Resource.marshal(resource)
 
+    # belongs_to dataset
+    @strawberry.field
+    async def dataset(self, info: Info) -> "Dataset":
+        async with models.get_session() as s:
+            sql = select(models.Dataset).where(models.Dataset.id == self.dataset_id)
+            dataset = (await s.execute(sql)).scalars().first()
+        return Dataset.marshal(dataset)
+
     @classmethod
     def marshal(cls, model: models.Datapoint) -> "Datapoint":
         return cls(
             id=strawberry.ID(str(model.id)),
-            dataset=Dataset.marshal(model.dataset) if model.dataset else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
             metadata_=model.metadata_,
@@ -212,6 +181,30 @@ class Label:
             data=json.loads(model.data),
         )
 
+@strawberry.type
+class TagDatapoint:
+    id: strawberry.ID
+    target: Optional[str]
+    left_id: int
+    right_id: int
+    tag: Optional["Tag"] = None
+
+    @strawberry.field
+    async def tag(self, info: Info) -> "Tag":
+        async with models.get_session() as s:
+            sql = select(models.Tag).where(models.Tag.id == self.left_id)
+            tag = (await s.execute(sql)).scalars().first()
+        return Tag.marshal(tag)
+
+    @classmethod
+    def marshal(cls, model: models.Tagdatapoint) -> "TagDatapoint":
+        return cls(
+            id=strawberry.ID(str(model.id)),
+            target=model.target if model.target else None,
+            left_id=model.left_id,
+            right_id=model.right_id
+        )
+
 
 @strawberry.type
 class Tag:
@@ -241,133 +234,25 @@ class Inference:
     id: strawberry.ID
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    data: JSON
     datapoint: Optional[Datapoint] = None
+
+     # belongs_to datapoint
+    @strawberry.field
+    async def datapoint(self, info: Info) -> "Datapoint":
+        async with models.get_session() as s:
+            sql = select(models.Datapoint).where(models.Datapoint.id == self.datapoint_id)
+            datapoint = (await s.execute(sql)).scalars().first()
+        return Datapoint.marshal(datapoint)
 
     @classmethod
     def marshal(cls, model: models.Inference) -> "Inference":
         return cls(
             id=strawberry.ID(str(model.id)),
-            datapoint=Datapoint.marshal(model.datapoint) if model.datapoint else None,
-            trained_model=TrainedModel.marshal(model.trained_model)
-            if model.trained_model
-            else None,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            data=json.loads(model.data),
         )
-
-
-@strawberry.type
-class ModelArchitecture:
-    id: strawberry.ID
-    name: Optional[str]
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    project: Optional[Project] = None
-
-    # has_many trained models
-    @strawberry.field
-    async def trained_models(self, info: Info) -> list["TrainedModel"]:
-        trained_models = await info.context["trained_models_by_model_architecture"].load(self.id)
-        return [TrainedModel.marshal(trained_model) for trained_model in trained_models]
-
-    @classmethod
-    def marshal(cls, model: models.ModelArchitecture) -> "ModelArchitecture":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            project=Project.marshal(model.project) if model.project else None,
-            name=model.name if model.name else None,
-            created_at=model.created_at,
-            updated_at=model.updated_at,
-        )
-
-
-@strawberry.type
-class TrainedModel:
-    id: strawberry.ID
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    model_architecture: Optional[ModelArchitecture] = None
-
-    # has_many layer_sets
-    @strawberry.field
-    async def layer_sets(self, info: Info) -> list["LayerSet"]:
-        layer_sets = await info.context["layer_sets_by_trained_model"].load(self.id)
-        return [LayerSet.marshal(layer_set) for layer_set in layer_sets]
-
-    @classmethod
-    def marshal(cls, model: models.TrainedModel) -> "TrainedModel":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            model_architecture=ModelArchitecture.marshal(model.model_architecture)
-            if model.model_architecture
-            else None,
-            created_at=model.created_at,
-            updated_at=model.updated_at,
-        )
-
-
-@strawberry.type
-class LayerSet:
-    id: strawberry.ID
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    trained_model: Optional[TrainedModel] = None
-
-    # has_many layers
-    @strawberry.field
-    async def layers(self, info: Info) -> list["Layer"]:
-        layers = await info.context["layers_by_layer_set"].load(self.id)
-        return [Layer.marshal(layer) for layer in layers]
-
-    @classmethod
-    def marshal(cls, model: models.LayerSet) -> "LayerSet":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            trained_model=TrainedModel.marshal(model.trained_model)
-            if model.trained_model
-            else None,
-            created_at=model.created_at,
-            updated_at=model.updated_at,
-        )
-
-
-@strawberry.type
-class Layer:
-    id: strawberry.ID
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    layer_set: Optional[LayerSet] = None
-
-    # has_many embeddings
-    @strawberry.field
-    async def embeddings(self, info: Info) -> list["Embedding"]:
-        embeddings = await info.context["embeddings_by_layer"].load(self.id)
-        return [Embedding.marshal(embedding) for embedding in embeddings]
-
-    @classmethod
-    def marshal(cls, model: models.Layer) -> "Layer":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            layer_set=LayerSet.marshal(model.layer_set) if model.layer_set else None,
-            created_at=model.created_at,
-            updated_at=model.updated_at,
-        )
-
-
-@strawberry.type
-class Projector:
-    id: strawberry.ID
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-    @classmethod
-    def marshal(cls, model: models.Projector) -> "Projector":
-        return cls(
-            id=strawberry.ID(str(model.id)),
-            created_at=model.created_at,
-            updated_at=model.updated_at,
-        )
-
 
 @strawberry.type
 class Job:
@@ -405,13 +290,20 @@ class EmbeddingSet:
         embeddings = await info.context["embeddings_by_embedding_set"].load(self.id)
         return [Embedding.marshal(embedding) for embedding in embeddings]
 
+    # belongs_to dataset
+    @strawberry.field
+    async def dataset(self, info: Info) -> "Dataset":
+        async with models.get_session() as s:
+            sql = select(models.Dataset).where(models.Dataset.id == self.dataset_id)
+            dataset = (await s.execute(sql)).scalars().first()
+        return Dataset.marshal(dataset)
+
     @classmethod
     def marshal(cls, model: models.EmbeddingSet) -> "EmbeddingSet":
         return cls(
             id=strawberry.ID(str(model.id)),
             created_at=model.created_at,
             updated_at=model.updated_at,
-            dataset=Dataset.marshal(model.dataset) if model.dataset else None,
         )
 
 
@@ -422,6 +314,7 @@ class ProjectionSet:
     updated_at: datetime.datetime
     project_id: Optional[int]
     embedding_set: Optional[EmbeddingSet] = None  # belongs_to embedding_set
+    set_type: str = None
 
     # has_many projections
     @strawberry.field
@@ -452,6 +345,7 @@ class ProjectionSet:
             created_at=model.created_at,
             updated_at=model.updated_at,
             project_id=model.project_id,
+            set_type=model.setType
         )
 
 
@@ -459,9 +353,6 @@ class ProjectionSet:
 class Embedding:
     id: strawberry.ID
     data: Optional[str]
-    label: Optional[str]
-    inference_identifier: Optional[str]
-    input_identifier: Optional[str]
     created_at: datetime.datetime
     updated_at: datetime.datetime
     embedding_set_id: Optional[int]
@@ -494,9 +385,6 @@ class Embedding:
         return cls(
             id=strawberry.ID(str(model.id)),
             data=model.data if model.data else None,
-            label=model.label if model.label else None,
-            inference_identifier=model.inference_identifier,
-            input_identifier=model.input_identifier,
             created_at=model.created_at,
             updated_at=model.updated_at,
             datapoint_id=model.datapoint_id,
@@ -575,20 +463,6 @@ class DatasetDoesNotExist:
     message: str = "No Dataset by this ID exists, Object not created"
 
 
-@strawberry.type
-class ModelArchitectureDoesNotExist:
-    message: str = "No Model Architecture by this ID exists, Object not created"
-
-
-@strawberry.type
-class TrainedModelDoesNotExist:
-    message: str = "No Trained Model by this ID exists, Object not created"
-
-
-@strawberry.type
-class LayerSetDoesNotExist:
-    message: str = "No Layer Set by this ID exists, Object not created"
-
 
 @strawberry.type
 class LabelDoesNotExist:
@@ -606,16 +480,7 @@ AddProjectionSetResponse = ProjectionSet
 AddProjectionResponse = Projection
 DeleteProjectResponse = ObjectDeleted
 AddDatasetResponse = strawberry.union("AddDatasetResponse", (Dataset, ProjectDoesNotExist))
-AddSliceResponse = strawberry.union("AddSliceResponse", (Slice, DatasetDoesNotExist))
 AddTagResponse = Tag
-AddModelArchitectureResponse = strawberry.union(
-    "AddModelArchitectureResponse", (ModelArchitecture, ProjectDoesNotExist)
-)
-AddTrainedModelResponse = strawberry.union(
-    "AddTrainedModelResponse", (TrainedModel, ModelArchitectureDoesNotExist)
-)
-AddLayerSetResponse = strawberry.union("AddLayerSetResponse", (LayerSet, TrainedModelDoesNotExist))
-AddLayerResponse = strawberry.union("AddLayerResponse", (Layer, LayerSetDoesNotExist))
 
 AddResourceResponse = Resource
 AddLabelResponse = Label
