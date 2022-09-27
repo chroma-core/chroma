@@ -2,7 +2,7 @@ import { useAtom } from 'jotai'
 import React, { useCallback, useEffect } from 'react'
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, context__inferenceFilterAtom, context__categoryFilterAtom, context__tagFilterAtom, context__datasetFilterAtom, visibleDatapointsAtom, context__metadataFiltersAtom, labelVisibleDatapointsAtom,
-  object__metadataFiltersAtom, object__datapointsAtom, object__categoryFilterAtom, object__categoriesAtom, object__datasetsAtom, object__datasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom, object__tagFilterAtom, object__tagsAtom, context__inferencecategoriesAtom, context__inferenceCategoryFilterAtom, object__inferencecategoriesAtom, object__inferenceCategoryFilterAtom
+  object__metadataFiltersAtom, object__datapointsAtom, object__categoryFilterAtom, object__categoriesAtom, object__datasetsAtom, object__datasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom, object__tagFilterAtom, object__tagsAtom, context__inferencecategoriesAtom, context__inferenceCategoryFilterAtom, object__inferencecategoriesAtom, object__inferenceCategoryFilterAtom, allLoadedAtom, anyFilterChangedYetAtom
 } from './atoms'
 import { FilterOption, Filter, FilterType, Datapoint } from './types'
 
@@ -10,6 +10,10 @@ import chroma from 'chroma-js'
 import distinctColors from 'distinct-colors'
 
 const Updater: React.FC = () => {
+  const [allLoaded, updateAllLoaded] = useAtom(allLoadedAtom)
+
+  const [anyFilterChangedYet, updateAnyFilterChangedYetAtom] = useAtom(anyFilterChangedYetAtom)
+
   // Atoms
   const [datapoints, updatedatapoints] = useAtom(context__datapointsAtom)
   const [labeldatapoints, updatelabeldatapoints] = useAtom(object__datapointsAtom)
@@ -61,14 +65,16 @@ const Updater: React.FC = () => {
       let dp = val
       visibleDps.push(dp.id)
 
-      for (let i = 0; i < filtersToObserve.length; i++) {
-        let filter = filtersToObserve[i]
-        for (let j = 0; j < filter!.options!.length; j++) {
-          var result = filter!.options![j].evalDatapoint(dp, filter!.options![j], filter)
-          if (result) {
-            datapointsToHide.push(dp.id)
-            i = filtersToObserve.length
-            j = filter!.options!.length // break out of both loops
+      if ((allLoaded === true) && (anyFilterChangedYet === true)) {
+        for (let i = 0; i < filtersToObserve.length; i++) {
+          let filter = filtersToObserve[i]
+          for (let j = 0; j < filter!.options!.length; j++) {
+            var result = filter!.options![j].evalDatapoint(dp, filter!.options![j], filter)
+            if (result) {
+              datapointsToHide.push(dp.id)
+              i = filtersToObserve.length
+              j = filter!.options!.length // break out of both loops
+            }
           }
         }
       }
@@ -78,26 +84,31 @@ const Updater: React.FC = () => {
   }, [...filtersToWatch, context__metadataFilters])
 
   // // whenever a filter is changed... generate the list of datapoints ids to hide
+  // the inclusion of metadata filter significantly slows things down
   const labelfiltersToObserve = [labelcategoryFilter, labeldatasetFilter, object__tagFilter, object__inferenceCategoryFilter, ...Object.values(object__metadataFilters)]
   useEffect(() => {
+    // this is running twice on load which is not ideal
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
     Object.values(labeldatapoints).map(function (val, keyIndex) {
       let dp = val
       visibleDps.push(dp.id)
 
-      for (let i = 0; i < labelfiltersToObserve.length; i++) {
-        let filter = labelfiltersToObserve[i]
-        for (let j = 0; j < filter!.options!.length; j++) {
-          // @ts-ignore
-          var result = filter!.options![j].evalDatapoint(dp, filter!.options![j], filter)
-          if (result) {
-            datapointsToHide.push(dp.id)
-            i = labelfiltersToObserve.length
-            j = filter!.options!.length // break out of both loops
+      if ((allLoaded === true) && (anyFilterChangedYet === true)) {
+        for (let i = 0; i < labelfiltersToObserve.length; i++) {
+          let filter = labelfiltersToObserve[i]
+          for (let j = 0; j < filter!.options!.length; j++) {
+            // @ts-ignore
+            var result = filter!.options![j].evalDatapoint(dp, filter!.options![j], filter)
+            if (result) {
+              datapointsToHide.push(dp.id)
+              i = labelfiltersToObserve.length
+              j = filter!.options!.length // break out of both loops
+            }
           }
         }
       }
+
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatelabelvisibleDatapoints(visibleDps)

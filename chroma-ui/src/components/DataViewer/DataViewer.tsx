@@ -9,7 +9,7 @@ import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, context__metadataFiltersAtom, globalDatapointAtom,
-  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom, contextObjectSwitcherAtom, DataType
+  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom, contextObjectSwitcherAtom, DataType, allLoadedAtom
 } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
@@ -104,6 +104,8 @@ const DataViewer = () => {
   const theme = useTheme()
   let params = useParams();
   const projectId = parseInt(params.project_id!, 10)
+
+  const [allLoaded, updateAllLoaded] = useAtom(allLoadedAtom)
 
   // Atoms
   const [context__datapoints, updatedatapoints] = useAtom(context__datapointsAtom)
@@ -512,6 +514,13 @@ const DataViewer = () => {
     }
   }
 
+  useEffect(() => {
+    const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingObjectProjections || processingContextProjections
+    if (progressModalOpen === false) {
+      updateAllLoaded(true)
+    }
+  }, [datapointsFetched])
+
   let loadingModalString = ""
   const progressModalOpen = !(datapointsFetched == totalDatapointsToFetch) || processingDatapoints || processingObjectProjections || processingContextProjections
   let progressWidth = 0
@@ -546,7 +555,7 @@ const DataViewer = () => {
           <ModalHeader>Downloading data</ModalHeader>
           <ModalBody pb={10}>
             <Progress value={progressWidth} borderRadius={5} sx={{
-              "& > div:first-child": {
+              "& > div:first-of-type": {
                 transitionProperty: "width",
                 transitionDuration: '4s',
                 transitionTimingFunction: 'linear'

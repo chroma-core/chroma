@@ -219,6 +219,11 @@ const DataPanel: React.FC = () => {
     }
   }
 
+  const autosizerResized = (data: any) => {
+    let columnCount = Math.ceil((data.width / 150))
+    setcolsPerRow(columnCount)
+  }
+
   const filterArray: FilterArray[] = [
     { filter: noneFilter!, update: () => { } },
     { filter: categoryFilter!, update: () => { } },
@@ -288,7 +293,7 @@ const DataPanel: React.FC = () => {
               {validFilters.map((filterb: any) => {
                 if (filterb.filter === undefined) return
                 return (
-                  <React.Fragment key={filterb.name}>
+                  <React.Fragment key={filterb.filter.name}>
                     <option key={filterb.filter.name + "-up"} value={filterb.filter.name + "-up"}>{filterb.filter.name} - up</option>
                     <option key={filterb.filter.name + "-down"} value={filterb.filter.name + "-down"}>{filterb.filter.name} - down</option>
                   </React.Fragment>
@@ -307,10 +312,9 @@ const DataPanel: React.FC = () => {
         </Portal>
 
         {(dps.length > 0) ?
-          <AutoSizer>
+          <AutoSizer onResize={autosizerResized}>
             {({ height, width }) => {
               let columnCount = Math.ceil((width / 150))
-              setcolsPerRow(columnCount)
               return (
                 <Flex pt={2} style={{ width: width, height: height }}>
                   <Scrollbars autoHide style={{ width: width, height: height }}>

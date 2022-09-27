@@ -21,7 +21,7 @@ import {
 import SidebarButton from '../Shared/SidebarButton';
 import FilterSidebarHeader from '../Shared/FilterSidebarHeader';
 import { useAtom } from 'jotai';
-import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom } from './atoms';
+import { context__categoryFilterAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetFilterAtom, DataType, globalCategoryFilterAtom, globalDatapointAtom, globalDatasetFilterAtom, globalMetadataFilterAtom, globalSelectedDatapointsAtom, globalTagFilterAtom, globalVisibleDatapointsAtom, context__metadataFiltersAtom, pointsToSelectAtom, selectedDatapointsAtom, context__tagFilterAtom, visibleDatapointsAtom, globalInferenceCategoriesAtom, globalInferenceCategoryFilterAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom, anyFilterChangedYetAtom } from './atoms';
 import { FilterArray, FilterType } from './types';
 
 interface FilterSidebarProps {
@@ -32,6 +32,8 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   const theme = useTheme();
   const bgColor = useColorModeValue("#FFFFFF", '#0c0c0b')
   const borderColor = useColorModeValue(theme.colors.ch_gray.light, theme.colors.ch_gray.dark)
+
+  const [anyFilterChangedYet, updateAnyFilterChangedYetAtom] = useAtom(anyFilterChangedYetAtom)
 
   const [datapoints] = useAtom(globalDatapointAtom)
   const [selectedDatapoints, setselectedDatapoints] = useAtom(globalSelectedDatapointsAtom)
@@ -79,6 +81,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
+    updateAnyFilterChangedYetAtom(true)
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)
     var options = filterArray[filterIndex].filter.options!.slice()
     let optionIndex = filterArray[filterIndex].filter.options!.findIndex((option: any) => option.id === passedOption.id)
@@ -90,6 +93,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
   }
 
   function updateContinuousFilter(passedFilter: any, minVisible: number, maxVisible: number) {
+    updateAnyFilterChangedYetAtom(true)
     let findMatchedFilter = metatadataFilterMap.find(f => f.filter.name === passedFilter.name)
     findMatchedFilter!.filter.range.minVisible = minVisible
     findMatchedFilter!.filter.range.maxVisible = maxVisible

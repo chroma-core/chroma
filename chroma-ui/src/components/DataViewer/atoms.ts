@@ -1,6 +1,9 @@
 import { atom } from "jotai"
 import { Datapoint, Dataset, Label, Tag, Resource, Inference, Category, Projection, CursorMap, Filter, PlotterBounds } from "./types"
 
+export const allLoadedAtom = atom<boolean>(false)
+export const anyFilterChangedYetAtom = atom<boolean>(false)
+
 // Core data atoms
 export const context__datapointsAtom = atom<{ [key: number]: Datapoint }>({})
 export const context__datasetsAtom = atom<{ [key: number]: Dataset }>({})
