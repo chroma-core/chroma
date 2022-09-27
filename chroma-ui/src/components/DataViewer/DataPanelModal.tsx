@@ -1,11 +1,11 @@
 import { ButtonGroup, useColorModeValue, Text, Box, GridItem, Grid as ChakraGrid, Center, Skeleton, TableContainer, Table, Tbody, Tr, Td, Flex, useTheme, Button } from "@chakra-ui/react"
 import { BiCategoryAlt } from "react-icons/bi"
 import { BsLayers, BsTag } from "react-icons/bs"
-import { context__categoriesAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetsAtom, DataType, globalDatapointAtom, globalResourcesAtom, context__inferencesAtom, context__labelsAtom, context__resourcesAtom, visibleDatapointsAtom, globalCategoriesAtom } from "./atoms"
+import { context__categoriesAtom, contextObjectSwitcherAtom, context__datapointsAtom, context__datasetsAtom, DataType, globalDatapointAtom, globalResourcesAtom, context__inferencesAtom, context__labelsAtom, context__resourcesAtom, visibleDatapointsAtom, globalCategoriesAtom, globalDatasetsAtom } from "./atoms"
 import Tags from "./Tags"
 import { useAtom } from 'jotai';
 import ImageRenderer from "./ImageRenderer"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 interface DataPanelGridProps {
   datapointId: any
@@ -14,6 +14,7 @@ interface DataPanelGridProps {
 const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
   if (datapointId === undefined) return <></> // handle this case though we dont expect to run into it
   const [datapoints] = useAtom(globalDatapointAtom)
+  const [datasets] = useAtom(globalDatasetsAtom)
   const [resources] = useAtom(globalResourcesAtom)
   const [categories] = useAtom(globalCategoriesAtom)
   const datapoint = datapoints[datapointId]
@@ -24,7 +25,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
     Inferences,
   }
 
-  const [labelsInferences, setLabelsInferences] = useState(AnnotationsViewed.Labels)
+  const [labelsInferences, setLabelsInferences] = useState((contextObjectSwitcher == DataType.Object) ? AnnotationsViewed.Inferences : AnnotationsViewed.Labels)
 
   let labelsToView = datapoint.annotations
   if (labelsInferences == AnnotationsViewed.Inferences) labelsToView = datapoint.inferences
@@ -35,7 +36,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
   // inject metadata into a standard place
   if (contextObjectSwitcher == DataType.Object) {
     // @ts-ignore
-    datapoint.metadata = datapoint.annotations[0].metadata
+    datapoint.metadata = datapoint.inferences[0].metadata
   }
 
   return (
@@ -47,7 +48,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
       <Flex height="100%">
         <Flex width="70%" bgColor={bgColor} justifyContent="center">
           <Flex direction="row" alignItems="center" justifyContent="center" height="100%">
-            <ImageRenderer imageUri={resources[datapoint.resource_id].uri} annotations={labelsToView} />
+            <ImageRenderer imageUri={resources[datapoint.resource_id].uri} bboxesToPlot={labelsToView} />
             {((datapoint.inferences.length > 0) && (datapoint.annotations.length > 0)) ?
               <ButtonGroup pos="absolute" variant='outline' spacing='1' bottom="40px">
                 <Button
@@ -79,10 +80,10 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
                   <Td width="30%" fontSize="xs">Resource URI</Td>
                   <Td p={0} fontSize="xs">{resources[datapoint.resource_id].uri}</Td>
                 </Tr>
-                {/* <Tr key={"dataset"}>
+                <Tr key={"dataset"}>
                   <Td width="30%" fontSize="xs">Dataset</Td>
                   <Td p={0} fontSize="xs">{datasets[datapoint.dataset_id].name}</Td>
-                </Tr> */}
+                </Tr>
                 {/* <Tr key={"quality"}>
                   <Td width="30%" fontSize="xs">Quality</Td>
                   <Td p={0} fontSize="xs">{(Math.exp(-parseFloat(datapoint.metadata.distance_score)) * 100).toFixed(3)}</Td>

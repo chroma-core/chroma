@@ -2,7 +2,7 @@ import { Skeleton, Box } from "@chakra-ui/react"
 import { useState, useRef, useEffect } from "react"
 import { Category } from "regl-scatterplot/dist/types"
 import { useQuery } from "urql"
-import { context__categoriesAtom, context__categoryFilterAtom } from "./atoms"
+import { contextObjectSwitcherAtom, context__categoriesAtom, context__categoryFilterAtom, DataType } from "./atoms"
 import { Annotation } from "./types"
 import { useAtom } from 'jotai'
 import { slice } from "lodash"
@@ -19,7 +19,7 @@ export const ImageQuery = `
 
 interface ImageRendererProps {
   imageUri: string
-  annotations: Annotation[]
+  bboxesToPlot: Annotation[]
   thumbnail?: boolean
 }
 
@@ -27,13 +27,14 @@ interface ImageOnLoad {
   target: HTMLImageElement
 }
 
-const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, thumbnail = false }) => {
+const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, bboxesToPlot, thumbnail = false }) => {
   let [imageDimensions, setImageDimensions] = useState([]) // [width, height]
   let [originalImageDimensions, setOriginalImageDimensions] = useState([]) // [width, height]
   const imageRef = useRef<HTMLImageElement>(null);
   const [categories] = useAtom(context__categoriesAtom)
   const [categoryFilter] = useAtom(context__categoryFilterAtom)
-  var hasBoundingBoxes = (annotations[0].bbox !== undefined)
+
+  var hasBoundingBoxes = ((bboxesToPlot[0] !== undefined) && (bboxesToPlot[0].bbox !== undefined))
 
   // sets image dimensons on load
   const onImgLoad = (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
@@ -66,8 +67,8 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   let paddingY
   var localAnnotationsFirstBbox
 
-  if ((annotations.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
-    firstAnnotationBbox = annotations[0].bbox
+  if ((bboxesToPlot.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
+    firstAnnotationBbox = bboxesToPlot[0].bbox
 
     var h = firstAnnotationBbox[3]
     var w = firstAnnotationBbox[2]
@@ -84,7 +85,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
     cropWidth = firstAnnotationBbox[2] + (paddingX * 2)
     cropHeight = firstAnnotationBbox[3] + (paddingY * 2)
 
-    localAnnotationsFirstBbox = annotations[0].bbox.slice()
+    localAnnotationsFirstBbox = bboxesToPlot[0].bbox.slice()
     // @ts-ignore
     localAnnotationsFirstBbox = [localAnnotationsFirstBbox[0] - leftOffset, localAnnotationsFirstBbox[1] - topOffset, localAnnotationsFirstBbox[2], localAnnotationsFirstBbox[3]]
   }
@@ -114,13 +115,13 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ imageUri, annotations, th
   let boundingBoxes: any[] = []
 
 
-  if ((annotations.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
+  if ((bboxesToPlot.length == 1) && (thumbnail == true) && hasBoundingBoxes) {
     // @ts-ignore
     originalImageDimensions = [cropWidth, cropHeight]
   }
 
-  if ((annotations.length > 0) && hasBoundingBoxes) {
-    boundingBoxes = annotations.map(a => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
+  if ((bboxesToPlot.length > 0) && hasBoundingBoxes) {
+    boundingBoxes = bboxesToPlot.map((a: any) => scaleToFittedImage(originalImageDimensions, imageDimensions, a))
   }
   if ((boundingBoxes.length == 1) && (thumbnail == true)) {
     // @ts-ignore

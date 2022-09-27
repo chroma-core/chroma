@@ -6,7 +6,7 @@ self.onmessage = (message) => {
 
     let targetIdDatapointIdMap = {}
     if (data.projections.setType == 'object') {
-        Object.values(datapointsCopy).forEach(d => targetIdDatapointIdMap[d.annotations[0].id] = d.id)
+        Object.values(datapointsCopy).forEach(d => targetIdDatapointIdMap[d.inferences[0].id] = d.id)
     }
 
     data.projections.projections.map((proj, index) => {

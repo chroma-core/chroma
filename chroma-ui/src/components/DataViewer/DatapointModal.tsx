@@ -1,6 +1,6 @@
 import { Modal, ModalBody, ModalCloseButton, ModalContent, useColorModeValue, useTheme } from "@chakra-ui/react"
 import { useAtom } from "jotai"
-import { colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, context__datapointsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, selectedDatapointsAtom, visibleDatapointsAtom } from "./atoms"
+import { colsPerRowAtom, datapointModalIndexAtom, datapointModalOpenAtom, context__datapointsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, selectedDatapointsAtom, visibleDatapointsAtom, datapointModalRowIndexAtom } from "./atoms"
 import DataPanelModal from "./DataPanelModal"
 
 interface DatapointModalProps {
@@ -10,6 +10,7 @@ interface DatapointModalProps {
 
 const DatapointModal: React.FC<DatapointModalProps> = ({ isOpen, totalLength }) => {
   const [datapointModalIndex, setdatapointModalIndex] = useAtom(datapointModalIndexAtom)
+  const [datapointModalRowIndex, setdatapointRowModalIndex] = useAtom(datapointModalRowIndexAtom)
   if (datapointModalIndex === null) return <></>
   const [colsPerRow] = useAtom(colsPerRowAtom)
   const [datapointModalOpen, updatedatapointModalOpen] = useAtom(datapointModalOpenAtom)
@@ -20,9 +21,9 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ isOpen, totalLength }) 
   if (selectedDatapoints.length > 0) dps = selectedDatapoints
   else dps = visibleDatapoints
 
-  const datapoint = dps[datapointModalIndex]
+  const datapoint = datapointModalIndex
 
-  let index = datapointModalIndex!
+  let index = datapointModalRowIndex!
   const beginningOfList = (index === 0)
   const endOfList = (index === totalLength)
   const firstRow = ((index) < colsPerRow)
@@ -34,16 +35,16 @@ const DatapointModal: React.FC<DatapointModalProps> = ({ isOpen, totalLength }) 
   function handleKeyDown(event: any) {
     index = index!
     if ((event.keyCode === 37) && (!beginningOfList)) { // LEFT
-      setdatapointModalIndex(index - 1)
+      setdatapointRowModalIndex(index - 1)
     }
     if ((event.keyCode === 39) && (!endOfList)) { // RIGHT
-      setdatapointModalIndex(index + 1)
+      setdatapointRowModalIndex(index + 1)
     }
     if ((event.keyCode === 38) && (!firstRow)) { // UP
-      setdatapointModalIndex(index - colsPerRow)
+      setdatapointRowModalIndex(index - colsPerRow)
     }
     if ((event.keyCode === 40) && (!lastRow)) { // DOWN
-      setdatapointModalIndex(index + colsPerRow)
+      setdatapointRowModalIndex(index + colsPerRow)
     }
     if ((event.keyCode === 27)) { // ESC
       alert("esc!")

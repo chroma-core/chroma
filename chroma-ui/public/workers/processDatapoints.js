@@ -21,13 +21,13 @@ self.onmessage = (message) => {
     let context__metadataFilters = {}
 
     // create object data structures
-    let object__categoriesObject = {}
+    let object__inferenceCategoriesObject = {}
     let object__datapointsObject = {}
     let object__datasetsObject = {}
     let object__labelsObject = {}
     let object__resourcesObject = {}
     let object__tagsObject = {}
-    // no object__inferencesObject
+    let object__labelCategoriesObject = {}
     let object__metadataFiltersObject = {}
 
 
@@ -48,8 +48,9 @@ self.onmessage = (message) => {
         categoriesData.forEach((category) => {
             if (context__categoriesObject[category.id] === undefined) {
                 context__categoriesObject[category.id] = { ...category }
-                object__categoriesObject[category.id] = { ...category }
+                object__inferenceCategoriesObject[category.id] = { ...category }
                 context__inferenceCategoriesObject[category.id] = { ...category }
+                object__labelCategoriesObject[category.id] = { ...category }
             }
         })
 
@@ -184,12 +185,11 @@ self.onmessage = (message) => {
     var i = 0
     var j = 0
     var targetDatapointIdMap = {}
+    let object_inference_categories = {}
     Object.values(context__datapointsObject).map(dp => {
         dp.inferences.map(ann => {
             let hasBoundingBoxes = (ann.bbox !== undefined)
             if (hasBoundingBoxes) {
-
-                // console.log('ann', ann)
 
                 // create the resource
                 object__resourcesObject[j] = {
@@ -199,12 +199,17 @@ self.onmessage = (message) => {
 
                 targetDatapointIdMap[ann.id] = i
 
+                var assoc_label = []
+                if (ann.label_id !== "") assoc_label = [dp.annotations.find(d => d.id == ann.label_id)]
+
                 // create the points
+                // we store the single inferences object in inferences
+                // if there is a corresponding label, we store it in annotations
                 object__datapointsObject[i] = {
-                    annotations: [ann],
+                    inferences: [ann],
+                    annotations: assoc_label,
                     dataset_id: dp.dataset_id,
                     id: i,
-                    inferences: [],
                     metadata: {},
                     tag_ids: [],
                     source_datapoint_id: dp.id,
@@ -216,11 +221,25 @@ self.onmessage = (message) => {
                 // add itself to the dataset
                 object__datasetsObject[dp.dataset_id].datapoint_ids.push(i)
 
+                if (assoc_label.length != 0) {
+                    const categoryId = assoc_label[0].category_id
+                    if (object_inference_categories[categoryId] === undefined) object_inference_categories[categoryId] = new Set()
+                    object_inference_categories[categoryId].add(i)
+                }
+
                 i++
                 j++
             }
 
         })
+
+    })
+
+    // take datapoint annotation data and add it to the category datapoint list
+    // load up our datapoint ids into categories
+    Object.keys(object_inference_categories).map((c) => {
+        const dps = (object_inference_categories[c]).keys()
+        object__labelCategoriesObject[c].datapoint_ids = [...dps]
     })
 
     // load tags object and fill in the object datapoints that have that tag 
@@ -254,11 +273,11 @@ self.onmessage = (message) => {
     // create our filters based on the metadata set on the inference annotation
     let annsInferenceIdsToAdd = {}
     Object.values(object__datapointsObject).map(inferenceDp => {
-        let categoryId = inferenceDp.annotations[0].category_id
+        let categoryId = inferenceDp.inferences[0].category_id
         if (annsInferenceIdsToAdd[categoryId] === undefined) annsInferenceIdsToAdd[categoryId] = new Set()
         annsInferenceIdsToAdd[categoryId].add(inferenceDp.id)
 
-        inferenceDp.annotations.map(ann => {
+        inferenceDp.inferences.map(ann => {
             Object.keys(ann.metadata).map(key => {
                 if (object__metadataFiltersObject[key] === undefined) object__metadataFiltersObject[key] = { name: key, options: {}, type: 0, linkedAtom: {} }
                 if (object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]] === undefined) object__metadataFiltersObject[key].linkedAtom[ann.metadata[key]] = { datapoint_ids: [] }
@@ -279,12 +298,12 @@ self.onmessage = (message) => {
 
     Object.keys(annsInferenceIdsToAdd).map((c) => {
         const dps = (annsInferenceIdsToAdd[c]).keys()
-        object__categoriesObject[c].datapoint_ids = [...dps]
+        object__inferenceCategoriesObject[c].datapoint_ids = [...dps]
     })
 
     // if we dont have any bounding boxes... wipe out the other data structures
     if (Object.values(object__datapointsObject).length === 0) {
-        object__categoriesObject = {}
+        object__inferenceCategoriesObject = {}
         object__resourcesObject = {}
         object__datasetsObject = {}
     }
@@ -310,7 +329,9 @@ self.onmessage = (message) => {
         object__labels: object__labelsObject, // just an empty object right now, only here for consistency
         object__resources: object__resourcesObject,
         object__tags: object__tagsObject,
-        object__categories: object__categoriesObject,
         object__metadataFilters: object__metadataFiltersObject,
+
+        object__labelCategories: object__labelCategoriesObject,
+        object__inferenceCategories: object__inferenceCategoriesObject,
     })
 }

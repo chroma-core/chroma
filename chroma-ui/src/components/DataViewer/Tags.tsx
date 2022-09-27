@@ -69,7 +69,7 @@ const Tags: React.FC<TagsProps> = ({ datapointId }) => {
     let add = newTagsArray.filter(x => !originalTagsArray.includes(x)) // tags to add
     let keep = originalTagsArray.filter(x => newTagsArray.includes(x)) // tags to keep
 
-    let target = (contextObjectSwitcher == DataType.Object) ? [datapoint.annotations[0].id] : null
+    let target = (contextObjectSwitcher == DataType.Object) ? [datapoint.inferences[0].id] : null
     let datapointIds = (contextObjectSwitcher == DataType.Object) ? [datapoint.source_datapoint_id] : [datapointId]
 
     add.map(tagToAdd => {

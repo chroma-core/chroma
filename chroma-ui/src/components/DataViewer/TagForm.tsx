@@ -47,7 +47,7 @@ const TagForm: React.FC = () => {
     var targetIds: any = null
     var objectDpIds: any = null
     if (contextObjectSwitcher == DataType.Object) {
-      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].annotations[0].id)
+      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].inferences[0].id)
       // @ts-ignore
       objectDpIds = selectedDatapointsCopy.map(sd => datapoints[sd].source_datapoint_id)
     }
@@ -100,7 +100,7 @@ const TagForm: React.FC = () => {
     var targetIds: any = null
     var objectDpIds: any = null
     if (contextObjectSwitcher == DataType.Object) {
-      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].annotations[0].id)
+      targetIds = selectedDatapointsCopy.map(sd => datapoints[sd].inferences[0].id)
       // @ts-ignore
       objectDpIds = selectedDatapointsCopy.map(sd => datapoints[sd].source_datapoint_id)
     }

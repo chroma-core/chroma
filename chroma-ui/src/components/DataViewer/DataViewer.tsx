@@ -239,7 +239,9 @@ const DataViewer = () => {
     normalizedData.object__datapoints = resetDatapointIds(datapointBumpLength, Object.values(object__resources).length, normalizedData.object__datapoints)
     normalizedData.object__resources = resetIds(Object.values(object__resources).length, normalizedData.object__resources)
     normalizedData.object__labels = resetIds(Object.values(object__labels).length, normalizedData.object__labels)
-    normalizedData.object__categories = bumpIds(datapointBumpLength, normalizedData.object__categories)
+
+    normalizedData.object__labelCategories = bumpIds(datapointBumpLength, normalizedData.object__labelCategories)
+    normalizedData.object__inferenceCategories = bumpIds(datapointBumpLength, normalizedData.object__inferenceCategories)
 
     // bump object_datapoint_ids
     Object.values(normalizedData.context__datapoints).map((ctxdp: any) => {
@@ -262,12 +264,20 @@ const DataViewer = () => {
       let newVals = (normalizedData.context__inferenceCategories[item].datapoint_ids !== undefined) ? normalizedData.context__inferenceCategories[item].datapoint_ids : []
       normalizedData.context__inferenceCategories[item].datapoint_ids = [...newVals, ...existing]
     })
-    Object.keys(normalizedData.object__categories).map((item: any, index: number) => {
+
+    Object.keys(normalizedData.object__labelCategories).map((item: any, index: number) => {
       let category = object__categories[item]
       let existing = (category !== undefined) ? category.datapoint_ids : []
-      let newVals = (normalizedData.object__categories[item].datapoint_ids !== undefined) ? normalizedData.object__categories[item].datapoint_ids : []
-      normalizedData.object__categories[item].datapoint_ids = [...newVals, ...existing]
+      let newVals = (normalizedData.object__labelCategories[item].datapoint_ids !== undefined) ? normalizedData.object__labelCategories[item].datapoint_ids : []
+      normalizedData.object__labelCategories[item].datapoint_ids = [...newVals, ...existing]
     })
+    Object.keys(normalizedData.object__inferenceCategories).map((item: any, index: number) => {
+      let category = object__inferencecategories[item]
+      let existing = (category !== undefined) ? category.datapoint_ids : []
+      let newVals = (normalizedData.object__inferenceCategories[item].datapoint_ids !== undefined) ? normalizedData.object__inferenceCategories[item].datapoint_ids : []
+      normalizedData.object__inferenceCategories[item].datapoint_ids = [...newVals, ...existing]
+    })
+
     Object.keys(normalizedData.context__tags).map((key: any, index: number) => {
       let item = context__tags[key]
       let existing = (item !== undefined) ? item.datapoint_ids : []
@@ -372,7 +382,7 @@ const DataViewer = () => {
         })
       }
       normalizedData.object__metadataFilters[key].fetchFn = (datapoint: any) => {
-        return datapoint.annotations[0].metadata[normalizedData.object__metadataFilters[key].name]
+        return datapoint.inferences[0].metadata[normalizedData.object__metadataFilters[key].name]
       }
 
       // deep merge datapoints ids with existing data
@@ -398,7 +408,7 @@ const DataViewer = () => {
           option.color = colors[i]
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption) => {
             // @ts-ignore
-            if ((option.visible == false) && (datapoint.annotations[0].metadata[key] == option.id)) return true
+            if ((option.visible == false) && (datapoint.inferences[0].metadata[key] == option.id)) return true
             else return false
           }
         })
@@ -409,7 +419,7 @@ const DataViewer = () => {
         normalizedData.object__metadataFilters[key].options.map((option: any) => {
           option.evalDatapoint = (datapoint: Datapoint, o: FilterOption, f: Filter) => {
             // @ts-ignore
-            if ((datapoint.annotations[0].metadata[key] > f.range.maxVisible) || (datapoint.annotations[0].metadata[key] < f.range.minVisible)) {
+            if ((datapoint.inferences[0].metadata[key] > f.range.maxVisible) || (datapoint.inferences[0].metadata[key] < f.range.minVisible)) {
               return true
             }
             else return false
@@ -435,7 +445,9 @@ const DataViewer = () => {
     updateobjectlabels({ ...{ ...object__labels }, ...normalizedData.object__labels })
     updateobjectresources({ ...{ ...object__resources }, ...normalizedData.object__resources })
     updateobjecttags({ ...{ ...object__tags }, ...normalizedData.object__tags })
-    updateobjectcategories({ ...{ ...object__categories }, ...normalizedData.object__categories })
+
+    updateobjectcategories({ ...{ ...object__categories }, ...normalizedData.object__labelCategories })
+    updateobjectinferencecategories({ ...{ ...object__inferencecategories }, ...normalizedData.object__inferenceCategories })
 
     setProcessingDatapoints(false)
     setDatapointsFetched(datapointsFetched + len)
