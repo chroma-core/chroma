@@ -167,9 +167,6 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
 
             metadatas = [
                 {
-                    # "quality": random.randint(0, 100),
-                    # "location": str_options[random.randint(0, 6)],
-                    # "label_id": target_uids[assocs[i]] if i in assocs.keys() else "",
                     "iou": ious[i] if i in ious.keys() else 0,
                     "score": scores[i] if i in scores.keys() else 0,
                 }
