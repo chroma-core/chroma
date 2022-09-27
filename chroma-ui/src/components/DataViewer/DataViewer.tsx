@@ -9,8 +9,7 @@ import { getMostRecentCreatedAtObjectContext } from './DataViewerUtils';
 import { atom, useAtom } from 'jotai';
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, selectedDatapointsAtom, toolSelectedAtom, toolWhenShiftPressedAtom, cursorAtom, context__metadataFiltersAtom, globalDatapointAtom,
-  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom, contextObjectSwitcherAtom, DataType,
-  allLoadedAtom
+  object__labelsAtom, object__tagsAtom, object__resourcesAtom, object__datasetsAtom, object__categoriesAtom, object__projectionsAtom, object__metadataFiltersAtom, object__datapointsAtom, context__inferencecategoriesAtom, object__inferencecategoriesAtom, shiftKeyPressedAtom, controlKeyPressedAtom, optionKeyPressedAtom, contextObjectSwitcherAtom, DataType, allLoadedAtom
 } from './atoms';
 import { NormalizeData, CursorMap, Filter, FilterType, FilterOption, Projection, Category, Datapoint } from './types';
 import Header from './Header';
@@ -144,6 +143,10 @@ const DataViewer = () => {
   const [toolWhenShiftPressed, setToolWhenShiftPressed] = useAtom(toolWhenShiftPressedAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
   const allFetched = (datapointsFetched == totalDatapointsToFetch)
+
+  const [optionKeyDown, setOptionKeyDown] = useAtom(shiftKeyPressedAtom)
+  const [commandKeyDown, setCommandKeyDown] = useAtom(controlKeyPressedAtom)
+  const [shiftKeyDown, setShiftKeyDown] = useAtom(optionKeyPressedAtom)
 
   // Onload Fetch projects and projection sets
   const [result, reexecuteQuery] = useQuery({
@@ -476,6 +479,16 @@ const DataViewer = () => {
       if (event.keyCode == 16) setCursor(CursorMap.add)
       if ([91, 93].includes(event.keyCode)) setCursor(CursorMap.remove)
     }
+
+    if ([18].includes(event.keyCode)) { // 18: OPTION left and right
+      setOptionKeyDown(true)
+    }
+    if ([91, 93].includes(event.keyCode)) { // 91/93: COMMAND left and right
+      setCommandKeyDown(true)
+    }
+    if ([16].includes(event.keyCode)) { // 16: SHIFT
+      setShiftKeyDown(true)
+    }
   }
 
   function handleKeyUp(event: any) {
@@ -488,6 +501,16 @@ const DataViewer = () => {
       if (toolWhenShiftPressed === 'lasso') {
         setCursor(CursorMap.lasso)
       }
+    }
+
+    if ([18].includes(event.keyCode)) { // 18: OPTION left and right
+      setOptionKeyDown(false)
+    }
+    if ([91, 93].includes(event.keyCode)) { // 91/93: COMMAND left and right
+      setCommandKeyDown(false)
+    }
+    if ([16].includes(event.keyCode)) { // 16: SHIFT
+      setShiftKeyDown(false)
     }
   }
 
