@@ -5,7 +5,7 @@ import { context__categoriesAtom, contextObjectSwitcherAtom, context__datapoints
 import Tags from "./Tags"
 import { useAtom } from 'jotai';
 import ImageRenderer from "./ImageRenderer"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 interface DataPanelGridProps {
   datapointId: any
@@ -25,7 +25,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
     Inferences,
   }
 
-  const [labelsInferences, setLabelsInferences] = useState(AnnotationsViewed.Labels)
+  const [labelsInferences, setLabelsInferences] = useState((contextObjectSwitcher == DataType.Object) ? AnnotationsViewed.Inferences : AnnotationsViewed.Labels)
 
   let labelsToView = datapoint.annotations
   if (labelsInferences == AnnotationsViewed.Inferences) labelsToView = datapoint.inferences
@@ -36,7 +36,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
   // inject metadata into a standard place
   if (contextObjectSwitcher == DataType.Object) {
     // @ts-ignore
-    datapoint.metadata = datapoint.annotations[0].metadata
+    datapoint.metadata = datapoint.inferences[0].metadata
   }
 
   return (
@@ -48,7 +48,7 @@ const DataPanelModal: React.FC<DataPanelGridProps> = ({ datapointId }) => {
       <Flex height="100%">
         <Flex width="70%" bgColor={bgColor} justifyContent="center">
           <Flex direction="row" alignItems="center" justifyContent="center" height="100%">
-            <ImageRenderer imageUri={resources[datapoint.resource_id].uri} annotations={labelsToView} />
+            <ImageRenderer imageUri={resources[datapoint.resource_id].uri} bboxesToPlot={labelsToView} />
             {((datapoint.inferences.length > 0) && (datapoint.annotations.length > 0)) ?
               <ButtonGroup pos="absolute" variant='outline' spacing='1' bottom="40px">
                 <Button

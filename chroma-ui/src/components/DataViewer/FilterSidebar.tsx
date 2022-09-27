@@ -72,7 +72,7 @@ const FilterSidebar: React.FC<FilterSidebarProps> = ({ showSkeleton }) => {
     { filter: tagFilter!, update: updateTag },
     ...metatadataFilterMap
   ]
-  if (contextObjectSwitcher == DataType.Context) filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
+  filterArray.push({ filter: inferencecategoryFilter!, update: updateInferenceCategory })
 
   function updateDiscreteFilter(passedFilter: any, passedOption: any) {
     let filterIndex = filterArray.findIndex(f => f.filter.name === passedFilter.name)

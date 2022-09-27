@@ -3,7 +3,7 @@ import scatterplot from './scatterplot'
 import { Box, useColorModeValue, Center, Spinner, Select, Text } from '@chakra-ui/react'
 import useResizeObserver from "use-resize-observer";
 // import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, toolSelectedAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, globalDatasetFilterAtom, object__datapointsAtom } from './atoms';
-import { context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatasetFilterAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, object__datapointsAtom, globaldatapointToPointMapAtom, globalplotterBoundsAtom, hoverToHighlightInPlotterDatapointIdAtom } from './atoms';
+import { object__inferenceCategoryFilterAtom, context__categoryFilterAtom, DataType, contextObjectSwitcherAtom, cursorAtom, globalDatasetFilterAtom, context__datapointsAtom, context__datasetFilterAtom, globalDatapointAtom, globalProjectionsAtom, globalSelectedDatapointsAtom, globalVisibleDatapointsAtom, pointsToSelectAtom, context__projectionsAtom, selectedDatapointsAtom, context__tagFilterAtom, toolSelectedAtom, visibleDatapointsAtom, globalCategoryFilterAtom, globalCategoriesAtom, globalResourcesAtom, globalMetadataFilterAtom, object__datapointsAtom, globaldatapointToPointMapAtom, globalplotterBoundsAtom, hoverToHighlightInPlotterDatapointIdAtom, object__categoryFilterAtom } from './atoms';
 import { atom, useAtom } from 'jotai'
 import { Projection, Datapoint, FilterType, Filter } from './types';
 import { totalmem } from 'os';
@@ -70,14 +70,16 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
   })
 
   // my own custom enum class so i can add to it at runtime
-  let totalColorByOptions = 2;
+  let totalColorByOptions = 3;
   let ColorByOptionsArr: { [key: string | number]: string | number; } = {
     0: 'None',
-    1: 'Categories',
+    1: 'LabelCategories',
     2: 'Datasets',
+    3: 'InferenceCategories',
     'None': 0,
-    'Categories': 1,
+    'LabelCategories': 1,
     'Datasets': 2,
+    'InferenceCategories': 3,
   }
 
   // local state for which color by option we currently have selected and what the color options are for it
@@ -92,17 +94,19 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
     options: [{ color: "#111", id: 0, visible: true, evalDatapoint: () => { } }],
     linkedAtom: [],
     fetchFn: (datapoint) => {
-      return datapoint.annotations[0].category_id
+      return ""//datapoint.annotations[0].category_id
     }
   }
 
-  const [categoryFilter] = useAtom(context__categoryFilterAtom)
+  const [categoryFilter] = useAtom(object__inferenceCategoryFilterAtom)
+  const [categoryFilter2] = useAtom(object__categoryFilterAtom)
   const [datasetFilter] = useAtom(globalDatasetFilterAtom)
   const filterArray: any[] = []
   if (contextObjectSwitcher == DataType.Object) {
     filterArray.push(
       { name: ColorByOptionsArr.None, filter: noneFilter },
-      { name: ColorByOptionsArr.Categories, filter: categoryFilter! },
+      { name: ColorByOptionsArr.LabelCategories, filter: categoryFilter2! },
+      { name: ColorByOptionsArr.InferenceCategories, filter: categoryFilter! },
       { name: ColorByOptionsArr.Datasets, filter: datasetFilter! },
       ...metatadataFilterMap
     )
@@ -119,7 +123,7 @@ const ProjectionPlotter: React.FC<PlotterProps> = ({ allFetched }) => {
       ...metatadataFilterMap
     )
     if (Object.values(object__datapoints).length === 0) {
-      filterArray.push({ name: ColorByOptionsArr.Categories, filter: categoryFilter! })
+      filterArray.push({ name: ColorByOptionsArr.LabelCategories, filter: categoryFilter! })
     }
     metatadataFilterMap.forEach(mF => {
       totalColorByOptions++

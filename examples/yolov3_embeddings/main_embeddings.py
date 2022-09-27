@@ -33,11 +33,15 @@ def reshape_context(inputs):
     return avg_pool_module(inputs)[:, :, -1, -1]
 
 
-def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas):
+def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas, label_ids=None):
     annotations = []
 
-    for box, category_id, category_name, uid, metadata in zip(
-        boxes, category_ids, category_names, uids, metadatas
+    if label_ids == None:
+        label_ids = []
+        label_ids = [None for i in range(len(boxes))]
+
+    for box, category_id, category_name, uid, metadata, label_id in zip(
+        boxes, category_ids, category_names, uids, metadatas, label_ids
     ):
         annotation = {
             "id": uid,
@@ -46,6 +50,8 @@ def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas):
             "category_name": category_name,
             "metadata": metadata,
         }
+        if label_id != None:
+            annotation["label_id"] = label_id
         annotations.append(annotation)
 
     return {"annotations": annotations}
@@ -58,7 +64,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
     num_anchors = 3
     no = 85
 
-    conf_thres = 0.01
+    conf_thres = 0.3
     nms_thres = 0.4
 
     Tensor = torch.FloatTensor
@@ -99,7 +105,8 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             target_cat_names = class_names[target_cat_ids]
             target_uids = [str(uuid.uuid4()) for i in range(len(target_cat_ids))]
             metadatas = [
-                {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
+                # {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
+                {}
                 for i in range(len(target_cat_ids))
             ]
             target_annotations = to_annotations_dict(
@@ -114,66 +121,72 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             det_category_names = class_names[det_category_ids]
             det_uids = [str(uuid.uuid4()) for i in range(len(det_category_ids))]
 
-            # Associate detections with labels
+            # Associate detections with labels by IOU best match.
             # We do this without rescaling to the original image, in the shape of the input
             assoc_iou_threshold = 0.5
             target[:, 2:] = xywh2xyxy(target[:, 2:])
             target[:, 2:] *= imgs.shape[-1]
 
             annotations = target[:, 1:]
-            target_labels = annotations[:, 0] if len(annotations) else []
             pred_boxes = output[:, :4]
             pred_scores = output[:, 4]
-            pred_labels = output[:, -1]
 
             assocs = {}
+            best_ious = {}
+            best_assocs = {}
             ious = {}
             scores = {}
             if len(annotations):
-                for pred_i, (pred_box, pred_label) in enumerate(zip(pred_boxes, pred_labels)):
+                for pred_i, pred_box in enumerate(pred_boxes):
                     scores[pred_i] = pred_scores[pred_i].item()
-                    # Skip if we've found all the annotations
-                    if len(assocs) == len(annotations):
-                        continue
-                    # Reject class mismatch
-                    if pred_label not in target_labels:
-                        continue
-
-                    # Filter target_boxes by pred_label so that we only match against boxes of our own label
-                    filtered_target_position, filtered_targets = zip(
-                        *filter(
-                            lambda x: target_labels[x[0]] == pred_label, enumerate(target_boxes)
-                        )
-                    )
 
                     # Find the best matching target for our predicted box
-                    iou, target_box_filtered_index = bbox_iou(
-                        pred_box.unsqueeze(0), torch.stack(filtered_targets)
-                    ).max(0)
+                    iou, target_box = bbox_iou(pred_box.unsqueeze(0), target[:, 2:]).max(0)
+                    iou = iou.item()
 
-                    # Remap the index in the list of filtered targets for that label to the index in the list with all targets.
-                    target_label_index = filtered_target_position[target_box_filtered_index]
-                    if iou >= assoc_iou_threshold and target_label_index not in assocs.values():
-                        assocs[pred_i] = target_label_index
-                        ious[pred_i] = iou.item()
+                    # Only associate if we pass the IoU threshold, and we did better.
+                    if iou >= assoc_iou_threshold:
+                        # We have associated to this box before
+                        if target_box in best_ious.keys():
+                            # But this IoU is better
+                            if iou > best_ious[target_box]:
+                                # Dissasociate the previous winner
+                                prev_best = best_assocs[target_box]
+                                assocs.pop(prev_best)
+                                ious.pop(prev_best)
+                                # Associate the new winner
+                                assocs[pred_i] = target_box
+                                ious[pred_i] = iou
+                                best_assocs[target_box] = pred_i
+                                best_ious[target_box] = iou
+                        else:
+                            assocs[pred_i] = target_box
+                            ious[pred_i] = iou
+                            best_assocs[target_box] = pred_i
+                            best_ious[target_box] = iou
 
             metadatas = [
                 {
-                    "quality": random.randint(0, 100),
-                    "location": str_options[random.randint(0, 6)],
+                    # "quality": random.randint(0, 100),
+                    # "location": str_options[random.randint(0, 6)],
                     # "label_id": target_uids[assocs[i]] if i in assocs.keys() else "",
                     "iou": ious[i] if i in ious.keys() else 0,
                     "score": scores[i] if i in scores.keys() else 0,
                 }
                 for i in range(len(det_category_ids))
             ]
+            label_ids = [
+                target_uids[assocs[i]] if i in assocs.keys() else ""
+                for i in range(len(det_category_ids))
+            ]
             det_annotations = to_annotations_dict(
-                det_boxes, det_category_ids, det_category_names, det_uids, metadatas
+                det_boxes, det_category_ids, det_category_names, det_uids, metadatas, label_ids
             )
             detection_inferences.append(det_annotations)
 
             metadata_list.append(
-                {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
+                {}
+                # {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
             )
 
         chroma_storage.set_inferences(detection_inferences)

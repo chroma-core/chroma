@@ -61,6 +61,11 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
     updatedatapointModalOpen(true)
   }
 
+  var labelsToPlot = datapoint.annotations
+  if (contextObjectSwitcher == DataType.Object) {
+    labelsToPlot = datapoint.inferences
+  }
+
   return (
     <Box
       height={125}
@@ -77,7 +82,7 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
     >
       <Flex direction="column" flex="row" justify="space-between" wrap="wrap" width="100%">
         <Flex direction="row" justifyContent="center" width="100%" minWidth={100} height={100}>
-          <ImageRenderer imageUri={uri} annotations={datapoint.annotations} thumbnail={true} />
+          <ImageRenderer imageUri={uri} bboxesToPlot={labelsToPlot} thumbnail={true} />
         </Flex>
         <Flex direction="row" justifyContent="space-evenly" alignItems="center" pl={1} borderRadius={5} bgColor={bgColor} ml="5px" mr="5px">
           <Flex alignItems="center">
@@ -86,7 +91,7 @@ export const DataPanelGrid: React.FC<DataPanelGridProps> = ({ datapoint, index }
           </Flex>
           {(contextObjectSwitcher == DataType.Object) ?
             <Flex>
-              <Text fontWeight={600} fontSize="sm" color="#666">{labelCategories[datapoint.annotations[0].category_id].name}</Text>
+              <Text fontWeight={600} fontSize="sm" color="#666">{labelCategories[datapoint.inferences[0].category_id].name}</Text>
             </Flex>
             : null}
         </Flex>

@@ -2,7 +2,7 @@ import { useAtom } from 'jotai'
 import React, { useCallback, useEffect } from 'react'
 import {
   context__datapointsAtom, context__labelsAtom, context__tagsAtom, context__resourcesAtom, context__inferencesAtom, context__datasetsAtom, context__categoriesAtom, context__projectionsAtom, context__inferenceFilterAtom, context__categoryFilterAtom, context__tagFilterAtom, context__datasetFilterAtom, visibleDatapointsAtom, context__metadataFiltersAtom, labelVisibleDatapointsAtom,
-  object__metadataFiltersAtom, object__datapointsAtom, object__categoryFilterAtom, object__categoriesAtom, object__datasetsAtom, object__datasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom, object__tagFilterAtom, object__tagsAtom, context__inferencecategoriesAtom, context__inferenceCategoryFilterAtom
+  object__metadataFiltersAtom, object__datapointsAtom, object__categoryFilterAtom, object__categoriesAtom, object__datasetsAtom, object__datasetFilterAtom, globalCategoryFilterAtom, globalDatasetFilterAtom, globalVisibleDatapointsAtom, object__tagFilterAtom, object__tagsAtom, context__inferencecategoriesAtom, context__inferenceCategoryFilterAtom, object__inferencecategoriesAtom, object__inferenceCategoryFilterAtom
 } from './atoms'
 import { FilterOption, Filter, FilterType, Datapoint } from './types'
 
@@ -29,6 +29,7 @@ const Updater: React.FC = () => {
   const [categories, updatecategories] = useAtom(context__categoriesAtom)
   const [labelcategories, updatelabelcategories] = useAtom(object__categoriesAtom)
   const [inferencecategories, updateinferencecategories] = useAtom(context__inferencecategoriesAtom)
+  const [objectinferencecategories, updateobjectinferencecategories] = useAtom(object__inferencecategoriesAtom)
 
   const [projections, updateprojections] = useAtom(context__projectionsAtom)
   const [visibleDatapoints, updatevisibleDatapoints] = useAtom(visibleDatapointsAtom)
@@ -41,6 +42,8 @@ const Updater: React.FC = () => {
   const [datasetFilter, updatedatasetFilter] = useAtom(context__datasetFilterAtom)
   const [labeldatasetFilter, updatelabeldatasetFilter] = useAtom(object__datasetFilterAtom)
   const [inferenceCategoryFilter, updateInferenceCategoryFilter] = useAtom(context__inferenceCategoryFilterAtom)
+
+  const [object__inferenceCategoryFilter, updateObjectInferenceCategoryFilter] = useAtom(object__inferenceCategoryFilterAtom)
 
   const [tagFilter, updatetagFilter] = useAtom(context__tagFilterAtom)
   const [object__tagFilter, updateobjecttagFilter] = useAtom(object__tagFilterAtom)
@@ -75,7 +78,7 @@ const Updater: React.FC = () => {
   }, [...filtersToWatch, context__metadataFilters])
 
   // // whenever a filter is changed... generate the list of datapoints ids to hide
-  const labelfiltersToObserve = [labelcategoryFilter, labeldatasetFilter, object__tagFilter, ...Object.values(object__metadataFilters)]
+  const labelfiltersToObserve = [labelcategoryFilter, labeldatasetFilter, object__tagFilter, object__inferenceCategoryFilter, ...Object.values(object__metadataFilters)]
   useEffect(() => {
     let visibleDps: number[] = []
     let datapointsToHide: number[] = []
@@ -98,7 +101,7 @@ const Updater: React.FC = () => {
     })
     visibleDps = visibleDps.filter((el) => !datapointsToHide.includes(el));
     updatelabelvisibleDatapoints(visibleDps)
-  }, [labelcategoryFilter, labeldatasetFilter, object__metadataFilters, object__tagFilter])
+  }, [labelcategoryFilter, labeldatasetFilter, object__metadataFilters, object__tagFilter, object__inferenceCategoryFilter])
 
   // categories filter
   useEffect(() => {
@@ -125,7 +128,7 @@ const Updater: React.FC = () => {
     })
 
     let newCategoryFilter: Filter = {
-      name: 'Label Category',
+      name: 'Label Categories',
       type: FilterType.Discrete,
       options: options,
       linkedAtom: categories,
@@ -161,7 +164,7 @@ const Updater: React.FC = () => {
     })
 
     let newCategoryFilter: Filter = {
-      name: 'Inference Category',
+      name: 'Inference Categories',
       type: FilterType.Discrete,
       options: options,
       linkedAtom: inferencecategories,
@@ -172,23 +175,23 @@ const Updater: React.FC = () => {
     updateInferenceCategoryFilter(newCategoryFilter)
   }, [inferencecategories])
 
-  // categories filter
+  // inferencecategories filter
   useEffect(() => {
     var colors = distinctColors({
-      "count": Object.values(categories).length,
+      "count": Object.values(objectinferencecategories).length,
       "lightMin": 20,
       "lightMax": 85,
       "chromaMin": 50
     }).map(color => color.hex())
 
-    let options: FilterOption[] = Object.values(categories).map((c, i) => {
+    let options: FilterOption[] = Object.values(objectinferencecategories).map((c, i) => {
       let option: FilterOption = {
         // @ts-ignore
         id: c.id,
         visible: true,
         color: colors[i],
         evalDatapoint: (datapoint: Datapoint, o: FilterOption) => {
-          const match = datapoint.annotations.findIndex(a => a.category_id == option.id)
+          const match = datapoint.inferences.findIndex(a => a.category_id == option.id)
           if ((option.visible == false) && (match > -1)) return true
           else return false
         }
@@ -197,16 +200,16 @@ const Updater: React.FC = () => {
     })
 
     let newCategoryFilter: Filter = {
-      name: 'Label Category',
+      name: 'Inference Categories',
       type: FilterType.Discrete,
       options: options,
-      linkedAtom: categories,
+      linkedAtom: objectinferencecategories,
       fetchFn: (datapoint) => {
-        return datapoint.annotations[0].category_id
+        return datapoint.inferences[0].category_id
       }
     }
-    updatecategoryFilter(newCategoryFilter)
-  }, [categories])
+    updateObjectInferenceCategoryFilter(newCategoryFilter)
+  }, [objectinferencecategories])
 
   // labelcategories filter
   useEffect(() => {
@@ -231,14 +234,15 @@ const Updater: React.FC = () => {
       }
       return option
     })
+    // colors.unshift
 
     let newCategoryFilter: Filter = {
-      name: 'Label Category',
+      name: 'Label Categories',
       type: FilterType.Discrete,
       options: options,
       linkedAtom: labelcategories,
       fetchFn: (datapoint) => {
-        return datapoint.annotations[0].category_id
+        return (datapoint.annotations[0] !== undefined) ? datapoint.annotations[0].category_id : 0 // TODO: handle colorig this better
       }
     }
     updatelabelcategoryFilter(newCategoryFilter)
