@@ -48,11 +48,10 @@ def ingest_training(database, filename):
 def ingest_prod(database, filename, ovoids):
     ingested = 0
     for embedding in stream_embedding(filename):
-        for inference in embedding.inferences:
-            if inference in ovoids:
-                ovoid = ovoids[inference]
-                distance = ovoid.distance(embedding.data)
-                # print(f"Prod: {distance}")
+        if embedding.inference in ovoids:
+            ovoid = ovoids[embedding.inference]
+            distance = ovoid.distance(embedding.data)
+            # print(f"Prod: {distance}")
         database.ingest_prod(embedding)
         ingested += 1
     print(f"Ingested {ingested} prod embeddings")
@@ -67,9 +66,9 @@ def build_ovoids(database):
         full = np.append(empty, embeddings, axis=0)
         try:
             ovoids[category] = Ovoid(category, full)
-        except ovoids.OvoidTooSmall:
+        except OvoidTooSmall:
             pass
-        except ovoids.OvoidSingularCovariance:
+        except OvoidSingularCovariance:
             pass
     return ovoids
 
@@ -81,6 +80,7 @@ def main():
     except:
         print(f"Available adapters: {', '.join(sorted(db_adapters.keys()))}")
         sys.exit(1)
+    print(f"Start with {args.db}")
     database.init_db(args.scratch)
     ingest_training(database, args.train_input)
     print(f"Counts: {database.training_counts()}")

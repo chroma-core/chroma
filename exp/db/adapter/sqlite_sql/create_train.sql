@@ -3,7 +3,7 @@ CREATE TABLE train_embeddings (
   created_at  DATETIME DEFAULT (CURRENT_TIMESTAMP), 
   updated_at  DATETIME DEFAULT (CURRENT_TIMESTAMP), 
   data        TEXT,
-  inferences  TEXT,
+  inference   TEXT,
   labels      TEXT,
   project     TEXT,
   model       TEXT,

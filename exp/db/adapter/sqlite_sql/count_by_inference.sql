@@ -1,3 +1,3 @@
-    SELECT inferences, count(*)
+    SELECT inference, count(*)
       FROM train_embeddings
-  GROUP BY inferences;
+  GROUP BY inference;

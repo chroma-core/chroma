@@ -42,7 +42,7 @@ class SQLitedb:
     def prod_fields(self, embedding):
         return [
             json.dumps(embedding.data),
-            json.dumps(embedding.inferences),
+            embedding.inference,
             json.dumps(embedding.labels),
             "project",
             "model",
@@ -60,7 +60,7 @@ class SQLitedb:
     def training_fields(self, embedding):
         return [
             json.dumps(embedding.data),
-            json.dumps(embedding.inferences),
+            embedding.inference,
             json.dumps(embedding.labels),
             "project",
             "model",
@@ -71,10 +71,9 @@ class SQLitedb:
     def ingest_training(self, embedding):
         with self.connection:
             with closing(self.connection.cursor()) as cursor:
-                for category in embedding.inferences:
-                    result = cursor.execute(
-                        self.sql["insert_train"], self.training_fields(embedding)
-                    )
+                result = cursor.execute(
+                    self.sql["insert_train"], self.training_fields(embedding)
+                )
 
     def training_counts(self):
         with closing(self.connection.cursor()) as cursor:
@@ -88,18 +87,15 @@ class SQLitedb:
             rows = cursor.execute(
                 self.sql["count_by_inference"]
             ).fetchall()
-            cats = sorted(list(set(flatten([json.loads(r[0]) for r in rows]))))
+            cats = sorted(list(flatten([r[0] for r in rows])))
             return cats
 
     def embeddings_for_category(self, category):
         with closing(self.connection.cursor()) as cursor:
-            json_cat = json.dumps([category])
             rows = cursor.execute(
-                self.sql["select_training"], (json_cat,)
+                self.sql["select_training"], (category,)
             ).fetchall()
-            embeddings = [json.loads(r[0]) for r in rows]
-            #print(f"EBMB: {embeddings}")
-            return embeddings
+            return [json.loads(r[0]) for r in rows]
 
 def flatten(l):
     return [item for sublist in l for item in sublist]
