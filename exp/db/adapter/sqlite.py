@@ -1,3 +1,4 @@
+import json
 import numpy
 import sqlite3
 
@@ -21,8 +22,6 @@ class SQLitedb:
 
     def load_sql(self):
         for query in self.sql_path.glob("*.sql"):
-            print(f"query: {query}")
-            print(f"query: {query.stem}")
             self.sql[query.stem] = self.read_sql_path(query)
     
     def read_sql_path(self, path):
@@ -41,16 +40,39 @@ class SQLitedb:
             with closing(self.connection.cursor()) as cursor:
                 cursor.execute(self.sql['create_train'])
                 cursor.execute(self.sql['create_prod'])
-            
+
+    def prod_fields(self, embedding):
+        return [
+            json.dumps(embedding.data),
+            json.dumps(embedding.inferences),
+            json.dumps(embedding.labels),
+            'project',
+            'model',
+            'layer',
+            embedding.resource_uri,
+        ]
+                
     def ingest_prod(self, embedding):
         with self.connection:
             with closing(self.connection.cursor()) as cursor:
-                result = cursor.execute(self.sql['insert_prod'], ('data', 'inf', 'lab', 'proj', 'model', 'layer', 'uir'))
-                print(f"RESULT: {result}")
+                result = cursor.execute(self.sql['insert_prod'], self.prod_fields(embedding))
+
+    def training_fields(self, embedding):
+        return [
+            json.dumps(embedding.data),
+            json.dumps(embedding.inferences),
+            json.dumps(embedding.labels),
+            'project',
+            'model',
+            'layer',
+            embedding.resource_uri,
+        ]
 
     def ingest_training(self, embedding):
-        for category in embedding["inferences"]:
-            self.training_embeddings[category].append(embedding)
+        with self.connection:
+            with closing(self.connection.cursor()) as cursor:
+                for category in embedding.inferences:
+                    result = cursor.execute(self.sql['insert_prod'], self.training_fields(embedding))
 
     def training_counts(self):
         return [(cat, len(embeds)) for cat, embeds in self.training_embeddings.items()]
