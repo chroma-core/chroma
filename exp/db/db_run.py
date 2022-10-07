@@ -62,10 +62,9 @@ def build_ovoids(database):
     ovoids = {}
     for category in database.categories():
         embeddings = database.embeddings_for_category(category)
-        vectors = [e.data for e in embeddings]
-        width = embeddings[0].width
-        empty = np.empty((0, embeddings[0].width))
-        full = np.append(empty, vectors, axis=0)
+        width = len(embeddings[0])
+        empty = np.empty((0, width))
+        full = np.append(empty, embeddings, axis=0)
         try:
             ovoids[category] = Ovoid(category, full)
         except ovoids.OvoidTooSmall:

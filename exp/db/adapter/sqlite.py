@@ -6,10 +6,8 @@ from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 
-class SQLitedb:
-    training_embeddings = defaultdict(list)
-    prod_embeddings = []
 
+class SQLitedb:
     sql = {}
 
     @property
@@ -23,11 +21,11 @@ class SQLitedb:
     def load_sql(self):
         for query in self.sql_path.glob("*.sql"):
             self.sql[query.stem] = self.read_sql_path(query)
-    
+
     def read_sql_path(self, path):
-        with open(path, 'r') as file:
+        with open(path, "r") as file:
             return file.read()
-        
+
     def init_db(self, scratch_path):
         self.scratch_path = Path(scratch_path)
         self.load_sql()
@@ -38,33 +36,35 @@ class SQLitedb:
     def create_tables(self):
         with self.connection:
             with closing(self.connection.cursor()) as cursor:
-                cursor.execute(self.sql['create_train'])
-                cursor.execute(self.sql['create_prod'])
+                cursor.execute(self.sql["create_train"])
+                cursor.execute(self.sql["create_prod"])
 
     def prod_fields(self, embedding):
         return [
             json.dumps(embedding.data),
             json.dumps(embedding.inferences),
             json.dumps(embedding.labels),
-            'project',
-            'model',
-            'layer',
+            "project",
+            "model",
+            "layer",
             embedding.resource_uri,
         ]
-                
+
     def ingest_prod(self, embedding):
         with self.connection:
             with closing(self.connection.cursor()) as cursor:
-                result = cursor.execute(self.sql['insert_prod'], self.prod_fields(embedding))
+                result = cursor.execute(
+                    self.sql["insert_prod"], self.prod_fields(embedding)
+                )
 
     def training_fields(self, embedding):
         return [
             json.dumps(embedding.data),
             json.dumps(embedding.inferences),
             json.dumps(embedding.labels),
-            'project',
-            'model',
-            'layer',
+            "project",
+            "model",
+            "layer",
             embedding.resource_uri,
         ]
 
@@ -72,20 +72,40 @@ class SQLitedb:
         with self.connection:
             with closing(self.connection.cursor()) as cursor:
                 for category in embedding.inferences:
-                    result = cursor.execute(self.sql['insert_prod'], self.training_fields(embedding))
+                    result = cursor.execute(
+                        self.sql["insert_train"], self.training_fields(embedding)
+                    )
 
     def training_counts(self):
-        return [(cat, len(embeds)) for cat, embeds in self.training_embeddings.items()]
+        with closing(self.connection.cursor()) as cursor:
+            rows = cursor.execute(
+                self.sql["count_by_inference"]
+            ).fetchall()
+            return rows
 
     def categories(self):
-        return self.training_embeddings.keys()
+        with closing(self.connection.cursor()) as cursor:
+            rows = cursor.execute(
+                self.sql["count_by_inference"]
+            ).fetchall()
+            cats = sorted(list(set(flatten([json.loads(r[0]) for r in rows]))))
+            return cats
 
     def embeddings_for_category(self, category):
-        return self.training_embeddings[category]
+        with closing(self.connection.cursor()) as cursor:
+            json_cat = json.dumps([category])
+            rows = cursor.execute(
+                self.sql["select_training"], (json_cat,)
+            ).fetchall()
+            embeddings = [json.loads(r[0]) for r in rows]
+            #print(f"EBMB: {embeddings}")
+            return embeddings
 
-    
+def flatten(l):
+    return [item for sublist in l for item in sublist]
+
 if __name__ == "__main__":
     test = SQLitedb()
     test.init_db("/tmp")
     print("init")
-    test.ingest_prod('')
+    test.ingest_prod("")

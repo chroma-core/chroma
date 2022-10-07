@@ -24,4 +24,4 @@ class Pythondb:
         return self.training_embeddings.keys()
 
     def embeddings_for_category(self, category):
-        return self.training_embeddings[category]
+        return [e.data for e in self.training_embeddings[category]]
