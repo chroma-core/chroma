@@ -97,6 +97,9 @@ class SQLitedb:
             ).fetchall()
             return [json.loads(r[0]) for r in rows]
 
+    def commit(self):
+        pass
+    
 def flatten(l):
     return [item for sublist in l for item in sublist]
 

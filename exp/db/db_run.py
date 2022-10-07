@@ -7,6 +7,7 @@ import json
 import numpy as np
 import sys
 
+from adapter.milvus import Milvus
 from adapter.pythondb import Pythondb
 from adapter.sqlite import SQLitedb
 from embedding import Embedding
@@ -15,6 +16,7 @@ from ovoids import Ovoid, OvoidTooSmall, OvoidSingularCovariance, OvoidNegativeS
 db_adapters = {
     "pythondb": Pythondb,
     "sqlite": SQLitedb,
+    "milvus": Milvus,
 }
 
 
@@ -43,6 +45,7 @@ def stream_embedding(filename):
 def ingest_training(database, filename):
     for embedding in stream_embedding(filename):
         database.ingest_training(embedding)
+    database.commit()
 
 
 def ingest_prod(database, filename, ovoids):

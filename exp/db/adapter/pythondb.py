@@ -24,3 +24,6 @@ class Pythondb:
 
     def embeddings_for_category(self, category):
         return [e.data for e in self.training_embeddings[category]]
+
+    def commit(self):
+        pass
