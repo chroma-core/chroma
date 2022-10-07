@@ -28,7 +28,7 @@ class Ovoid:
         # print(f"OVOID: {category} {count} {width} {self.mean} {self.inv_cov}")
 
     def distance(self, embedding):
-        delta = np.array(embedding["embeddings"]) - self.mean
+        delta = np.array(embedding) - self.mean
         squared_mhb = np.sum((delta * np.matmul(self.inv_cov, delta)), axis=0)
         if squared_mhb < 0:
             raise OvoidNegativeSquared

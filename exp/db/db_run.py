@@ -7,13 +7,14 @@ import json
 import numpy as np
 import sys
 
-from adapter.numpydb import Numpy
 from adapter.pythondb import Pythondb
+from adapter.sqlite import SQLitedb
+from embedding import Embedding
 from ovoids import Ovoid, OvoidTooSmall, OvoidSingularCovariance, OvoidNegativeSquared
 
 db_adapters = {
     "pythondb": Pythondb,
-    "numpydb": Numpy,
+    "sqlite": SQLitedb,
 }
 
 
@@ -21,6 +22,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="DB Test Run")
     parser.add_argument("--train_input", required=True, help="Path to training jsonl")
     parser.add_argument("--prod_input", required=True, help="Path to prod jsonl")
+    parser.add_argument("--scratch", required=True, help="Path to scratch files")
     parser.add_argument("--db", required=True, help="Database to test")
     args = parser.parse_args()
     return args
@@ -33,20 +35,25 @@ def stream_json(filename):
             yield data
 
 
-def ingest_training(database, filename):
+def stream_embedding(filename):
     for data in stream_json(filename):
-        database.ingest_training(data)
+        yield Embedding(data)
+
+
+def ingest_training(database, filename):
+    for embedding in stream_embedding(filename):
+        database.ingest_training(embedding)
 
 
 def ingest_prod(database, filename, ovoids):
     ingested = 0
-    for data in stream_json(filename):
-        for inference in data["inferences"]:
+    for embedding in stream_embedding(filename):
+        for inference in embedding.inferences:
             if inference in ovoids:
                 ovoid = ovoids[inference]
-                distance = ovoid.distance(data)
+                distance = ovoid.distance(embedding.data)
                 # print(f"Prod: {distance}")
-        database.ingest_prod(data)
+        database.ingest_prod(embedding)
         ingested += 1
     print(f"Ingested {ingested} prod embeddings")
 
@@ -55,8 +62,9 @@ def build_ovoids(database):
     ovoids = {}
     for category in database.categories():
         embeddings = database.embeddings_for_category(category)
-        vectors = [e["embeddings"] for e in embeddings]
-        empty = np.empty((0, len(vectors[0])))
+        vectors = [e.data for e in embeddings]
+        width = embeddings[0].width
+        empty = np.empty((0, embeddings[0].width))
         full = np.append(empty, vectors, axis=0)
         try:
             ovoids[category] = Ovoid(category, full)
@@ -74,6 +82,7 @@ def main():
     except:
         print(f"Available adapters: {', '.join(sorted(db_adapters.keys()))}")
         sys.exit(1)
+    database.init_db(args.scratch)
     ingest_training(database, args.train_input)
     print(f"Counts: {database.training_counts()}")
     ovoids = build_ovoids(database)
