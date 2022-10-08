@@ -37,20 +37,20 @@ def stream_json(filename):
             yield data
 
 
-def stream_embedding(filename):
+def stream_embedding(filename, mode:Embedding.Mode):
     for data in stream_json(filename):
-        yield Embedding(data)
+        yield Embedding(data, mode)
 
 
 def ingest_training(database, filename):
-    for embedding in stream_embedding(filename):
+    for embedding in stream_embedding(filename, Embedding.Mode.TRAIN):
         database.ingest_training(embedding)
     database.commit()
 
 
 def ingest_prod(database, filename, ovoids):
     ingested = 0
-    for embedding in stream_embedding(filename):
+    for embedding in stream_embedding(filename, Embedding.Mode.PROD):
         if embedding.inference in ovoids:
             ovoid = ovoids[embedding.inference]
             distance = ovoid.distance(embedding.data)
