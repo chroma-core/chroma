@@ -10,6 +10,7 @@ time ./db_run.py --train_input=mnist_train.jsonl.bz2 --prod_input=mnist_test.jso
 
 
 # Milvus deferred until we test nearest-vector searches
+# Start milvus: sudo docker-compose up -d 
 # time ./db_run.py --train_input=mnist_train.jsonl.bz2 --prod_input=mnist_test.jsonl.bz2 \
 # 	    --scratch=/tmp \
 # 	    --db=milvus
