@@ -6,7 +6,6 @@ from sqlalchemy import desc
 
 from embedding import Embedding
 
-
 class Milvus:
     training_embeddings = defaultdict(list)
     prod_embeddings = []
@@ -15,7 +14,6 @@ class Milvus:
 
     def init_db(self, scratch_path):
         connections.connect(alias="default", host="localhost", port=19530)
-
         for collection in utility.list_collections():
             print(f"Drop collection: {collection}")
             utility.drop_collection(collection)
@@ -24,21 +22,23 @@ class Milvus:
         self.prod_embeddings.append(embedding)
 
     def ingest_training(self, embedding:Embedding):
-        self.stage[embedding.model].append(embedding)
+        self.stage[embedding.key].append(embedding)
 
     def commit(self):
         stage = self.stage
         self.stage = {}
 
-        for model, embeddings in stage.items():
+        for key, embeddings in stage.items():
+            model, mode = key
             collection = self.embeddings_collection(model=model, width=embeddings[0].width)
+            print(f"Collection: {model} {mode} {collection.name}")
             data = [
                 [str(e.inference) for e in embeddings],
                 [0.0] * len(embeddings),
                 [e.data for e in embeddings],
             ]
             try:
-                result = collection.insert(data, "train")
+                result = collection.insert(data, mode)
             except Exception as e:
                 print(f"Embedding: {embeddings[0]}")
                 print(f"Data: {data[0]}")
@@ -47,11 +47,15 @@ class Milvus:
                 raise
             if result.insert_count != len(data[0]):
                 print(f"Failed insert: {result}")
+            else:
+                print(f"Inserted {result.insert_count} into {model} {mode}")
 
     def training_counts(self):
-        return [(cat, len(embeds)) for cat, embeds in self.training_embeddings.items()]
+        return [(cat, self.embeddings_for_category(cat)) for cat in self.categories()]
 
     def categories(self):
+        # collection = Collection("model1")
+        # collection.search()
         return self.training_embeddings.keys()
 
     def embeddings_for_category(self, category):
