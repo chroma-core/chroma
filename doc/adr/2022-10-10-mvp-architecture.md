@@ -76,7 +76,7 @@ was running on the same hardware as the client, and if so, implement
 zero-copy memory sharing instead of seralizing data over a network.
 
 
-![MVP Architecture Diagram](2022-10-10-mvp-architecture/diagram.png "MVP Architecture")
+![MVP Architecture Diagram](./2022-10-10-mvp-architecture/diagram.png "MVP Architecture")
 
 ## Consequences
 
