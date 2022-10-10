@@ -6,6 +6,10 @@ from sqlalchemy import desc
 
 from embedding import Embedding
 
+#
+#  NOTE: this module is incomplete.  Deferring Milvus until we test nearest-vector searches.
+#
+
 class Milvus:
     training_embeddings = defaultdict(list)
     prod_embeddings = []
