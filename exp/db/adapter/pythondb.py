@@ -4,6 +4,7 @@ from collections import defaultdict
 
 
 class Pythondb:
+    stage = defaultdict(list)
     training_embeddings = defaultdict(list)
     prod_embeddings = []
 
@@ -14,7 +15,8 @@ class Pythondb:
         self.prod_embeddings.append(embedding)
 
     def ingest_training(self, embedding):
-        self.training_embeddings[embedding.inference].append(embedding)
+        self.stage[embedding.key].append(embedding)
+        # self.training_embeddings[embedding.inference].append(embedding)
 
     def training_counts(self):
         return [(cat, len(embeds)) for cat, embeds in self.training_embeddings.items()]
@@ -26,4 +28,10 @@ class Pythondb:
         return [e.data for e in self.training_embeddings[category]]
 
     def commit(self):
-        pass
+        stage = self.stage
+        self.stage = {}
+
+        for key, embeddings in stage.items():
+            model, mode = key
+            for embedding in embeddings:
+                self.training_embeddings[model].append(embedding)
