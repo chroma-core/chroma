@@ -50,10 +50,7 @@ We will implement and distribute the Chroma Client as a Python library.
 
 We will implement and distribute the Chroma Server as a collection of Docker images.
 
-The entry point for installing/running Chroma Server will be a minimal
-wrapper script around Docker Compose. The process for running Chroma
-Server will be to clone the git repository, then run the startup
-script.
+The entry point for installing/running Chroma Server will be to run Docker Compose.
 
 The Chroma Client is Chroma's only stable, public API. As the
 customer-facing part of the product, The Chroma Client is optimized
