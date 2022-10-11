@@ -8,12 +8,15 @@ import numpy as np
 import sys
 
 from adapter.milvus import Milvus
+from adapter.parquet import Parquet
 from adapter.pythondb import Pythondb
 from adapter.sqlite import SQLitedb
+
 from embedding import Embedding
 from ovoids import Ovoid, OvoidTooSmall, OvoidSingularCovariance, OvoidNegativeSquared
 
 db_adapters = {
+    "parquet": Parquet,
     "pythondb": Pythondb,
     "sqlite": SQLitedb,
     "milvus": Milvus,
