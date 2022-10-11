@@ -34,4 +34,4 @@ class Pythondb:
         for key, embeddings in stage.items():
             model, mode = key
             for embedding in embeddings:
-                self.training_embeddings[model].append(embedding)
+                self.training_embeddings[embedding.inference].append(embedding)
