@@ -14,7 +14,7 @@ class Parquet:
     training_embeddings = defaultdict(list)
     prod_embeddings = []
 
-    tables = {}
+    inferences = defaultdict(list)
 
     @property
     def index_path(self):
@@ -37,10 +37,10 @@ class Parquet:
         return [(cat, len(embeds)) for cat, embeds in self.training_embeddings.items()]
 
     def categories(self):
-        return self.training_embeddings.keys()
+        return self.inferences.keys()
 
     def embeddings_for_category(self, category):
-        return [e.data for e in self.training_embeddings[category]]
+        return self.inferences[category]
 
     def commit(self):
         stage = self.stage
@@ -49,22 +49,37 @@ class Parquet:
         for key, embeddings in stage.items():
             model, mode = key
             table = np.array([e.data for e in embeddings])
+            infs = [e.inference for e in embeddings]
             width = table.shape[1]
             twist = table.transpose()
             print("shape", twist.shape, "width", width)
             np_cols = [twist[i, :] for i in range(width)]
             pa_cols = [pa.array(c) for c in np_cols]
-            pa_table = pa.table({
+            data = {
                 f"col{i}": pa_cols[i]
                 for i in range(width)
-            })
+            }
+            data['inferences'] = infs
+            pa_table = pa.Table.from_pydict(data)
             pq.write_table(pa_table, self.path_for(model))
         
             # pretend round trip
             pq_table = pq.read_table(self.path_for(model))
             round_np = np.array(pq_table)
-            print("round", round_np.shape, "cols", len(pq_table.columns))
-            
+            round_rows = round_np.transpose().tolist()
+            print("round", round_np.shape, "cols", len(pq_table.columns), len(round_rows))
+
+            for row in round_rows:
+                # super gross test hack
+                embedding = row[:10]
+                inference = int(row[-1])
+                self.inferences[inference].append(embedding)
+
+            # brute force iterate, but I think I can replace this with one pq batch per inference
+            # inferences = {}
+            # for row in round_rows:
+            #     inferences[]
+
 
             # for embedding in embeddings:
             #     self.training_embeddings[model].append(embedding)
