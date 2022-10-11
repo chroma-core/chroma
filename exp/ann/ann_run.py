@@ -10,9 +10,11 @@ from collections import defaultdict
 
 from embedding import Embedding
 from sink.annoy import Annoy
+from sink.hnsw import Hnsw
 
 sinks = {
     "annoy": Annoy,
+    "hnsw": Hnsw,
 }
 
 
