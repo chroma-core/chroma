@@ -1,10 +1,15 @@
 import argparse
 from functools import partial
 
+import numpy
 import torch
 import random
 import torch.nn.functional as F
 from PIL import Image
+
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 # Use the model as defined in training
 from main_training import Net
@@ -26,7 +31,7 @@ class CustomDataset(datasets.MNIST):
         return img, target, resource_uri
 
 
-def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
+def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK, data_to_record):
     test_loss = 0
     correct = 0
     with torch.no_grad():
@@ -77,6 +82,19 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
                 )
 
             chroma_storage.set_metadata(metadata_list)
+            
+
+            df = pd.DataFrame({
+                # 'embedding_data': data.tolist(),
+                'embedding_data':[entry['data'] for entry in chroma_storage.get_embeddings_buffer()],
+                'resource_uri': list(resource_uri),
+                'metadata': metadata_list,
+                'infer': inference_json_list,
+                'label': label_json_list
+            })
+            # print()
+            data_to_record = pd.concat([data_to_record, df], ignore_index=True)
+
             chroma_storage.store_batch_embeddings()
 
     test_loss /= len(data_loader.dataset)
@@ -86,6 +104,7 @@ def infer(model, device, data_loader, chroma_storage: chroma_manager.ChromaSDK):
             test_loss, correct, len(data_loader.dataset), 100.0 * correct / len(data_loader.dataset)
         )
     )
+    return data_to_record
 
 
 def main():
@@ -140,6 +159,9 @@ def main():
         ]
     )
 
+    train_data_to_record = pd.DataFrame()
+    test_data_to_record = pd.DataFrame()
+
     # Run in the Chroma context
     with chroma_manager.ChromaSDK(
         project_name="MNIST-All", dataset_name="Train", categories=mnist_category_data
@@ -152,7 +174,7 @@ def main():
         # Attach the hook
         chroma_storage.attach_forward_hook(model.fc2)
 
-        infer(model, device, data_loader, chroma_storage)
+        train_data_to_record = infer(model, device, data_loader, chroma_storage, train_data_to_record)
 
     # Run in the Chroma context
     with chroma_manager.ChromaSDK(
@@ -166,7 +188,22 @@ def main():
         # Attach the hook
         chroma_storage.attach_forward_hook(model.fc2)
 
-        infer(model, device, data_loader, chroma_storage)
+        test_data_to_record = infer(model, device, data_loader, chroma_storage, test_data_to_record)
+
+    train_data_to_record_pq = pa.Table.from_pandas(train_data_to_record)
+    pq.write_table(train_data_to_record_pq, 'train_data_to_record.parquet')
+    # print("test_data_to_record", test_data_to_record, len(test_data_to_record))
+
+    test_data_to_record_pq = pa.Table.from_pandas(test_data_to_record)
+    pq.write_table(test_data_to_record_pq, 'test_data_to_record.parquet')
+
+    train_data_to_record_pq_read = pq.read_table('train_data_to_record.parquet')
+    train_data_to_record_pq_read.to_pandas()
+    # print("train_data_to_record_pq_read", train_data_to_record_pq_read.head())
+
+    test_data_to_record_pq_read = pq.read_table('test_data_to_record.parquet')
+    test_data_to_record_pq_read.to_pandas()
+    # print("test_data_to_record_pq_read", test_data_to_record_pq_read.head())
 
 
 if __name__ == "__main__":
