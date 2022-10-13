@@ -2,6 +2,7 @@
 
 import bz2
 import json
+import re
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-coco_context_nested = pq.read_table("coco_context_with_json.parquet")
+coco_context_nested = pq.read_table("coco_context_nested.parquet")
 ctx_nested = coco_context_nested.to_pandas()
 print(ctx_nested)
 
@@ -18,6 +19,10 @@ print(filter1)
 
 
 def chair_filter(raw_objects):
+    ptable = pd.DataFrame(raw_objects)
+    print("FILTER")
+    print(ptable)
+    return True
     for object in json.loads(raw_objects):
         # print("FILTER:", object)
         detection = object.get("detection", None) or {}
@@ -32,8 +37,8 @@ def chair_filter(raw_objects):
 obj1_bools = filter1.objects.apply(lambda raw: chair_filter(raw))
 print("Filter on first record:", obj1_bools.to_list())
 
-ctx_nested_bools = ctx_nested.objects.apply(lambda raw: chair_filter(raw))
-# print("Filter on full set:", ctx_nested_bools.to_list())
-full_chair = ctx_nested[ctx_nested_bools]
+# ctx_nested_bools = ctx_nested.objects.apply(lambda raw: chair_filter(raw))
+# # print("Filter on full set:", ctx_nested_bools.to_list())
+# full_chair = ctx_nested[ctx_nested_bools]
 
-print("All chairs", full_chair)
+# print("All chairs", full_chair)

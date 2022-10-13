@@ -117,12 +117,12 @@ pa_table = pa.Table.from_pandas(pd_table)
 
 pq.write_table(pa_table, "coco_context_nested.parquet")
 
-coco_context_nested = pq.read_table("coco_context_with_json.parquet")
-ctx_nested = coco_context_nested.to_pandas()
-print(ctx_nested)
+# coco_context_nested = pq.read_table("coco_context_with_json.parquet")
+# ctx_nested = coco_context_nested.to_pandas()
+# print(ctx_nested)
 
-filter1 = ctx_nested[(ctx_nested.input_uri == "val2014/COCO_val2014_000000000164.jpg")]
-print(filter1)
+# filter1 = ctx_nested[(ctx_nested.input_uri == "val2014/COCO_val2014_000000000164.jpg")]
+# print(filter1)
 
-obj1 = filter1.objects.apply(lambda i: True)
-print(obj1)
+# obj1 = filter1.objects.apply(lambda i: True)
+# print(obj1)
