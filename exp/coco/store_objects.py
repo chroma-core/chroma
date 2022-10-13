@@ -26,10 +26,8 @@ class Object:
 
     @property
     def embedding_as_dict(self):
-        column_names = [f"embedding_{i}" for i in range(self.embedding_width)]
-        return {
-            f"embedding_{i}": value for i, value in zip(column_names, self.embedding)
-        }
+        column_names = [f"embedding_{i:04}" for i in range(self.embedding_width)]
+        return {key: value for key, value in zip(column_names, self.embedding)}
 
     @property
     def row(self):
