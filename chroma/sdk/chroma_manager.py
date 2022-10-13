@@ -218,6 +218,9 @@ class ChromaSDK:
     def set_labels(self, labels):
         self._data_buffer.set_data("_labels", labels)
 
+    def get_embeddings_buffer(self):
+        return self._data_buffer._embeddings
+
     def set_metadata(self, metadata):
         self._data_buffer.set_data("_metadata", metadata)
 
