@@ -164,7 +164,7 @@ def main():
 
     # Run in the Chroma context
     with chroma_manager.ChromaSDK(
-        project_name="MNIST-All", dataset_name="Train", categories=mnist_category_data
+        project_name="MNIST-All-2", dataset_name="Train", categories=mnist_category_data
     ) as chroma_storage:
 
         # Use the MNIST training set
@@ -178,7 +178,7 @@ def main():
 
     # Run in the Chroma context
     with chroma_manager.ChromaSDK(
-        project_name="MNIST-All", dataset_name="Test", categories=mnist_category_data
+        project_name="MNIST-All-2", dataset_name="Test", categories=mnist_category_data
     ) as chroma_storage:
 
         # Use the MNIST test set

@@ -6,6 +6,10 @@ import random
 import tqdm
 import numpy as np
 
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 import torch
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
@@ -46,7 +50,7 @@ def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas, la
         annotation = {
             "id": uid,
             "bbox": box.tolist(),
-            "category_id": str(category_id),
+            "category_id": int(category_id),
             "category_name": category_name,
             "metadata": metadata,
         }
@@ -57,7 +61,7 @@ def to_annotations_dict(boxes, category_ids, category_names, uids, metadatas, la
     return {"annotations": annotations}
 
 
-def infer(model, device, data_loader, class_names, chroma_storage: chroma_manager.ChromaSDK):
+def infer(model, device, data_loader, class_names, chroma_storage: chroma_manager.ChromaSDK, context_data_recorder, object_data_recorder):
 
     context_layer_index = 74  # Output of last layer in backbone network
     detection_layer_indices = [81, 93, -2]  # Outputs of last conv. layers before YOLO layers
@@ -105,8 +109,7 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             target_cat_names = class_names[target_cat_ids]
             target_uids = [str(uuid.uuid4()) for i in range(len(target_cat_ids))]
             metadatas = [
-                # {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
-                {}
+                {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
                 for i in range(len(target_cat_ids))
             ]
             target_annotations = to_annotations_dict(
@@ -182,8 +185,8 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
             detection_inferences.append(det_annotations)
 
             metadata_list.append(
-                {}
-                # {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
+                # {}
+                {"quality": random.randint(0, 100), "location": str_options[random.randint(0, 6)]}
             )
 
         chroma_storage.set_inferences(detection_inferences)
@@ -217,12 +220,22 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
                 filtered_embs.append([])
 
         annotated_embs = []
-        for det_annotations, embs in zip(detection_inferences, filtered_embs):
+        for det_annotations, embs, img_path in zip(detection_inferences, filtered_embs, img_paths):
             annotated_emb = [
                 {"target": det_annotation["id"], "data": emb.tolist()}
                 for det_annotation, emb in zip(det_annotations["annotations"], embs)
             ]
             annotated_embs.append(annotated_emb)
+            
+            for det_annotation, emb in zip(det_annotations["annotations"], embs):
+                df2 = pd.DataFrame({
+                    'embedding_data':[emb],
+                    'resource_uri': img_path,
+                    'metadata_list': [det_annotation["metadata"]],
+                    'infer': [{"annotations":[det_annotation]}],
+                    'label': [det_annotation["label_id"]]
+                })
+                object_data_recorder = pd.concat([object_data_recorder, df2], ignore_index=True)
 
         annotated_ctx_embs = []
         for ctx in ctx_embedding:
@@ -231,16 +244,26 @@ def infer(model, device, data_loader, class_names, chroma_storage: chroma_manage
 
         chroma_storage.set_ctx_embeddings(annotated_ctx_embs)
         chroma_storage.set_embeddings(annotated_embs)
+
+        df = pd.DataFrame({
+            'embedding_data':list(ctx_embedding),
+            'resource_uri': list(img_paths),
+            'metadata_list': metadata_list,
+            'infer': detection_inferences,
+            'label': labels
+        })
+        context_data_recorder = pd.concat([context_data_recorder, df], ignore_index=True)
+
         chroma_storage.store_batch_embeddings()
 
-    return
+    return context_data_recorder, object_data_recorder
 
 
 def main():
     # Setup params
     model_path = "config/yolov3.cfg"
     weights_path = "weights/yolov3.weights"
-    data = "config/coco.data"
+    data = "config/coco1000.data"
     batch_size = 8
     img_size = 416
     n_cpu = 8
@@ -251,6 +274,9 @@ def main():
     data_config = parse_data_config(data)
     valid_path = data_config["valid"]
     class_names = load_classes(data_config["names"])
+
+    context_data_recorder = pd.DataFrame()
+    object_data_recorder = pd.DataFrame()
 
     class_object = []
     i = 0
@@ -282,9 +308,22 @@ def main():
     model.eval()
 
     with chroma_manager.ChromaSDK(
-        project_name="YOLO", dataset_name="TestYolo50", categories=json.dumps(class_object)
+        project_name="YOLO-1000only-3", dataset_name="TestYolo1000-3", categories=json.dumps(class_object)
     ) as chroma_storage:
-        infer(model, device, dataloader, class_names, chroma_storage=chroma_storage)
+        context_data_recorder, object_data_recorder = infer(model, device, dataloader, class_names, chroma_storage=chroma_storage, context_data_recorder=context_data_recorder, object_data_recorder=object_data_recorder)
+
+    context_data_recorder_pq = pa.Table.from_pandas(context_data_recorder)
+    pq.write_table(context_data_recorder_pq, 'context_data_recorder.parquet')
+    context_data_recorder_pq_read = pq.read_table('context_data_recorder.parquet')
+    context_data_recorder_pq_read_df = context_data_recorder_pq_read.to_pandas()
+    print("context_data_recorder_pq_read_df", context_data_recorder_pq_read_df.head())
+
+    object_data_recorder_pq = pa.Table.from_pandas(object_data_recorder)
+    pq.write_table(object_data_recorder_pq, 'object_data_recorder.parquet')
+    object_data_recorder_pq_read = pq.read_table('object_data_recorder.parquet')
+    object_data_recorder_pq_read_df = object_data_recorder_pq_read.to_pandas()
+    print("object_data_recorder_pq_read_df", object_data_recorder_pq_read_df.head())
+
 
 
 if __name__ == "__main__":
