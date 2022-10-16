@@ -32,3 +32,4 @@ pythonpath = [
   ]
 
 [tool.setuptools_scm]
+root=".."
