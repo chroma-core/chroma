@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chroma_client"
+dynamic = ["version"]
 dependencies = [
   'pyarrow ~= 9.0',
   'numpy ~= 1.23'
