@@ -3,12 +3,12 @@ name: Chroma Client Test
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'chroma-client/**'
   pull_request:
     branches:
-      - master
+      - main
     paths:
       - 'chroma-client/**'
 

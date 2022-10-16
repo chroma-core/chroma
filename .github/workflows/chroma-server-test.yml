@@ -3,12 +3,12 @@ name: Chroma Server Test
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'chroma-server/**'
   pull_request:
     branches:
-      - master
+f      - main
     paths:
       - 'chroma-server/**'
 
