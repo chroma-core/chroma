@@ -26,7 +26,6 @@ classifiers = [
 "Homepage" = "https://github.com/chroma-core/chroma"
 "Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
 
-
 [tool.pytest.ini_options]
 pythonpath = [
   "src"
