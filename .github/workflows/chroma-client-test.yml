@@ -1,8 +1,5 @@
 name: Chroma Client Test
 
-on: [push, pull_request]
-  branches: ['master']
-
 on:
   push:
     branches:
