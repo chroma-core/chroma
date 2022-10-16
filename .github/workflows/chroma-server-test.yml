@@ -1,0 +1,32 @@
+name: Chroma Server Test
+
+on:
+  push:
+#    branches:
+#      - master
+    paths:
+      - 'chroma-server/**'
+  pull_request:
+#    branches:
+#      - master
+    paths:
+      - 'chroma-server/**'
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python: ['3.10']
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install test dependencies
+      run: cd chroma-server && python -m pip install -r requirements.txt -r requirements_dev.txt
+    - name: Test
+      run: cd chroma-server && python -m pytest
