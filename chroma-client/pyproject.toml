@@ -28,7 +28,7 @@ classifiers = [
 [tool.pytest.ini_options]
 pythonpath = [
   "src"
-  ]
+]
 
 [tool.setuptools_scm]
 root=".."

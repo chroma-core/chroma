@@ -16,6 +16,8 @@ To run tests, run `pytest`.
 
 To run the server locally, in development mode, run `uvicorn chroma_server:app --reload`
 
-## Building
+## Docker
+
+To build the docker image locally, run `bin/build`.
 
 
