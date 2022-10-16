@@ -1,6 +1,19 @@
 name: Chroma Client Test
 
 on: [push, pull_request]
+  branches: ['master']
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'chroma-client/**'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'chroma-client/**'
 
 jobs:
   test:
