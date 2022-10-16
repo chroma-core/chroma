@@ -1,9 +1,3 @@
 #!/usr/bin/env bash
 
-export VERSION=`python -m setuptools_scm`
-
-if [[ -n `git status --porcelain` ]]; then
-    VERSION=$VERSION-dirty
-fi
-
-docker build . -t ghcr.io/chroma-core/chroma-server:$VERSION
+docker build . -t ghcr.io/chroma-core/chroma-server:`bin/version`
