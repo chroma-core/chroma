@@ -2,13 +2,13 @@ name: Chroma Server Test
 
 on:
   push:
-#    branches:
-#      - master
+    branches:
+      - master
     paths:
       - 'chroma-server/**'
   pull_request:
-#    branches:
-#      - master
+    branches:
+      - master
     paths:
       - 'chroma-server/**'
 
