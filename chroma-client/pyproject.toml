@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chroma_client"
+version = "0.0.1"
+dependencies = [
+  'pyarrow ~= 9.0',
+  'numpy ~= 1.23'
+]
+authors = [
+  { name="Jeff Huber", email="jeff@trychroma.com" },
+  { name="Anton Troynikov", email="anton@trychroma.com" }
+]
+description = "Chroma."
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache-2.0",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/chroma-core/chroma"
+"Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
