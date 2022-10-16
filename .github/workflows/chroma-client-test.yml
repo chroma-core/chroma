@@ -1,0 +1,22 @@
+name: Chroma Client Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python: ['3.7', '3.8', '3.9', '3.10']
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install test dependencies
+      run: cd chroma-client && python -m pip install -r dev_requirements.txt
+    - name: Test
+      run: cd chroma-client && python -m tox
