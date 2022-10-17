@@ -8,7 +8,7 @@ on:
       - 'chroma-server/**'
   pull_request:
     branches:
-f      - main
+      - main
     paths:
       - 'chroma-server/**'
 
