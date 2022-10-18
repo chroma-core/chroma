@@ -3,7 +3,7 @@ name: Chroma Server Publish
 on:
   push:
     branches:
-      - lukev-cd
+      - main
     paths:
       - 'chroma-server/**'
 
