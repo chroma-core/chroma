@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+export VERSION=`python -m setuptools_scm`
+
+if [[ -n `git status --porcelain` ]]; then
+    VERSION=$VERSION-dirty
+fi
+
+echo $VERSION
