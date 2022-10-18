@@ -1,0 +1,50 @@
+name: Chroma Server Publish
+
+on:
+  push:
+    branches:
+      - lukev-cd
+    paths:
+      - 'chroma-server/**'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: "ghcr.io/chroma-core/chroma-server"
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.10'
+
+    - name: Install setuptools_scm
+      run: cd chroma-server && python -m pip install setuptools_scm
+
+    - name: Get Version
+      id: tag
+      run: cd chroma-server && echo "::set-output name=TAG_NAME::$IMAGE_NAME:$(bin/version)"
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+      with:
+        context: chroma-server
+        push: true
+        tags: ${{ steps.tag.outputs.TAG_NAME }}
