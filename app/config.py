@@ -3,9 +3,7 @@ from pydantic import BaseSettings
 
 
 class Settings(BaseSettings):
-    main_database: str = "SQLite"
-    embeddings_database: str = "SQLite"
-    indexer: str = "Indexer"
+    dataset_path: str = "/opt/chroma/datasets"
 
     class Config:
         env_file = ".env"
