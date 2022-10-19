@@ -1,0 +1,141 @@
+openapi: 3.0.0
+servers:
+  - description: Chroma External API
+    url: https://localhost/chroma-ext/1.0.0
+info:
+  description: Chroma External API
+  version: "0.0.1"
+  title: Chroma External API
+  contact:
+    email: jeff@trychroma.com
+  license:
+    name: Chroma
+    url: 'http://trychroma.com/api-license.html'
+paths:
+  /log:
+    post:
+      summary: records a single embedding
+      operationId: logEmbedding
+      description: Records a single embedding
+      responses:
+        '201':
+          description: embedding recorded
+        '400':
+          description: 'invalid input, object invalid'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Embedding'
+        description: Embedding to record
+  /embeddingsets:
+    get:
+      summary: List logged embedding sets
+      operationId: listEmbeddingSets
+      description: List sets seen in embedding log calls
+      responses:
+        '200':
+          description: Matching sets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmbeddingSet'
+  /recommendations:
+    get:
+      summary: Fetch embeddings Chroma finds interesting
+      operationId: fetchRecommendations
+      description: Fetch embeddings Chroma finds interesting
+      parameters:
+        - in: query
+          name: filter
+          description: pass an optional search string for looking up inventory
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: skip
+          description: number of records to skip for pagination
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - in: query
+          name: limit
+          description: maximum number of records to return
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 50
+      responses:
+        '200':
+          description: Matching recommendations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Embedding'
+        '400':
+          description: 'invalid input, object invalid'
+components:
+  schemas:
+    AnyValue: {}
+    Embedding:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        data:
+          type: string
+          format: base64
+        recordedDate:
+          type: string
+          format: date-time
+          example: '2022-10-18T16:34:28.614077Z'
+        setId:
+          type: string
+    EmbeddingSet:
+      type: object
+      properties:
+        id:
+          type: string
+        firstLog:
+          type: string
+          format: date-time
+        lastLog:
+          type: string
+          format: date-time
+        fields:
+          $ref: '#/components/schemas/AnyValue'
+    LogResult:
+      type: object
+      required:
+        - id
+        - name
+        - manufacturer
+        - releaseDate
+      properties:
+        id:
+          type: string
+          format: uuid
+        nearest-trainings:
+          type: array
+          items:
+            type: string
+        recommendations:
+          type: array
+          items:
+            type: string
+          example: ["train"]
+    EmbeddingRecommendation:
+      type: object
+      properties:
+        embedding_id:
+          type: string
+          format: uuid
+        recommendation: 
+          $ref: '#/components/schemas/AnyValue'

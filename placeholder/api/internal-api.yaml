@@ -1,0 +1,30 @@
+openapi: 3.0.0
+servers:
+  - description: Chroma Service API
+    url: https://localhost/chroma-service/1.0.0
+info:
+  description: Chroma Service API
+  version: "0.0.1"
+  title: Chroma Service API
+  contact:
+    email: jeff@trychroma.com
+  license:
+    name: Chroma
+    url: 'http://trychroma.com/api-license.html'
+paths:
+  /status:
+    get:
+      summary: Status of all components
+      operationId: status
+      responses:
+        '200':
+          description: Status of all components
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnyValue'
+components:
+  schemas:
+    AnyValue: {}
