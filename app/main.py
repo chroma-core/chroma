@@ -20,13 +20,9 @@ services = Services(
 
 app = FastAPI(dependencies=[Depends(get_settings)])
 
+
 data = services.dataset(Path(get_settings().dataset_path) / "objects_data_recorder_fixed.parquet")
-#data = ParquetDataset(Path(get_settings().dataset_path) / "objects_data_recorder_fixed.parquet")
-logger.warning("DATA %s", data)
-count = 0
-for chunk in data.iterate():
-    count += 1
-print("  rows: %s", count)
+services.mhb_indexer().index(data)
 
 @app.get("/")
 async def read_root(
