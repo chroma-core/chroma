@@ -1,0 +1,3 @@
+# ignore mac created DS_Store files
+.DS_Store
+**/.DS_Store

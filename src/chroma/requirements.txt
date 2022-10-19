@@ -1,0 +1,7 @@
+duckdb
+pyarrow
+numpy
+pandas
+hnswlib
+umap-learn
+matplotlib
