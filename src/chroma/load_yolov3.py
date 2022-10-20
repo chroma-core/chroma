@@ -22,6 +22,7 @@ if __name__ == "__main__":
     chroma = Chroma(base_metadata=base_metadata)
 
     for index, row in df.iterrows():
+        # this turns numpy arrays into lists so that they can be json serialized, yes this is my workaround
         for element in row['infer']['annotations']:
             element['bbox'] = element['bbox'].tolist()
         row['infer']['annotations'] = row['infer']['annotations'].tolist()
@@ -30,12 +31,12 @@ if __name__ == "__main__":
         if (index < len/2):
             chroma.log_training(
                 input_uri=row['resource_uri'],
-                inference_data=json.dumps(row['infer']),
+                inference_data=json.dumps(row['infer']), # perhaps we should change this input to get away from COCO formatting reliance
                 embedding_data=embeddings)
         else: 
             chroma.log_production(
                 input_uri=row['resource_uri'],
-                inference_data=json.dumps(row['infer']),
+                inference_data=json.dumps(row['infer']), # perhaps we should change this input to get away from COCO formatting reliance
                 embedding_data=embeddings)
 
     print(chroma.fetch())

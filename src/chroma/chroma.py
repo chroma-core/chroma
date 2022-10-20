@@ -4,6 +4,7 @@ from logger import logger
 from db.duckdb import DuckDB
 from index.hnswlib import Hnswlib
 import os
+import json
 
 # This core chroma logic can be used either:
 # - as a client only, that ferrires data to a remote server
@@ -130,8 +131,11 @@ class Chroma:
             raise Exception("Invalid model_version: " + str(model_version))
         if not isinstance(layer, str):
             raise Exception("Invalid layer: " + str(layer))
+
+        # get category_name from inference_data
+        category_name = json.loads(inference_data)["annotations"][0]["category_name"]
         
-        self._db.add_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer)
+        self._db.add_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer, None, category_name)
 
         # logger.info("Log running")
         return
@@ -167,12 +171,12 @@ class Chroma:
                 raise Exception("Invalid metadata: " + str(metadata))
 
         # get the embdding data from the database
-        self._ann_index.run(self._db.get_all_embeddings())
+        self._ann_index.run(self._db.get_all_embeddings()) #TODOTODO - change this now
 
         # print('self._db.update()', self._db.update())
         self._db.update(class_distances(self._db.fetch()))
         data = self._db.fetch()
-        umap_and_project(data["embedding_data"], data['distance'])
+        # umap_and_project(data["embedding_data"], data['distance'])
 
         # logger.info("Process running")
         return

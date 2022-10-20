@@ -63,6 +63,8 @@ class Hnswlib(Index):
         pass
 
     def persist(self):
+        if self._index is None:
+            return
         print('running hnswlib persist')
         print(self._index)
         self._index.save_index(".chroma/index.bin")

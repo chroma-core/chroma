@@ -21,7 +21,8 @@ class DuckDB(Database):
                 app STRING,
                 model_version STRING,
                 layer STRING,
-                distance REAL
+                distance REAL,
+                category_name STRING
             )
         ''')
         # we create ids to manage internal bookkeeping and *nothing else*, users should not have to care about these ids
@@ -37,7 +38,7 @@ class DuckDB(Database):
         ''')
         return
 
-    def add_batch(self, embedding_data, metadata, input_uri, inference_data, app, model_version, layer, distance=None):
+    def add_batch(self, embedding_data, metadata, input_uri, inference_data, app, model_version, layer, distance=None, category_name=None):
         '''
         Add embeddings to the database
         This accepts both a single input and a list of inputs
@@ -52,9 +53,10 @@ class DuckDB(Database):
             # if all of the lengths are the same, then we can do batch mode
             if all(x == lengths[0] for x in lengths):
                 self._conn.executemany('''
-                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                    [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance]
+                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
+                    [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance, category_name]
                 )
+                return
         
         # if any of the types are 'list' - throw an error
         # remove the first type from types because embedding_data is always a list
@@ -63,15 +65,15 @@ class DuckDB(Database):
 
         # if we get here, then we are doing single insert mode
         self._conn.execute('''
-            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?)''', 
-            [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance]
+            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
+            [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance, category_name]
         )
 
         # self._conn.execute(f'''
         #     UPDATE embeddings SET distance=5 WHERE id=1'''
         # )
 
-    def update(self, data):
+    def update(self, data): # call this update_distance! that is all it does
         '''
         I was not able to figure out how to do a bulk update in duckdb
         This is going to be slow and bad
@@ -122,7 +124,8 @@ class DuckDB(Database):
                 app,
                 model_version,
                 layer,
-                distance
+                distance,
+                category_name
             FROM 
                 embeddings
         {where_filter}
@@ -148,6 +151,9 @@ class DuckDB(Database):
         Persist the database to disk
         TODO: we can think about partitioning here... we could partition out by app/model_version/layer for example
         '''
+        if self._conn is None:
+            return
+
         self._conn.execute('''
             COPY 
                 (SELECT * FROM embeddings) 
