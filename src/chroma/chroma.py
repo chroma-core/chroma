@@ -171,9 +171,8 @@ class Chroma:
                 raise Exception("Invalid metadata: " + str(metadata))
 
         # get the embdding data from the database
-        self._ann_index.run(self._db.get_all_embeddings()) #TODOTODO - change this now
+        self._ann_index.run(self._db.fetch()) 
 
-        # print('self._db.update()', self._db.update())
         self._db.update(class_distances(self._db.fetch()))
         data = self._db.fetch()
         # umap_and_project(data["embedding_data"], data['distance'])
@@ -204,7 +203,7 @@ class Chroma:
         return self._db.fetch(where_filter, sort, limit)
 
     def fetch_highest_signal(self, metadata={}, n_results=10):
-        # TODO: id like to be able to fetch by category_id
+        # TODO: id like to be able to fetch by category_name
         '''
         Fetches the highest distance items from the database for a given metadata
         What we really want is the distance and input_uri I think.... 

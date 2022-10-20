@@ -4,7 +4,8 @@
 
 ## Trying it out
 
-`python main.py`
+`python main.py` for the most basic smoke test
+`python load_yolo3.py` for a more robust test
 
 ## .chroma
 
