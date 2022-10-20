@@ -1,6 +1,8 @@
 # set up a python logger
 import logging
 import sys
+
+# TODO: why do i set logging level to DEBUG three times?
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

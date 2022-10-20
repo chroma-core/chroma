@@ -6,7 +6,7 @@ class Index():
         pass
 
     @abstractmethod
-    def add_batch(self, batch):
+    def run(self, batch):
         pass
 
     @abstractmethod

@@ -22,5 +22,9 @@ class Database():
         pass
 
     @abstractmethod
+    def get_all_embeddings(self):
+        pass
+
+    @abstractmethod
     def load(self):
         pass
