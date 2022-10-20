@@ -1,0 +1,6 @@
+# Depenences to test, build and release the project
+build
+pytest
+setuptools_scm
+-e . # Include transitive dependencies and code from the current project
+

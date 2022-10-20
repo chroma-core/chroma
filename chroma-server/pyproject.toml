@@ -1,0 +1,19 @@
+[project]
+name = "chroma_server"
+dynamic = ["version"]
+
+authors = [
+  { name="Jeff Huber", email="jeff@trychroma.com" },
+  { name="Anton Troynikov", email="anton@trychroma.com" }
+]
+description = "Chroma."
+readme = "README.md"
+requires-python = ">=3.7"
+
+[project.urls]
+"Homepage" = "https://github.com/chroma-core/chroma"
+"Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
+
+[tool.setuptools_scm]
+root=".."
+local_scheme="no-local-version"
