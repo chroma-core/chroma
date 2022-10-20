@@ -70,6 +70,11 @@ class Hnswlib(Index):
 
     def load(self):
         # TODO: dont hard code maxelements obv
+        # TODO: also dont hard code dim... but how are we supposed to know this head of time/
+        # we need to pin an index to a parquet file... and then we would need to load that parquet file
+        # only after loading the database I guess. 
+        p = hnswlib.Index(space='l2', dim=16)
+        self._index = p
         self._index.load_index(".chroma/index.bin", max_elements = 1000000)
 
 

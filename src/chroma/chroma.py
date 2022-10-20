@@ -171,7 +171,8 @@ class Chroma:
 
         # print('self._db.update()', self._db.update())
         self._db.update(class_distances(self._db.fetch()))
-        # umap_and_project(self._db.fetch()["embedding_data"])
+        data = self._db.fetch()
+        umap_and_project(data["embedding_data"], data['distance'])
 
         # logger.info("Process running")
         return
