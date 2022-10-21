@@ -1,3 +1,4 @@
+from curses import meta
 from algorithms.mhb_class_distances import class_distances
 from algorithms.umap_and_project import umap_and_project
 from logger import logger
@@ -76,11 +77,13 @@ class Chroma:
             os.mkdir(".chroma")
 
         # load an existing database if it exists
+        # TODO: this will need to be somewhat intelligent to what ap_model_layer you are using
         if os.path.exists(".chroma/chroma.parquet"):
             logger.info("Loading existing chroma database")
             self._db.load()
 
         # load an existing index if it exists
+        # TODO: this will need to be somewhat intelligent to what ap_model_layer you are using
         if os.path.exists(".chroma/index.bin"):
             logger.info("Loading existing chroma index")
             self._ann_index.load()
@@ -94,9 +97,19 @@ class Chroma:
         self._ann_index.persist() 
         return
 
+    def log(self, input_uri, inference_data, embedding_data, metadata=None):
+        types = [type(x).__name__ for x in [input_uri, inference_data, embedding_data]]
+
+        # this branches does the type checking and data augmentation before passing it down to the database ingestor
+        # if all of the types are 'list' - do batch mode
+        if all(x == 'list' for x in types):
+            self.log_batch(input_uri, inference_data, embedding_data, metadata=metadata)
+        else:
+            self.log_single(input_uri, inference_data, embedding_data, metadata=metadata)   
+
     # todo: should this support both single and batch mode?
     # batch mode could accept lists for all these inputs and do the lining up of them...
-    def log(self, input_uri, inference_data, embedding_data, metadata=None):
+    def log_single(self, input_uri, inference_data, embedding_data, metadata=None):
         # ensure that input uri is a string
         if not isinstance(input_uri, str):
             raise Exception("Invalid input uri: " + str(input_uri))
@@ -131,13 +144,29 @@ class Chroma:
             raise Exception("Invalid model_version: " + str(model_version))
         if not isinstance(layer, str):
             raise Exception("Invalid layer: " + str(layer))
-
-        # get category_name from inference_data
-        category_name = json.loads(inference_data)["annotations"][0]["category_name"]
+            
+        category_name = inference_data["annotations"][0]["category_name"]
         
         self._db.add_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer, None, category_name)
 
-        # logger.info("Log running")
+        return
+
+    def log_batch(self, input_uri, inference_data, embedding_data, metadata=None):
+        app = []
+        model_version = []
+        layer = []
+        category_name = []
+
+        for id in inference_data:
+            app.append(str(metadata["app"]))
+            model_version.append(str(metadata["model_version"]))
+            layer.append(str(metadata["layer"]))
+            category_name.append(id["annotations"][0]["category_name"])
+
+        metadata = [metadata] * len(input_uri)
+
+        self._db.add_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer, None, category_name)
+
         return
 
     def log_training(self, input_uri, inference_data, embedding_data):
@@ -173,8 +202,8 @@ class Chroma:
         # get the embdding data from the database
         self._ann_index.run(self._db.fetch()) 
 
-        self._db.update(class_distances(self._db.fetch()))
-        data = self._db.fetch()
+        # self._db.update(class_distances(self._db.fetch()))
+        # data = self._db.fetch()
         # umap_and_project(data["embedding_data"], data['distance'])
 
         # logger.info("Process running")

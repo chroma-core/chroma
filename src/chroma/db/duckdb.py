@@ -45,16 +45,28 @@ class DuckDB(Database):
         '''
 
         # create list of the types of all inputs
-        types = [type(x).__name__ for x in [embedding_data, metadata, input_uri, inference_data, app, model_version, layer, distance]]
+        types = [type(x).__name__ for x in [embedding_data, input_uri, inference_data, app, model_version, layer]]
 
         # if all of the types are 'list' - do batch mode
-        if all(x == list for x in types):
-            lengths = [len(x) for x in [embedding_data, metadata, input_uri, inference_data, app, model_version, layer, distance]]
+        if all(x == 'list' for x in types):
+            lengths = [len(x) for x in [embedding_data, input_uri, inference_data, app, model_version, layer]]
+
+            if distance is None:
+                distance = [None] * lengths[0]
+            if category_name is None:
+                category_name = [None] * lengths[0]
             # if all of the lengths are the same, then we can do batch mode
+            # data_to_insert = [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance, category_name] for [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance, category_name] in zip(*data_to_insert)
+
+            # an array that is the first element in embedding_data and the first element in inpt_uri and so on
+            data_to_insert = []
+            for i in range(lengths[0]):
+                data_to_insert.append([embedding_data[i], metadata[i], input_uri[i], inference_data[i],  app[i], model_version[i], layer[i], distance[i], category_name[i]])
+
             if all(x == lengths[0] for x in lengths):
                 self._conn.executemany('''
                     INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                    [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, distance, category_name]
+                    data_to_insert
                 )
                 return
         
@@ -118,7 +130,7 @@ class DuckDB(Database):
             SELECT 
                 id,
                 embedding_data, 
-                json(infer) AS infer, 
+                infer, 
                 metadata, 
                 input_uri,
                 app,
