@@ -25,13 +25,6 @@ if __name__ == "__main__":
     start = time.time()
     BATCH_REPORTING_SIZE = 100_000
     for index, row in df.iterrows():
-        # this turns numpy arrays into lists so that they can be json serialized, yes this is my workaround
-        for element in row['infer']['annotations']:
-            element['bbox'] = element['bbox'].tolist()
-        row['infer']['annotations'] = row['infer']['annotations'].tolist()
-        embeddings=row['embedding_data'].tolist()
-
-        # if index is divislbe by 1000, print the index
         if index % BATCH_REPORTING_SIZE == 0:
             end = time.time()
             print("time to log n single record: ", "{:.2f}".format(end - start), index, "n=", BATCH_REPORTING_SIZE)
@@ -41,12 +34,12 @@ if __name__ == "__main__":
             chroma.log_training(
                 input_uri=row['resource_uri'],
                 inference_data=row['infer'], # perhaps we should change this input to get away from COCO formatting reliance
-                embedding_data=embeddings)
+                embedding_data=row['embedding_data'].tolist())
         else: 
             chroma.log_production(
                 input_uri=row['resource_uri'],
                 inference_data=row['infer'], # perhaps we should change this input to get away from COCO formatting reliance
-                embedding_data=embeddings)
+                embedding_data=row['embedding_data'].tolist())
 
     allend = time.time()
     print("time to log all: ", "{:.2f}".format(allend - allstart))
