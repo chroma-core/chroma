@@ -31,7 +31,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
@@ -40,7 +40,7 @@ jobs:
 
     - name: Get Version
       id: tag
-      run: cd chroma-server && echo "::set-output name=TAG_NAME::$IMAGE_NAME:$(bin/version)"
+      run: cd chroma-server && echo "TAG_NAME=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
 
     - name: Build and push Docker image
       uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
