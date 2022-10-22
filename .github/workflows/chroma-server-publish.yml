@@ -2,10 +2,10 @@ name: Chroma Server Publish
 
 on:
   push:
+    tags:
+      - '*'
     branches:
       - main
-    paths:
-      - 'chroma-server/**'
 
 env:
   REGISTRY: ghcr.io
