@@ -1,0 +1,40 @@
+name: Chroma Client Publish
+
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - lukev-cd-client
+    paths:
+      - 'chroma-client/**'
+
+jobs:
+  build-and-relese:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install test dependencies
+      run: cd chroma-client && python -m pip install -r dev_requirements.txt
+    - name: Get Version
+      id: version
+      run: cd chroma-client && echo "::set-output name=version::$(python -m setuptools_scm )"
+    - name: Test
+      run: cd chroma-client && python -m pytest
+    - name: Build
+      run: cd chroma-client && python -m build
+    - name: Release
+      uses: "marvinpinto/action-automatic-releases@v1.2.1"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: true
+        title: "${{steps.version.outputs.version}}"
+        files: |
+          chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz
