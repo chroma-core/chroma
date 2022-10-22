@@ -2,8 +2,6 @@ name: Chroma Client Publish
 
 on:
   push:
-    tags:
-      - '*'
     branches:
       - lukev-cd-client
     paths:
@@ -12,8 +10,6 @@ on:
 jobs:
   build-and-relese:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@v3
