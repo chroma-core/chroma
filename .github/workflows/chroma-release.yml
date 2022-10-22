@@ -5,7 +5,7 @@ on:
     tags:
       - '*'
     branches:
-      - lukev-cd-client
+      - main
 
 env:
   REGISTRY: ghcr.io
