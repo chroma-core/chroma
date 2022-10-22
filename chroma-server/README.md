@@ -37,3 +37,4 @@ In brief, version numbers are generated as follows:
 - If the current head is not a clean checkout, a `-dirty` local
   version will be appended to the version number. For example,
   `0.0.2-dev5-dirty`.
+
