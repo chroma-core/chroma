@@ -1,0 +1,81 @@
+name: Chroma Release
+
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - lukev-cd-client
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: "ghcr.io/chroma-core/chroma-server"
+
+jobs:
+  build-and-relese:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - name: Install Client Dev Dependencies
+      run: cd chroma-client && python -m pip install -r dev_requirements.txt
+    - name: Build Client
+      run: cd chroma-client && python -m build
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install setuptools_scm
+      run: cd chroma-server && python -m pip install setuptools_scm
+    - name: Get Docker Tag
+      id: tag
+      run: cd chroma-server && echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
+    - name: Build and push Docker image
+      uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+      with:
+        context: chroma-server
+        push: true
+        tags: ${{ steps.tag.outputs.tag_name}}
+    - name: Get Release Version
+      id: version
+      run: cd chroma-client && echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+    - name: Get current date
+      id: builddate
+      run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
+    - name: Release Tagged Version
+      uses: ncipollo/release-action@v1.11.1
+      if: "startsWith(github.ref, 'refs/tags/')"
+      with:
+        body: |
+          Version: `${{steps.version.outputs.version}}`
+          Git ref: `${{github.ref}}`
+          Build Date: `${{steps.builddate.outputs.builddate}}`
+          PIP Package: `chroma_client-${{steps.version.outputs.version}}.tar.gz`
+          Docker Image: `${{steps.tag.outputs.tag_name}}`
+        artifacts: "chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz"
+        prerelease: true
+    - name: Release Latest
+      uses: ncipollo/release-action@v1.11.1
+      if: "!startsWith(github.ref, 'refs/tags/')"
+      with:
+        tag: "latest"
+        name: "Latest"
+        body: |
+          Version: `${{steps.version.outputs.version}}`
+          Git ref: `${{github.ref}}`
+          Build Date: `${{steps.builddate.outputs.builddate}}`
+          PIP Package: `chroma_client-${{steps.version.outputs.version}}.tar.gz`
+          Docker Image: `${{steps.tag.outputs.tag_name}}`
+        artifacts: "chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz"
+        allowUpdates: true
+        prerelease: true
+
