@@ -12,7 +12,7 @@ env:
   IMAGE_NAME: "ghcr.io/chroma-core/chroma-server"
 
 jobs:
-  build-and-relese:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
