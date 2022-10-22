@@ -63,6 +63,13 @@ jobs:
           Docker Image: `${{steps.tag.outputs.tag_name}}`
         artifacts: "chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz"
         prerelease: true
+    - name: Update Tag
+      uses: richardsimko/update-tag@v1.0.5
+      if: "!startsWith(github.ref, 'refs/tags/')"
+      with:
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Release Latest
       uses: ncipollo/release-action@v1.11.1
       if: "!startsWith(github.ref, 'refs/tags/')"
