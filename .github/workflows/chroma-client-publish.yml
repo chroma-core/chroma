@@ -2,6 +2,8 @@ name: Chroma Client Publish
 
 on:
   push:
+    tags:
+      - '*'
     branches:
       - lukev-cd-client
     paths:
