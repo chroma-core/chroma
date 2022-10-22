@@ -29,7 +29,7 @@ jobs:
       run: cd chroma-client && python -m build
 
     - name: Log in to the Container registry
-      uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      uses: docker/login-action@v2.1.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -40,7 +40,7 @@ jobs:
       id: tag
       run: cd chroma-server && echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
     - name: Build and push Docker image
-      uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+      uses: docker/build-push-action@v3.2.0
       with:
         context: chroma-server
         push: true
