@@ -28,12 +28,20 @@ jobs:
       run: cd chroma-client && python -m pytest
     - name: Build
       run: cd chroma-client && python -m build
-    - name: Release
-      uses: "marvinpinto/action-automatic-releases@v1.2.1"
+    - name: Release Tag
+      uses: softprops/action-gh-release@v1
+      if: "startsWith(github.ref, 'refs/tags/')"
       with:
-        automatic_release_tag: "latest"
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
         prerelease: true
-        title: "${{steps.version.outputs.version}}"
+        name: "${{steps.version.outputs.version}}"
+        files: |
+          chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz
+    - name: Release Latest
+      uses: softprops/action-gh-release@v1
+      if: "!startsWith(github.ref, 'refs/tags/')"
+      with:
+        prerelease: true
+        tag_name: "latest"
+        name: "${{steps.version.outputs.version}}"
         files: |
           chroma-client/dist/chroma_client-${{steps.version.outputs.version}}.tar.gz
