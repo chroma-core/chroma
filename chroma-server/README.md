@@ -38,3 +38,9 @@ In brief, version numbers are generated as follows:
   version will be appended to the version number. For example,
   `0.0.2-dev5-dirty`.
 
+To run use `docker images` to see what containers and tags you have available:
+```
+docker run -p 8000:8000 ghcr.io/chroma-core/chroma-server:<tag name -- eg 0.0.2-dirty>>
+```
+
+This will expose the internal app at `localhost:8000`
