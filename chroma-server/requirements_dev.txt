@@ -1,3 +1,8 @@
 httpx
 pytest
 setuptools_scm
+duckdb
+hnswlib
+pandas
+numpy
+pyarrow
