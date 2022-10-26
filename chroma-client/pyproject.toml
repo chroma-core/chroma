@@ -7,7 +7,8 @@ name = "chroma_client"
 dynamic = ["version"]
 dependencies = [
   'pyarrow ~= 9.0',
-  'requests'
+  'requests',
+  'httpx'
 ]
 
 authors = [
