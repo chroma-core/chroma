@@ -82,6 +82,17 @@ async def test_reset_db():
         response = await ac.get("/api/v1/count")
         assert response.json() == {"count": 0}
 
+@pytest.mark.anyio
+async def test_get_nearest_neighbors():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.get("/api/v1/reset")
+        await post_batch_records(ac)
+        await ac.get("/api/v1/process")
+        response = await ac.post("/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1})
+    assert response.status_code == 200
+    assert len(response.json()["ids"]) == 1
+
+
 # TODO: test persist and load
 # @pytest.mark.anyio
 # async def test_persist_db():
