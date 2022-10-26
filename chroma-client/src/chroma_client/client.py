@@ -87,7 +87,6 @@ class Chroma:
         model_version: str, 
         layer: str, 
         dataset: str = None,
-        distance: float = None, 
         category_name: str = None):
         '''
         Logs a single embedding to the database
@@ -102,7 +101,6 @@ class Chroma:
             "model_version": model_version, 
             "layer": layer, 
             "dataset": dataset, 
-            "distance": distance,
             "category_name": category_name 
         })  )
 
@@ -168,7 +166,6 @@ class Chroma:
         model_version:  Union[list, str], 
         layer:  Union[list, str], 
         dataset: list = None,
-        distance: list = None, 
         category_name: list = None):
         '''
         Logs a batch of embeddings to the database
@@ -193,7 +190,6 @@ class Chroma:
             "model_version": model_version, 
             "layer": layer, 
             "dataset": dataset, 
-            "distance": distance, 
             "category_name": category_name 
         }) )
 

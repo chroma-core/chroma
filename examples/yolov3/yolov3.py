@@ -61,10 +61,24 @@ if __name__ == "__main__":
         input_uri = batch['resource_uri'].tolist()
         inference_data = batch['infer'].tolist()
 
-        print(embedding_data)
+        # get category name from batch['infer']
+        category_names = []
+        for index, row in batch.iterrows():
+            for idx, annotation in enumerate(row['infer']['annotations']):
+                category_names.append(annotation['category_name'])
 
         # log the batch
-        chroma.log_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer, dataset)
+        chroma.log_batch(
+            embedding_data=embedding_data, 
+            metadata=metadata, 
+            input_uri=input_uri, 
+            inference_data=inference_data, 
+            app=app, 
+            model_version=model_version, 
+            layer=layer, 
+            dataset=dataset,
+            category_name=category_names
+        )
 
     allend = time.time()
     print("time to log all: ", "{:.2f}".format(allend - allstart))
