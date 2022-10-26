@@ -159,3 +159,25 @@ class DuckDB(Database):
         Load the database from disk
         '''
         self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
+
+    def get_by_ids(self, ids=list):
+        # select from duckdb table where ids are in the list
+
+        return self._conn.execute(f'''
+            SELECT 
+                id,
+                embedding_data, 
+                infer, 
+                metadata, 
+                input_uri,
+                app,
+                model_version,
+                dataset,
+                layer,
+                distance,
+                category_name
+            FROM 
+                embeddings
+            WHERE
+                id IN ({','.join([str(x) for x in ids])})
+        ''').fetchdf().replace({np.nan: None}) # replace nan with None for json serialization

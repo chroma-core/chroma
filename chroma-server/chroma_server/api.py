@@ -7,7 +7,7 @@ from fastapi import FastAPI, Response, status
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
-from chroma_server.types import AddEmbedding
+from chroma_server.types import AddEmbedding, QueryEmbedding
 from chroma_server.utils import logger
 
 
@@ -123,3 +123,15 @@ async def rand(metadata={}, sort=None, limit=None):
     results = app._db.fetch(metadata, sort, limit)
     rand = rand_bisectional_subsample(results)
     return rand.to_dict(orient="records")
+
+@app.post("/api/v1/get_nearest_neighbors")
+async def get_nearest_neighbors(embedding: QueryEmbedding):
+    '''
+    return the distance and labels for the input embedding
+    '''
+    nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results)
+    return {
+        "ids": nn[0].tolist()[0],
+        "embeddings": app._db.get_by_ids(nn[0].tolist()[0]).to_dict(orient="records"),
+        "distances": nn[1].tolist()[0]
+    }

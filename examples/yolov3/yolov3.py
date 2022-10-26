@@ -4,10 +4,12 @@ import numpy as np
 from pandas.io.json import json_normalize
 import json
 import time
+import os
 
 if __name__ == "__main__":
 
-    file = 'data__nogit/objects_data_recorder_fixed.parquet'
+    file = 'data__nogit/yolov3_objects_large.parquet'
+
     print("Loading parquet file: ", file)
     py = pq.read_table(file)
     df = py.to_pandas()
@@ -27,13 +29,14 @@ if __name__ == "__main__":
     model_version = "1.0.0"
     layer = "pool5"
     dataset = "training"
-    BATCH_SIZE = 10000
+    # BATCH_SIZE = 10_000
+    BATCH_SIZE = 100
 
     print("Loading in records with a batch size of: " , data_length)
 
     # iterate through df with a batch size of 100
     for i in range(0, data_length, BATCH_SIZE):
-        if (i > 20000):
+        if (i > 100):
             break
 
         end = time.time()
@@ -58,6 +61,8 @@ if __name__ == "__main__":
         input_uri = batch['resource_uri'].tolist()
         inference_data = batch['infer'].tolist()
 
+        print(embedding_data)
+
         # log the batch
         chroma.log_batch(embedding_data, metadata, input_uri, inference_data, app, model_version, layer, dataset)
 
@@ -69,8 +74,12 @@ if __name__ == "__main__":
 
     chroma.process()
 
+    print("df['embedding_data'][0]: ", df['embedding_data'][0])
+    get_nearest_neighbors = chroma.get_nearest_neighbors(df['embedding_data'][0], 10)
+    print("Nearest neighbors: ", get_nearest_neighbors)
+
     highest_signal = chroma.rand() # rand for now - by far the slowest operation
-    print("Records in a bisectional split: ",len(highest_signal))
+    print("Records in a bisectional split: ", len(highest_signal))
 
     # del chroma
     fetched = chroma.count()

@@ -13,3 +13,7 @@ class AddEmbedding(BaseModel):
     dataset: Union[str, list] = None
     distance: Union[float, list] = None 
     category_name: Union[str, list] = None
+
+class QueryEmbedding(BaseModel):
+    embedding: list
+    n_results: int = 10
