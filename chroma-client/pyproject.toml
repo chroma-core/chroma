@@ -9,6 +9,7 @@ dependencies = [
   'pyarrow ~= 9.0',
   'requests'
 ]
+
 authors = [
   { name="Jeff Huber", email="jeff@trychroma.com" },
   { name="Anton Troynikov", email="anton@trychroma.com" }
@@ -34,3 +35,9 @@ pythonpath = [
 [tool.setuptools_scm]
 root=".."
 local_scheme="dirty-tag"
+
+[options.extras_require]
+test = [
+  'pytest',
+  'httpx'
+]
