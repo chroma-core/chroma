@@ -127,7 +127,7 @@ async def rand(metadata={}, sort=None, limit=None):
 @app.post("/api/v1/get_nearest_neighbors")
 async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
-    return the distance and labels for the input embedding
+    return the distance, database ids, and embedding themselves for the input embedding
     '''
     nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results)
     return {

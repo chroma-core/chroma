@@ -33,11 +33,11 @@ class Hnswlib(Index):
         p.add_items(data1, embedding_data["id"])
 
         # Query the elements for themselves and measure recall:
-        labels, distances = p.knn_query(data1, k=1)
-        # logger.debug("labels", labels)
+        database_ids, distances = p.knn_query(data1, k=1)
+        # logger.debug("database_ids", database_ids)
         # logger.debug("distances", distances)
         # logger.debug(len(distances))
-        logger.debug("Recall for the first batch:" + str(np.mean(labels.reshape(-1) == np.arange(len(data1)))))
+        logger.debug("Recall for the first batch:" + str(np.mean(database_ids.reshape(-1) == np.arange(len(data1)))))
 
         self._index = p
 
@@ -60,5 +60,5 @@ class Hnswlib(Index):
 
     # do knn_query on hnswlib to get nearest neighbors
     def get_nearest_neighbors(self, query, k):
-        labels, distances = self._index.knn_query(query, k=k)
-        return labels, distances
+        database_ids, distances = self._index.knn_query(query, k=k)
+        return database_ids, distances
