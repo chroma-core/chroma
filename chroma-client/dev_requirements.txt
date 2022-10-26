@@ -2,5 +2,5 @@
 build
 pytest
 setuptools_scm
--e . # Include transitive dependencies and code from the current project
+-e .[test] # Include transitive dependencies and code from the current project
 
