@@ -35,9 +35,3 @@ pythonpath = [
 [tool.setuptools_scm]
 root=".."
 local_scheme="dirty-tag"
-
-[options.extras_require]
-test = [
-  'pytest',
-  'httpx'
-]
