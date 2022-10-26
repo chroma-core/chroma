@@ -29,6 +29,6 @@ jobs:
     - name: Install test dependencies
       run: cd chroma-server && python -m pip install -r requirements.txt -r requirements_dev.txt
     - name: Install chroma_client
-      run: cd chroma-client && pip install chroma_client
+      run: cd chroma-client && pip install .
     - name: Test
       run: cd chroma-server && python -m pytest
