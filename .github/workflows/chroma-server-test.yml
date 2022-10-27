@@ -30,6 +30,8 @@ jobs:
       run: |
         git config --global url."https://${{ secrets.GITHUB_TOKEN }}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
         cd chroma-server && python -m pip install -r requirements.txt -r requirements_dev.txt
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Install chroma_client
       run: cd chroma-client && pip install .
     - name: Test
