@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
         end = time.time()
         page = i * BATCH_SIZE
-        print("Time to process BATCH_SIZE rows: " + str(end - start), ", records loaded: " + str(i))
+        print(f"Time to process {BATCH_SIZE} rows: {end - start}, records loaded: {str(i)}")
         start = time.time()
 
         # get the batch
