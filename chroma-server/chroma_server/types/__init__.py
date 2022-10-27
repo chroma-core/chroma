@@ -17,3 +17,5 @@ class AddEmbedding(BaseModel):
 class QueryEmbedding(BaseModel):
     embedding: list
     n_results: int = 10
+    category_name: str
+    dataset: str

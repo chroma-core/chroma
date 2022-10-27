@@ -59,6 +59,13 @@ class Hnswlib(Index):
         self._index.load_index(".chroma/index.bin", max_elements= elements)
 
     # do knn_query on hnswlib to get nearest neighbors
-    def get_nearest_neighbors(self, query, k):
-        database_ids, distances = self._index.knn_query(query, k=k)
+    def get_nearest_neighbors(self, query, k, ids=None):
+        filter_function = None
+        if not ids is None:
+            filter_function = lambda id: id in ids
+
+        if len(ids) < k:
+            k = len(ids)
+
+        database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
         return database_ids, distances

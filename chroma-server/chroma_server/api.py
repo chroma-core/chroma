@@ -129,7 +129,17 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results)
+    ids = None
+    filter_by_where = {}
+    if embedding.category_name is not None:
+        filter_by_where['category_name'] = embedding.category_name
+    if embedding.dataset is not None:
+        filter_by_where['dataset'] = embedding.dataset
+
+    if filter_by_where is not None:
+        ids = app._db.fetch(filter_by_where)["id"].tolist()
+    
+    nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
     return {
         "ids": nn[0].tolist()[0],
         "embeddings": app._db.get_by_ids(nn[0].tolist()[0]).to_dict(orient="records"),

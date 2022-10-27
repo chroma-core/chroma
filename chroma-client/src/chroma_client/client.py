@@ -246,13 +246,15 @@ class Chroma:
             dataset="triage"
         )
         
-    def get_nearest_neighbors(self, embedding, n_results=10):
+    def get_nearest_neighbors(self, embedding, n_results=10, category_name=None, dataset="training"):
         '''
         Gets the nearest neighbors of a single embedding
         '''
         x = requests.post(self._api_url + "/get_nearest_neighbors", data = json.dumps({
             "embedding": embedding, 
-            "n_results": n_results
+            "n_results": n_results,
+            "category_name": category_name,
+            "dataset": dataset
         }) )
 
         if x.status_code == 200:
