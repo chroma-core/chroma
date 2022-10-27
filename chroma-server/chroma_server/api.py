@@ -15,11 +15,6 @@ from chroma_server.utils import logger
 # Boot script
 db = DuckDB
 ann_index = Hnswlib
-base_metadata = {
-    "app":"yolov3", 
-    "model_version":"1.0.0", 
-    "layer":"pool5", 
-}
 
 app = FastAPI(debug=True)
 
@@ -61,9 +56,6 @@ async def add_to_db(new_embedding: AddEmbedding):
         new_embedding.metadata, 
         new_embedding.input_uri, 
         new_embedding.inference_data, 
-        new_embedding.app, 
-        new_embedding.model_version, 
-        new_embedding.layer, 
         new_embedding.dataset,
         new_embedding.distance, 
         new_embedding.category_name

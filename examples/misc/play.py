@@ -1,7 +1,7 @@
 import json
 from chroma_client import Chroma
 
-chroma = Chroma(app="yolov3", model_version="1.0.0", layer="pool5")
+chroma = Chroma()
 chroma.reset()
 
 # log
@@ -11,9 +11,6 @@ for i in range(10):
         metadata={"test": "test"},
         input_uri="https://www.google.com",
         inference_data={"test": "test"},
-        app="yolov3",
-        model_version="1.0.0",
-        layer="pool5",
         dataset=None
     )
 

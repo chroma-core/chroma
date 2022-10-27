@@ -20,14 +20,11 @@ if __name__ == "__main__":
     # print("Data preview")
     # print(df.head())
 
-    chroma = Chroma(app="yolov3", model_version="1.0.0", layer="pool5")
+    chroma = Chroma()
     chroma.reset() #make sure we are using a fresh db
     allstart = time.time()
     start = time.time()
 
-    app = "yolov3"
-    model_version = "1.0.0"
-    layer = "pool5"
     dataset = "training"
     BATCH_SIZE = 10_000
     # BATCH_SIZE = 100
@@ -73,9 +70,6 @@ if __name__ == "__main__":
             metadata=metadata, 
             input_uri=input_uri, 
             inference_data=inference_data, 
-            app=app, 
-            model_version=model_version, 
-            layer=layer, 
             dataset=dataset,
             category_name=category_names
         )
@@ -131,9 +125,6 @@ if __name__ == "__main__":
     #     #     metadata=row['metadata_list'],
     #     #     input_uri=row['resource_uri'],
     #     #     inference_data=row['infer'], # the numpy array is not json serializable, the bbox
-    #     #     app="yolov3",
-    #     #     model_version="1.0.0",
-    #     #     layer="pool5",
     #     # )
 
     #     if (index < data_length/2):

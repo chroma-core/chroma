@@ -16,9 +16,6 @@ class DuckDB(Database):
                 metadata JSON, 
                 input_uri STRING, 
                 infer JSON,
-                app STRING,
-                model_version STRING,
-                layer STRING,
                 dataset STRING,
                 distance REAL,
                 category_name STRING
@@ -38,18 +35,18 @@ class DuckDB(Database):
         ''')
         return
 
-    def add_batch(self, embedding_data, metadata, input_uri, inference_data, app, model_version, layer, dataset=None, distance=None, category_name=None):
+    def add_batch(self, embedding_data, metadata, input_uri, inference_data, dataset=None, distance=None, category_name=None):
         '''
         Add embeddings to the database
         This accepts both a single input and a list of inputs
         '''
 
         # create list of the types of all inputs
-        types = [type(x).__name__ for x in [embedding_data, input_uri, inference_data, app, model_version, layer]]
+        types = [type(x).__name__ for x in [embedding_data, input_uri, inference_data]]
 
         # if all of the types are 'list' - do batch mode
         if all(x == 'list' for x in types):
-            lengths = [len(x) for x in [embedding_data, input_uri, inference_data, app, model_version, layer]]
+            lengths = [len(x) for x in [embedding_data, input_uri, inference_data]]
 
             # accepts some inputs as str or none, and this multiples them out to the correct length
             if distance is None or isinstance(distance, str):
@@ -62,23 +59,23 @@ class DuckDB(Database):
             # we have to move from column to row format for duckdb
             data_to_insert = []
             for i in range(lengths[0]):
-                data_to_insert.append([embedding_data[i], metadata[i], input_uri[i], inference_data[i],  app[i], model_version[i], layer[i], dataset[i], distance[i], category_name[i]])
+                data_to_insert.append([embedding_data[i], metadata[i], input_uri[i], inference_data[i],  dataset[i], distance[i], category_name[i]])
 
             if all(x == lengths[0] for x in lengths):
                 self._conn.executemany('''
-                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
+                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?)''', 
                     data_to_insert
                 )
                 return
         
         # if any of the types are 'list' - throw an error
-        if any(x == list for x in [input_uri, inference_data, app, model_version, layer, dataset, distance, category_name]):
+        if any(x == list for x in [input_uri, inference_data, dataset, distance, category_name]):
             raise Exception("Invalid input types. One input is a list where others are not: " + str(types))
 
         # single insert mode
         self._conn.execute('''
-            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-            [embedding_data, metadata, input_uri, inference_data,  app, model_version, layer, dataset, distance, category_name]
+            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?)''', 
+            [embedding_data, metadata, input_uri, inference_data,  dataset, distance, category_name]
         )
         
     def count(self):
@@ -127,10 +124,7 @@ class DuckDB(Database):
                 infer, 
                 metadata, 
                 input_uri,
-                app,
-                model_version,
                 dataset,
-                layer,
                 distance,
                 category_name
             FROM 
@@ -177,10 +171,7 @@ class DuckDB(Database):
                 infer, 
                 metadata, 
                 input_uri,
-                app,
-                model_version,
                 dataset,
-                layer,
                 distance,
                 category_name
             FROM 
