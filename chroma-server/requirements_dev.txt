@@ -2,7 +2,7 @@ httpx
 pytest
 setuptools_scm
 duckdb
-hnswlib @ git+https://git@github.com/chroma-core/hnswlib.git
+hnswlib @ git+https://github.com/chroma-core/hnswlib.git
 pandas
 numpy
 pyarrow
