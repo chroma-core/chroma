@@ -2,6 +2,7 @@ from os import EX_CANTCREAT
 from chroma_server.db.abstract import Database
 import duckdb
 import numpy as np
+import pandas as pd
 
 class DuckDB(Database):
     _conn = None
@@ -162,6 +163,12 @@ class DuckDB(Database):
 
     def get_by_ids(self, ids=list):
         # select from duckdb table where ids are in the list
+        if not isinstance(ids, list):
+            raise Exception("ids must be a list")
+        
+        if not ids:
+            # create an empty pandas dataframe
+            return pd.DataFrame()
 
         return self._conn.execute(f'''
             SELECT 

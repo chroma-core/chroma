@@ -25,6 +25,7 @@ async def post_one_record(ac):
         "model_version": "1.0.0",
         "layer": "pool5",
         "dataset": "coco",
+        "category_name": "person"
     })
 
 async def post_batch_records(ac):
@@ -37,6 +38,7 @@ async def post_batch_records(ac):
         "model_version": ["1.0.0", "1.0.0"],
         "layer": ["pool5", "pool5"],
         "dataset": "training",
+        "category_name": "person"
     })
 
 @pytest.mark.anyio
@@ -91,6 +93,26 @@ async def test_get_nearest_neighbors():
         response = await ac.post("/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1})
     assert response.status_code == 200
     assert len(response.json()["ids"]) == 1
+
+@pytest.mark.anyio
+async def test_get_nearest_neighbors_filter():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.get("/api/v1/reset")
+        await post_batch_records(ac)
+        await ac.get("/api/v1/process")
+        response = await ac.post("/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "dataset": "training", "category_name": "monkey"})
+    assert response.status_code == 200
+    assert len(response.json()["ids"]) == 0
+
+@pytest.mark.anyio
+async def test_get_nearest_neighbors_filter():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.get("/api/v1/reset")
+        await post_batch_records(ac)
+        await ac.get("/api/v1/process")
+        response = await ac.post("/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 2, "dataset": "training", "category_name": "person"})
+    assert response.status_code == 200
+    assert len(response.json()["ids"]) == 2
 
 
 # TODO: test persist and load
