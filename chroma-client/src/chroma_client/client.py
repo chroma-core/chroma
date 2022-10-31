@@ -68,60 +68,6 @@ class Chroma:
 
     def log(self, 
         embedding_data: list, 
-        input_uri: str, 
-        dataset: str = None,
-        category_name: str = None):
-        '''
-        Logs a single embedding to the database
-        '''
-
-        x = requests.post(self._api_url + "/add", data = json.dumps({
-            "embedding_data": embedding_data,
-            "input_uri": input_uri, 
-            "dataset": dataset, 
-            "category_name": category_name 
-        })  )
-
-        if x.status_code == 201:
-            return True
-        else:
-            return False
-    
-    def log_training(self, embedding_data: list, input_uri: str):
-        '''
-        Small wrapper around log() to log a single training embedding
-        - sets dataset to "training"
-        '''
-        return self.log(
-            embedding_data=embedding_data, 
-            input_uri=input_uri, 
-            dataset="training"
-        )
-
-    def log_production(self, embedding_data: list, input_uri: str):
-        '''
-        Small wrapper around log() to log a single production embedding
-        - sets dataset to "production"
-        '''
-        return self.log(
-            embedding_data=embedding_data, 
-            input_uri=input_uri, 
-            dataset="production"
-        )
-    
-    def log_triage(self, embedding_data: list, input_uri: str):
-        '''
-        Small wrapper around log() to log a single triage embedding
-        - sets dataset to "triage"
-        '''
-        return self.log(
-            embedding_data=embedding_data, 
-            input_uri=input_uri, 
-            dataset="triage"
-        )
-
-    def log_batch(self, 
-        embedding_data: list, 
         input_uri: list, 
         dataset: list = None,
         category_name: list = None):
@@ -142,37 +88,40 @@ class Chroma:
         else:
             return False
     
-    def log_training_batch(self, embedding_data: list, input_uri: list):
+    def log_training(self, embedding_data: list, input_uri: list, category_name: list):
         '''
-        Small wrapper around log_batch() to log a batch of training embedding
+        Small wrapper around log() to log a batch of training embedding
         - sets dataset to "training"
         '''
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="training"
+            dataset="training",
+            category_name=category_name
         )
         
-    def log_production_batch(self, embedding_data: list, input_uri: list):
+    def log_production(self, embedding_data: list, input_uri: list, category_name: list):
         '''
-        Small wrapper around log_batch() to log a batch of production embedding
+        Small wrapper around log() to log a batch of production embedding
         - sets dataset to "production"
         '''
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="production"
+            dataset="production",
+            category_name=category_name
         )
         
-    def log_triage_batch(self, embedding_data: list, input_uri: list):
+    def log_triage(self, embedding_data: list, input_uri: list, category_name: list):
         '''
-        Small wrapper around log_batch() to log a batch of triage embedding
+        Small wrapper around log() to log a batch of triage embedding
         - sets dataset to "triage"
         '''
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="triage"
+            dataset="triage",
+            category_name=category_name
         )
         
     def get_nearest_neighbors(self, embedding, n_results=10, category_name=None, dataset="training"):
