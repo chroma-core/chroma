@@ -3,7 +3,7 @@ from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     disable_anonymized_telemetry: bool = False
-    telemetry_anonymized_uuid: str = 'not-set'
+    telemetry_anonymized_uuid: str = False
 
     class Config:
         env_file = ".env"
