@@ -6,8 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "chroma_client"
 dynamic = ["version"]
 dependencies = [
-  'pyarrow ~= 9.0'
+  'pyarrow ~= 9.0',
+  'requests ~= 2.28',
 ]
+
 authors = [
   { name="Jeff Huber", email="jeff@trychroma.com" },
   { name="Anton Troynikov", email="anton@trychroma.com" }

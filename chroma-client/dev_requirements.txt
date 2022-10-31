@@ -2,5 +2,6 @@
 build
 pytest
 setuptools_scm
+httpx
 -e . # Include transitive dependencies and code from the current project
 
