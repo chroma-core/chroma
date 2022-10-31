@@ -8,9 +8,7 @@ chroma.reset()
 for i in range(10):
     chroma.log(
         embedding_data=[1,2,3,4,5,6,7,8,9,10],
-        metadata={"test": "test"},
         input_uri="https://www.google.com",
-        inference_data={"test": "test"},
         dataset=None
     )
 

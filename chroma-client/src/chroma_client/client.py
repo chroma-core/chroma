@@ -5,7 +5,6 @@ from typing import Union
 class Chroma:
 
     _api_url = "http://localhost:8000/api/v1"
-    _base_metadata = {}
 
     def __init__(self, url=None):
         """Initialize Chroma client"""
@@ -22,25 +21,23 @@ class Chroma:
         x = requests.get(self._api_url + "/count")
         return x.json()
 
-    def fetch(self, metadata={}, sort=None, limit=None):
+    def fetch(self, where_filter={}, sort=None, limit=None):
         '''
         Fetches embeddings from the database
         '''
         x = requests.get(self._api_url + "/fetch", data=json.dumps({
-            "metadata":json.dumps(metadata), 
+            "where_filter":json.dumps(where_filter), 
             "sort":sort, 
             "limit":limit
         }))
         return x.json()
 
-    def process(self, metadata={}):
+    def process(self):
         '''
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything
         '''
-        requests.get(self._api_url + "/process", data=json.dumps({
-            "metadata":json.dumps(metadata), 
-        }))
+        requests.get(self._api_url + "/process")
         return True
 
     def reset(self):
@@ -71,9 +68,7 @@ class Chroma:
 
     def log(self, 
         embedding_data: list, 
-        metadata: dict, 
         input_uri: str, 
-        inference_data: dict, 
         dataset: str = None,
         category_name: str = None):
         '''
@@ -82,9 +77,7 @@ class Chroma:
 
         x = requests.post(self._api_url + "/add", data = json.dumps({
             "embedding_data": embedding_data,
-            "metadata": metadata, 
             "input_uri": input_uri, 
-            "inference_data": inference_data, 
             "dataset": dataset, 
             "category_name": category_name 
         })  )
@@ -94,50 +87,42 @@ class Chroma:
         else:
             return False
     
-    def log_training(self, embedding_data: list, input_uri: str, inference_data: dict):
+    def log_training(self, embedding_data: list, input_uri: str):
         '''
         Small wrapper around log() to log a single training embedding
         - sets dataset to "training"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="training"
         )
 
-    def log_production(self, embedding_data: list, input_uri: str, inference_data: dict):
+    def log_production(self, embedding_data: list, input_uri: str):
         '''
         Small wrapper around log() to log a single production embedding
         - sets dataset to "production"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="production"
         )
     
-    def log_triage(self, embedding_data: list, input_uri: str, inference_data: dict):
+    def log_triage(self, embedding_data: list, input_uri: str):
         '''
         Small wrapper around log() to log a single triage embedding
         - sets dataset to "triage"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="triage"
         )
 
     def log_batch(self, 
         embedding_data: list, 
-        metadata: list, 
         input_uri: list, 
-        inference_data: list, 
         dataset: list = None,
         category_name: list = None):
         '''
@@ -147,9 +132,7 @@ class Chroma:
 
         x = requests.post(self._api_url + "/add", data = json.dumps({
             "embedding_data": embedding_data, 
-            "metadata": metadata,
             "input_uri": input_uri, 
-            "inference_data": inference_data,
             "dataset": dataset, 
             "category_name": category_name 
         }) )
@@ -159,42 +142,36 @@ class Chroma:
         else:
             return False
     
-    def log_training_batch(self, embedding_data: list, input_uri: list, inference_data: list):
+    def log_training_batch(self, embedding_data: list, input_uri: list):
         '''
         Small wrapper around log_batch() to log a batch of training embedding
         - sets dataset to "training"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="training"
         )
         
-    def log_production_batch(self, embedding_data: list, input_uri: list, inference_data: list):
+    def log_production_batch(self, embedding_data: list, input_uri: list):
         '''
         Small wrapper around log_batch() to log a batch of production embedding
         - sets dataset to "production"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="production"
         )
         
-    def log_triage_batch(self, embedding_data: list, input_uri: list, inference_data: list):
+    def log_triage_batch(self, embedding_data: list, input_uri: list):
         '''
         Small wrapper around log_batch() to log a batch of triage embedding
         - sets dataset to "triage"
         '''
         return self.log(
             embedding_data=embedding_data, 
-            metadata=self._base_metadata, 
             input_uri=input_uri, 
-            inference_data=inference_data, 
             dataset="triage"
         )
         

@@ -13,11 +13,9 @@ class DuckDB(Database):
             CREATE TABLE embeddings (
                 id integer PRIMARY KEY,
                 embedding_data REAL[], 
-                metadata JSON, 
                 input_uri STRING, 
-                infer JSON,
                 dataset STRING,
-                distance REAL,
+                custom_quality_score REAL,
                 category_name STRING
             )
         ''')
@@ -35,22 +33,22 @@ class DuckDB(Database):
         ''')
         return
 
-    def add_batch(self, embedding_data, metadata, input_uri, inference_data, dataset=None, distance=None, category_name=None):
+    def add_batch(self, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
         '''
         Add embeddings to the database
         This accepts both a single input and a list of inputs
         '''
 
         # create list of the types of all inputs
-        types = [type(x).__name__ for x in [embedding_data, input_uri, inference_data]]
+        types = [type(x).__name__ for x in [embedding_data, input_uri]]
 
         # if all of the types are 'list' - do batch mode
         if all(x == 'list' for x in types):
-            lengths = [len(x) for x in [embedding_data, input_uri, inference_data]]
+            lengths = [len(x) for x in [embedding_data, input_uri]]
 
             # accepts some inputs as str or none, and this multiples them out to the correct length
-            if distance is None or isinstance(distance, str):
-                distance = [distance] * lengths[0]
+            if custom_quality_score is None or isinstance(custom_quality_score, str):
+                custom_quality_score = [custom_quality_score] * lengths[0]
             if category_name is None or isinstance(category_name, str):
                 category_name = [category_name] * lengths[0]
             if dataset is None or isinstance(dataset, str):
@@ -59,23 +57,23 @@ class DuckDB(Database):
             # we have to move from column to row format for duckdb
             data_to_insert = []
             for i in range(lengths[0]):
-                data_to_insert.append([embedding_data[i], metadata[i], input_uri[i], inference_data[i],  dataset[i], distance[i], category_name[i]])
+                data_to_insert.append([embedding_data[i], input_uri[i], dataset[i], custom_quality_score[i], category_name[i]])
 
             if all(x == lengths[0] for x in lengths):
                 self._conn.executemany('''
-                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?)''', 
+                    INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?)''', 
                     data_to_insert
                 )
                 return
         
         # if any of the types are 'list' - throw an error
-        if any(x == list for x in [input_uri, inference_data, dataset, distance, category_name]):
+        if any(x == list for x in [input_uri, dataset, custom_quality_score, category_name]):
             raise Exception("Invalid input types. One input is a list where others are not: " + str(types))
 
         # single insert mode
         self._conn.execute('''
-            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?, ?, ?)''', 
-            [embedding_data, metadata, input_uri, inference_data,  dataset, distance, category_name]
+            INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?)''', 
+            [embedding_data, input_uri,  dataset, custom_quality_score, category_name]
         )
         
     def count(self):
@@ -83,16 +81,16 @@ class DuckDB(Database):
             SELECT COUNT(*) FROM embeddings;
         ''').fetchone()[0]
 
-    def update(self, data): # call this update_distance! that is all it does
+    def update(self, data): # call this update_custom_quality_score! that is all it does
         '''
         I was not able to figure out (yet) how to do a bulk update in duckdb
         This is going to be fairly slow
         '''
         for element in data:    
-            if element['distance'] is None:
+            if element['custom_quality_score'] is None:
                 continue
             self._conn.execute(f'''
-                UPDATE embeddings SET distance={element['distance']} WHERE id={element['id']}'''
+                UPDATE embeddings SET custom_quality_score={element['custom_quality_score']} WHERE id={element['id']}'''
             )
 
     def fetch(self, where_filter={}, sort=None, limit=None):
@@ -121,11 +119,9 @@ class DuckDB(Database):
             SELECT 
                 id,
                 embedding_data, 
-                infer, 
-                metadata, 
                 input_uri,
                 dataset,
-                distance,
+                custom_quality_score,
                 category_name
             FROM 
                 embeddings
@@ -168,11 +164,9 @@ class DuckDB(Database):
             SELECT 
                 id,
                 embedding_data, 
-                infer, 
-                metadata, 
                 input_uri,
                 dataset,
-                distance,
+                custom_quality_score,
                 category_name
             FROM 
                 embeddings

@@ -18,9 +18,7 @@ async def test_root():
 async def post_one_record(ac):
     return await ac.post("/api/v1/add", json={
         "embedding_data": [1.02, 2.03, 3.03],
-        "metadata": {},
         "input_uri": "https://example.com",
-        "inference_data": {"test": "test"},
         "dataset": "coco",
         "category_name": "person"
     })
@@ -28,9 +26,7 @@ async def post_one_record(ac):
 async def post_batch_records(ac):
     return await ac.post("/api/v1/add", json={
         "embedding_data": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-        "metadata": [{"test":"Test"}, {"test":"Test"}],
         "input_uri": ["https://example.com", "https://example.com"],
-        "inference_data": [{"test":"Test"}, {"test":"Test"}],
         "dataset": "training",
         "category_name": "person"
     })
