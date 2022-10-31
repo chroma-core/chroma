@@ -30,9 +30,6 @@ if __name__ == "__main__":
     print("Loading in records with a batch size of: " , data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if (i > 30_000):
-            break
-
         end = time.time()
         page = i * BATCH_SIZE
         print("Time to process BATCH_SIZE rows: " + '{0:.2f}'.format((end - start)) + "s, records loaded: " + str(i))

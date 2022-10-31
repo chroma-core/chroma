@@ -71,6 +71,7 @@ class DuckDB(Database):
             raise Exception("Invalid input types. One input is a list where others are not: " + str(types))
 
         # single insert mode
+        # This should never fire because we do everything in batch mode, but given the mode away from duckdb likely, I am just leaving it in
         self._conn.execute('''
             INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?)''', 
             [embedding_data, input_uri,  dataset, custom_quality_score, category_name]
