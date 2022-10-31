@@ -1,7 +1,7 @@
 import hnswlib
 import numpy as np
 from chroma_server.index.abstract import Index
-from chroma_server.utils import logger
+from chroma_server.logger import logger
 
 class Hnswlib(Index):
 
