@@ -4,12 +4,34 @@ import time
 
 from fastapi import FastAPI, Response, status
 
+
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
 from chroma_server.types import AddEmbedding, QueryEmbedding
 from chroma_server.logger import logger
 from chroma_server.utils.telemetry.capture import Capture
+from chroma_server.utils.config.settings import get_settings
+
+import sentry_sdk
+from sentry_sdk import configure_scope
+from posthog.sentry.posthog_integration import PostHogIntegration
+
+PostHogIntegration.organization = "chroma"
+
+sentry_sdk.init(
+    dsn="https://ef5fae1e461f49b3a7a2adf3404378ab@o4504080408051712.ingest.sentry.io/4504080409296896",
+
+    # Set traces_sample_rate to 1.0 to capture 100%
+    # of transactions for performance monitoring.
+    # We recommend adjusting this value in production,
+    traces_sample_rate=1.0,
+    integrations=[PostHogIntegration()],
+)
+
+# raise Exception("get_settings().telemetry_anonymized_uuid", get_settings().telemetry_anonymized_uuid)
+with configure_scope() as scope:
+    scope.set_tag('posthog_distinct_id', get_settings().telemetry_anonymized_uuid)
 
 # Boot script
 db = DuckDB
@@ -34,6 +56,10 @@ if os.path.exists(".chroma/index.bin"):
 
 chroma_telemetry = Capture()
 chroma_telemetry.capture('server-start')
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0
 
 # API Endpoints
 @app.get("/api/v1")
