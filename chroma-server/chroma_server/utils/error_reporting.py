@@ -9,8 +9,15 @@ sample_rate = 1.0
 if get_settings().environment == "production":
     sample_rate = 0.1
 
+def strip_sensitive_data(event, hint):
+    if 'server_name' in event:
+        del event['server_name']
+        return event
+
 def init_error_reporting():
-    chroma_client = Client(dsn="https://ef5fae1e461f49b3a7a2adf3404378ab@o4504080408051712.ingest.sentry.io/4504080409296896")
+    chroma_client = Client(
+        dsn="https://ef5fae1e461f49b3a7a2adf3404378ab@o4504080408051712.ingest.sentry.io/4504080409296896",
+        )
     if get_settings().user_sentry_dsn:
         user_client = Client(dsn=get_settings().user_sentry_dsn)
 
@@ -24,7 +31,8 @@ def init_error_reporting():
         transport=send_event,
         traces_sample_rate=sample_rate,
         integrations=[PostHogIntegration()],
-        environment=get_settings().environment
+        environment=get_settings().environment,
+        before_send=strip_sensitive_data,
     )
     with configure_scope() as scope:
         scope.set_tag('posthog_distinct_id', get_settings().telemetry_anonymized_uuid)
