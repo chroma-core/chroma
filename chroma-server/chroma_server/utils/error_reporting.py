@@ -15,7 +15,8 @@ def init_error_reporting():
         user_client = Client(dsn=get_settings().user_sentry_dsn)
 
     def send_event(event):
-        chroma_client.capture_event(event)
+        if not get_settings().disable_anonymized_telemetry:
+            chroma_client.capture_event(event)
         if get_settings().user_sentry_dsn:
             user_client.capture_event(event)
 
