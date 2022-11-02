@@ -20,7 +20,7 @@ class Capture(Telemetry):
         posthog.host = 'https://app.posthog.com'
         self._conn = posthog
 
-        if get_settings().telemetry_anonymized_uuid == False:
+        if not get_settings().telemetry_anonymized_uuid:
             self._telemetry_anonymized_uuid = uuid.uuid4()
 
             with open(".env", "a") as f:

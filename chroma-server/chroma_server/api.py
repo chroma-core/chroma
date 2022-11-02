@@ -15,10 +15,10 @@ from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
 from chroma_server.types import AddEmbedding, QueryEmbedding
 from chroma_server.logger import logger
 from chroma_server.utils.telemetry.capture import Capture
-from chroma_server.utils.config.settings import get_settings
-
 from chroma_server.utils.error_reporting import init_error_reporting
 
+chroma_telemetry = Capture()
+chroma_telemetry.capture('server-start')
 init_error_reporting()
 
 # Boot script
