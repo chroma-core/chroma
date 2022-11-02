@@ -11,8 +11,10 @@ from chroma_server.types import AddEmbedding, QueryEmbedding
 from chroma_server.logger import logger
 from chroma_server.utils.telemetry.capture import Capture
 
+from chroma_server.db.postgres import database, User, Embedding, Postgres
+
 # Boot script
-db = DuckDB
+db = Postgres
 ann_index = Hnswlib
 
 app = FastAPI(debug=True)
@@ -35,6 +37,29 @@ if os.path.exists(".chroma/index.bin"):
 chroma_telemetry = Capture()
 chroma_telemetry.capture('server-start')
 
+@app.on_event("startup")
+async def startup():
+    if not database.is_connected:
+        await database.connect()
+    # create a dummy entry
+    await User.objects.get_or_create(email="test@test.com")
+    
+@app.on_event("shutdown")
+async def shutdown():
+    if database.is_connected:
+        await database.disconnect()
+
+# @app.get("/add_embedding")
+# async def add():
+#     new_embedding = await Embedding.objects.get_or_create(
+#         embedding_data=[1,2,3,4,5,6,7,9,10,11,12,14,15,16,15,15,25,25,25,25,25,25,25,25,2,52,5,25,2,5,25,2,5,25,2,52,5,2,5,25,2,5],
+#         input_uri="/test/test.jpg",
+#         dataset="training",
+#         custom_quality_score=0.0,
+#         category_name="spoon"
+#         )
+#     return new_embedding
+
 # API Endpoints
 @app.get("/api/v1")
 async def root():
@@ -50,7 +75,7 @@ async def add_to_db(new_embedding: AddEmbedding):
     - supports single or batched embeddings
     '''
 
-    app._db.add_batch(
+    await app._db.add_batch(
         new_embedding.embedding_data, 
         new_embedding.input_uri, 
         new_embedding.dataset,
@@ -73,14 +98,14 @@ async def fetch(where_filter={}, sort=None, limit=None):
     Fetches embeddings from the database
     - enables filtering by where_filter, sorting by key, and limiting the number of results
     '''
-    return app._db.fetch(where_filter, sort, limit).to_dict(orient="records")
+    return await app._db.fetch(where_filter, sort, limit)
 
 @app.get("/api/v1/count")
 async def count():
     '''
     Returns the number of records in the database
     '''
-    return ({"count": app._db.count()})
+    return ({"count": await app._db.count()})
 
 @app.get("/api/v1/persist")
 async def persist():
@@ -111,7 +136,7 @@ async def rand(where_filter={}, sort=None, limit=None):
     '''
     results = app._db.fetch(where_filter, sort, limit)
     rand = rand_bisectional_subsample(results)
-    return rand.to_dict(orient="records")
+    return rand
 
 @app.post("/api/v1/get_nearest_neighbors")
 async def get_nearest_neighbors(embedding: QueryEmbedding):
@@ -131,6 +156,6 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
     return {
         "ids": nn[0].tolist()[0],
-        "embeddings": app._db.get_by_ids(nn[0].tolist()[0]).to_dict(orient="records"),
+        "embeddings": app._db.get_by_ids(nn[0].tolist()[0]),
         "distances": nn[1].tolist()[0]
     }

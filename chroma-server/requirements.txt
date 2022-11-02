@@ -7,3 +7,14 @@ duckdb==0.5.1
 hnswlib @ git+https://oauth2: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@github.com/chroma-core/hnswlib.git
 posthog
 uuid==1.30
+
+# app
+pydantic
+# db
+psycopg2==2.8.6
+SQLAlchemy
+
+asyncpg
+ormar
+ormar-postgres-extensions
+psycopg2

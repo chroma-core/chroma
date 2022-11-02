@@ -1,0 +1,25 @@
+version: '3.9'
+services:
+  server:
+    build:
+      context: ./chroma-server
+      dockerfile: Dockerfile
+    volumes:
+      - ./chroma-server/:/chroma-server/
+    command: uvicorn chroma_server:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    env_file:
+      - ./chroma-server/.env
+    ports:
+      - 8000:8000
+    depends_on:
+      - db
+  db:
+    image: postgres:13-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    env_file:
+      - ./chroma-server/.env
+    ports:
+      - 5432:5432
+volumes:
+    postgres_data:

@@ -5,6 +5,10 @@ FROM --platform=linux/amd64 python:3.10
 
 WORKDIR /chroma-server
 
+RUN apt-get update \
+  && apt-get -y install netcat gcc postgresql \
+  && apt-get clean
+
 COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r requirements.txt

@@ -25,7 +25,7 @@ if __name__ == "__main__":
     start = time.time()
 
     dataset = "training"
-    BATCH_SIZE = 10_000
+    BATCH_SIZE = 5_000
 
     print("Loading in records with a batch size of: " , data_length)
 
@@ -52,10 +52,13 @@ if __name__ == "__main__":
             for idx, annotation in enumerate(row['infer']['annotations']):
                 category_names.append(annotation['category_name'])
 
-        chroma.log_batch(
+        # dataset to datasets
+        datasets = [dataset] * len(batch)
+
+        chroma.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset=dataset,
+            dataset=datasets,
             category_name=category_names
         )
 
