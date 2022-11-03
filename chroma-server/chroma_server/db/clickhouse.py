@@ -1,6 +1,7 @@
 from os import EX_CANTCREAT
 from chroma_server.db.abstract import Database
 import uuid
+import time
 
 from clickhouse_driver import connect, Client
 
@@ -39,6 +40,7 @@ class Clickhouse(Database):
         pass
 
     def fetch(self, where_filter={}, sort=None, limit=None):
+        s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
         if where_filter is not None:
             if not isinstance(where_filter, dict):
@@ -60,7 +62,7 @@ class Clickhouse(Database):
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
 
-        return self._conn.execute(f'''
+        val = self._conn.execute(f'''
             SELECT 
                 uuid,
                 embedding_data, 
@@ -72,6 +74,9 @@ class Clickhouse(Database):
                 embeddings
         {where_filter}
         ''')
+        print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
+
+        return val
 
     def delete_batch(self, batch):
         pass
