@@ -6,6 +6,12 @@ from chroma_server.utils import logger
 class Hnswlib(Index):
 
     _index = None
+
+    # these data structures enable us to map between uuids and ids
+    # - our uuids are strings (clickhouse doesnt do autoincrementing ids for performance)
+    # - but hnswlib uses integers only as ids
+    # - so this is a temporary bandaid. 
+    # TODO: this should get written to disk somehow or we the index will be come useless after a restart
     _id_to_uuid = {}
     _uuid_to_id = {}
 
@@ -28,7 +34,7 @@ class Hnswlib(Index):
             i += 1
 
         # We split the data in two batches:
-        data1 = embeddings # embedding_data['embedding_data'].to_numpy().tolist()
+        data1 = embeddings
         dim = len(data1[0])
         num_elements = len(data1) 
         # logger.debug("dimensionality is:", dim)

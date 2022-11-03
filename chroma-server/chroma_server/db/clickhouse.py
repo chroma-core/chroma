@@ -60,7 +60,7 @@ class Clickhouse(Database):
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
 
-        fetch_results = self._conn.execute(f'''
+        return self._conn.execute(f'''
             SELECT 
                 uuid,
                 embedding_data, 
@@ -73,10 +73,6 @@ class Clickhouse(Database):
         {where_filter}
         ''')
 
-        # print('fetch_results', fetch_results)
-
-        return fetch_results
-
     def delete_batch(self, batch):
         pass
 
@@ -87,9 +83,6 @@ class Clickhouse(Database):
         pass
 
     def get_by_ids(self, ids=list):
-        # ids = "'" + "','".join([str(x) for x in ids]) + "'"
-        # print("id list", ids)
-
         return self._conn.execute(f'''
             SELECT 
                 uuid,
