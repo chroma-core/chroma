@@ -1,1 +1,12 @@
+# ignore mac created DS_Store files
 .DS_Store
+**/.DS_Store
+
+__pycache__
+**/__pycache__
+
+chroma-server/chroma_logs.log
+
+**/data__nogit
+
+**/.ipynb_checkpoints

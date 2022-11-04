@@ -1,3 +1,8 @@
 httpx
 pytest
 setuptools_scm
+duckdb
+hnswlib @ git+https://oauth2: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@github.com/chroma-core/hnswlib.git
+pandas
+numpy
+pyarrow
