@@ -45,7 +45,6 @@ class Clickhouse(Database):
         ) ENGINE = MergeTree() ORDER BY space_key''')
 
     def __init__(self):
-        # https://stackoverflow.com/questions/59224272/connect-cannot-assign-requested-address
         client = Client('clickhouse')
         self._conn = client
         self._create_table_embeddings()
@@ -103,13 +102,7 @@ class Clickhouse(Database):
 
     def get_by_ids(self, ids=list):
         return self._conn.execute(f'''
-            SELECT 
-                {db_schema_to_keys()}
-            FROM 
-                embeddings
-            WHERE
-                uuid IN ({ids})
-        ''')
+            SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({ids})''')
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')

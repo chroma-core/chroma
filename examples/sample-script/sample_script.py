@@ -3,6 +3,7 @@ from chroma_client import Chroma
 
 chroma = Chroma()
 
+print(chroma.heartbeat())
 
 chroma.set_context("test", "1", "2")
 # chroma.reset()

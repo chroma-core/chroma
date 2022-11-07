@@ -22,16 +22,12 @@ app._ann_index = ann_index()
 # API Endpoints
 @app.get("/api/v1")
 async def root():
-    '''
-    Heartbeat endpoint
-    '''
+    '''Heartbeat endpoint'''
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
 
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add_to_db(new_embedding: AddEmbedding):
-    '''
-    Save batched embeddings to database
-    '''
+    '''Save batched embeddings to database'''
     app._db.add_batch(
         new_embedding.space_key, 
         new_embedding.embedding_data, 

@@ -8,7 +8,6 @@ from chroma_server.utils import logger
 
 class Hnswlib(Index):
 
-    # we cache the index and mappers for the latest space_key
     _space_key = None
     _index = None
     _index_metadata = {
@@ -16,23 +15,19 @@ class Hnswlib(Index):
         'elements': None,
         'time_created': None,
     }
+
     # these data structures enable us to map between uuids and ids
     # - our uuids are strings (clickhouse doesnt do autoincrementing ids for performance)
     # - but hnswlib uses integers only as ids
-    # - so this is a bandaid. 
     _id_to_uuid = {}
     _uuid_to_id = {}
 
     def __init__(self):
         pass
 
-    def run(self, space_key, uuids, embedding_data):
+    def run(self, space_key, uuids, embeddings):
         # more comments available at the source: https://github.com/nmslib/hnswlib
-
-        self._space_key = space_key
-
-        s1 = time.time()
-        embeddings = embedding_data
+        dimensionality = len(embeddings[0])
         ids = []
         i = 0
 
@@ -41,39 +36,22 @@ class Hnswlib(Index):
             self._id_to_uuid[i] = str(uuid)
             self._uuid_to_id[str(uuid)] = i
             i += 1
-        
-        data1 = embeddings
-        dim = len(data1[0])
-        num_elements = len(data1) 
-        # logger.debug("dimensionality is:", dim)
-        # logger.debug("total number of elements is:", num_elements)
 
-        p = hnswlib.Index(space='l2', dim=dim)  # # Declaring index, possible options are l2, cosine or ip
-        p.init_index(max_elements=len(data1), ef_construction=100, M=16) # Initing index
-        p.set_ef(10)  # Controlling the recall by setting ef:
-        p.set_num_threads(4) # Set number of threads used during batch search/construction
+        index = hnswlib.Index(space='l2', dim=dimensionality) # possible options are l2, cosine or ip
+        index.init_index(max_elements=len(embeddings), ef_construction=100, M=16) 
+        index.set_ef(10) 
+        index.set_num_threads(4) 
+        index.add_items(embeddings, ids)
 
-        # logger.debug("Adding first batch of elements", (len(data1)))
-        s2= time.time()
-        p.add_items(data1, ids)
-
-        # Query the elements for themselves and measure recall:
-        # database_ids, distances = p.knn_query(data1, k=1)
-        # logger.debug("database_ids", database_ids)
-        # logger.debug("distances", distances)
-        # logger.debug(len(distances))
-        # logger.debug("Recall for the first batch:" + str(np.mean(database_ids.reshape(-1) == np.arange(len(data1)))))
-
-        self._index = p
-
+        self._index = index
+        self._space_key = space_key
         self._index_metadata = {
-            'dimensionality': dim,
-            'elements': num_elements,
+            'dimensionality': dimensionality,
+            'elements': len(embeddings) ,
             'time_created': time.time(),
         }
-
         self.save()
-
+        
     def save(self):
         if self._index is None:
             return

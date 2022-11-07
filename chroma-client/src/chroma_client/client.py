@@ -17,65 +17,35 @@ class Chroma:
             self._space_key = app + "_" + model_version + "_" + layer
 
     def set_context(self, app, model_version, layer):
-        '''
-        Sets the context of the client
-        '''
+        '''Sets the context of the client'''
         self._space_key = app + "_" + model_version + "_" + layer
 
     def set_space_key(self, space_key):
-        '''
-        Sets the space key for the client, enables overriding the string concat
-        '''
+        '''Sets the space key for the client, enables overriding the string concat'''
         self._space_key = space_key
 
     def get_context(self):
-        '''
-        Returns the space key
-        '''
+        '''Returns the space key'''
         return self._space_key
 
+    def heartbeat(self):
+        '''Returns the current server time in nanoseconds to check if the server is alive'''
+        return requests.get(self._api_url).json()
+
     def count(self, space_key=None):
-        '''
-        Returns the number of embeddings in the database
-        '''
-        payload = json.dumps({"space_key": space_key or self._space_key})
-        x = requests.get(self._api_url + "/count", data=payload)
+        '''Returns the number of embeddings in the database'''
+        x = requests.get(self._api_url + "/count", data=json.dumps({"space_key": space_key or self._space_key}))
         return x.json()
 
     def fetch(self, where_filter={}, sort=None, limit=None):
-        '''
-        Fetches embeddings from the database
-        '''
+        '''Fetches embeddings from the database'''
         where_filter["space_key"] = self._space_key
-
-        x = requests.get(self._api_url + "/fetch", data=json.dumps({
+        return requests.get(self._api_url + "/fetch", data=json.dumps({
             "where_filter":where_filter, 
             "sort":sort, 
             "limit":limit
-        }))
-        return x.json()
-
-    def process(self, space_key=None):
-        '''
-        Processes embeddings in the database
-        - currently this only runs hnswlib, doesnt return anything
-        '''
-        requests.get(self._api_url + "/process", data = json.dumps({"space_key": space_key or self._space_key}))
-        return True
-
-    def reset(self):
-        '''
-        Resets the database
-        '''
-        return requests.get(self._api_url + "/reset")
-
-    def heartbeat(self):
-        '''
-        Returns the current server time in milliseconds to check if the server is alive
-        '''
-        x = requests.get(self._api_url)
-        return x.json()
-
+        })).json()
+   
     def log(self, 
         embedding_data: list, 
         input_uri: list, 
@@ -108,47 +78,45 @@ class Chroma:
     
     def log_training(self, embedding_data: list, input_uri: list, category_name: list, space_keys: list = None):
         '''
-        Small wrapper around log() to log a batch of training embedding
-        - sets dataset to "training"
+        Small wrapper around log() to log a batch of training embedding - sets dataset to "training"
         '''
+        datasets = ["training"] * len(input_uri)
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="training",
+            dataset=datasets,
             category_name=category_name,
             space_keys=space_keys
         )
         
     def log_production(self, embedding_data: list, input_uri: list, category_name: list, space_keys: list = None):
         '''
-        Small wrapper around log() to log a batch of production embedding
-        - sets dataset to "production"
+        Small wrapper around log() to log a batch of production embedding - sets dataset to "production"
         '''
+        datasets = ["production"] * len(input_uri)
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="production",
+            dataset=datasets,
             category_name=category_name,
             space_keys=space_keys
         )
         
     def log_triage(self, embedding_data: list, input_uri: list, category_name: list, space_keys: list = None):
         '''
-        Small wrapper around log() to log a batch of triage embedding
-        - sets dataset to "triage"
+        Small wrapper around log() to log a batch of triage embedding - sets dataset to "triage"
         '''
+        datasets = ["triage"] * len(input_uri)
         return self.log(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
-            dataset="triage",
+            dataset=datasets,
             category_name=category_name,
             space_keys=space_keys
         )
         
     def get_nearest_neighbors(self, embedding, n_results=10, category_name=None, dataset="training", space_key = None):
-        '''
-        Gets the nearest neighbors of a single embedding
-        '''
+        '''Gets the nearest neighbors of a single embedding'''
         if not space_key:
             space_key = self._space_key
 
@@ -165,9 +133,18 @@ class Chroma:
         else:
             return False
 
+    def process(self, space_key=None):
+        '''
+        Processes embeddings in the database
+        - currently this only runs hnswlib, doesnt return anything
+        '''
+        requests.get(self._api_url + "/process", data = json.dumps({"space_key": space_key or self._space_key}))
+        return True
+
+    def reset(self):
+        '''Resets the database'''
+        return requests.get(self._api_url + "/reset")
+
     def raw_sql(self, sql):
-        '''
-        Runs a raw SQL query against the database
-        '''
-        x = requests.get(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql}))
-        return x.json()
+        '''Runs a raw SQL query against the database'''
+        return requests.get(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql})).json()
