@@ -4,9 +4,8 @@ import time
 
 from fastapi import FastAPI, Response, status
 
-from chroma_server.db.clickhouse import Clickhouse
+from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
-from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
 from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding
 from chroma_server.utils import logger
 
@@ -20,14 +19,6 @@ app = FastAPI(debug=True)
 app._db = db()
 app._ann_index = ann_index()
 
-# scoping
-# an embedding space is specific to a particular trained model and layer
-# instead of making the user manage this complexity, we will handle some conventions here
-# that being said, we will only store a single string, "space_key" in the db, which the user can, in principle, override
-# - embeddings are always written with and fetched from the same space_key
-# - indexes are specific to a space_key and a timestamp
-# - the client can handle the app + model_verison + layer => space_key string generation
-
 # API Endpoints
 @app.get("/api/v1")
 async def root():
@@ -39,8 +30,7 @@ async def root():
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add_to_db(new_embedding: AddEmbedding):
     '''
-    Save embedding to database
-    - supports single or batched embeddings
+    Save batched embeddings to database
     '''
     app._db.add_batch(
         new_embedding.space_key, 
@@ -51,15 +41,15 @@ async def add_to_db(new_embedding: AddEmbedding):
         new_embedding.category_name
     )
 
-    return {"response": "Added record to database"}
+    return {"response": "Added records to database"}
 
 @app.get("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
     '''
-    where_filter = {"space_key": process_embedding.space_key}
-    app._ann_index.run(process_embedding.space_key, app._db.fetch(where_filter))
+    fetch = app._db.fetch({"space_key": process_embedding.space_key}, columnar=True)
+    app._ann_index.run(process_embedding.space_key, fetch[1], fetch[2]) # more magic number, ugh
 
 @app.get("/api/v1/fetch")
 async def fetch(fetch_embedding: FetchEmbedding):
@@ -79,11 +69,12 @@ async def count(count_embedding: CountEmbedding):
 @app.get("/api/v1/reset")
 async def reset():
     '''
-    Reset the database and index
+    Reset the database and index - WARNING: Destructive! 
     '''
     app._db = db()
     app._db.reset()
     app._ann_index = ann_index()
+    app._ann_index.reset()
     return True
 
 @app.post("/api/v1/get_nearest_neighbors")
@@ -104,7 +95,7 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
 
     if filter_by_where is not None:
         results = app._db.fetch(filter_by_where)
-        ids = [str(item[1]) for item in results] # 1 is the uuid column
+        ids = [str(item[get_col_pos('uuid')]) for item in results] 
     
     uuids, distances = app._ann_index.get_nearest_neighbors(embedding.space_key, embedding.embedding, embedding.n_results, ids)
     return {

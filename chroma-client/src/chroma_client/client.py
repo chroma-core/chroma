@@ -5,8 +5,6 @@ from typing import Union
 class Chroma:
 
     _api_url = "http://localhost:8000/api/v1"
-
-    # we enable the user to set the space_key in the constructor
     _space_key = None
 
     def __init__(self, url=None, app=None, model_version=None, layer=None):
@@ -14,8 +12,6 @@ class Chroma:
 
         if isinstance(url, str) and url.startswith("http"):
             self._api_url = url
-
-        self.url = url
 
         if app and model_version and layer:
             self._space_key = app + "_" + model_version + "_" + layer
@@ -28,7 +24,7 @@ class Chroma:
 
     def set_space_key(self, space_key):
         '''
-        Sets the space key for the client
+        Sets the space key for the client, enables overriding the string concat
         '''
         self._space_key = space_key
 
@@ -85,8 +81,7 @@ class Chroma:
         input_uri: list, 
         dataset: list = None,
         category_name: list = None,
-        space_keys: list = None
-        ):
+        space_keys: list = None):
         '''
         Logs a batch of embeddings to the database
         - pass in column oriented data lists

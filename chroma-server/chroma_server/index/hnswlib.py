@@ -1,6 +1,7 @@
 import hnswlib
 import pickle
 import time
+import os
 import numpy as np
 from chroma_server.index.abstract import Index
 from chroma_server.utils import logger
@@ -25,22 +26,20 @@ class Hnswlib(Index):
     def __init__(self):
         pass
 
-    def run(self, space_key, embedding_data):
+    def run(self, space_key, uuids, embedding_data):
         # more comments available at the source: https://github.com/nmslib/hnswlib
 
         self._space_key = space_key
 
         s1 = time.time()
-        uuids = []
-        embeddings = []
+        embeddings = embedding_data
         ids = []
         i = 0
-        for embedding in embedding_data:
-            uuids.append(str(embedding[1]))
-            embeddings.append((embedding[2]))
+
+        for uuid in uuids:
             ids.append(i)
-            self._id_to_uuid[i] = str(embedding[1])
-            self._uuid_to_id[str(embedding[1])] = i
+            self._id_to_uuid[i] = str(uuid)
+            self._uuid_to_id[str(uuid)] = i
             i += 1
         
         data1 = embeddings
@@ -48,11 +47,7 @@ class Hnswlib(Index):
         num_elements = len(data1) 
         # logger.debug("dimensionality is:", dim)
         # logger.debug("total number of elements is:", num_elements)
-        # logger.debug("max elements", num_elements//2)
 
-        concatted_data = data1 
-        # logger.debug("concatted_data", len(concatted_data))
-        
         p = hnswlib.Index(space='l2', dim=dim)  # # Declaring index, possible options are l2, cosine or ip
         p.init_index(max_elements=len(data1), ef_construction=100, M=16) # Initing index
         p.set_ef(10)  # Controlling the recall by setting ef:
@@ -61,7 +56,6 @@ class Hnswlib(Index):
         # logger.debug("Adding first batch of elements", (len(data1)))
         s2= time.time()
         p.add_items(data1, ids)
-        print('time to add the items: ', time.time() - s2)
 
         # Query the elements for themselves and measure recall:
         # database_ids, distances = p.knn_query(data1, k=1)
@@ -140,3 +134,7 @@ class Hnswlib(Index):
             uuids.append(self._id_to_uuid[id])
         
         return uuids, distances
+
+    def reset(self):
+        for f in os.listdir('/index_data'):
+            os.remove(os.path.join('/index_data', f))
