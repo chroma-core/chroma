@@ -6,7 +6,7 @@ from fastapi import FastAPI, Response, status
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
-from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding
+from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql
 from chroma_server.utils import logger
 
 # Boot script
@@ -103,3 +103,7 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
         "embeddings": app._db.get_by_ids(uuids),
         "distances": distances.tolist()[0]
     }
+
+@app.get("/api/v1/raw_sql")
+async def raw_sql(raw_sql: RawSql):
+    return app._db.raw_sql(raw_sql.raw_sql)

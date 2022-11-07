@@ -114,3 +114,6 @@ class Clickhouse(Database):
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
         self._create_table_embeddings()
+
+    def raw_sql(self, sql):
+        return self._conn.execute(sql)

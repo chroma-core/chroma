@@ -25,12 +25,12 @@ if __name__ == "__main__":
     start = time.time()
 
     dataset = "training"
-    BATCH_SIZE = 100_000
+    BATCH_SIZE = 10_000
 
     print("Loading in records with a batch size of: " , data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if i >= 300_000:
+        if i >= 20_000:
             break
 
         end = time.time()
