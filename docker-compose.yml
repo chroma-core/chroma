@@ -11,6 +11,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./chroma-server/:/chroma-server/
+      - index_data:/index_data
     command: uvicorn chroma_server:app --reload --workers 1 --host 0.0.0.0 --port 8000
     # env_file:
     #   - ./chroma-server/.env
@@ -35,5 +36,7 @@ services:
 
 volumes:
   clickhouse_data:
+    driver: local
+  index_data:
     driver: local
 

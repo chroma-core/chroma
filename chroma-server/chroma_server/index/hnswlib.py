@@ -1,4 +1,5 @@
 import hnswlib
+import pickle
 import time
 import numpy as np
 from chroma_server.index.abstract import Index
@@ -6,21 +7,23 @@ from chroma_server.utils import logger
 
 class Hnswlib(Index):
 
+    # we cache the index and mappers for the latest space_key
+    _space_key = None
     _index = None
-
     # these data structures enable us to map between uuids and ids
     # - our uuids are strings (clickhouse doesnt do autoincrementing ids for performance)
     # - but hnswlib uses integers only as ids
-    # - so this is a temporary bandaid. 
-    # TODO: this should get written to disk somehow or we the index will be come useless after a restart
+    # - so this is a bandaid. 
     _id_to_uuid = {}
     _uuid_to_id = {}
 
     def __init__(self):
         pass
 
-    def run(self, embedding_data):
+    def run(self, space_key, embedding_data):
         # more comments available at the source: https://github.com/nmslib/hnswlib
+
+        self._space_key = space_key
 
         s1 = time.time()
         uuids = []
@@ -28,16 +31,13 @@ class Hnswlib(Index):
         ids = []
         i = 0
         for embedding in embedding_data:
-            uuids.append(str(embedding[0]))
-            embeddings.append((embedding[1]))
+            uuids.append(str(embedding[1]))
+            embeddings.append((embedding[2]))
             ids.append(i)
-            self._id_to_uuid[i] = str(embedding[0])
-            self._uuid_to_id[str(embedding[0])] = i
+            self._id_to_uuid[i] = str(embedding[1])
+            self._uuid_to_id[str(embedding[1])] = i
             i += 1
         
-        print('time to create uuids and embeddings: ', time.time() - s1)
-
-        # We split the data in two batches:
         data1 = embeddings
         dim = len(data1[0])
         num_elements = len(data1) 
@@ -67,25 +67,40 @@ class Hnswlib(Index):
 
         self._index = p
 
-    def fetch(self, query):
-       raise NotImplementedError
+        self.save()
 
-    def delete_batch(self, batch):
-        raise NotImplementedError
-
-    def persist(self):
+    def save(self):
         if self._index is None:
             return
-        self._index.save_index(".chroma/index.bin")
-        logger.debug('Index saved to .chroma/index.bin')
+        self._index.save_index(f"/index_data/index_{self._space_key}.bin")
 
-    def load(self, elements, dimensionality):
+        # pickle the mappers
+        with open(f"/index_data/id_to_uuid_{self._space_key}.pkl", 'wb') as f:
+            pickle.dump(self._id_to_uuid, f, pickle.HIGHEST_PROTOCOL)
+        with open(f"/index_data/uuid_to_id_{self._space_key}.pkl", 'wb') as f:
+            pickle.dump(self._uuid_to_id, f, pickle.HIGHEST_PROTOCOL)
+
+        logger.debug('Index saved to /index_data/index.bin')
+
+    def load(self, space_key, elements, dimensionality):
         p = hnswlib.Index(space='l2', dim= dimensionality)
         self._index = p
-        self._index.load_index(".chroma/index.bin", max_elements= elements)
+        self._index.load_index(f"/index_data/index_{space_key}.bin", max_elements= elements)
+
+        # unpickle the mappers
+        with open(f"/index_data/id_to_uuid_{space_key}.pkl", 'rb') as f:
+            self._id_to_uuid = pickle.load(f)
+        with open(f"/index_data/uuid_to_id_{space_key}.pkl", 'rb') as f:
+            self._uuid_to_id = pickle.load(f)
+
+        self._space_key = space_key
 
     # do knn_query on hnswlib to get nearest neighbors
-    def get_nearest_neighbors(self, query, k, uuids=None):
+    def get_nearest_neighbors(self, space_key, query, k, uuids=None):
+
+        if self._space_key != space_key:
+            # TODO: deal with this magic number.... 
+            self.load(space_key, 500_000, len(query))
 
         s2= time.time()
         # get ids from uuids

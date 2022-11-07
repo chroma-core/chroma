@@ -1,5 +1,6 @@
 from abc import abstractmethod
 
+# TODO: update this to match the clickhouse implementation
 class Database():
     @abstractmethod
     def __init__(self):
@@ -11,16 +12,4 @@ class Database():
 
     @abstractmethod
     def fetch(self, query):
-        pass
-
-    @abstractmethod
-    def delete_batch(self, batch):
-        pass
-
-    @abstractmethod
-    def persist(self):
-        pass
-
-    @abstractmethod
-    def load(self):
         pass

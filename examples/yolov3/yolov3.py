@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     data_length = len(df)
 
-    chroma = Chroma()
+    chroma = Chroma(app="yolov3", model_version="1", layer="1")
     chroma.reset() #make sure we are using a fresh db
     allstart = time.time()
     start = time.time()
