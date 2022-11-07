@@ -62,8 +62,6 @@ class Clickhouse(Database):
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
 
-        print("where_filter", where_filter)
-
         val = self._conn.execute(f'''
             SELECT 
                 space_key,
