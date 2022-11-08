@@ -133,6 +133,6 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     uuids, distances = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
-        "embeddings": app._db.get_by_ids(uuids),#
+        "embeddings": app._db.get_by_ids(uuids),
         "distances": distances.tolist()[0]
     }

@@ -19,7 +19,6 @@ class Clickhouse(Database):
         )  ENGINE = Memory''')
 
     def __init__(self):
-        # https://stackoverflow.com/questions/59224272/connect-cannot-assign-requested-address
         client = Client('clickhouse')
         self._conn = client
         self._create_table_embeddings()
@@ -36,7 +35,7 @@ class Clickhouse(Database):
     def count(self):
         return self._conn.execute('SELECT COUNT() FROM embeddings')
 
-    def update(self, data): # call this update_custom_quality_score! that is all it does
+    def update(self, data):
         pass
 
     def fetch(self, where_filter={}, sort=None, limit=None):

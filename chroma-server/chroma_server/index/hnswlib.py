@@ -8,11 +8,6 @@ class Hnswlib(Index):
 
     _index = None
 
-    # these data structures enable us to map between uuids and ids
-    # - our uuids are strings (clickhouse doesnt do autoincrementing ids for performance)
-    # - but hnswlib uses integers only as ids
-    # - so this is a temporary bandaid. 
-    # TODO: this should get written to disk somehow or we the index will be come useless after a restart
     _id_to_uuid = {}
     _uuid_to_id = {}
 
