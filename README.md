@@ -30,3 +30,17 @@ python3 chroma/bin/test.py
 ```
 
 * These urls will be swapped out for the link in the repo once it is live
+
+
+### You should see something like
+
+```
+Getting heartbeat to verify the server is up
+{'nanosecond heartbeat': 1667865642509760965000}
+Logging embeddings into the database
+Generating the index
+True
+Running a nearest neighbor search
+{'ids': ['11540ca6-ebbc-4c81-8299-108d8c47c88c'], 'embeddings': [['sample_space', '11540ca6-ebbc-4c81-8299-108d8c47c88c', [1.0, 2.0, 3.0, 4.0, 5.0], '/images/1', 'training', None, 'spoon']], 'distances': [0.0]}
+Success! Everything worked!
+```
