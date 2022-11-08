@@ -1,13 +1,8 @@
 import os
-from random import sample
 import shutil
 import time
-from typing import Callable
 
-from fastapi import FastAPI, Response, status
-from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
+from fastapi import FastAPI, status
 
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
