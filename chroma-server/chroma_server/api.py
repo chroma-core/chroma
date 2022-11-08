@@ -2,19 +2,19 @@ import os
 import shutil
 import time
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, status
 
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
 from chroma_server.types import AddEmbedding, QueryEmbedding
-<<<<<<< HEAD
 from chroma_server.logger import logger
 from chroma_server.utils.telemetry.capture import Capture
-=======
-from chroma_server.utils import logger
+from chroma_server.utils.error_reporting import init_error_reporting
 
->>>>>>> main
+chroma_telemetry = Capture()
+chroma_telemetry.capture('server-start')
+init_error_reporting()
 
 # Boot script
 db = DuckDB
@@ -37,8 +37,6 @@ if os.path.exists(".chroma/index.bin"):
     logger.info("Loading existing chroma index")
     app._ann_index.load(app._db.count(), len(app._db.fetch(limit=1).embedding_data))
 
-chroma_telemetry = Capture()
-chroma_telemetry.capture('server-start')
 
 # API Endpoints
 @app.get("/api/v1")
