@@ -6,8 +6,9 @@ class AddEmbedding(BaseModel):
     embedding_data: list
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
-    custom_quality_score: Union[float, list] = None 
+    custom_quality_score: Union[float, list] = None
     category_name: Union[str, list] = None
+
 
 class QueryEmbedding(BaseModel):
     embedding: list

@@ -1,0 +1,8 @@
+[tool.black]
+line-length = 100
+
+# Black will refuse to run if it's not this version.
+required-version = "22.6.0"
+
+# Ensure black's output will be compatible with all listed versions.
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
