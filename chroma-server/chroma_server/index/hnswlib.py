@@ -2,7 +2,8 @@ import hnswlib
 import time
 import numpy as np
 from chroma_server.index.abstract import Index
-from chroma_server.utils import logger
+from chroma_server.logger import logger
+
 
 class Hnswlib(Index):
 
@@ -35,18 +36,20 @@ class Hnswlib(Index):
         # We split the data in two batches:
         data1 = embeddings
         dim = len(data1[0])
-        num_elements = len(data1) 
+        num_elements = len(data1)
         # logger.debug("dimensionality is:", dim)
         # logger.debug("total number of elements is:", num_elements)
         # logger.debug("max elements", num_elements//2)
 
-        concatted_data = data1 
+        concatted_data = data1
         # logger.debug("concatted_data", len(concatted_data))
-        
-        p = hnswlib.Index(space='l2', dim=dim)  # # Declaring index, possible options are l2, cosine or ip
-        p.init_index(max_elements=len(data1), ef_construction=100, M=16) # Initing index
+
+        p = hnswlib.Index(
+            space="l2", dim=dim
+        )  # # Declaring index, possible options are l2, cosine or ip
+        p.init_index(max_elements=len(data1), ef_construction=100, M=16)  # Initing index
         p.set_ef(10)  # Controlling the recall by setting ef:
-        p.set_num_threads(4) # Set number of threads used during batch search/construction
+        p.set_num_threads(4)  # Set number of threads used during batch search/construction
 
         # logger.debug("Adding first batch of elements", (len(data1)))
         s2= time.time()
@@ -63,7 +66,7 @@ class Hnswlib(Index):
         self._index = p
 
     def fetch(self, query):
-       raise NotImplementedError
+        raise NotImplementedError
 
     def delete_batch(self, batch):
         raise NotImplementedError
@@ -72,12 +75,12 @@ class Hnswlib(Index):
         if self._index is None:
             return
         self._index.save_index(".chroma/index.bin")
-        logger.debug('Index saved to .chroma/index.bin')
+        logger.debug("Index saved to .chroma/index.bin")
 
     def load(self, elements, dimensionality):
-        p = hnswlib.Index(space='l2', dim= dimensionality)
+        p = hnswlib.Index(space="l2", dim=dimensionality)
         self._index = p
-        self._index.load_index(".chroma/index.bin", max_elements= elements)
+        self._index.load_index(".chroma/index.bin", max_elements=elements)
 
     # do knn_query on hnswlib to get nearest neighbors
     def get_nearest_neighbors(self, query, k, uuids=None):

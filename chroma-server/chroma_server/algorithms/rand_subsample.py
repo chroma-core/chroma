@@ -1,5 +1,5 @@
-
 import random
+
 
 def rand_bisectional_subsample(data):
     """
