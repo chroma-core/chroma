@@ -9,7 +9,7 @@ from worker import heavy_offline_analysis
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
-from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql, Results
+from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql, Results, SpaceKeyInput
 from chroma_server.utils import logger
 
 from celery.result import AsyncResult
@@ -31,9 +31,9 @@ async def root():
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
 
 
-@app.get("/api/v1/trigger_heavy_celery_task")
-async def heavy_offline_analysis_api(space_key: str):
-    task = heavy_offline_analysis.delay(space_key)
+@app.get("/api/v1/calculate_results")
+async def calculate_results(space_key: SpaceKeyInput):
+    task = heavy_offline_analysis.delay(space_key.space_key)
     return JSONResponse({"task_id": task.id})
 
 @app.get("/api/v1/tasks/{task_id}")
@@ -47,7 +47,7 @@ async def get_status(task_id):
     return JSONResponse(result)
 
 @app.get("/api/v1/get_results")
-async def heavy_offline_results(results: Results):
+async def get_results(results: Results):
     return app._db.return_results(results.space_key, results.n_results)
 
     

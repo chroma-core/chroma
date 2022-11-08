@@ -48,6 +48,8 @@ class Clickhouse(Database):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY space_key''')
+
+        self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
     
     def _create_table_results(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS results (

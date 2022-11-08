@@ -148,3 +148,15 @@ class Chroma:
     def raw_sql(self, sql):
         '''Runs a raw SQL query against the database'''
         return requests.get(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql})).json()
+
+    def calculate_results(self, space_key=None):
+        '''Calculates the results for the given space key'''
+        return requests.get(self._api_url + "/calculate_results", data = json.dumps({"space_key": space_key or self._space_key})).json()
+
+    def get_results(self, space_key=None, n_results = 100):
+        '''Gets the results for the given space key'''
+        return requests.get(self._api_url + "/get_results", data = json.dumps({"space_key": space_key or self._space_key, "n_results": n_results})).json()
+    
+    def get_task_status(self, task_id):
+        '''Gets the status of a task'''
+        return requests.get(self._api_url + f"/tasks/{task_id}").json()
