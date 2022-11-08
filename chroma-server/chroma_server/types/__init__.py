@@ -30,3 +30,7 @@ class CountEmbedding(BaseModel):
 
 class RawSql(BaseModel):
     raw_sql: str = None
+
+class Results(BaseModel):
+    space_key: str
+    n_results: int = 100

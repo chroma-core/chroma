@@ -3,11 +3,16 @@ import shutil
 import time
 
 from fastapi import FastAPI, Response, status
+from fastapi.responses import JSONResponse
+
+from worker import heavy_offline_analysis
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
-from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql
+from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql, Results
 from chroma_server.utils import logger
+
+from celery.result import AsyncResult
 
 # Boot script
 db = Clickhouse
@@ -24,6 +29,28 @@ app._ann_index = ann_index()
 async def root():
     '''Heartbeat endpoint'''
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
+
+
+@app.get("/api/v1/trigger_heavy_celery_task")
+async def heavy_offline_analysis_api(space_key: str):
+    task = heavy_offline_analysis.delay(space_key)
+    return JSONResponse({"task_id": task.id})
+
+@app.get("/api/v1/tasks/{task_id}")
+async def get_status(task_id):
+    task_result = AsyncResult(task_id)
+    result = {
+        "task_id": task_id,
+        "task_status": task_result.status,
+        "task_result": task_result.result
+    }
+    return JSONResponse(result)
+
+@app.get("/api/v1/get_results")
+async def heavy_offline_results(results: Results):
+    return app._db.return_results(results.space_key, results.n_results)
+
+    
 
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add_to_db(new_embedding: AddEmbedding):
