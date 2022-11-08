@@ -42,9 +42,6 @@ if os.path.exists(".chroma/index.bin"):
     logger.info("Loading existing chroma index")
     app._ann_index.load(app._db.count(), len(app._db.fetch(limit=1).embedding_data))
 
-chroma_telemetry = Capture()
-chroma_telemetry.capture('server-start')
-
 
 # API Endpoints
 @app.get("/api/v1")
