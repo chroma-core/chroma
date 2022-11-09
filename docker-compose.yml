@@ -9,6 +9,7 @@ services:
     build:
       context: ./chroma-server
       dockerfile: Dockerfile
+      target: chroma_server
     volumes:
       - ./chroma-server/:/chroma-server/
     command: uvicorn chroma_server:app --reload --workers 1 --host 0.0.0.0 --port 8000

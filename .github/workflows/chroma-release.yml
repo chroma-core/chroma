@@ -44,6 +44,7 @@ jobs:
       with:
         context: chroma-server
         push: true
+        target: chroma_server
         tags: ${{ steps.tag.outputs.tag_name}}
     - name: Get Release Version
       id: version
