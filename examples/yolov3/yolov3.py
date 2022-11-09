@@ -88,6 +88,10 @@ if __name__ == "__main__":
     end = time.time()
     print("Time to get nearest neighbors: " +'{0:.2f}'.format((end - start)) + 's')
 
+    task = chroma.calculate_results()
+    print(task)
+    print(chroma.get_task_status(task['task_id']))
+
     fetched = chroma.count()
     print("Records loaded into the database: ",  fetched)
     del chroma
