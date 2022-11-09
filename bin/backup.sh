@@ -34,7 +34,7 @@ mkdir -p ../backups
 mkdir -p ../backups/$backup_name
 
 # create folder in ../backups with that name string, if folder already exists, exit
-docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="BACKUP database default TO Disk('backups', '$backup_name.zip')"
+docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="BACKUP DATABASE default TO Disk('backups', '$backup_name.zip')"
 
 # use that name to dump the clickhouse db and copy into the folder
 docker cp chroma_clickhouse_1:/etc/clickhouse-server/$backup_name.zip ../backups/$backup_name/$backup_name.zip

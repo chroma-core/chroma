@@ -27,17 +27,16 @@ fi
 
 echo $backup_name 
 
-# change file permissions so it can be loaded into the database in the docker container
-
 # change file permissions to -rw-r-----
 chmod 440 ../backups/$backup_name/$backup_name.zip
 chmod 777 ../backups/$backup_name/$backup_name.zip
-
 docker cp ../backups/$backup_name/index_data chroma_server_1:/
-
 docker cp ../backups/$backup_name/$backup_name.zip chroma_clickhouse_1:/etc/clickhouse-server/$backup_name.zip
+
 docker exec -u 0 -it chroma_clickhouse_1 chmod 777 /etc/clickhouse-server/$backup_name.zip
 docker exec -u 0 -it chroma_clickhouse_1 chown 1001 /etc/clickhouse-server/$backup_name.zip
 docker exec -u 0 -it chroma_clickhouse_1 chgrp root /etc/clickhouse-server/$backup_name.zip
-docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="DROP database default"
-docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="RESTORE database default FROM Disk('backups', '$backup_name.zip')"
+docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="DROP TABLE embeddings"
+docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="DROP TABLE results"
+docker exec -u 0 -it chroma_clickhouse_1 rm -rf /bitnami/clickhouse/data/tmp
+docker exec -u 0 -it chroma_clickhouse_1 clickhouse-client --query="RESTORE DATABASE default FROM Disk('backups', '$backup_name.zip')"
