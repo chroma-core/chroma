@@ -1,4 +1,6 @@
-#!/usr/bin/env bash -e
+#!/usr/bin/env bash
+
+set -e
 
 function cleanup {
   docker-compose -f docker-compose.test.yml down
