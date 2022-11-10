@@ -23,4 +23,4 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Test
-      run: bin/test
+      run: cd chroma-server && bin/test
