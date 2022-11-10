@@ -1,6 +1,7 @@
 from abc import abstractmethod
 
-class Index():
+
+class Index:
     @abstractmethod
     def __init__(self):
         pass

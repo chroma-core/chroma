@@ -4,11 +4,14 @@ from chroma_client import Chroma
 import pytest
 import time
 from httpx import AsyncClient
+
 # from ..api import app # this wont work because i moved the file
+
 
 @pytest.fixture
 def anyio_backend():
-    return 'asyncio'
+    return "asyncio"
+
 
 def test_init():
     chroma = Chroma()

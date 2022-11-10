@@ -2,22 +2,23 @@ import numpy as np
 import json
 import ast
 
+
 def class_distances(data):
-    ''''
+    """'
     This is all very subject to change, so essentially just copy and paste from what we had before
-    '''
+    """
 
     return False
 
     # def unpack_annotations(embeddings):
     #     annotations = [json.loads(embedding['infer'])["annotations"]for embedding in embeddings]
-    #     annotations = [annotation for annotation_list in annotations for annotation in annotation_list] 
+    #     annotations = [annotation for annotation_list in annotations for annotation in annotation_list]
     #     # Unpack embedding data
     #     embeddings = [embedding["embedding_data"] for embedding in embeddings]
     #     embedding_vectors_by_category = {}
     #     for embedding_annotation_pair in zip(embeddings, annotations):
     #         data = np.array(embedding_annotation_pair[0])
-    #         category = embedding_annotation_pair[1]['category_id'] 
+    #         category = embedding_annotation_pair[1]['category_id']
     #         if category in embedding_vectors_by_category.keys():
     #             embedding_vectors_by_category[category] = np.append(
     #                 embedding_vectors_by_category[category], data[np.newaxis, :], axis=0
@@ -84,5 +85,5 @@ def class_distances(data):
 
     #     if (len(inferences) == 0):
     #         raise Exception("No inferences found for datapoint")
-    
+
     # return output_distances

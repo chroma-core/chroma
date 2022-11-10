@@ -2,6 +2,7 @@ import requests
 import json
 from typing import Union
 
+
 class Chroma:
 
     _api_url = "http://localhost:8000/api/v1"

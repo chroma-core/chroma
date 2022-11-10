@@ -4,7 +4,8 @@ import time
 import os
 import numpy as np
 from chroma_server.index.abstract import Index
-from chroma_server.utils import logger
+from chroma_server.logger import logger
+
 
 class Hnswlib(Index):
 
@@ -16,9 +17,6 @@ class Hnswlib(Index):
         'time_created': None,
     }
 
-    # these data structures enable us to map between uuids and ids
-    # - our uuids are strings (clickhouse doesnt do autoincrementing ids for performance)
-    # - but hnswlib uses integers only as ids
     _id_to_uuid = {}
     _uuid_to_id = {}
 
