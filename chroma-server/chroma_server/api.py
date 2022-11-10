@@ -7,7 +7,7 @@ from fastapi import FastAPI, Response, status
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
-from chroma_server.types import AddEmbedding, QueryEmbedding
+from chroma_server.types import AddEmbedding, NNQueryEmbedding, FetchEmbeddings
 from chroma_server.utils import logger
 
 
@@ -55,8 +55,8 @@ async def add_to_db(new_embedding: AddEmbedding):
         new_embedding.embedding_data, 
         new_embedding.input_uri, 
         new_embedding.dataset,
-        new_embedding.custom_quality_score, 
-        new_embedding.category_name
+        new_embedding.inference_category_name,
+        new_embedding.label_category_name
         )
 
     return {"response": "Added record to database"}
@@ -69,12 +69,12 @@ async def process():
     app._ann_index.run(app._db.fetch())
 
 @app.get("/api/v1/fetch")
-async def fetch(where_filter={}, sort=None, limit=None):
+async def fetch(fetch: FetchEmbeddings):
     '''
     Fetches embeddings from the database
     - enables filtering by where_filter, sorting by key, and limiting the number of results
     '''
-    return app._db.fetch(where_filter, sort, limit).to_dict(orient="records")
+    return app._db.fetch(fetch.where_filter, fetch.sort, fetch.limit).to_dict(orient="records")
 
 @app.get("/api/v1/count")
 async def count():
@@ -115,21 +115,13 @@ async def rand(where_filter={}, sort=None, limit=None):
     return rand.to_dict(orient="records")
 
 @app.post("/api/v1/get_nearest_neighbors")
-async def get_nearest_neighbors(embedding: QueryEmbedding):
+async def get_nearest_neighbors(nn_query_embedding: NNQueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    ids = None
-    filter_by_where = {}
-    if embedding.category_name is not None:
-        filter_by_where['category_name'] = embedding.category_name
-    if embedding.dataset is not None:
-        filter_by_where['dataset'] = embedding.dataset
-
-    if filter_by_where is not None:
-        ids = app._db.fetch(filter_by_where)["id"].tolist()
+    ids = app._db.fetch(nn_query_embedding.where_filter)["id"].tolist()
     
-    nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
+    nn = app._ann_index.get_nearest_neighbors(nn_query_embedding.query_embedding_vector, nn_query_embedding.n_results, ids)
     return {
         "ids": nn[0].tolist()[0],
         "embeddings": app._db.get_by_ids(nn[0].tolist()[0]).to_dict(orient="records"),

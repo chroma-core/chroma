@@ -26,7 +26,7 @@ class Chroma:
         Fetches embeddings from the database
         '''
         x = requests.get(self._api_url + "/fetch", data=json.dumps({
-            "where_filter":json.dumps(where_filter), 
+            "where_filter": where_filter, 
             "sort":sort, 
             "limit":limit
         }))
@@ -70,7 +70,8 @@ class Chroma:
         embedding_data: list, 
         input_uri: list, 
         dataset: list = None,
-        category_name: list = None):
+        inference_category_name: list = None, 
+        label_category_name: list = None):
         '''
         Logs a batch of embeddings to the database
         - pass in column oriented data lists
@@ -80,7 +81,8 @@ class Chroma:
             "embedding_data": embedding_data, 
             "input_uri": input_uri, 
             "dataset": dataset, 
-            "category_name": category_name 
+            "inference_category_name": inference_category_name,
+            "label_category_name": label_category_name
         }) )
 
         if x.status_code == 201:
@@ -124,16 +126,15 @@ class Chroma:
             category_name=category_name
         )
         
-    def get_nearest_neighbors(self, embedding, n_results=10, category_name=None, dataset="training"):
+    def get_nearest_neighbors(self, query_embedding_vector, n_results=10, where_filter={}):
         '''
         Gets the nearest neighbors of a single embedding
         '''
         x = requests.post(self._api_url + "/get_nearest_neighbors", data = json.dumps({
-            "embedding": embedding, 
+            "query_embedding_vector": query_embedding_vector, 
             "n_results": n_results,
-            "category_name": category_name,
-            "dataset": dataset
-        }) )
+            "where_filter": where_filter,
+        }))
 
         if x.status_code == 200:
             return x.json()

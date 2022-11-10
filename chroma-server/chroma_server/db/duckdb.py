@@ -15,8 +15,8 @@ class DuckDB(Database):
                 embedding_data REAL[], 
                 input_uri STRING, 
                 dataset STRING,
-                custom_quality_score REAL,
-                category_name STRING
+                inference_category_name STRING,
+                label_category_name STRING
             )
         ''')
 
@@ -33,7 +33,7 @@ class DuckDB(Database):
         ''')
         return
 
-    def add_batch(self, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add_batch(self, embedding_data, input_uri, dataset=None, inference_category_name=None, label_category_name=None):
         '''
         Add embeddings to the database
         This accepts both a single input and a list of inputs
@@ -47,17 +47,17 @@ class DuckDB(Database):
             lengths = [len(x) for x in [embedding_data, input_uri]]
 
             # accepts some inputs as str or none, and this multiples them out to the correct length
-            if custom_quality_score is None or isinstance(custom_quality_score, str):
-                custom_quality_score = [custom_quality_score] * lengths[0]
-            if category_name is None or isinstance(category_name, str):
-                category_name = [category_name] * lengths[0]
+            if inference_category_name is None or isinstance(inference_category_name, str):
+                inference_category_name = [inference_category_name] * lengths[0]
+            if label_category_name is None or isinstance(label_category_name, str):
+                label_category_name = [label_category_name] * lengths[0]
             if dataset is None or isinstance(dataset, str):
                 dataset = [dataset] * lengths[0]
 
             # we have to move from column to row format for duckdb
             data_to_insert = []
             for i in range(lengths[0]):
-                data_to_insert.append([embedding_data[i], input_uri[i], dataset[i], custom_quality_score[i], category_name[i]])
+                data_to_insert.append([embedding_data[i], input_uri[i], dataset[i], inference_category_name[i], label_category_name[i]])
 
             if all(x == lengths[0] for x in lengths):
                 self._conn.executemany('''
@@ -67,32 +67,20 @@ class DuckDB(Database):
                 return
         
         # if any of the types are 'list' - throw an error
-        if any(x == list for x in [input_uri, dataset, custom_quality_score, category_name]):
+        if any(x == list for x in [input_uri, dataset, inference_category_name, label_category_name]):
             raise Exception("Invalid input types. One input is a list where others are not: " + str(types))
 
         # single insert mode
         # This should never fire because we do everything in batch mode, but given the mode away from duckdb likely, I am just leaving it in
         self._conn.execute('''
             INSERT INTO embeddings VALUES (nextval('seq_id'), ?, ?, ?, ?, ?)''', 
-            [embedding_data, input_uri,  dataset, custom_quality_score, category_name]
+            [embedding_data, input_uri,  dataset, inference_category_name, label_category_name]
         )
         
     def count(self):
         return self._conn.execute('''
             SELECT COUNT(*) FROM embeddings;
         ''').fetchone()[0]
-
-    def update(self, data): # call this update_custom_quality_score! that is all it does
-        '''
-        I was not able to figure out (yet) how to do a bulk update in duckdb
-        This is going to be fairly slow
-        '''
-        for element in data:    
-            if element['custom_quality_score'] is None:
-                continue
-            self._conn.execute(f'''
-                UPDATE embeddings SET custom_quality_score={element['custom_quality_score']} WHERE id={element['id']}'''
-            )
 
     def fetch(self, where_filter={}, sort=None, limit=None):
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -115,15 +103,15 @@ class DuckDB(Database):
 
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
-
+        
         return self._conn.execute(f'''
             SELECT 
                 id,
                 embedding_data, 
                 input_uri,
                 dataset,
-                custom_quality_score,
-                category_name
+                inference_category_name,
+                label_category_name
             FROM 
                 embeddings
         {where_filter}
@@ -167,10 +155,12 @@ class DuckDB(Database):
                 embedding_data, 
                 input_uri,
                 dataset,
-                custom_quality_score,
-                category_name
+                inference_category_name,
+                label_category_name
             FROM 
                 embeddings
             WHERE
                 id IN ({','.join([str(x) for x in ids])})
+            ORDER BY
+                id
         ''').fetchdf().replace({np.nan: None}) # replace nan with None for json serialization
