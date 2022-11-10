@@ -4,7 +4,7 @@ import time
 
 from fastapi import FastAPI, status
 
-from chroma_server.db.duckdb import DuckDB
+from chroma_server.db.clickhouse import Clickhouse
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
 from chroma_server.types import AddEmbedding, QueryEmbedding
@@ -17,7 +17,7 @@ chroma_telemetry.capture('server-start')
 init_error_reporting()
 
 # Boot script
-db = DuckDB
+db = Clickhouse
 ann_index = Hnswlib
 
 app = FastAPI(debug=True)
@@ -110,6 +110,7 @@ async def reset():
     """
     shutil.rmtree(".chroma", ignore_errors=True)
     app._db = db()
+    app._db.reset()
     app._ann_index = ann_index()
     return True
 
@@ -137,11 +138,12 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
         filter_by_where["dataset"] = embedding.dataset
 
     if filter_by_where is not None:
-        ids = app._db.fetch(filter_by_where)["id"].tolist()
-
-    nn = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
+        results = app._db.fetch(filter_by_where)
+        ids = [str(item[0]) for item in results]
+    
+    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
     return {
-        "ids": nn[0].tolist()[0],
-        "embeddings": app._db.get_by_ids(nn[0].tolist()[0]).to_dict(orient="records"),
-        "distances": nn[1].tolist()[0],
+        "ids": uuids,
+        "embeddings": app._db.get_by_ids(uuids),
+        "distances": distances.tolist()[0]
     }

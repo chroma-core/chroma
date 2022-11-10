@@ -1,0 +1,40 @@
+version: '3.9'
+
+networks:
+  my-network:
+    driver: bridge
+
+services:
+  server:
+    build:
+      context: ./chroma-server
+      dockerfile: Dockerfile
+      target: chroma_server
+    volumes:
+      - ./chroma-server/:/chroma-server/
+    command: uvicorn chroma_server:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    # env_file:
+    #   - ./chroma-server/.env
+    ports:
+      - 8000:8000
+    depends_on:
+      - clickhouse
+    networks:
+      - my-network
+  
+  clickhouse:
+    image: docker.io/bitnami/clickhouse:22.9
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+    volumes:
+      - clickhouse_data:/bitnami/clickhouse
+    networks:
+      - my-network
+
+volumes:
+  clickhouse_data:
+    driver: local
+

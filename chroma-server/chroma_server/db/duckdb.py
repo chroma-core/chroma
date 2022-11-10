@@ -1,8 +1,6 @@
 from os import EX_CANTCREAT
 from chroma_server.db.abstract import Database
 import duckdb
-import numpy as np
-import pandas as pd
 
 
 class DuckDB(Database):

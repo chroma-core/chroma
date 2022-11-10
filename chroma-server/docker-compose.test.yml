@@ -1,0 +1,26 @@
+version: '3.9'
+
+networks:
+  my-network:
+    driver: bridge
+
+services:
+  server_test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: chroma_server_test
+    depends_on:
+      - clickhouse
+    networks:
+      - my-network
+
+  clickhouse:
+    image: docker.io/bitnami/clickhouse:22.9
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+    networks:
+      - my-network
