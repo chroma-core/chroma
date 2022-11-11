@@ -9,6 +9,7 @@ services:
     build:
       context: ./chroma-server
       dockerfile: Dockerfile
+      target: chroma_server
     volumes:
       - ./chroma-server/:/chroma-server/
       - index_data:/index_data

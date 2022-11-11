@@ -2,10 +2,11 @@ import requests
 import json
 from typing import Union
 
+
 class Chroma:
 
     _api_url = "http://localhost:8000/api/v1"
-    _space_key = None
+    _space_key = "default_scope"
 
     def __init__(self, url=None, app=None, model_version=None, layer=None):
         """Initialize Chroma client"""

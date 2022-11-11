@@ -1,6 +1,7 @@
 from abc import abstractmethod
 
-class Database():
+
+class Database:
     @abstractmethod
     def __init__(self):
         pass

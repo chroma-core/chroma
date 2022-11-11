@@ -12,7 +12,8 @@ pip install -r requirements.txt
 pip install -r requirements_dev.txt
 ```
 
-To run tests, run `pytest`.
+To run tests, run `bin/test`. This will run the test suite inside a
+docker compose cluster, with the database available, and clean up when complete.
 
 To run the server locally, in development mode, run `uvicorn chroma_server:app --reload`
 
