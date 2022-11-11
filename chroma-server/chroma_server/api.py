@@ -82,13 +82,13 @@ async def process(process_embedding: ProcessEmbedding):
     app._ann_index.run(process_embedding.space_key, fetch[1], fetch[2]) # more magic number, ugh
 
 
-@app.get("/api/v1/fetch")
-async def fetch(fetch_embedding: FetchEmbedding):
+@app.post("/api/v1/fetch")
+async def fetch(embedding: FetchEmbedding):
     '''
     Fetches embeddings from the database
     - enables filtering by where_filter, sorting by key, and limiting the number of results
     '''
-    return app._db.fetch(fetch_embedding.where_filter, fetch_embedding.sort, fetch_embedding.limit)
+    return app._db.fetch(embedding.where_filter, embedding.sort, embedding.limit)
 
 
 @app.get("/api/v1/count")
