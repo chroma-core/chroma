@@ -10,7 +10,6 @@ from worker import heavy_offline_analysis
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql, Results, SpaceKeyInput
-from chroma_server.utils import logger
 
 from chroma_server.utils.telemetry.capture import Capture
 from chroma_server.utils.error_reporting import init_error_reporting
@@ -113,7 +112,7 @@ async def reset():
 
 @app.post("/api/v1/get_nearest_neighbors")
 async def get_nearest_neighbors(embedding: QueryEmbedding):
-    """
+    '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
     if embedding.space_key is None:
