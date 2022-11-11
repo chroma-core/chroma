@@ -46,9 +46,11 @@ services:
     image: docker.io/bitnami/clickhouse:22.9
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
+      - CLICKHOUSE_TCP_PORT=9007
+      - CLICKHOUSE_HTTP_PORT=8123
     ports:
       - '8123:8123'
-      - '9000:9000'
+      - '9007:9007'
     volumes:
       - clickhouse_data:/bitnami/clickhouse
     networks:

@@ -56,7 +56,7 @@ class Clickhouse(Database):
         ) ENGINE = MergeTree() ORDER BY space_key''')
 
     def __init__(self):
-        client = Client('clickhouse')
+        client = Client(host='clickhouse', port='9007')
         self._conn = client
         self._create_table_embeddings()
         self._create_table_results()
