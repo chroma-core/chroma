@@ -19,18 +19,18 @@ if __name__ == "__main__":
 
     data_length = len(df)
 
-    chroma = Chroma()
+    chroma = Chroma(app="yolov3", model_version="1", layer="1")
     chroma.reset() #make sure we are using a fresh db
     allstart = time.time()
     start = time.time()
 
     dataset = "training"
-    BATCH_SIZE = 100_000
+    BATCH_SIZE = 10_000
 
     print("Loading in records with a batch size of: " , data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if i >= 300_000:
+        if i >= 20_000:
             break
 
         end = time.time()

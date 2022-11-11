@@ -4,10 +4,10 @@ import time
 
 from fastapi import FastAPI, status
 
-from chroma_server.db.clickhouse import Clickhouse
+from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
+from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql
 from chroma_server.algorithms.rand_subsample import rand_bisectional_subsample
-from chroma_server.types import AddEmbedding, QueryEmbedding
 from chroma_server.logger import logger
 from chroma_server.utils.telemetry.capture import Capture
 from chroma_server.utils.error_reporting import init_error_reporting
@@ -26,112 +26,76 @@ app = FastAPI(debug=True)
 app._db = db()
 app._ann_index = ann_index()
 
-if not os.path.exists(".chroma"):
-    os.mkdir(".chroma")
-
-if os.path.exists(".chroma/chroma.parquet"):
-    logger.info("Loading existing chroma database")
-    app._db.load()
-
-if os.path.exists(".chroma/index.bin"):
-    logger.info("Loading existing chroma index")
-    app._ann_index.load(app._db.count(), len(app._db.fetch(limit=1).embedding_data))
-
-
 # API Endpoints
 @app.get("/api/v1")
 async def root():
-    """
-    Heartbeat endpoint
-    """
+    '''Heartbeat endpoint'''
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
 
 
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add_to_db(new_embedding: AddEmbedding):
-    """
-    Save embedding to database
-    - supports single or batched embeddings
-    """
-
+    '''Save batched embeddings to database'''
     app._db.add_batch(
-        new_embedding.embedding_data,
-        new_embedding.input_uri,
+        new_embedding.space_key, 
+        new_embedding.embedding_data, 
+        new_embedding.input_uri, 
         new_embedding.dataset,
-        new_embedding.custom_quality_score,
-        new_embedding.category_name,
+        new_embedding.custom_quality_score, 
+        new_embedding.category_name
     )
 
-    return {"response": "Added record to database"}
+    return {"response": "Added records to database"}
 
 
 @app.get("/api/v1/process")
-async def process():
-    """
+async def process(process_embedding: ProcessEmbedding):
+    '''
     Currently generates an index for the embedding db
-    """
-    app._ann_index.run(app._db.fetch())
+    '''
+    fetch = app._db.fetch({"space_key": process_embedding.space_key}, columnar=True)
+    app._ann_index.run(process_embedding.space_key, fetch[1], fetch[2]) # more magic number, ugh
 
 
 @app.get("/api/v1/fetch")
-async def fetch(where_filter={}, sort=None, limit=None):
-    """
+async def fetch(fetch_embedding: FetchEmbedding):
+    '''
     Fetches embeddings from the database
     - enables filtering by where_filter, sorting by key, and limiting the number of results
-    """
-    return app._db.fetch(where_filter, sort, limit).to_dict(orient="records")
+    '''
+    return app._db.fetch(fetch_embedding.where_filter, fetch_embedding.sort, fetch_embedding.limit)
 
 
 @app.get("/api/v1/count")
-async def count():
-    """
+async def count(count_embedding: CountEmbedding):
+    '''
     Returns the number of records in the database
-    """
-    return {"count": app._db.count()}
-
-
-@app.get("/api/v1/persist")
-async def persist():
-    """
-    Persist the database and index to disk
-    """
-    if not os.path.exists(".chroma"):
-        os.mkdir(".chroma")
-
-    app._db.persist()
-    app._ann_index.persist()
-    return True
+    '''
+    return {"count": app._db.count(space_key=count_embedding.space_key)}
 
 
 @app.get("/api/v1/reset")
 async def reset():
-    """
-    Reset the database and index
-    """
-    shutil.rmtree(".chroma", ignore_errors=True)
+    '''
+    Reset the database and index - WARNING: Destructive! 
+    '''
     app._db = db()
     app._db.reset()
     app._ann_index = ann_index()
+    app._ann_index.reset()
     return True
-
-
-@app.get("/api/v1/rand")
-async def rand(where_filter={}, sort=None, limit=None):
-    """
-    Randomly bisection the database
-    """
-    results = app._db.fetch(where_filter, sort, limit)
-    rand = rand_bisectional_subsample(results)
-    return rand.to_dict(orient="records")
-
 
 @app.post("/api/v1/get_nearest_neighbors")
 async def get_nearest_neighbors(embedding: QueryEmbedding):
     """
     return the distance, database ids, and embedding themselves for the input embedding
-    """
+    '''
+    if embedding.space_key is None:
+        return {"error": "space_key is required"}
+
     ids = None
     filter_by_where = {}
+    filter_by_where["space_key"] = embedding.space_key
     if embedding.category_name is not None:
         filter_by_where["category_name"] = embedding.category_name
     if embedding.dataset is not None:
@@ -139,11 +103,15 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
 
     if filter_by_where is not None:
         results = app._db.fetch(filter_by_where)
-        ids = [str(item[0]) for item in results]
+        ids = [str(item[get_col_pos('uuid')]) for item in results] 
     
-    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.embedding, embedding.n_results, ids)
+    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.space_key, embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
         "embeddings": app._db.get_by_ids(uuids),
         "distances": distances.tolist()[0]
     }
+
+@app.get("/api/v1/raw_sql")
+async def raw_sql(raw_sql: RawSql):
+    return app._db.raw_sql(raw_sql.raw_sql)

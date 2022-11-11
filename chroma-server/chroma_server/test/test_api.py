@@ -141,19 +141,3 @@ async def test_get_nearest_neighbors_filter():
         )
     assert response.status_code == 200
     assert len(response.json()["ids"]) == 2
-
-
-# TODO: test persist and load
-# @pytest.mark.anyio
-# async def test_persist_db():
-#     async with AsyncClient(app=app, base_url="http://test") as ac:
-#         await ac.get("/api/v1/persist")
-
-#         # ensure the files were written to disk
-#         import os
-#         assert os.path.exists(".chroma/chroma.parquet")
-#         assert os.path.exists(".chroma/index.bin")
-
-# Purposefully untested
-# - process
-# - rand
