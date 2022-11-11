@@ -20,16 +20,16 @@ async def test_root():
     )  # a billion nanoseconds = 3s
 
 
-async def post_one_record(ac):
-    return await ac.post(
-        "/api/v1/add",
-        json={
-            "embedding_data": [1.02, 2.03, 3.03],
-            "input_uri": "https://example.com",
-            "dataset": "coco",
-            "category_name": "person",
-        },
-    )
+# async def post_one_record(ac):
+#     return await ac.post(
+#         "/api/v1/add",
+#         json={
+#             "embedding_data": [1.02, 2.03, 3.03],
+#             "input_uri": "https://example.com",
+#             "dataset": "coco",
+#             "category_name": "person",
+#         },
+#     )
 
 
 async def post_batch_records(ac):
@@ -47,9 +47,9 @@ async def post_batch_records(ac):
 @pytest.mark.anyio
 async def test_add_to_db():
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await post_one_record(ac)
+        response = await post_batch_records(ac)
     assert response.status_code == 201
-    assert response.json() == {"response": "Added record to database"}
+    assert response.json() == {"response": "Added records to database"}
 
 
 @pytest.mark.anyio
@@ -57,7 +57,7 @@ async def test_add_to_db_batch():
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await post_batch_records(ac)
     assert response.status_code == 201
-    assert response.json() == {"response": "Added record to database"}
+    assert response.json() == {"response": "Added records to database"}
 
 
 @pytest.mark.anyio

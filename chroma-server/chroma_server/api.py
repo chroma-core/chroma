@@ -5,7 +5,7 @@ import time
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 
-from worker import heavy_offline_analysis
+from chroma_server.worker import heavy_offline_analysis
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
