@@ -41,7 +41,7 @@ class Chroma:
     def fetch(self, where_filter={}, sort=None, limit=None):
         '''Fetches embeddings from the database'''
         where_filter["space_key"] = self._space_key
-        return requests.get(self._api_url + "/fetch", data=json.dumps({
+        return requests.post(self._api_url + "/fetch", data=json.dumps({
             "where_filter":where_filter, 
             "sort":sort, 
             "limit":limit
