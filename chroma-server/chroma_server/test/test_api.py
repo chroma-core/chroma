@@ -60,13 +60,13 @@ async def test_add_to_db():
     assert response.json() == {"response": "Added records to database"}
 
 
-# @pytest.mark.anyio
-# async def test_add_to_db_batch():
-#     async with AsyncClient(app=app, base_url="http://test") as ac:
-#         response = await post_batch_records(ac)
-#     print(response.json())
-#     assert response.status_code == 201
-#     assert response.json() == {"response": "Added records to database"}
+@pytest.mark.anyio
+async def test_add_to_db_batch():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        response = await post_batch_records(ac)
+    print(response.json())
+    assert response.status_code == 201
+    assert response.json() == {"response": "Added records to database"}
 
 
 # @pytest.mark.anyio
@@ -83,7 +83,7 @@ async def test_add_to_db():
 #     async with AsyncClient(app=app, base_url="http://test") as ac:
 #         await ac.get("/api/v1/reset")  # reset db
 #         await post_batch_records(ac)
-#         response = await ac.get("/api/v1/count")
+#         response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
 #     assert response.status_code == 200
 #     assert response.json() == {"count": 2}
 
@@ -93,11 +93,11 @@ async def test_add_to_db():
 #     async with AsyncClient(app=app, base_url="http://test") as ac:
 #         await ac.get("/api/v1/reset")
 #         await post_batch_records(ac)
-#         response = await ac.get("/api/v1/count")
+#         response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
 #         assert response.json() == {"count": 2}
 #         response = await ac.get("/api/v1/reset")
 #         assert response.json() == True
-#         response = await ac.get("/api/v1/count")
+#         response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
 #         assert response.json() == {"count": 0}
 
 
@@ -106,9 +106,9 @@ async def test_add_to_db():
 #     async with AsyncClient(app=app, base_url="http://test") as ac:
 #         await ac.get("/api/v1/reset")
 #         await post_batch_records(ac)
-#         await ac.get("/api/v1/process")
+#         await ac.get("/api/v1/process", params={"space_key": "test_space"})
 #         response = await ac.post(
-#             "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1}
+#             "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "space_key": "test_space"}
 #         )
 #     assert response.status_code == 200
 #     assert len(response.json()["ids"]) == 1
@@ -127,26 +127,8 @@ async def test_add_to_db():
 #                 "n_results": 1,
 #                 "dataset": "training",
 #                 "category_name": "monkey",
+#                 "space_key": "test_space",
 #             },
 #         )
 #     assert response.status_code == 200
 #     assert len(response.json()["ids"]) == 0
-
-
-# @pytest.mark.anyio
-# async def test_get_nearest_neighbors_filter():
-#     async with AsyncClient(app=app, base_url="http://test") as ac:
-#         await ac.get("/api/v1/reset")
-#         await post_batch_records(ac)
-#         await ac.get("/api/v1/process")
-#         response = await ac.post(
-#             "/api/v1/get_nearest_neighbors",
-#             json={
-#                 "embedding": [1.1, 2.3, 3.2],
-#                 "n_results": 2,
-#                 "dataset": "training",
-#                 "category_name": "person",
-#             },
-#         )
-#     assert response.status_code == 200
-#     assert len(response.json()["ids"]) == 2
