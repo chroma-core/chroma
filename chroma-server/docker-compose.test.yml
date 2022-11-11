@@ -11,10 +11,10 @@ services:
       dockerfile: Dockerfile
       target: chroma_server_test
     volumes:
-      - ./chroma-server/:/chroma-server/
       - index_data:/index_data
-    ports:
-      - 8000:8000
+    #   - ./chroma-server/:/chroma-server/
+    # ports:
+    #   - 8000:8000
     depends_on:
       - clickhouse
     networks:
@@ -27,8 +27,8 @@ services:
     ports:
       - '8123:8123'
       - '9000:9000'
-    volumes:
-      - clickhouse_data:/bitnami/clickhouse
+    # volumes:
+    #   - clickhouse_data:/bitnami/clickhouse
     networks:
       - chroma-net
 
