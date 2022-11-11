@@ -1,38 +1,42 @@
-from os import EX_CANTCREAT
 from chroma_server.db.abstract import Database
 import uuid
 import time
 
 from clickhouse_driver import connect, Client
 
-DATABASE_SCHEMA = [
+EMBEDDING_TABLE_SCHEMA = [
     {'space_key': 'String'},
     {'uuid': 'UUID'},
     {'embedding_data': 'Array(Float64)'},
     {'input_uri': 'String'},
     {'dataset': 'String'},
-    {'custom_quality_score': ' Nullable(Float64)'},
     {'category_name': 'String'},
 ]
 
-def db_array_schema_to_clickhouse_schema():
+RESULTS_TABLE_SCHEMA = [
+    {'space_key': 'String'},
+    {'uuid': 'UUID'},
+    {'custom_quality_score': ' Nullable(Float64)'},
+]
+
+def db_array_schema_to_clickhouse_schema(table_schema):
     return_str = ""
-    for element in DATABASE_SCHEMA:
+    for element in table_schema:
         for k, v in element.items():
             return_str += f"{k} {v}, "
     return return_str
 
 def db_schema_to_keys():
     return_str = ""
-    for element in DATABASE_SCHEMA:
-        if element == DATABASE_SCHEMA[-1]:
+    for element in EMBEDDING_TABLE_SCHEMA:
+        if element == EMBEDDING_TABLE_SCHEMA[-1]:
             return_str += f"{list(element.keys())[0]}"
         else:
             return_str += f"{list(element.keys())[0]}, "
     return return_str
 
 def get_col_pos(col_name):
-    for i, col in enumerate(DATABASE_SCHEMA):
+    for i, col in enumerate(EMBEDDING_TABLE_SCHEMA):
         if col_name in col:
             return i
 
@@ -41,13 +45,21 @@ class Clickhouse(Database):
 
     def _create_table_embeddings(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS embeddings (
-            {db_array_schema_to_clickhouse_schema()}
+            {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
+        ) ENGINE = MergeTree() ORDER BY space_key''')
+
+        self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
+    
+    def _create_table_results(self):
+        self._conn.execute(f'''CREATE TABLE IF NOT EXISTS results (
+            {db_array_schema_to_clickhouse_schema(RESULTS_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY space_key''')
 
     def __init__(self):
         client = Client('clickhouse')
         self._conn = client
         self._create_table_embeddings()
+        self._create_table_results()
 
     def add_batch(self, space_key, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
         data_to_insert = []
@@ -107,6 +119,37 @@ class Clickhouse(Database):
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
         self._create_table_embeddings()
+        self._create_table_results()
 
     def raw_sql(self, sql):
         return self._conn.execute(sql)
+
+    def add_results(self, space_keys, uuids, custom_quality_score):
+        data_to_insert = []
+        for i in range(len(space_keys)):
+            data_to_insert.append([space_keys[i], uuids[i], custom_quality_score[i]])
+
+        self._conn.execute('''
+         INSERT INTO results (space_key, uuid, custom_quality_score) VALUES''', data_to_insert)
+    
+    def delete_results(self, space_key):
+        self._conn.execute(f"DELETE FROM results WHERE space_key = '{space_key}'")
+     
+    def return_results(self, space_key, n_results = 100):
+        return self._conn.execute(f'''
+            SELECT
+                embeddings.input_uri,
+                embeddings.embedding_data,
+                results.custom_quality_score
+            FROM
+                results
+            INNER JOIN
+                embeddings
+            ON
+                results.uuid = embeddings.uuid
+            WHERE
+                results.space_key = '{space_key}'
+            ORDER BY
+                results.custom_quality_score DESC
+            LIMIT {n_results}
+        ''')
