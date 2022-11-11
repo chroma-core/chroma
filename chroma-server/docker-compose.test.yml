@@ -1,7 +1,7 @@
 version: '3.9'
 
 networks:
-  my-network:
+  chroma-net:
     driver: bridge
 
 services:
@@ -10,10 +10,13 @@ services:
       context: .
       dockerfile: Dockerfile
       target: chroma_server_test
+    volumes:
+      - ./:/chroma-server/
+      - index_data:/index_data
     depends_on:
       - clickhouse
     networks:
-      - my-network
+      - chroma-net
 
   clickhouse:
     image: docker.io/bitnami/clickhouse:22.9
@@ -23,4 +26,9 @@ services:
       - '8123:8123'
       - '9000:9000'
     networks:
-      - my-network
+      - chroma-net
+
+volumes:
+  index_data:
+    driver: local
+
