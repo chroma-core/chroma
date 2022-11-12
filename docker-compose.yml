@@ -17,6 +17,7 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CLICKHOUSE_TCP_PORT=9000
     ports:
       - 8000:8000
     depends_on:
@@ -46,6 +47,8 @@ services:
     image: docker.io/bitnami/clickhouse:22.9
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
+      - CLICKHOUSE_TCP_PORT=9000
+      - CLICKHOUSE_HTTP_PORT=8123
     ports:
       - '8123:8123'
       - '9000:9000'
