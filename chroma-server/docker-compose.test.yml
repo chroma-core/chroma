@@ -14,19 +14,21 @@ services:
       - ./:/chroma-server/
       - index_data:/index_data
     depends_on:
-      - clickhouse_test
+      - clickhouse
     networks:
       - chroma-net
+    environment:
+      - CLICKHOUSE_TCP_PORT=9001
 
-  clickhouse_test:
+  clickhouse:
     image: docker.io/bitnami/clickhouse:22.9
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
-      - CLICKHOUSE_TCP_PORT=9008
+      - CLICKHOUSE_TCP_PORT=9001
       - CLICKHOUSE_HTTP_PORT=8124
     ports:
       - '8124:8124'
-      - '9008:9008'
+      - '9001:9001'
     networks:
       - chroma-net
 

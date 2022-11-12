@@ -1,6 +1,7 @@
 from chroma_server.db.abstract import Database
 import uuid
 import time
+import os
 
 from clickhouse_driver import connect, Client
 
@@ -56,7 +57,7 @@ class Clickhouse(Database):
         ) ENGINE = MergeTree() ORDER BY space_key''')
 
     def __init__(self):
-        client = Client(host='clickhouse', port='9007')
+        client = Client(host='clickhouse', port=os.getenv('CLICKHOUSE_TCP_PORT', '9000'))
         self._conn = client
         self._create_table_embeddings()
         self._create_table_results()
