@@ -1,8 +1,10 @@
-from chroma_client import Chroma
 import time
 import pytest
 
-chroma = Chroma()
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
 
 def something(duration=0.000001):
     """
@@ -12,6 +14,7 @@ def something(duration=0.000001):
     # You may return anything you want, like the result of a computation
     return 123
 
+@pytest.mark.anyio
 def test_my_stuff(benchmark):
     # benchmark something
     result = benchmark(something)
