@@ -1,3 +1,4 @@
 httpx
 pytest
 setuptools_scm
+pytest-benchmark
