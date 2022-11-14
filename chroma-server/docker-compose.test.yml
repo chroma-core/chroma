@@ -17,14 +17,18 @@ services:
       - clickhouse
     networks:
       - chroma-net
+    environment:
+      - CLICKHOUSE_TCP_PORT=9001
 
   clickhouse:
     image: docker.io/bitnami/clickhouse:22.9
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
+      - CLICKHOUSE_TCP_PORT=9001
+      - CLICKHOUSE_HTTP_PORT=8124
     ports:
-      - '8123:8123'
-      - '9000:9000'
+      - '8124:8124'
+      - '9001:9001'
     networks:
       - chroma-net
 
