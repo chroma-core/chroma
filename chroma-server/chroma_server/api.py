@@ -135,6 +135,14 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
 async def raw_sql(raw_sql: RawSql):
     return app._db.raw_sql(raw_sql.raw_sql)
 
+@app.post("/api/v1/create_index")
+async def create_index(process_embedding: ProcessEmbedding):
+    '''
+    Currently generates an index for the embedding db
+    '''
+    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
+    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
+    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
 
 @app.post("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
