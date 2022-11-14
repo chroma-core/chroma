@@ -37,28 +37,6 @@ async def root():
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
     
 
-@app.post("/api/v1/calculate_results")
-async def calculate_results(model_space: SpaceKeyInput):
-    task = heavy_offline_analysis.delay(model_space.model_space)
-    chroma_telemetry.capture('heavy-offline-analysis')
-    return JSONResponse({"task_id": task.id})
-
-@app.post("/api/v1/tasks/{task_id}")
-async def get_status(task_id):
-    task_result = AsyncResult(task_id)
-    result = {
-        "task_id": task_id,
-        "task_status": task_result.status,
-        "task_result": task_result.result
-    }
-    return JSONResponse(result)
-
-@app.post("/api/v1/get_results")
-async def get_results(results: Results):
-    return app._db.return_results(results.model_space, results.n_results)
-
-
-
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add(new_embedding: AddEmbedding):
     '''Save batched embeddings to database'''
@@ -79,9 +57,6 @@ async def add(new_embedding: AddEmbedding):
     else: 
         dataset = new_embedding.dataset
 
-    # print the len of all inputs to add
-    print(len(new_embedding.embedding), len(new_embedding.input_uri), len(model_space), len(dataset))
-
     app._db.add(
         model_space, 
         new_embedding.embedding, 
@@ -92,17 +67,6 @@ async def add(new_embedding: AddEmbedding):
     )
 
     return {"response": "Added records to database"}
-
-@app.post("/api/v1/process")
-async def process(process_embedding: ProcessEmbedding):
-    '''
-    Currently generates an index for the embedding db
-    '''
-    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
-    chroma_telemetry.capture('created-index', {'n': len(fetch[2])})
-    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
-
-    return {"response": "Processed space"}
 
 @app.post("/api/v1/fetch")
 async def fetch(embedding: FetchEmbedding):
@@ -170,3 +134,49 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
 @app.post("/api/v1/raw_sql")
 async def raw_sql(raw_sql: RawSql):
     return app._db.raw_sql(raw_sql.raw_sql)
+
+
+@app.post("/api/v1/process")
+async def process(process_embedding: ProcessEmbedding):
+    '''
+    Currently generates an index for the embedding db
+    '''
+    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
+    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
+    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
+
+    task = heavy_offline_analysis.delay(process_embedding.model_space)
+    chroma_telemetry.capture('heavy-offline-analysis')
+    return JSONResponse({"task_id": task.id})
+
+@app.post("/api/v1/tasks/{task_id}")
+async def get_status(task_id):
+    task_result = AsyncResult(task_id)
+    result = {
+        "task_id": task_id,
+        "task_status": task_result.status,
+        "task_result": task_result.result
+    }
+    return JSONResponse(result)
+
+@app.post("/api/v1/get_results")
+async def get_results(results: Results):
+
+    # if there is no index, generate one
+    if not app._ann_index.has_index(results.model_space):
+        fetch = app._db.fetch({"model_space": results.model_space}, columnar=True)
+        chroma_telemetry.capture('run-process', {'n': len(fetch[2])})
+        print("Generating index for model space: ", results.model_space, " with ", len(fetch[2]), " embeddings")
+        app._ann_index.run(results.model_space, fetch[1], fetch[2]) # more magic number, ugh
+        print("Done generating index for model space: ", results.model_space)
+
+    # if there are no results, generate them
+    print("app._db.count_results(results.model_space): ", app._db.count_results(results.model_space))
+    if app._db.count_results(results.model_space) == 0:
+        print("starting heavy offline analysis")
+        task = heavy_offline_analysis(results.model_space)
+        print("ending heavy offline analysis")
+        return app._db.return_results(results.model_space, results.n_results)
+
+    else:
+        return app._db.return_results(results.model_space, results.n_results)

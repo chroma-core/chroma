@@ -7,14 +7,14 @@ class Chroma:
     _api_url = "http://localhost:8000/api/v1"
     _model_space = "default_scope"
 
-    def __init__(self, url=None, app=None, model_version=None, layer=None):
+    def __init__(self, url=None, model_space=None):
         """Initialize Chroma client"""
 
         if isinstance(url, str) and url.startswith("http"):
             self._api_url = url
 
-        if app and model_version and layer:
-            self._model_space = app + "_" + model_version + "_" + layer
+        if isinstance(model_space, str) and model_space:
+            self._model_space = model_space
 
     def set_model_space(self, app, model_version, layer):
         '''Sets the model_space of the client'''
@@ -158,8 +158,8 @@ class Chroma:
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything
         '''
-        requests.post(self._api_url + "/process", data = json.dumps({"model_space": model_space or self._model_space}))
-        return True
+        x = requests.post(self._api_url + "/process", data = json.dumps({"model_space": model_space or self._model_space}))
+        return x.json()
 
     def reset(self):
         '''Resets the database'''

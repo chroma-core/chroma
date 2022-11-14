@@ -80,6 +80,9 @@ class Hnswlib(Index):
 
         self._model_space = model_space
 
+    def has_index(self, model_space):
+        return os.path.isfile(f"/index_data/index_{model_space}.bin")
+
     # do knn_query on hnswlib to get nearest neighbors
     def get_nearest_neighbors(self, model_space, query, k, uuids=None):
 
