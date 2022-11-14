@@ -12,6 +12,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {'input_uri': 'String'},
     {'dataset': 'String'},
     {'inference_class': 'String'},
+    {'label_class': 'Nullable(String)'},
 ]
 
 RESULTS_TABLE_SCHEMA = [
@@ -63,13 +64,15 @@ class Clickhouse(Database):
         self._create_table_embeddings()
         self._create_table_results()
 
-    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, inference_class=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, inference_class=None, label_class=None):
         data_to_insert = []
         for i in range(len(embedding)):
-            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], inference_class[i]])
+            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], inference_class[i], (label_class[i] if label_class is not None else None)])
 
-        self._conn.execute('''
-         INSERT INTO embeddings (model_space, uuid, embedding, input_uri, dataset, inference_class) VALUES''', data_to_insert)
+        insert_string = "model_space, uuid, embedding, input_uri, dataset, inference_class, label_class"
+
+        self._conn.execute(f'''
+         INSERT INTO embeddings ({insert_string}) VALUES''', data_to_insert)
         
     def count(self, model_space=None):
         where_string = ""

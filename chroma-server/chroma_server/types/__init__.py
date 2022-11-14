@@ -8,13 +8,14 @@ class AddEmbedding(BaseModel):
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
     inference_class: Union[str, list] = None
-
+    label_class: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
     model_space: str = None
     embedding: list
     n_results: int = 10
     inference_class: str = None
+    label_class: str = None
     dataset: str = None
 
 class ProcessEmbedding(BaseModel):

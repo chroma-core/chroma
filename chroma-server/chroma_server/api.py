@@ -87,8 +87,8 @@ async def add(new_embedding: AddEmbedding):
         new_embedding.embedding, 
         new_embedding.input_uri, 
         dataset,
-        None, 
-        new_embedding.inference_class
+        new_embedding.inference_class, 
+        new_embedding.label_class
     )
 
     return {"response": "Added records to database"}
@@ -151,6 +151,8 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     filter_by_where["model_space"] = embedding.model_space
     if embedding.inference_class is not None:
         filter_by_where["inference_class"] = embedding.inference_class
+    if embedding.label_class is not None:
+        filter_by_where["label_class"] = embedding.label_class
     if embedding.dataset is not None:
         filter_by_where["dataset"] = embedding.dataset
 

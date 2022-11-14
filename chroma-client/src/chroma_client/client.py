@@ -68,6 +68,7 @@ class Chroma:
         input_uri: list, 
         dataset: list = None,
         inference_class: list = None,
+        label_class: list = None,
         model_spaces: list = None):
         '''
         Addss a batch of embeddings to the database
@@ -82,7 +83,8 @@ class Chroma:
             "embedding": embedding, 
             "input_uri": input_uri, 
             "dataset": dataset, 
-            "inference_class": inference_class 
+            "inference_class": inference_class,
+            "label_class": label_class
         }) )
 
         if x.status_code == 201:
@@ -90,7 +92,7 @@ class Chroma:
         else:
             return False
     
-    def add_training(self, embedding: list, input_uri: list, inference_class: list, model_spaces: list = None):
+    def add_training(self, embedding: list, input_uri: list, inference_class: list, label_class: list = None, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of training embedding - sets dataset to "training"
         '''
@@ -100,10 +102,11 @@ class Chroma:
             input_uri=input_uri, 
             dataset=datasets,
             inference_class=inference_class,
-            model_spaces=model_spaces
+            model_spaces=model_spaces,
+            label_class=label_class
         )
         
-    def add_production(self, embedding: list, input_uri: list, inference_class: list, model_spaces: list = None):
+    def add_production(self, embedding: list, input_uri: list, inference_class: list, label_class: list = None, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of production embedding - sets dataset to "production"
         '''
@@ -113,10 +116,11 @@ class Chroma:
             input_uri=input_uri, 
             dataset=datasets,
             inference_class=inference_class,
-            model_spaces=model_spaces
+            model_spaces=model_spaces,
+            label_class=label_class
         )
         
-    def add_triage(self, embedding: list, input_uri: list, inference_class: list, model_spaces: list = None):
+    def add_triage(self, embedding: list, input_uri: list, inference_class: list, label_class: list = None, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of triage embedding - sets dataset to "triage"
         '''
@@ -126,10 +130,11 @@ class Chroma:
             input_uri=input_uri, 
             dataset=datasets,
             inference_class=inference_class,
-            model_spaces=model_spaces
+            model_spaces=model_spaces,
+            label_class=label_class
         )
         
-    def get_nearest_neighbors(self, embedding, n_results=10, inference_class=None, dataset="training", model_space = None):
+    def get_nearest_neighbors(self, embedding, n_results=10, inference_class=None, label_class=None, dataset="training", model_space = None):
         '''Gets the nearest neighbors of a single embedding'''
         if not model_space:
             model_space = self._model_space
@@ -139,6 +144,7 @@ class Chroma:
             "embedding": embedding, 
             "n_results": n_results,
             "inference_class": inference_class,
+            "label_class": label_class,
             "dataset": dataset
         }) )
 
