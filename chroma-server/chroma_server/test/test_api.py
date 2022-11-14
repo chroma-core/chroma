@@ -22,7 +22,7 @@ async def post_batch_records(ac):
             "embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
             "input_uri": ["https://example.com", "https://example.com"],
             "dataset": ["training", "training"],
-            "category_name": ["person", "person"],
+            "inference_class": ["person", "person"],
             "model_space": ["test_space", "test_space"],
         },
     )
@@ -34,7 +34,7 @@ async def post_batch_records_minimal(ac):
             "embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
             "input_uri": ["https://example.com", "https://example.com"],
             "dataset": "training",
-            "category_name": ["person", "person"],
+            "inference_class": ["person", "person"],
             "model_space": "test_space"
         },
     )
@@ -116,7 +116,7 @@ async def test_get_nearest_neighbors_filter():
                 "embedding": [1.1, 2.3, 3.2],
                 "n_results": 1,
                 "dataset": "training",
-                "category_name": "monkey",
+                "inference_class": "monkey",
                 "model_space": "test_space",
             },
         )

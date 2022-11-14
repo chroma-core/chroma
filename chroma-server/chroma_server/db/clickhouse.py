@@ -11,7 +11,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {'embedding': 'Array(Float64)'},
     {'input_uri': 'String'},
     {'dataset': 'String'},
-    {'category_name': 'String'},
+    {'inference_class': 'String'},
 ]
 
 RESULTS_TABLE_SCHEMA = [
@@ -63,13 +63,13 @@ class Clickhouse(Database):
         self._create_table_embeddings()
         self._create_table_results()
 
-    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, inference_class=None):
         data_to_insert = []
         for i in range(len(embedding)):
-            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], category_name[i]])
+            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], inference_class[i]])
 
         self._conn.execute('''
-         INSERT INTO embeddings (model_space, uuid, embedding, input_uri, dataset, category_name) VALUES''', data_to_insert)
+         INSERT INTO embeddings (model_space, uuid, embedding, input_uri, dataset, inference_class) VALUES''', data_to_insert)
         
     def count(self, model_space=None):
         where_string = ""
