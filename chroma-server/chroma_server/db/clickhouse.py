@@ -157,6 +157,7 @@ class Clickhouse(Database):
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
+        self._conn.execute('DROP TABLE results')
         self._create_table_embeddings()
         self._create_table_results()
 
@@ -173,6 +174,12 @@ class Clickhouse(Database):
     
     def delete_results(self, model_space):
         self._conn.execute(f"DELETE FROM results WHERE model_space = '{model_space}'")
+
+    def count_results(self, model_space=None):
+        where_string = ""
+        if model_space is not None:
+            where_string = f"WHERE model_space = '{model_space}'"
+        return self._conn.execute(f"SELECT COUNT() FROM results {where_string}")[0][0]
      
     def return_results(self, model_space, n_results = 100):
         return self._conn.execute(f'''
