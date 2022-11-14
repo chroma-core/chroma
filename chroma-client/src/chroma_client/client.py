@@ -32,13 +32,9 @@ class Chroma:
         '''Returns the current server time in nanoseconds to check if the server is alive'''
         return requests.get(self._api_url).json()
 
-    def count(self, model_space=None, all=False):
+    def count(self, model_space=None):
         '''Returns the number of embeddings in the database'''
         params = {"model_space": model_space or self._model_space}
-
-        if all:
-            params["model_space"] = None
-
         x = requests.get(self._api_url + "/count", params=params)
         return x.json()
 
