@@ -50,6 +50,7 @@ class Clickhouse(Database):
         ) ENGINE = MergeTree() ORDER BY space_key''')
 
         self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
+        self._conn.execute(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
     
     def _create_table_results(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS results (
@@ -72,11 +73,11 @@ class Clickhouse(Database):
         
     def count(self, space_key=None):
         where_string = ""
-        if space_key:
+        if space_key is not None:
             where_string = f"WHERE space_key = '{space_key}'"
         return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")[0][0]
 
-    def fetch(self, where_filter={}, sort=None, limit=None, columnar=False):
+    def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
         if where_filter["space_key"] is None:
             return {"error": "space_key is required"}
 
@@ -98,9 +99,14 @@ class Clickhouse(Database):
 
         if sort is not None:
             where_filter += f" ORDER BY {sort}"
+        else:
+            where_filter += f" ORDER BY space_key" # stable ordering
 
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
+        
+        if offset is not None or isinstance(offset, int):
+            where_filter += f" OFFSET {offset}"
 
         val = self._conn.execute(f'''
             SELECT 
@@ -109,6 +115,35 @@ class Clickhouse(Database):
                 embeddings
         {where_filter}
         ''', columnar=columnar)
+        print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
+
+        return val
+
+    def delete(self, where_filter={}):
+        if where_filter["space_key"] is None:
+            return {"error": "space_key is required. Use reset to clear the entire db"}
+
+        s3= time.time()
+        # check to see if query is a dict and if it is a flat list of key value pairs
+        if where_filter is not None:
+            if not isinstance(where_filter, dict):
+                raise Exception("Invalid where_filter: " + str(where_filter))
+            
+            # ensure where_filter is a flat dict
+            for key in where_filter:
+                if isinstance(where_filter[key], dict):
+                    raise Exception("Invalid where_filter: " + str(where_filter))
+        
+        where_filter = " AND ".join([f"{key} = '{value}'" for key, value in where_filter.items()])
+
+        if where_filter:
+            where_filter = f"WHERE {where_filter}"
+
+        val = self._conn.execute(f'''
+            DELETE FROM 
+                embeddings
+        {where_filter}
+        ''')
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val

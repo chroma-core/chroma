@@ -2,7 +2,6 @@ import requests
 import json
 from typing import Union
 
-
 class Chroma:
 
     _api_url = "http://localhost:8000/api/v1"
@@ -33,18 +32,39 @@ class Chroma:
         '''Returns the current server time in nanoseconds to check if the server is alive'''
         return requests.get(self._api_url).json()
 
-    def count(self, space_key=None):
+    def count(self, space_key=None, all=False):
         '''Returns the number of embeddings in the database'''
-        x = requests.get(self._api_url + "/count", data=json.dumps({"space_key": space_key or self._space_key}))
+        params = {"space_key": space_key or self._space_key}
+
+        if all:
+            params["space_key"] = None
+
+        x = requests.get(self._api_url + "/count", params=params)
         return x.json()
 
-    def fetch(self, where_filter={}, sort=None, limit=None):
+    def fetch(self, where_filter={}, sort=None, limit=None, offset=None, page=None, page_size=None):
         '''Fetches embeddings from the database'''
-        where_filter["space_key"] = self._space_key
+        if self._space_key:
+            where_filter["space_key"] = self._space_key
+
+        if page and page_size:
+            offset = (page - 1) * page_size
+            limit = page_size
+
         return requests.post(self._api_url + "/fetch", data=json.dumps({
             "where_filter":where_filter, 
             "sort":sort, 
-            "limit":limit
+            "limit":limit,
+            "offset":offset
+        })).json()
+
+    def delete(self, where_filter={}):
+        '''Deletes embeddings from the database'''
+        if self._space_key:
+            where_filter["space_key"] = self._space_key
+
+        return requests.post(self._api_url + "/delete", data=json.dumps({
+            "where_filter":where_filter, 
         })).json()
    
     def log(self, 
@@ -59,10 +79,7 @@ class Chroma:
         '''
 
         if not space_keys:
-            if isinstance(dataset, list):
-                space_keys = [self._space_key] * len(dataset)
-            else:
-                space_keys = self._space_key
+            space_keys = self._space_key
 
         x = requests.post(self._api_url + "/add", data = json.dumps({
             "space_key": space_keys,
@@ -139,25 +156,25 @@ class Chroma:
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything
         '''
-        requests.get(self._api_url + "/process", data = json.dumps({"space_key": space_key or self._space_key}))
+        requests.post(self._api_url + "/process", data = json.dumps({"space_key": space_key or self._space_key}))
         return True
 
     def reset(self):
         '''Resets the database'''
-        return requests.get(self._api_url + "/reset")
+        return requests.post(self._api_url + "/reset")
 
     def raw_sql(self, sql):
         '''Runs a raw SQL query against the database'''
-        return requests.get(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql})).json()
+        return requests.post(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql})).json()
 
     def calculate_results(self, space_key=None):
         '''Calculates the results for the given space key'''
-        return requests.get(self._api_url + "/calculate_results", data = json.dumps({"space_key": space_key or self._space_key})).json()
+        return requests.post(self._api_url + "/calculate_results", data = json.dumps({"space_key": space_key or self._space_key})).json()
 
     def get_results(self, space_key=None, n_results = 100):
         '''Gets the results for the given space key'''
-        return requests.get(self._api_url + "/get_results", data = json.dumps({"space_key": space_key or self._space_key, "n_results": n_results})).json()
+        return requests.post(self._api_url + "/get_results", data = json.dumps({"space_key": space_key or self._space_key, "n_results": n_results})).json()
     
     def get_task_status(self, task_id):
         '''Gets the status of a task'''
-        return requests.get(self._api_url + f"/tasks/{task_id}").json()
+        return requests.post(self._api_url + f"/tasks/{task_id}").json()
