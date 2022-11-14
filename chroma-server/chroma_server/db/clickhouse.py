@@ -73,10 +73,8 @@ class Clickhouse(Database):
         
     def count(self, space_key=None):
         where_string = ""
-        print("space_key", space_key)
         if space_key is not None:
             where_string = f"WHERE space_key = '{space_key}'"
-        print("where_string: ", where_string)
         return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")[0][0]
 
     def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
@@ -140,8 +138,6 @@ class Clickhouse(Database):
 
         if where_filter:
             where_filter = f"WHERE {where_filter}"
-
-        print("DELETE FROM embeddings", where_filter)
 
         val = self._conn.execute(f'''
             DELETE FROM 

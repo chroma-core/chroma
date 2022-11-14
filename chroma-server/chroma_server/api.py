@@ -125,7 +125,6 @@ async def count(space_key: str = None):
     '''
     Returns the number of records in the database
     '''
-    print("space_key", space_key)
     return {"count": app._db.count(space_key=space_key)}
 
 @app.post("/api/v1/reset")

@@ -33,28 +33,6 @@ services:
     networks:
       - chroma-net
 
-  redis:
-    image: redis:6-alpine
-    networks:
-      - chroma-net
-
-  worker:
-    build:
-      context: .
-      dockerfile: DockerfileCelery
-    command: celery worker --app=worker.celery --loglevel=info 
-    volumes:
-      - ./:/chroma-server/
-      - index_data:/index_data
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    depends_on:
-      - server_test
-      - redis
-    networks:
-      - chroma-net
-
 volumes:
   index_data:
     driver: local
