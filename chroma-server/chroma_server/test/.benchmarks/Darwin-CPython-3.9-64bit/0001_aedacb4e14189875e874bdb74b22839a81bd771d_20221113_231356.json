@@ -1,0 +1,78 @@
+{
+    "machine_info": {
+        "node": "Jeffreys-MacBook-Air.local",
+        "processor": "arm",
+        "machine": "arm64",
+        "python_compiler": "Clang 13.0.0 (clang-1300.0.29.30)",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.9.2",
+        "python_version": "3.9.2",
+        "python_build": [
+            "default",
+            "Jun 18 2022 21:05:43"
+        ],
+        "release": "21.4.0",
+        "system": "Darwin",
+        "cpu": {
+            "python_version": "3.9.2.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "ARM_8",
+            "bits": 64,
+            "count": 8,
+            "arch_string_raw": "arm64",
+            "brand_raw": "Apple M1"
+        }
+    },
+    "commit_info": {
+        "id": "aedacb4e14189875e874bdb74b22839a81bd771d",
+        "time": "2022-11-13T15:11:36-08:00",
+        "author_time": "2022-11-13T15:11:36-08:00",
+        "dirty": false,
+        "project": "chroma",
+        "branch": "jeff/benchmarks"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "test_my_stuff",
+            "fullname": "test_benchmarks.py::test_my_stuff",
+            "params": null,
+            "param": null,
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.333000000076524e-06,
+                "max": 7.816599999999063e-05,
+                "mean": 3.6045574285212928e-06,
+                "stddev": 1.0237297598013327e-06,
+                "rounds": 57010,
+                "median": 3.5000000000451337e-06,
+                "iqr": 4.19999999223819e-08,
+                "q1": 3.5000000000451337e-06,
+                "q3": 3.5419999999675156e-06,
+                "iqr_outliers": 8819,
+                "stddev_outliers": 1882,
+                "outliers": "1882;8819",
+                "ld15iqr": 3.457999999900707e-06,
+                "hd15iqr": 3.6249999999515836e-06,
+                "ops": 277426.56895613193,
+                "total": 0.2054958189999989,
+                "iterations": 1
+            }
+        }
+    ],
+    "datetime": "2022-11-13T23:13:57.794121",
+    "version": "4.0.0"
+}
