@@ -3,7 +3,7 @@ from typing import Union, Any
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
-    space_key: Union[str, list]
+    model_space: Union[str, list]
     embedding_data: list
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
@@ -11,14 +11,14 @@ class AddEmbedding(BaseModel):
 
 
 class QueryEmbedding(BaseModel):
-    space_key: str = None
+    model_space: str = None
     embedding: list
     n_results: int = 10
     category_name: str = None
     dataset: str = None
 
 class ProcessEmbedding(BaseModel):
-    space_key: str = None
+    model_space: str = None
 
 class FetchEmbedding(BaseModel):
     where_filter: dict = {}
@@ -27,17 +27,17 @@ class FetchEmbedding(BaseModel):
     offset: int = None
 
 class CountEmbedding(BaseModel):
-    space_key: str = None
+    model_space: str = None
 
 class RawSql(BaseModel):
     raw_sql: str = None
 
 class Results(BaseModel):
-    space_key: str
+    model_space: str
     n_results: int = 100
 
 class SpaceKeyInput(BaseModel):
-    space_key: str
+    model_space: str
 
 class DeleteEmbedding(BaseModel):
     where_filter: dict = {}

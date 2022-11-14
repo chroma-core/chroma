@@ -1,7 +1,7 @@
 from chroma_client import Chroma
 
 chroma = Chroma()
-chroma.set_space_key('sample_space')
+chroma.set_model_space('sample_space')
 print("Getting heartbeat to verify the server is up")
 print(chroma.heartbeat())
 

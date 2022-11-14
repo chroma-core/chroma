@@ -14,9 +14,9 @@ def create_task(task_type):
     return True
 
 @celery.task(name="heavy_offline_analysis")
-def heavy_offline_analysis(space_key):
+def heavy_offline_analysis(model_space):
     task_db_conn = Clickhouse()
-    embedding_rows = task_db_conn.fetch({"space_key": space_key})
+    embedding_rows = task_db_conn.fetch({"model_space": model_space})
 
     uuids = []
     custom_quality_scores = []
@@ -25,9 +25,9 @@ def heavy_offline_analysis(space_key):
         uuids.append(row[get_col_pos("uuid")])
         custom_quality_scores.append(random.random())
 
-    spaces = [space_key] * len(uuids)
+    spaces = [model_space] * len(uuids)
 
-    task_db_conn.delete_results(space_key)
+    task_db_conn.delete_results(model_space)
     task_db_conn.add_results(spaces, uuids, custom_quality_scores)
     
     return "Wrote custom quality scores to database"

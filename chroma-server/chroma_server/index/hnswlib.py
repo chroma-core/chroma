@@ -9,7 +9,7 @@ from chroma_server.logger import logger
 
 class Hnswlib(Index):
 
-    _space_key = None
+    _model_space = None
     _index = None
     _index_metadata = {
         'dimensionality': None,
@@ -23,7 +23,7 @@ class Hnswlib(Index):
     def __init__(self):
         pass
 
-    def run(self, space_key, uuids, embeddings):
+    def run(self, model_space, uuids, embeddings):
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         ids = []
@@ -42,7 +42,7 @@ class Hnswlib(Index):
         index.add_items(embeddings, ids)
 
         self._index = index
-        self._space_key = space_key
+        self._model_space = model_space
         self._index_metadata = {
             'dimensionality': dimensionality,
             'elements': len(embeddings) ,
@@ -53,38 +53,38 @@ class Hnswlib(Index):
     def save(self):
         if self._index is None:
             return
-        self._index.save_index(f"/index_data/index_{self._space_key}.bin")
+        self._index.save_index(f"/index_data/index_{self._model_space}.bin")
 
         # pickle the mappers
-        with open(f"/index_data/id_to_uuid_{self._space_key}.pkl", 'wb') as f:
+        with open(f"/index_data/id_to_uuid_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._id_to_uuid, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"/index_data/uuid_to_id_{self._space_key}.pkl", 'wb') as f:
+        with open(f"/index_data/uuid_to_id_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._uuid_to_id, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"/index_data/index_metadata_{self._space_key}.pkl", 'wb') as f:
+        with open(f"/index_data/index_metadata_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._index_metadata, f, pickle.HIGHEST_PROTOCOL)
 
         logger.debug('Index saved to /index_data/index.bin')
 
-    def load(self, space_key):
+    def load(self, model_space):
         # unpickle the mappers
-        with open(f"/index_data/id_to_uuid_{space_key}.pkl", 'rb') as f:
+        with open(f"/index_data/id_to_uuid_{model_space}.pkl", 'rb') as f:
             self._id_to_uuid = pickle.load(f)
-        with open(f"/index_data/uuid_to_id_{space_key}.pkl", 'rb') as f:
+        with open(f"/index_data/uuid_to_id_{model_space}.pkl", 'rb') as f:
             self._uuid_to_id = pickle.load(f)
-        with open(f"/index_data/index_metadata_{space_key}.pkl", 'rb') as f:
+        with open(f"/index_data/index_metadata_{model_space}.pkl", 'rb') as f:
             self._index_metadata = pickle.load(f)
 
         p = hnswlib.Index(space='l2', dim= self._index_metadata['dimensionality'])
         self._index = p
-        self._index.load_index(f"/index_data/index_{space_key}.bin", max_elements= self._index_metadata['elements'])
+        self._index.load_index(f"/index_data/index_{model_space}.bin", max_elements= self._index_metadata['elements'])
 
-        self._space_key = space_key
+        self._model_space = model_space
 
     # do knn_query on hnswlib to get nearest neighbors
-    def get_nearest_neighbors(self, space_key, query, k, uuids=None):
+    def get_nearest_neighbors(self, model_space, query, k, uuids=None):
 
-        if self._space_key != space_key:
-            self.load(space_key)
+        if self._model_space != model_space:
+            self.load(model_space)
 
         s2= time.time()
         # get ids from uuids
