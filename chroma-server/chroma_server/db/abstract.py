@@ -7,7 +7,7 @@ class Database:
         pass
 
     @abstractmethod
-    def add(self, model_space, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, category_name=None):
         pass
 
     @abstractmethod

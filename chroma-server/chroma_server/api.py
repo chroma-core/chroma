@@ -63,7 +63,7 @@ async def get_results(results: Results):
 async def add(new_embedding: AddEmbedding):
     '''Save batched embeddings to database'''
 
-    number_of_embeddings = len(new_embedding.embedding_data)
+    number_of_embeddings = len(new_embedding.embedding)
 
     if isinstance(new_embedding.model_space, str):
         model_space = [new_embedding.model_space] * number_of_embeddings
@@ -80,11 +80,11 @@ async def add(new_embedding: AddEmbedding):
         dataset = new_embedding.dataset
 
     # print the len of all inputs to add
-    print(len(new_embedding.embedding_data), len(new_embedding.input_uri), len(model_space), len(dataset))
+    print(len(new_embedding.embedding), len(new_embedding.input_uri), len(model_space), len(dataset))
 
     app._db.add(
         model_space, 
-        new_embedding.embedding_data, 
+        new_embedding.embedding, 
         new_embedding.input_uri, 
         dataset,
         None, 

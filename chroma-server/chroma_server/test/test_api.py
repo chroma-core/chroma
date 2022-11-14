@@ -19,7 +19,7 @@ async def post_batch_records(ac):
     return await ac.post(
         "/api/v1/add",
         json={
-            "embedding_data": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+            "embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
             "input_uri": ["https://example.com", "https://example.com"],
             "dataset": ["training", "training"],
             "category_name": ["person", "person"],
@@ -31,7 +31,7 @@ async def post_batch_records_minimal(ac):
     return await ac.post(
         "/api/v1/add",
         json={
-            "embedding_data": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+            "embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
             "input_uri": ["https://example.com", "https://example.com"],
             "dataset": "training",
             "category_name": ["person", "person"],

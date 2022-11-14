@@ -8,7 +8,7 @@ from clickhouse_driver import connect, Client
 EMBEDDING_TABLE_SCHEMA = [
     {'model_space': 'String'},
     {'uuid': 'UUID'},
-    {'embedding_data': 'Array(Float64)'},
+    {'embedding': 'Array(Float64)'},
     {'input_uri': 'String'},
     {'dataset': 'String'},
     {'category_name': 'String'},
@@ -63,13 +63,13 @@ class Clickhouse(Database):
         self._create_table_embeddings()
         self._create_table_results()
 
-    def add(self, model_space, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, category_name=None):
         data_to_insert = []
-        for i in range(len(embedding_data)):
-            data_to_insert.append([model_space[i], uuid.uuid4(), embedding_data[i], input_uri[i], dataset[i], category_name[i]])
+        for i in range(len(embedding)):
+            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], category_name[i]])
 
         self._conn.execute('''
-         INSERT INTO embeddings (model_space, uuid, embedding_data, input_uri, dataset, category_name) VALUES''', data_to_insert)
+         INSERT INTO embeddings (model_space, uuid, embedding, input_uri, dataset, category_name) VALUES''', data_to_insert)
         
     def count(self, model_space=None):
         where_string = ""
@@ -175,7 +175,7 @@ class Clickhouse(Database):
         return self._conn.execute(f'''
             SELECT
                 embeddings.input_uri,
-                embeddings.embedding_data,
+                embeddings.embedding,
                 results.custom_quality_score
             FROM
                 results

@@ -64,7 +64,7 @@ class Chroma:
         })).json()
    
     def add(self, 
-        embedding_data: list, 
+        embedding: list, 
         input_uri: list, 
         dataset: list = None,
         category_name: list = None,
@@ -79,7 +79,7 @@ class Chroma:
 
         x = requests.post(self._api_url + "/add", data = json.dumps({
             "model_space": model_spaces,
-            "embedding_data": embedding_data, 
+            "embedding": embedding, 
             "input_uri": input_uri, 
             "dataset": dataset, 
             "category_name": category_name 
@@ -90,39 +90,39 @@ class Chroma:
         else:
             return False
     
-    def add_training(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_training(self, embedding: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of training embedding - sets dataset to "training"
         '''
         datasets = ["training"] * len(input_uri)
         return self.add(
-            embedding_data=embedding_data, 
+            embedding=embedding, 
             input_uri=input_uri, 
             dataset=datasets,
             category_name=category_name,
             model_spaces=model_spaces
         )
         
-    def add_production(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_production(self, embedding: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of production embedding - sets dataset to "production"
         '''
         datasets = ["production"] * len(input_uri)
         return self.add(
-            embedding_data=embedding_data, 
+            embedding=embedding, 
             input_uri=input_uri, 
             dataset=datasets,
             category_name=category_name,
             model_spaces=model_spaces
         )
         
-    def add_triage(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_triage(self, embedding: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
         Small wrapper around add() to add a batch of triage embedding - sets dataset to "triage"
         '''
         datasets = ["triage"] * len(input_uri)
         return self.add(
-            embedding_data=embedding_data, 
+            embedding=embedding, 
             input_uri=input_uri, 
             dataset=datasets,
             category_name=category_name,

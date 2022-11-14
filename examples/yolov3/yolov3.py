@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
             row['embedding_data'] = row['embedding_data'].tolist()
 
-        embedding_data = batch['embedding_data'].tolist()
+        embedding = batch['embedding_data'].tolist()
         input_uri = batch['resource_uri'].tolist()
 
         category_names = []
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         datasets = dataset
 
         chroma.add(
-            embedding_data=embedding_data, 
+            embedding=embedding, 
             input_uri=input_uri, 
             dataset=dataset,
             category_name=category_names

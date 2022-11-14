@@ -4,7 +4,7 @@ from typing import Union, Any
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
     model_space: Union[str, list]
-    embedding_data: list
+    embedding: list
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
     category_name: Union[str, list] = None
