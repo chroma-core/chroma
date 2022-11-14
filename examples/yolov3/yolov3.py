@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
         datasets = dataset
 
-        chroma.log(
+        chroma.add(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
             dataset=dataset,
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         )
 
     allend = time.time()
-    print("time to log all: ", "{:.2f}".format(allend - allstart) + 's')
+    print("time to add all: ", "{:.2f}".format(allend - allstart) + 's')
 
     fetched = chroma.count()
     print("Records loaded into the database: ",  fetched)

@@ -6,7 +6,7 @@ print("Getting heartbeat to verify the server is up")
 print(chroma.heartbeat())
 
 print("Logging embeddings into the database")
-chroma.log(
+chroma.add(
     [[1,2,3,4,5], [5,4,3,2,1], [10,9,8,7,6]], 
     ["/images/1", "/images/2", "/images/3"], 
     ["training", "training", "training"], 

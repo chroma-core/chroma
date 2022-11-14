@@ -41,7 +41,7 @@ async def post_batch_records_minimal(ac):
 
 
 @pytest.mark.anyio
-async def test_add_to_db_batch():
+async def test_add_batch():
     async with AsyncClient(app=app, base_url="http://test") as ac:
         await ac.post("/api/v1/reset")
         response = await post_batch_records(ac)
@@ -52,7 +52,7 @@ async def test_add_to_db_batch():
 
    
 @pytest.mark.anyio
-async def test_add_to_db_batch_minimal():
+async def test_add_batch_minimal():
     async with AsyncClient(app=app, base_url="http://test") as ac:
         await ac.post("/api/v1/reset")
         response = await post_batch_records_minimal(ac)

@@ -63,7 +63,7 @@ class Clickhouse(Database):
         self._create_table_embeddings()
         self._create_table_results()
 
-    def add_batch(self, model_space, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
         data_to_insert = []
         for i in range(len(embedding_data)):
             data_to_insert.append([model_space[i], uuid.uuid4(), embedding_data[i], input_uri[i], dataset[i], category_name[i]])

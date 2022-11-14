@@ -4,9 +4,9 @@ from chroma_client import Chroma
 chroma = Chroma()
 chroma.reset()
 
-# log
+# add
 for i in range(10):
-    chroma.log(
+    chroma.add(
         embedding_data=[1,2,3,4,5,6,7,8,9,10],
         input_uri="https://www.google.com",
         dataset=None

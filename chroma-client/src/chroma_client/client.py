@@ -67,14 +67,14 @@ class Chroma:
             "where_filter":where_filter, 
         })).json()
    
-    def log(self, 
+    def add(self, 
         embedding_data: list, 
         input_uri: list, 
         dataset: list = None,
         category_name: list = None,
         model_spaces: list = None):
         '''
-        Logs a batch of embeddings to the database
+        Addss a batch of embeddings to the database
         - pass in column oriented data lists
         '''
 
@@ -94,12 +94,12 @@ class Chroma:
         else:
             return False
     
-    def log_training(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_training(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
-        Small wrapper around log() to log a batch of training embedding - sets dataset to "training"
+        Small wrapper around add() to add a batch of training embedding - sets dataset to "training"
         '''
         datasets = ["training"] * len(input_uri)
-        return self.log(
+        return self.add(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
             dataset=datasets,
@@ -107,12 +107,12 @@ class Chroma:
             model_spaces=model_spaces
         )
         
-    def log_production(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_production(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
-        Small wrapper around log() to log a batch of production embedding - sets dataset to "production"
+        Small wrapper around add() to add a batch of production embedding - sets dataset to "production"
         '''
         datasets = ["production"] * len(input_uri)
-        return self.log(
+        return self.add(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
             dataset=datasets,
@@ -120,12 +120,12 @@ class Chroma:
             model_spaces=model_spaces
         )
         
-    def log_triage(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
+    def add_triage(self, embedding_data: list, input_uri: list, category_name: list, model_spaces: list = None):
         '''
-        Small wrapper around log() to log a batch of triage embedding - sets dataset to "triage"
+        Small wrapper around add() to add a batch of triage embedding - sets dataset to "triage"
         '''
         datasets = ["triage"] * len(input_uri)
-        return self.log(
+        return self.add(
             embedding_data=embedding_data, 
             input_uri=input_uri, 
             dataset=datasets,
