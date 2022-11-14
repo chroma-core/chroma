@@ -7,7 +7,6 @@ class AddEmbedding(BaseModel):
     embedding_data: list
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
-    custom_quality_score: Union[float, list] = None
     category_name: Union[str, list] = None
 
 
@@ -25,6 +24,7 @@ class FetchEmbedding(BaseModel):
     where_filter: dict = {}
     sort: str = None
     limit: int = None
+    offset: int = None
 
 class CountEmbedding(BaseModel):
     space_key: str = None
@@ -38,3 +38,6 @@ class Results(BaseModel):
 
 class SpaceKeyInput(BaseModel):
     space_key: str
+
+class DeleteEmbedding(BaseModel):
+    where_filter: dict = {}

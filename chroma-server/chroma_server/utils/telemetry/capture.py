@@ -1,6 +1,7 @@
 import posthog
 import uuid
 import sys
+import os
 from chroma_server.utils.telemetry.abstract import Telemetry
 from chroma_server.utils.config.settings import get_settings
 
@@ -30,5 +31,10 @@ class Capture(Telemetry):
             self._telemetry_anonymized_uuid = get_settings().telemetry_anonymized_uuid
 
     def capture(self, event, properties=None):
+        if properties is None:
+            properties = {}
+
+        properties['environment'] = os.getenv('environment', 'development')
+
         self._conn.capture(self._telemetry_anonymized_uuid, event, properties)
 

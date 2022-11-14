@@ -19,6 +19,7 @@ services:
       - chroma-net
     environment:
       - CLICKHOUSE_TCP_PORT=9001
+      - environment=test
 
   clickhouse:
     image: docker.io/bitnami/clickhouse:22.9

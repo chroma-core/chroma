@@ -27,12 +27,39 @@ async def post_batch_records(ac):
         },
     )
 
+async def post_batch_records_minimal(ac):
+    return await ac.post(
+        "/api/v1/add",
+        json={
+            "embedding_data": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+            "input_uri": ["https://example.com", "https://example.com"],
+            "dataset": "training",
+            "category_name": ["person", "person"],
+            "space_key": "test_space"
+        },
+    )
+
+
 @pytest.mark.anyio
 async def test_add_to_db_batch():
     async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.post("/api/v1/reset")
         response = await post_batch_records(ac)
-    assert response.status_code == 201
-    assert response.json() == {"response": "Added records to database"}
+        assert response.status_code == 201
+        assert response.json() == {"response": "Added records to database"}
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
+        assert response.json() == {"count": 2}
+
+   
+@pytest.mark.anyio
+async def test_add_to_db_batch_minimal():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.post("/api/v1/reset")
+        response = await post_batch_records_minimal(ac)
+        assert response.status_code == 201
+        assert response.json() == {"response": "Added records to database"} 
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
+        assert response.json() == {"count": 2}
 
 @pytest.mark.anyio
 async def test_fetch_from_db():
@@ -49,7 +76,7 @@ async def test_count_from_db():
     async with AsyncClient(app=app, base_url="http://test") as ac:
         await ac.post("/api/v1/reset")  # reset db
         await post_batch_records(ac)
-        response = await ac.get("/api/v1/count", json={"space_key": "test_space"})
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
     assert response.status_code == 200
     assert response.json() == {"count": 2}
 
@@ -58,11 +85,11 @@ async def test_reset_db():
     async with AsyncClient(app=app, base_url="http://test") as ac:
         await ac.post("/api/v1/reset")
         await post_batch_records(ac)
-        response = await ac.post("/api/v1/count", json={"space_key": "test_space"})
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
         assert response.json() == {"count": 2}
         response = await ac.post("/api/v1/reset")
         assert response.json() == True
-        response = await ac.post("/api/v1/count", json={"space_key": "test_space"})
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
         assert response.json() == {"count": 0}
 
 @pytest.mark.anyio
@@ -104,6 +131,19 @@ async def test_process():
         response = await ac.post("/api/v1/process", json={"space_key": "test_space"})
     assert response.status_code == 200
     assert response.json() == {"response": "Processed space"}
+
+# test delete
+@pytest.mark.anyio
+async def test_delete():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.post("/api/v1/reset")
+        await post_batch_records(ac)
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
+        assert response.json() == {"count": 2}
+        response = await ac.post("/api/v1/delete", json={"where_filter": {"space_key": "test_space"}})
+        assert response.json() == []
+        response = await ac.get("/api/v1/count", params={"space_key": "test_space"})
+        assert response.json() == {"count": 0}
 
 # test calculate results
 # @pytest.mark.anyio

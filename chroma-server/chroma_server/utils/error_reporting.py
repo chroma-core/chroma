@@ -16,6 +16,9 @@ def strip_sensitive_data(event, hint):
 
 def init_error_reporting():
 
+    if get_settings().environment == "test":
+        return
+
     sentry_sdk.init(
         dsn="https://ef5fae1e461f49b3a7a2adf3404378ab@o4504080408051712.ingest.sentry.io/4504080409296896",
         traces_sample_rate=sample_rate,
