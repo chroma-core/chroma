@@ -14,7 +14,7 @@ def class_distances(data):
     #     annotations = [json.loads(embedding['infer'])["annotations"]for embedding in embeddings]
     #     annotations = [annotation for annotation_list in annotations for annotation in annotation_list]
     #     # Unpack embedding data
-    #     embeddings = [embedding["embedding_data"] for embedding in embeddings]
+    #     embeddings = [embedding["embedding"] for embedding in embeddings]
     #     embedding_vectors_by_category = {}
     #     for embedding_annotation_pair in zip(embeddings, annotations):
     #         data = np.array(embedding_annotation_pair[0])
@@ -62,7 +62,7 @@ def class_distances(data):
     # quality_scores = []
     # for idx, datapoint in enumerate(target_datapoints):
     #     inferences = json.loads(datapoint['infer'])["annotations"]
-    #     embeddings = [datapoint["embedding_data"]]
+    #     embeddings = [datapoint["embedding"]]
 
     #     for i in range(len(inferences)):
     #         emb_data = embeddings[i]

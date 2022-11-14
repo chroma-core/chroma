@@ -7,11 +7,11 @@ class Database:
         pass
 
     @abstractmethod
-    def add_batch(self, space_key, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, inference_class=None, label_class=None):
         pass
 
     @abstractmethod
-    def count(self, space_key=None):
+    def count(self, model_space=None):
         pass
 
     @abstractmethod

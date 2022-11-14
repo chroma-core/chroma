@@ -38,8 +38,8 @@ async def root():
     
 
 @app.post("/api/v1/calculate_results")
-async def calculate_results(space_key: SpaceKeyInput):
-    task = heavy_offline_analysis.delay(space_key.space_key)
+async def calculate_results(model_space: SpaceKeyInput):
+    task = heavy_offline_analysis.delay(model_space.model_space)
     chroma_telemetry.capture('heavy-offline-analysis')
     return JSONResponse({"task_id": task.id})
 
@@ -55,22 +55,22 @@ async def get_status(task_id):
 
 @app.post("/api/v1/get_results")
 async def get_results(results: Results):
-    return app._db.return_results(results.space_key, results.n_results)
+    return app._db.return_results(results.model_space, results.n_results)
 
 
 
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
-async def add_to_db(new_embedding: AddEmbedding):
+async def add(new_embedding: AddEmbedding):
     '''Save batched embeddings to database'''
 
-    number_of_embeddings = len(new_embedding.embedding_data)
+    number_of_embeddings = len(new_embedding.embedding)
 
-    if isinstance(new_embedding.space_key, str):
-        space_key = [new_embedding.space_key] * number_of_embeddings
-    elif len(new_embedding.space_key) == 1: 
-        space_key = [new_embedding.space_key[0]] * number_of_embeddings
+    if isinstance(new_embedding.model_space, str):
+        model_space = [new_embedding.model_space] * number_of_embeddings
+    elif len(new_embedding.model_space) == 1: 
+        model_space = [new_embedding.model_space[0]] * number_of_embeddings
     else: 
-        space_key = new_embedding.space_key
+        model_space = new_embedding.model_space
     
     if isinstance(new_embedding.dataset, str):
         dataset = [new_embedding.dataset] * number_of_embeddings
@@ -79,16 +79,16 @@ async def add_to_db(new_embedding: AddEmbedding):
     else: 
         dataset = new_embedding.dataset
 
-    # print the len of all inputs to add_batch
-    print(len(new_embedding.embedding_data), len(new_embedding.input_uri), len(space_key), len(dataset))
+    # print the len of all inputs to add
+    print(len(new_embedding.embedding), len(new_embedding.input_uri), len(model_space), len(dataset))
 
-    app._db.add_batch(
-        space_key, 
-        new_embedding.embedding_data, 
+    app._db.add(
+        model_space, 
+        new_embedding.embedding, 
         new_embedding.input_uri, 
         dataset,
-        None, 
-        new_embedding.category_name
+        new_embedding.inference_class, 
+        new_embedding.label_class
     )
 
     return {"response": "Added records to database"}
@@ -98,9 +98,9 @@ async def process(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
     '''
-    fetch = app._db.fetch({"space_key": process_embedding.space_key}, columnar=True)
+    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
     chroma_telemetry.capture('created-index', {'n': len(fetch[2])})
-    app._ann_index.run(process_embedding.space_key, fetch[1], fetch[2]) # more magic number, ugh
+    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
 
     return {"response": "Processed space"}
 
@@ -121,11 +121,11 @@ async def delete(embedding: DeleteEmbedding):
     return app._db.delete(embedding.where_filter)
 
 @app.get("/api/v1/count")
-async def count(space_key: str = None):
+async def count(model_space: str = None):
     '''
     Returns the number of records in the database
     '''
-    return {"count": app._db.count(space_key=space_key)}
+    return {"count": app._db.count(model_space=model_space)}
 
 @app.post("/api/v1/reset")
 async def reset():
@@ -143,14 +143,16 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    if embedding.space_key is None:
-        return {"error": "space_key is required"}
+    if embedding.model_space is None:
+        return {"error": "model_space is required"}
 
     ids = None
     filter_by_where = {}
-    filter_by_where["space_key"] = embedding.space_key
-    if embedding.category_name is not None:
-        filter_by_where["category_name"] = embedding.category_name
+    filter_by_where["model_space"] = embedding.model_space
+    if embedding.inference_class is not None:
+        filter_by_where["inference_class"] = embedding.inference_class
+    if embedding.label_class is not None:
+        filter_by_where["label_class"] = embedding.label_class
     if embedding.dataset is not None:
         filter_by_where["dataset"] = embedding.dataset
 
@@ -158,7 +160,7 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
         results = app._db.fetch(filter_by_where)
         ids = [str(item[get_col_pos('uuid')]) for item in results] 
     
-    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.space_key, embedding.embedding, embedding.n_results, ids)
+    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.model_space, embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
         "embeddings": app._db.get_by_ids(uuids),

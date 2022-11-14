@@ -47,25 +47,25 @@ if __name__ == "__main__":
 
             row['embedding_data'] = row['embedding_data'].tolist()
 
-        embedding_data = batch['embedding_data'].tolist()
+        embedding = batch['embedding_data'].tolist()
         input_uri = batch['resource_uri'].tolist()
 
-        category_names = []
+        inference_classes = []
         for index, row in batch.iterrows():
             for idx, annotation in enumerate(row['infer']['annotations']):
-                category_names.append(annotation['category_name'])
+                inference_classes.append(annotation['category_name'])
 
         datasets = dataset
 
-        chroma.log(
-            embedding_data=embedding_data, 
+        chroma.add(
+            embedding=embedding, 
             input_uri=input_uri, 
             dataset=dataset,
-            category_name=category_names
+            inference_class=inference_classes
         )
 
     allend = time.time()
-    print("time to log all: ", "{:.2f}".format(allend - allstart) + 's')
+    print("time to add all: ", "{:.2f}".format(allend - allstart) + 's')
 
     fetched = chroma.count()
     print("Records loaded into the database: ",  fetched)

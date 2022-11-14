@@ -6,16 +6,17 @@ import os
 from clickhouse_driver import connect, Client
 
 EMBEDDING_TABLE_SCHEMA = [
-    {'space_key': 'String'},
+    {'model_space': 'String'},
     {'uuid': 'UUID'},
-    {'embedding_data': 'Array(Float64)'},
+    {'embedding': 'Array(Float64)'},
     {'input_uri': 'String'},
     {'dataset': 'String'},
-    {'category_name': 'String'},
+    {'inference_class': 'String'},
+    {'label_class': 'Nullable(String)'},
 ]
 
 RESULTS_TABLE_SCHEMA = [
-    {'space_key': 'String'},
+    {'model_space': 'String'},
     {'uuid': 'UUID'},
     {'custom_quality_score': ' Nullable(Float64)'},
 ]
@@ -47,7 +48,7 @@ class Clickhouse(Database):
     def _create_table_embeddings(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
-        ) ENGINE = MergeTree() ORDER BY space_key''')
+        ) ENGINE = MergeTree() ORDER BY model_space''')
 
         self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
         self._conn.execute(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
@@ -55,7 +56,7 @@ class Clickhouse(Database):
     def _create_table_results(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS results (
             {db_array_schema_to_clickhouse_schema(RESULTS_TABLE_SCHEMA)}
-        ) ENGINE = MergeTree() ORDER BY space_key''')
+        ) ENGINE = MergeTree() ORDER BY model_space''')
 
     def __init__(self):
         client = Client(host='clickhouse', port=os.getenv('CLICKHOUSE_TCP_PORT', '9000'))
@@ -63,23 +64,25 @@ class Clickhouse(Database):
         self._create_table_embeddings()
         self._create_table_results()
 
-    def add_batch(self, space_key, embedding_data, input_uri, dataset=None, custom_quality_score=None, category_name=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, inference_class=None, label_class=None):
         data_to_insert = []
-        for i in range(len(embedding_data)):
-            data_to_insert.append([space_key[i], uuid.uuid4(), embedding_data[i], input_uri[i], dataset[i], category_name[i]])
+        for i in range(len(embedding)):
+            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], inference_class[i], (label_class[i] if label_class is not None else None)])
 
-        self._conn.execute('''
-         INSERT INTO embeddings (space_key, uuid, embedding_data, input_uri, dataset, category_name) VALUES''', data_to_insert)
+        insert_string = "model_space, uuid, embedding, input_uri, dataset, inference_class, label_class"
+
+        self._conn.execute(f'''
+         INSERT INTO embeddings ({insert_string}) VALUES''', data_to_insert)
         
-    def count(self, space_key=None):
+    def count(self, model_space=None):
         where_string = ""
-        if space_key is not None:
-            where_string = f"WHERE space_key = '{space_key}'"
+        if model_space is not None:
+            where_string = f"WHERE model_space = '{model_space}'"
         return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")[0][0]
 
     def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
-        if where_filter["space_key"] is None:
-            return {"error": "space_key is required"}
+        if where_filter["model_space"] is None:
+            return {"error": "model_space is required"}
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -100,7 +103,7 @@ class Clickhouse(Database):
         if sort is not None:
             where_filter += f" ORDER BY {sort}"
         else:
-            where_filter += f" ORDER BY space_key" # stable ordering
+            where_filter += f" ORDER BY model_space" # stable ordering
 
         if limit is not None or isinstance(limit, int):
             where_filter += f" LIMIT {limit}"
@@ -120,8 +123,8 @@ class Clickhouse(Database):
         return val
 
     def delete(self, where_filter={}):
-        if where_filter["space_key"] is None:
-            return {"error": "space_key is required. Use reset to clear the entire db"}
+        if where_filter["model_space"] is None:
+            return {"error": "model_space is required. Use reset to clear the entire db"}
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -160,22 +163,22 @@ class Clickhouse(Database):
     def raw_sql(self, sql):
         return self._conn.execute(sql)
 
-    def add_results(self, space_keys, uuids, custom_quality_score):
+    def add_results(self, model_spaces, uuids, custom_quality_score):
         data_to_insert = []
-        for i in range(len(space_keys)):
-            data_to_insert.append([space_keys[i], uuids[i], custom_quality_score[i]])
+        for i in range(len(model_spaces)):
+            data_to_insert.append([model_spaces[i], uuids[i], custom_quality_score[i]])
 
         self._conn.execute('''
-         INSERT INTO results (space_key, uuid, custom_quality_score) VALUES''', data_to_insert)
+         INSERT INTO results (model_space, uuid, custom_quality_score) VALUES''', data_to_insert)
     
-    def delete_results(self, space_key):
-        self._conn.execute(f"DELETE FROM results WHERE space_key = '{space_key}'")
+    def delete_results(self, model_space):
+        self._conn.execute(f"DELETE FROM results WHERE model_space = '{model_space}'")
      
-    def return_results(self, space_key, n_results = 100):
+    def return_results(self, model_space, n_results = 100):
         return self._conn.execute(f'''
             SELECT
                 embeddings.input_uri,
-                embeddings.embedding_data,
+                embeddings.embedding,
                 results.custom_quality_score
             FROM
                 results
@@ -184,7 +187,7 @@ class Clickhouse(Database):
             ON
                 results.uuid = embeddings.uuid
             WHERE
-                results.space_key = '{space_key}'
+                results.model_space = '{model_space}'
             ORDER BY
                 results.custom_quality_score DESC
             LIMIT {n_results}
