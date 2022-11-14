@@ -36,13 +36,12 @@ async def root():
     '''Heartbeat endpoint'''
     return {"nanosecond heartbeat": int(1000 * time.time_ns())}
 
-
-@app.get("/api/v1/calculate_results")
+@app.post("/api/v1/calculate_results")
 async def calculate_results(space_key: SpaceKeyInput):
     task = heavy_offline_analysis.delay(space_key.space_key)
     return JSONResponse({"task_id": task.id})
 
-@app.get("/api/v1/tasks/{task_id}")
+@app.post("/api/v1/tasks/{task_id}")
 async def get_status(task_id):
     task_result = AsyncResult(task_id)
     result = {
@@ -52,11 +51,9 @@ async def get_status(task_id):
     }
     return JSONResponse(result)
 
-@app.get("/api/v1/get_results")
+@app.post("/api/v1/get_results")
 async def get_results(results: Results):
     return app._db.return_results(results.space_key, results.n_results)
-
-    
 
 @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
 async def add_to_db(new_embedding: AddEmbedding):
@@ -72,8 +69,7 @@ async def add_to_db(new_embedding: AddEmbedding):
 
     return {"response": "Added records to database"}
 
-
-@app.get("/api/v1/process")
+@app.post("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
@@ -81,6 +77,7 @@ async def process(process_embedding: ProcessEmbedding):
     fetch = app._db.fetch({"space_key": process_embedding.space_key}, columnar=True)
     app._ann_index.run(process_embedding.space_key, fetch[1], fetch[2]) # more magic number, ugh
 
+    return {"response": "Processed space"}
 
 @app.post("/api/v1/fetch")
 async def fetch(embedding: FetchEmbedding):
@@ -90,16 +87,15 @@ async def fetch(embedding: FetchEmbedding):
     '''
     return app._db.fetch(embedding.where_filter, embedding.sort, embedding.limit)
 
-
 @app.get("/api/v1/count")
-async def count(count_embedding: CountEmbedding):
+async def count(space_key: str):
     '''
     Returns the number of records in the database
     '''
-    return {"count": app._db.count(space_key=count_embedding.space_key)}
+    print("space_key", space_key)
+    return {"count": app._db.count(space_key=space_key)}
 
-
-@app.get("/api/v1/reset")
+@app.post("/api/v1/reset")
 async def reset():
     '''
     Reset the database and index - WARNING: Destructive! 
@@ -137,6 +133,6 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
         "distances": distances.tolist()[0]
     }
 
-@app.get("/api/v1/raw_sql")
+@app.post("/api/v1/raw_sql")
 async def raw_sql(raw_sql: RawSql):
     return app._db.raw_sql(raw_sql.raw_sql)
