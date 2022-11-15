@@ -9,6 +9,7 @@ from chroma_server.logger import logger
 
 class Hnswlib(Index):
 
+    _save_folder = '/index_data'
     _model_space = None
     _index = None
     _index_metadata = {
@@ -22,6 +23,10 @@ class Hnswlib(Index):
 
     def __init__(self):
         pass
+
+    # set the save folder
+    def set_save_folder(self, save_folder):
+        self._save_folder = save_folder
 
     def run(self, model_space, uuids, embeddings):
         # more comments available at the source: https://github.com/nmslib/hnswlib
@@ -51,40 +56,44 @@ class Hnswlib(Index):
         self.save()
         
     def save(self):
+        # create the directory if it doesn't exist
+        if not os.path.exists(f'{self._save_folder}'):
+            os.makedirs(f'{self._save_folder}')
+
         if self._index is None:
             return
-        self._index.save_index(f"/index_data/index_{self._model_space}.bin")
+        self._index.save_index(f"{self._save_folder}/index_{self._model_space}.bin")
 
         # pickle the mappers
-        with open(f"/index_data/id_to_uuid_{self._model_space}.pkl", 'wb') as f:
+        with open(f"{self._save_folder}/id_to_uuid_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._id_to_uuid, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"/index_data/uuid_to_id_{self._model_space}.pkl", 'wb') as f:
+        with open(f"{self._save_folder}/uuid_to_id_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._uuid_to_id, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"/index_data/index_metadata_{self._model_space}.pkl", 'wb') as f:
+        with open(f"{self._save_folder}/index_metadata_{self._model_space}.pkl", 'wb') as f:
             pickle.dump(self._index_metadata, f, pickle.HIGHEST_PROTOCOL)
 
-        logger.debug('Index saved to /index_data/index.bin')
+        logger.debug('Index saved to {self._save_folder}/index.bin')
 
     def load(self, model_space):
         # unpickle the mappers
-        with open(f"/index_data/id_to_uuid_{model_space}.pkl", 'rb') as f:
+        with open(f"{self._save_folder}/id_to_uuid_{model_space}.pkl", 'rb') as f:
             self._id_to_uuid = pickle.load(f)
-        with open(f"/index_data/uuid_to_id_{model_space}.pkl", 'rb') as f:
+        with open(f"{self._save_folder}/uuid_to_id_{model_space}.pkl", 'rb') as f:
             self._uuid_to_id = pickle.load(f)
-        with open(f"/index_data/index_metadata_{model_space}.pkl", 'rb') as f:
+        with open(f"{self._save_folder}/index_metadata_{model_space}.pkl", 'rb') as f:
             self._index_metadata = pickle.load(f)
 
         p = hnswlib.Index(space='l2', dim= self._index_metadata['dimensionality'])
         self._index = p
-        self._index.load_index(f"/index_data/index_{model_space}.bin", max_elements= self._index_metadata['elements'])
+        self._index.load_index(f"{self._save_folder}/index_{model_space}.bin", max_elements= self._index_metadata['elements'])
 
         self._model_space = model_space
 
     def has_index(self, model_space):
-        return os.path.isfile(f"/index_data/index_{model_space}.bin")
+        return os.path.isfile(f"{self._save_folder}/index_{model_space}.bin")
 
     # do knn_query on hnswlib to get nearest neighbors
-    def get_nearest_neighbors(self, model_space, query, k, uuids=None):
+    def get_nearest_neighbors(self, model_space, query, k, uuids=[]):
 
         if self._model_space != model_space:
             self.load(model_space)
@@ -96,12 +105,15 @@ class Hnswlib(Index):
             ids.append(self._uuid_to_id[uuid])
 
         filter_function = None
-        if not ids is None:
+        # if uuids is not an empty array
+        if len(ids) > 0:
             filter_function = lambda id: id in ids
 
-        if len(ids) < k:
+        if len(ids) < k and len(ids) > 0:
             k = len(ids)
         print('time to pre process our knn query: ', time.time() - s2)
+
+        print("filter_function: ", filter_function)
 
         s3= time.time()
         database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
@@ -115,5 +127,5 @@ class Hnswlib(Index):
         return uuids, distances
 
     def reset(self):
-        for f in os.listdir('/index_data'):
-            os.remove(os.path.join('/index_data', f))
+        for f in os.listdir(f'{self._save_folder}'):
+            os.remove(os.path.join(f'{self._save_folder}', f))
