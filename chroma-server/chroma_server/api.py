@@ -107,24 +107,14 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    if embedding.model_space is None:
+    print('embedding.where_filter', embedding.where_filter)
+    if embedding.where_filter['model_space'] is None:
         return {"error": "model_space is required"}
 
-    ids = None
-    filter_by_where = {}
-    filter_by_where["model_space"] = embedding.model_space
-    if embedding.inference_class is not None:
-        filter_by_where["inference_class"] = embedding.inference_class
-    if embedding.label_class is not None:
-        filter_by_where["label_class"] = embedding.label_class
-    if embedding.dataset is not None:
-        filter_by_where["dataset"] = embedding.dataset
-
-    if filter_by_where is not None:
-        results = app._db.fetch(filter_by_where)
-        ids = [str(item[get_col_pos('uuid')]) for item in results] 
+    results = app._db.fetch(embedding.where_filter)
+    ids = [str(item[get_col_pos('uuid')]) for item in results] 
     
-    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.model_space, embedding.embedding, embedding.n_results, ids)
+    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.where_filter['model_space'], embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
         "embeddings": app._db.get_by_ids(uuids),

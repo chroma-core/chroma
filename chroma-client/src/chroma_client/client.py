@@ -134,18 +134,15 @@ class Chroma:
             label_class=label_class
         )
         
-    def get_nearest_neighbors(self, embedding, n_results=10, inference_class=None, label_class=None, dataset="training", model_space = None):
+    def get_nearest_neighbors(self, embedding, n_results=10, where_filter={}):
         '''Gets the nearest neighbors of a single embedding'''
-        if not model_space:
-            model_space = self._model_space
+        if not where_filter["model_space"]:
+            where_filter["model_space"] = self._model_space
 
         x = requests.post(self._api_url + "/get_nearest_neighbors", data = json.dumps({
-            "model_space": model_space,
             "embedding": embedding, 
             "n_results": n_results,
-            "inference_class": inference_class,
-            "label_class": label_class,
-            "dataset": dataset
+            "where_filter": where_filter
         }) )
 
         if x.status_code == 200:
