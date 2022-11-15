@@ -93,27 +93,31 @@ class Hnswlib(Index):
         return os.path.isfile(f"{self._save_folder}/index_{model_space}.bin")
 
     # do knn_query on hnswlib to get nearest neighbors
-    def get_nearest_neighbors(self, model_space, query, k, uuids=[]):
+    def get_nearest_neighbors(self, model_space, query, k, uuids=None):
 
         if self._model_space != model_space:
             self.load(model_space)
 
         s2= time.time()
         # get ids from uuids
+
         ids = []
-        for uuid in uuids:
-            ids.append(self._uuid_to_id[uuid])
+        if not uuids is None:
+            for uuid in uuids:
+                ids.append(self._uuid_to_id[uuid])
 
         filter_function = None
         # if uuids is not an empty array
-        if len(ids) > 0:
-            filter_function = lambda id: id in ids
+        if not uuids is None:
+            if not ids is None:
+                filter_function = lambda id: id in ids
 
-        if len(ids) < k and len(ids) > 0:
-            k = len(ids)
+        if not uuids is None:
+            if len(ids) < k:# and len(uuids) > 0:
+                k = len(ids)
         print('time to pre process our knn query: ', time.time() - s2)
 
-        print("filter_function: ", filter_function)
+        print("query, k, filter_function", query, k, filter_function)
 
         s3= time.time()
         database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
@@ -121,8 +125,9 @@ class Hnswlib(Index):
 
         # get uuids from ids    
         uuids = []
-        for id in database_ids[0]:
-            uuids.append(self._id_to_uuid[id])
+        if not uuids is None:
+            for id in database_ids[0]:
+                uuids.append(self._id_to_uuid[id])
         
         return uuids, distances
 
