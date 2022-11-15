@@ -16,10 +16,6 @@ class Chroma:
         if isinstance(model_space, str) and model_space:
             self._model_space = model_space
 
-    def set_model_space(self, app, model_version, layer):
-        '''Sets the model_space of the client'''
-        self._model_space = app + "_" + model_version + "_" + layer
-
     def set_model_space(self, model_space):
         '''Sets the space key for the client, enables overriding the string concat'''
         self._model_space = model_space
