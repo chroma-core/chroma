@@ -117,7 +117,13 @@ class Clickhouse(Database):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-        val = self._fetch(where=where, columnar=columnar)
+        val = self._conn.query_dataframe(f'''
+            SELECT 
+                {db_schema_to_keys()}
+            FROM 
+                embeddings
+        {where}
+        ''')
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val
