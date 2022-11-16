@@ -100,7 +100,7 @@ async def test_get_nearest_neighbors():
         await post_batch_records(ac)
         await ac.post("/api/v1/create_index", json={"model_space": "test_space"})
         response = await ac.post(
-            "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "model_space": "test_space"}
+            "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where_filter":{"model_space": "test_space"}}
         )
     assert response.status_code == 200
     assert len(response.json()["ids"]) == 1
@@ -116,9 +116,11 @@ async def test_get_nearest_neighbors_filter():
             json={
                 "embedding": [1.1, 2.3, 3.2],
                 "n_results": 1,
-                "dataset": "training",
-                "inference_class": "monkey",
-                "model_space": "test_space",
+                "where_filter":{
+                    "dataset": "training",
+                    "inference_class": "monkey",
+                    "model_space": "test_space",
+                }
             },
         )
     assert response.status_code == 200

@@ -11,12 +11,9 @@ class AddEmbedding(BaseModel):
     label_class: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
-    model_space: str = None
+    where_filter: dict = {}
     embedding: list
     n_results: int = 10
-    inference_class: str = None
-    label_class: str = None
-    dataset: str = None
 
 class ProcessEmbedding(BaseModel):
     model_space: str = None
