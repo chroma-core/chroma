@@ -1,6 +1,8 @@
 import time
+import os
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
+from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
 from chroma_server.types import (AddEmbedding, CountEmbedding, DeleteEmbedding,
                                  FetchEmbedding, ProcessEmbedding,
@@ -18,8 +20,13 @@ init_error_reporting()
 
 from celery.result import AsyncResult
 
-# Boot script
-db = Clickhouse
+# current valid modes are 'in-memory' and 'docker', it defaults to docker
+chroma_mode = os.getenv('CHROMA_MODE', 'docker')
+if chroma_mode == 'in-memory':
+    db = DuckDB
+else:
+    db = Clickhouse
+
 ann_index = Hnswlib
 
 app = FastAPI(debug=True)
@@ -27,6 +34,14 @@ app = FastAPI(debug=True)
 # init db and index
 app._db = db()
 app._ann_index = ann_index()
+
+def create_index_data_dir():
+    if not os.path.exists(os.getcwd() + '/index_data'):
+        os.makedirs(os.getcwd() + '/index_data')
+    app._ann_index.set_save_folder(os.getcwd() + '/index_data')
+
+if chroma_mode == 'in-memory':
+    create_index_data_dir()
 
 # API Endpoints
 @app.get("/api/v1")
@@ -98,6 +113,8 @@ async def reset():
     app._db.reset()
     app._ann_index = ann_index()
     app._ann_index.reset()
+    if chroma_mode == 'in-memory':
+        create_index_data_dir()
     return True
 
 @app.post("/api/v1/get_nearest_neighbors")
@@ -110,7 +127,7 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
 
     results = app._db.fetch(embedding.where_filter)
     ids = [str(item[get_col_pos('uuid')]) for item in results] 
-    
+
     uuids, distances = app._ann_index.get_nearest_neighbors(embedding.where_filter['model_space'], embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
@@ -136,6 +153,9 @@ async def process(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
     '''
+    if chroma_mode == 'in-memory':
+        raise Exception("in-memory mode does not process because it relies on celery and redis")
+
     fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
     app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
@@ -146,6 +166,9 @@ async def process(process_embedding: ProcessEmbedding):
 
 @app.post("/api/v1/tasks/{task_id}")
 async def get_status(task_id):
+    if chroma_mode == 'in-memory':
+        raise Exception("in-memory mode does not process because it relies on celery and redis")
+        
     task_result = AsyncResult(task_id)
     result = {
         "task_id": task_id,
@@ -156,6 +179,8 @@ async def get_status(task_id):
 
 @app.post("/api/v1/get_results")
 async def get_results(results: Results):
+    if chroma_mode == 'in-memory':
+        raise Exception("in-memory mode does not process because it relies on celery and redis")
 
     # if there is no index, generate one
     if not app._ann_index.has_index(results.model_space):

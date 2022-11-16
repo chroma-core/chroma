@@ -44,3 +44,11 @@ Running a nearest neighbor search
 {'ids': ['11540ca6-ebbc-4c81-8299-108d8c47c88c'], 'embeddings': [['sample_space', '11540ca6-ebbc-4c81-8299-108d8c47c88c', [1.0, 2.0, 3.0, 4.0, 5.0], '/images/1', 'training', None, 'spoon']], 'distances': [0.0]}
 Success! Everything worked!
 ```
+
+
+### Run in-memory Chroma
+
+```
+cd chroma-server
+CHROMA_MODE="in-memory" uvicorn chroma_server.api:app --reload --log-level=debug
+```
