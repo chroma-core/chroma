@@ -8,6 +8,7 @@ dynamic = ["version"]
 dependencies = [
   'pyarrow ~= 9.0',
   'requests ~= 2.28',
+  'typer ~= 0.4.1'
 ]
 
 authors = [
@@ -35,3 +36,6 @@ pythonpath = [
 [tool.setuptools_scm]
 root=".."
 local_scheme="dirty-tag"
+
+[project.scripts]
+chroma = "cli.command:run"
