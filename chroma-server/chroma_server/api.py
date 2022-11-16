@@ -1,18 +1,16 @@
-import os
-import shutil
 import time
-
-from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
-
-from chroma_server.worker import heavy_offline_analysis
 
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.index.hnswlib import Hnswlib
-from chroma_server.types import AddEmbedding, QueryEmbedding, ProcessEmbedding, FetchEmbedding, CountEmbedding, RawSql, Results, SpaceKeyInput, DeleteEmbedding
-
-from chroma_server.utils.telemetry.capture import Capture
+from chroma_server.types import (AddEmbedding, CountEmbedding, DeleteEmbedding,
+                                 FetchEmbedding, ProcessEmbedding,
+                                 QueryEmbedding, RawSql, Results,
+                                 SpaceKeyInput)
 from chroma_server.utils.error_reporting import init_error_reporting
+from chroma_server.utils.telemetry.capture import Capture
+from chroma_server.worker import heavy_offline_analysis
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
 
 chroma_telemetry = Capture()
 chroma_telemetry.capture('server-start')
@@ -107,7 +105,6 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    print('embedding.where_filter', embedding.where_filter)
     if embedding.where_filter['model_space'] is None:
         return {"error": "model_space is required"}
 
