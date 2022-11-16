@@ -1,0 +1,58 @@
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-family: 'Inter', sans-serif;
+
+  /* prevent double clicking on background selecting text on sidebar */
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+code {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+html::-webkit-scrollbar {
+  display: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+html,
+body {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.select-cursor {
+  cursor: url('../public/cursor-outline.svg') -1 -2, auto;
+}
+
+.crosshair-plus-cursor {
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-plus.svg') 8 7, auto;
+}
+
+.crosshair-minus-cursor {
+  /* custom offsets to get the cursor to be aligned with system crosshair */
+  cursor: url('../public/crosshair-minus.svg') 8 7, auto;
+}
+
+/* pointer events should skip this and populate down */
+.chakra-modal__content-container {
+  pointer-events: none;
+}
+
+/* pointer events on this should stop here */
+.chakra-modal__content {
+  pointer-events: all;
+}

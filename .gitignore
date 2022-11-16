@@ -13,3 +13,8 @@ chroma-server/chroma_logs.log
 
 index_data
 /index_data
+
+# igonore chroma-ui build files
+chroma-ui/build
+chroma-ui/public/
+chroma-ui/node_modules/
