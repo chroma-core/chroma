@@ -15,7 +15,7 @@ chroma.add(
 
 # print("fetch", chroma.fetch())
 print("Generating the index")
-print(chroma.process())
+print(chroma.create_index())
 
 print("Running a nearest neighbor search")
 print(chroma.get_nearest_neighbors([1,2,3,4,5], 1))
