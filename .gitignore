@@ -10,3 +10,6 @@ chroma-server/chroma_logs.log
 **/data__nogit
 
 **/.ipynb_checkpoints
+
+index_data
+/index_data

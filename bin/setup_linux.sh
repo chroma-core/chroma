@@ -30,7 +30,6 @@ git clone https://oauth2:github_pat_11AAGZWEA0i4gAuiLWSPPV_j72DZ4YurWwGV6wm0RHBy
 
 #checkout the right branch
 cd chroma
-git checkout jeff/packaging
 
 # run docker
 cd chroma-server
