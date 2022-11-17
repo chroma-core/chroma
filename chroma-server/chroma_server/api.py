@@ -81,6 +81,7 @@ async def add(new_embedding: AddEmbedding):
 
     return {"response": "Added records to database"}
 
+
 @app.post("/api/v1/fetch")
 async def fetch(embedding: FetchEmbedding):
     '''
@@ -103,6 +104,8 @@ async def count(model_space: str = None):
     Returns the number of records in the database
     '''
     return {"count": app._db.count(model_space=model_space)}
+
+
 
 @app.post("/api/v1/reset")
 async def reset():
@@ -200,3 +203,19 @@ async def get_results(results: Results):
 
     else:
         return app._db.return_results(results.model_space, results.n_results)
+
+# headless mode
+core = app
+core.add = add
+core.count = count
+core.fetch = fetch
+core.reset = reset
+core.delete = delete
+core.get_nearest_neighbors = get_nearest_neighbors
+core.raw_sql = raw_sql
+core.create_index = create_index
+
+# these as currently constructed require celery
+# chroma_core.process = process
+# chroma_core.get_status = get_status
+# chroma_core.get_results = get_results
