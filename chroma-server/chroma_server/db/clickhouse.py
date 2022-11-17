@@ -73,12 +73,18 @@ class Clickhouse(Database):
 
         self._conn.execute(f'''
          INSERT INTO embeddings ({insert_string}) VALUES''', data_to_insert)
-        
-    def count(self, model_space=None):
+
+    def _count(self, model_space=None):
         where_string = ""
         if model_space is not None:
             where_string = f"WHERE model_space = '{model_space}'"
-        return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")[0][0]
+        return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")
+        
+    def count(self, model_space=None):
+        return self._count(model_space=model_space)[0][0]
+
+    def _fetch(self, where_filter={}, columnar=False):
+        return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where_filter}''', columnar=columnar)
 
     def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
         if where_filter["model_space"] is None:
@@ -111,16 +117,17 @@ class Clickhouse(Database):
         if offset is not None or isinstance(offset, int):
             where_filter += f" OFFSET {offset}"
 
-        val = self._conn.execute(f'''
-            SELECT 
-                {db_schema_to_keys()}
-            FROM 
-                embeddings
-        {where_filter}
-        ''', columnar=columnar)
+        val = self._fetch(where_filter=where_filter, columnar=columnar)
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val
+
+    def _delete(self, where_filter={}):
+        return self._conn.execute(f'''
+            DELETE FROM 
+                embeddings
+        {where_filter}
+        ''')
 
     def delete(self, where_filter={}):
         if where_filter["model_space"] is None:
@@ -142,11 +149,7 @@ class Clickhouse(Database):
         if where_filter:
             where_filter = f"WHERE {where_filter}"
 
-        val = self._conn.execute(f'''
-            DELETE FROM 
-                embeddings
-        {where_filter}
-        ''')
+        val = self._delete(where_filter=where_filter)
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val
