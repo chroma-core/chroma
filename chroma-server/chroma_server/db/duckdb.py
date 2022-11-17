@@ -44,61 +44,16 @@ class DuckDB(Clickhouse):
         data_to_insert = []
         for i in range(len(embedding)):
             data_to_insert.append([model_space[i], str(uuid.uuid4()), embedding[i], input_uri[i], dataset[i], inference_class[i], (label_class[i] if label_class is not None else None)])
-
-        insert_string = "model_space, uuid, embedding, input_uri, dataset, inference_class, label_class"
         
+        insert_string = "model_space, uuid, embedding, input_uri, dataset, inference_class, label_class"
         self._conn.executemany(f'''
          INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?,?)''', data_to_insert)
 
-    # the fetchall syntax is different than clickhouse
     def count(self, model_space=None):
-        where_string = ""
-        if model_space is not None:
-            where_string = f"WHERE model_space = '{model_space}'"
-        return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}").fetchall()[0][0]
+        return self._count(model_space=model_space).fetchall()[0][0]
 
-    # duckdb uses fetchall
-    def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
-        if where_filter["model_space"] is None:
-            return {"error": "model_space is required"}
-
-        s3= time.time()
-        # check to see if query is a dict and if it is a flat list of key value pairs
-        if where_filter is not None:
-            if not isinstance(where_filter, dict):
-                raise Exception("Invalid where_filter: " + str(where_filter))
-            
-            # ensure where_filter is a flat dict
-            for key in where_filter:
-                if isinstance(where_filter[key], dict):
-                    raise Exception("Invalid where_filter: " + str(where_filter))
-        
-        where_filter = " AND ".join([f"{key} = '{value}'" for key, value in where_filter.items()])
-
-        if where_filter:
-            where_filter = f"WHERE {where_filter}"
-
-        if sort is not None:
-            where_filter += f" ORDER BY {sort}"
-        else:
-            where_filter += f" ORDER BY model_space" # stable ordering
-
-        if limit is not None or isinstance(limit, int):
-            where_filter += f" LIMIT {limit}"
-        
-        if offset is not None or isinstance(offset, int):
-            where_filter += f" OFFSET {offset}"
-
-        val = self._conn.execute(f'''
-            SELECT 
-                {db_schema_to_keys()}
-            FROM 
-                embeddings
-        {where_filter}
-        ''').fetchall()
-        print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
-
-        # change val to a columnar format
+    def _fetch(self, where_filter={}, columnar=False):
+        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where_filter}''').fetchall()
         if columnar:
             val = list(zip(*val))
 

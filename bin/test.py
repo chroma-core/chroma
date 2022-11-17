@@ -13,6 +13,9 @@ chroma.add(
     ['spoon', 'knife', 'fork']
 )
 
+print("count")
+print(chroma.count())
+
 # print("fetch", chroma.fetch())
 print("Generating the index")
 print(chroma.create_index())
