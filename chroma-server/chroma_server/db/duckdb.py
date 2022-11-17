@@ -56,8 +56,14 @@ class DuckDB(Clickhouse):
         val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where_filter}''').fetchall()
         if columnar:
             val = list(zip(*val))
-
         return val
+
+    def _delete(self, where_filter={}):
+        return self._conn.execute(f'''
+            DELETE FROM 
+                embeddings
+        {where_filter}
+        ''').fetchall()[0]
 
     # duckdb uses fetchdf, and replaces the nans with nones so they can be converted to json
     def get_by_ids(self, ids=list):
