@@ -54,6 +54,35 @@ class Hnswlib(Index):
             'time_created': time.time(),
         }
         self.save()
+
+    def delete(self, model_space):
+        # delete files, dont throw error if they dont exist
+        try:
+            os.remove(f"{self._save_folder}/id_to_uuid_{model_space}.pkl")
+            os.remove(f"{self._save_folder}/uuid_to_id_{model_space}.pkl")
+            os.remove(f"{self._save_folder}/index_metadata_{model_space}.pkl")
+            os.remove(f"{self._save_folder}/index_{model_space}.bin")
+        except:
+            pass
+
+        if self._model_space == model_space:
+            self._index = None
+            self._model_space = None
+            self._index_metadata = None
+            self._id_to_uuid = {}
+            self._uuid_to_id = {}
+
+    def delete_from_index(self, model_space, uuids):
+        if self._model_space != model_space:
+            self.load(model_space)
+
+        if self._index is not None:
+            for uuid in uuids:
+                self._index.mark_deleted(self._uuid_to_id[uuid])
+                del self._id_to_uuid[self._uuid_to_id[uuid]]
+                del self._uuid_to_id[uuid]
+
+        self.save()
         
     def save(self):
         # create the directory if it doesn't exist
@@ -76,18 +105,21 @@ class Hnswlib(Index):
 
     def load(self, model_space):
         # unpickle the mappers
-        with open(f"{self._save_folder}/id_to_uuid_{model_space}.pkl", 'rb') as f:
-            self._id_to_uuid = pickle.load(f)
-        with open(f"{self._save_folder}/uuid_to_id_{model_space}.pkl", 'rb') as f:
-            self._uuid_to_id = pickle.load(f)
-        with open(f"{self._save_folder}/index_metadata_{model_space}.pkl", 'rb') as f:
-            self._index_metadata = pickle.load(f)
+        try:
+            with open(f"{self._save_folder}/id_to_uuid_{model_space}.pkl", 'rb') as f:
+                self._id_to_uuid = pickle.load(f)
+            with open(f"{self._save_folder}/uuid_to_id_{model_space}.pkl", 'rb') as f:
+                self._uuid_to_id = pickle.load(f)
+            with open(f"{self._save_folder}/index_metadata_{model_space}.pkl", 'rb') as f:
+                self._index_metadata = pickle.load(f)
 
-        p = hnswlib.Index(space='l2', dim= self._index_metadata['dimensionality'])
-        self._index = p
-        self._index.load_index(f"{self._save_folder}/index_{model_space}.bin", max_elements= self._index_metadata['elements'])
+            p = hnswlib.Index(space='l2', dim= self._index_metadata['dimensionality'])
+            self._index = p
+            self._index.load_index(f"{self._save_folder}/index_{model_space}.bin", max_elements= self._index_metadata['elements'])
 
-        self._model_space = model_space
+            self._model_space = model_space
+        except:
+            logger.debug('Index not found')
 
     def has_index(self, model_space):
         return os.path.isfile(f"{self._save_folder}/index_{model_space}.bin")

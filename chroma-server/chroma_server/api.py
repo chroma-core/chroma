@@ -96,7 +96,14 @@ async def delete(embedding: DeleteEmbedding):
     Deletes embeddings from the database
     - enables filtering by where
     '''
-    return app._db.delete(embedding.where)
+    deleted_uuids = app._db.delete(embedding.where)
+    if len(embedding.where) == 1:
+        if 'model_space' in embedding.where:
+            app._ann_index.delete(embedding.where['model_space'])
+
+    deleted_uuids = [uuid[0] for uuid in deleted_uuids] # de-tuple
+    app._ann_index.delete_from_index(embedding.where['model_space'], deleted_uuids)
+    return deleted_uuids
 
 @app.get("/api/v1/count")
 async def count(model_space: str = None):
@@ -114,8 +121,8 @@ async def reset():
     '''
     app._db = db()
     app._db.reset()
+    app._ann_index.reset() # this has to come first I think
     app._ann_index = ann_index()
-    app._ann_index.reset()
     if chroma_mode == 'in-memory':
         create_index_data_dir()
     return True
