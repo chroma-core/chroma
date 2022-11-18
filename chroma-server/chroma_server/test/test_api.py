@@ -22,7 +22,7 @@ async def post_batch_records(ac):
             "embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
             "input_uri": ["https://example.com", "https://example.com"],
             "dataset": ["training", "training"],
-            "inference_class": ["person", "person"],
+            "inference_class": ["knife", "person"],
             "model_space": ["test_space", "test_space"],
             "label_class": ["person", "person"],
         },
@@ -143,9 +143,26 @@ async def test_delete():
         response = await ac.get("/api/v1/count", params={"model_space": "test_space"})
         assert response.json() == {"count": 2}
         response = await ac.post("/api/v1/delete", json={"where": {"model_space": "test_space"}})
-        # assert response.json() == []
         response = await ac.get("/api/v1/count", params={"model_space": "test_space"})
         assert response.json() == {"count": 0}
+
+@pytest.mark.anyio
+async def test_delete_with_index():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        await ac.post("/api/v1/reset")
+        await post_batch_records(ac)
+        response = await ac.get("/api/v1/count", params={"model_space": "test_space"})
+        assert response.json() == {"count": 2}
+        await ac.post("/api/v1/create_index", json={"model_space": "test_space"})
+        response = await ac.post(
+            "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where":{"model_space": "test_space"}}
+        )
+        assert response.json()['embeddings'][0][5] == 'knife'
+        response = await ac.post("/api/v1/delete", json={"where": {"model_space": "test_space", "inference_class": "knife"}})
+        response = await ac.post(
+            "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where":{"model_space": "test_space"}}
+        )
+        assert response.json()['embeddings'][0][5] == 'person'
 
 # test calculate results
 # @pytest.mark.anyio

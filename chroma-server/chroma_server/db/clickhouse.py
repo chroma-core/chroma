@@ -123,11 +123,13 @@ class Clickhouse(Database):
         return val
 
     def _delete(self, where={}):
-        return self._conn.execute(f'''
+        uuids_deleted = self._conn.execute(f'''SELECT toString(uuid) FROM embeddings {where}''')
+        self._conn.execute(f'''
             DELETE FROM 
                 embeddings
         {where}
         ''')
+        return uuids_deleted
 
     def delete(self, where={}):
         if where["model_space"] is None:

@@ -59,13 +59,14 @@ class DuckDB(Clickhouse):
         return val
 
     def _delete(self, where={}):
-        return self._conn.execute(f'''
+        uuids_deleted = self._conn.execute(f'''SELECT uuid FROM embeddings {where}''').fetchall()
+        self._conn.execute(f'''
             DELETE FROM 
                 embeddings
         {where}
         ''').fetchall()[0]
+        return uuids_deleted
 
-    # duckdb uses fetchdf, and replaces the nans with nones so they can be converted to json
     def get_by_ids(self, ids=list):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
@@ -82,4 +83,4 @@ class DuckDB(Clickhouse):
                 embeddings
             WHERE
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
-        ''').fetchdf().replace({np.nan: None})
+        ''').fetchall()
