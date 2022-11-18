@@ -12,7 +12,7 @@ import uuid
 ###############
 an_embedding = None
 
-DATA_MODE = "milvus"
+DATA_MODE = "chroma"
 
 if __name__ == "__main__":
 
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     print("Loading in records with a batch size of: " , data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if i >= 80_000:
+        if i >= 30_000:
             break
 
         end = time.time()

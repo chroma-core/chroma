@@ -147,9 +147,13 @@ async def create_index(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
     '''
+    start = time.time()
     fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
+    print(f"fetch time: {time.time() - start}")
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
+    start = time.time()
     app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
+    print(f"index time: {time.time() - start}")
 
 @app.post("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
