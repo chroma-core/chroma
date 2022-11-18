@@ -30,7 +30,7 @@ services:
     build:
       context: ./chroma-server
       dockerfile: DockerfileCelery
-    command: celery worker --app=worker.celery --loglevel=info 
+    command: celery worker --app=chroma_server.worker.celery --loglevel=info 
     volumes:
       - ./chroma-server/:/chroma-server/
       - index_data:/index_data
