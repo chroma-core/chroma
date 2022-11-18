@@ -83,73 +83,73 @@ class Clickhouse(Database):
     def count(self, model_space=None):
         return self._count(model_space=model_space)[0][0]
 
-    def _fetch(self, where_filter={}, columnar=False):
-        return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where_filter}''', columnar=columnar)
+    def _fetch(self, where={}, columnar=False):
+        return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''', columnar=columnar)
 
-    def fetch(self, where_filter={}, sort=None, limit=None, offset=None, columnar=False):
-        if where_filter["model_space"] is None:
+    def fetch(self, where={}, sort=None, limit=None, offset=None, columnar=False):
+        if where["model_space"] is None:
             return {"error": "model_space is required"}
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
-        if where_filter is not None:
-            if not isinstance(where_filter, dict):
-                raise Exception("Invalid where_filter: " + str(where_filter))
+        if where is not None:
+            if not isinstance(where, dict):
+                raise Exception("Invalid where: " + str(where))
             
-            # ensure where_filter is a flat dict
-            for key in where_filter:
-                if isinstance(where_filter[key], dict):
-                    raise Exception("Invalid where_filter: " + str(where_filter))
+            # ensure where is a flat dict
+            for key in where:
+                if isinstance(where[key], dict):
+                    raise Exception("Invalid where: " + str(where))
         
-        where_filter = " AND ".join([f"{key} = '{value}'" for key, value in where_filter.items()])
+        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
 
-        if where_filter:
-            where_filter = f"WHERE {where_filter}"
+        if where:
+            where = f"WHERE {where}"
 
         if sort is not None:
-            where_filter += f" ORDER BY {sort}"
+            where += f" ORDER BY {sort}"
         else:
-            where_filter += f" ORDER BY model_space" # stable ordering
+            where += f" ORDER BY model_space" # stable ordering
 
         if limit is not None or isinstance(limit, int):
-            where_filter += f" LIMIT {limit}"
+            where += f" LIMIT {limit}"
         
         if offset is not None or isinstance(offset, int):
-            where_filter += f" OFFSET {offset}"
+            where += f" OFFSET {offset}"
 
-        val = self._fetch(where_filter=where_filter, columnar=columnar)
+        val = self._fetch(where=where, columnar=columnar)
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val
 
-    def _delete(self, where_filter={}):
+    def _delete(self, where={}):
         return self._conn.execute(f'''
             DELETE FROM 
                 embeddings
-        {where_filter}
+        {where}
         ''')
 
-    def delete(self, where_filter={}):
-        if where_filter["model_space"] is None:
+    def delete(self, where={}):
+        if where["model_space"] is None:
             return {"error": "model_space is required. Use reset to clear the entire db"}
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
-        if where_filter is not None:
-            if not isinstance(where_filter, dict):
-                raise Exception("Invalid where_filter: " + str(where_filter))
+        if where is not None:
+            if not isinstance(where, dict):
+                raise Exception("Invalid where: " + str(where))
             
-            # ensure where_filter is a flat dict
-            for key in where_filter:
-                if isinstance(where_filter[key], dict):
-                    raise Exception("Invalid where_filter: " + str(where_filter))
+            # ensure where is a flat dict
+            for key in where:
+                if isinstance(where[key], dict):
+                    raise Exception("Invalid where: " + str(where))
         
-        where_filter = " AND ".join([f"{key} = '{value}'" for key, value in where_filter.items()])
+        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
 
-        if where_filter:
-            where_filter = f"WHERE {where_filter}"
+        if where:
+            where = f"WHERE {where}"
 
-        val = self._delete(where_filter=where_filter)
+        val = self._delete(where=where)
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val

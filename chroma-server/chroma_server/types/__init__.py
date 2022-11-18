@@ -11,7 +11,7 @@ class AddEmbedding(BaseModel):
     label_class: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
-    where_filter: dict = {}
+    where: dict = {}
     embedding: list
     n_results: int = 10
 
@@ -19,7 +19,7 @@ class ProcessEmbedding(BaseModel):
     model_space: str = None
 
 class FetchEmbedding(BaseModel):
-    where_filter: dict = {}
+    where: dict = {}
     sort: str = None
     limit: int = None
     offset: int = None
@@ -38,4 +38,4 @@ class SpaceKeyInput(BaseModel):
     model_space: str
 
 class DeleteEmbedding(BaseModel):
-    where_filter: dict = {}
+    where: dict = {}
