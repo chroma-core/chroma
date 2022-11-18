@@ -86,17 +86,17 @@ async def add(new_embedding: AddEmbedding):
 async def fetch(embedding: FetchEmbedding):
     '''
     Fetches embeddings from the database
-    - enables filtering by where_filter, sorting by key, and limiting the number of results
+    - enables filtering by where, sorting by key, and limiting the number of results
     '''
-    return app._db.fetch(embedding.where_filter, embedding.sort, embedding.limit, embedding.offset)
+    return app._db.fetch(embedding.where, embedding.sort, embedding.limit, embedding.offset)
 
 @app.post("/api/v1/delete")
 async def delete(embedding: DeleteEmbedding):
     '''
     Deletes embeddings from the database
-    - enables filtering by where_filter
+    - enables filtering by where
     '''
-    return app._db.delete(embedding.where_filter)
+    return app._db.delete(embedding.where)
 
 @app.get("/api/v1/count")
 async def count(model_space: str = None):
@@ -125,13 +125,13 @@ async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
     return the distance, database ids, and embedding themselves for the input embedding
     '''
-    if embedding.where_filter['model_space'] is None:
+    if embedding.where['model_space'] is None:
         return {"error": "model_space is required"}
 
-    results = app._db.fetch(embedding.where_filter)
+    results = app._db.fetch(embedding.where)
     ids = [str(item[get_col_pos('uuid')]) for item in results] 
 
-    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.where_filter['model_space'], embedding.embedding, embedding.n_results, ids)
+    uuids, distances = app._ann_index.get_nearest_neighbors(embedding.where['model_space'], embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
         "embeddings": app._db.get_by_ids(uuids),
