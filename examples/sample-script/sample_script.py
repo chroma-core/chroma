@@ -2,10 +2,10 @@ import pandas as pd
 from chroma_client import Chroma
 
 chroma = Chroma()
+chroma.reset()
+chroma.set_model_space("sample_1_1")
 
 print(chroma.heartbeat())
-
-chroma.set_context("sample", "1", "1")
 
 chroma.add([[1,2,3,4,5]], ["/images/1"], ["training"], ['spoon'])
 chroma.add([[1,2,3,4,5]], ["/images/2"], ["training"], ['spoon'])
@@ -14,16 +14,15 @@ chroma.add([[1,2,3,4,5]], ["/images/1"], ["training"], ['knife'])
 chroma.add([[1,2,3,4,5]], ["/images/4"], ["training"], ['knife'])
 chroma.add([[1,2,3,4,5]], ["/prod/2"], ["test"], ['knife'])
 
-chroma.process()
+process_task = chroma.process()
+print(process_task)
 
-task = chroma.calculate_results("sample_1_1")
-print(task)
-print(chroma.get_task_status(task['task_id']))
+print(chroma.get_task_status(process_task['task_id']))
 
 print("sleeping for 10s to wait for task to complete")
 import time
 time.sleep(10)
-print(chroma.get_task_status(task['task_id']))
+print(chroma.get_task_status(process_task['task_id']))
 print(chroma.get_results())
 
 # print(chroma.raw_sql("SELECT * FROM results WHERE space_key = 'yolov3_1_1'"))
