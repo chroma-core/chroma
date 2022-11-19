@@ -17,3 +17,4 @@ requires-python = ">=3.7"
 [tool.setuptools_scm]
 root=".."
 local_scheme="no-local-version"
+

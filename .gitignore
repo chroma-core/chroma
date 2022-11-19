@@ -13,3 +13,5 @@ chroma-server/chroma_logs.log
 
 index_data
 /index_data
+
+chroma_logs.log
