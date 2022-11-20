@@ -199,3 +199,75 @@ class Clickhouse(Database):
                 results.custom_quality_score DESC
             LIMIT {n_results}
         ''')
+
+    def get_model_spaces(self):
+        unique_model_spaces = self._conn.execute(f'''
+            SELECT DISTINCT model_space FROM embeddings
+        ''')
+
+        unique_model_spaces = [model_space[0] for model_space in unique_model_spaces]
+
+        model_space_datasets = []
+        for model_space in unique_model_spaces:
+            model_space_datasets.append(self._conn.execute(f'''
+                SELECT DISTINCT dataset FROM embeddings WHERE model_space = '{model_space}'
+            ''')[0])
+
+        model_space_embedding_lengths = []
+        for model_space in unique_model_spaces:
+            model_space_embedding_lengths.append(self._conn.execute(f'''
+                SELECT length(embedding) FROM embeddings WHERE model_space = '{model_space}' LIMIT 1
+            ''')[0])
+
+        model_spaces = {}
+        for i in range(len(unique_model_spaces)):
+            model_spaces[unique_model_spaces[i]] = {
+                "datasets": model_space_datasets[i],
+                "count": self.count(model_space=unique_model_spaces[i]), 
+                "dimensionality": model_space_embedding_lengths[i][0]
+            }
+
+        return model_spaces
+
+    def inspect(self, model_space):
+
+        count = self.count(model_space=model_space)
+        
+        datasets = self._conn.execute(f'''
+            SELECT DISTINCT dataset FROM embeddings WHERE model_space = '{model_space}'
+        ''')
+
+        inference_class = self._conn.execute(f'''
+            SELECT DISTINCT inference_class FROM embeddings WHERE model_space = '{model_space}'
+        ''')
+
+        label_class = self._conn.execute(f'''
+            SELECT DISTINCT inference_class FROM embeddings WHERE model_space = '{model_space}'
+        ''')
+
+        dimensionality = self._conn.execute(f'''
+            SELECT length(embedding) FROM embeddings WHERE model_space = '{model_space}' LIMIT 1
+        ''')[0][0]
+        
+        # flatten inference_class and label_class
+        datasets = [datasets[0] for datasets in datasets]
+        inference_class = [inference_class[0] for inference_class in inference_class]
+        label_class = [label_class[0] for label_class in label_class]
+
+        # count results
+        count_results = self.count_results(model_space=model_space)
+
+        return {
+            "model_space": model_space,
+            "count": count,
+            "datasets": datasets,
+            "inference_class": inference_class,
+            "label_class": label_class,
+            "dimensionality": dimensionality,
+            "count_results": count_results
+        }
+
+    def peak(self, model_space, n=10):
+        return self._conn.query_dataframe(f'''
+            SELECT {db_schema_to_keys()} FROM embeddings WHERE model_space = '{model_space}' LIMIT {n}
+        ''')

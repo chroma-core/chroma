@@ -52,7 +52,7 @@ class Chroma:
 
     def delete(self, where_filter={}):
         '''Deletes embeddings from the database'''
-        if self._model_space:
+        if self._model_space and not "model_space" in where_filter:
             where_filter["model_space"] = self._model_space
 
         return requests.post(self._api_url + "/delete", data=json.dumps({
@@ -176,3 +176,15 @@ class Chroma:
     def get_task_status(self, task_id):
         '''Gets the status of a task'''
         return requests.post(self._api_url + f"/tasks/{task_id}").json()
+
+    def get_model_spaces(self):
+        '''Gets the model spaces'''
+        return requests.get(self._api_url + "/get_model_spaces").json()
+
+    def inspect(self, model_space=None):
+        '''Inspects the database'''
+        return requests.get(self._api_url + f"/inspect/{model_space}").json()
+
+    def peak(self, model_space=None):
+        '''Inspects the database'''
+        return requests.get(self._api_url + f"/peak/{model_space}").json()

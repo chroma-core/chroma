@@ -188,3 +188,15 @@ async def get_results(results: Results):
 
     else:
         return app._db.return_results(results.model_space, results.n_results)
+
+@app.get("/api/v1/get_model_spaces")
+async def get_model_spaces():
+    return app._db.get_model_spaces()
+
+@app.get("/api/v1/inspect/{model_space}")
+async def inspect(model_space):
+    return app._db.inspect(model_space)
+
+@app.get("/api/v1/peak/{model_space}")
+async def peak(model_space):
+    return app._db.peak(model_space)
