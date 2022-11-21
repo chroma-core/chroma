@@ -20,6 +20,7 @@ class ChromaRouter():
     _app = None
     _db = None
     _ann_index = None
+    _celery_enabed = True
 
     def __init__(self, app: FastAPI, db, ann_index: Hnswlib):
         self._app = app
@@ -40,13 +41,15 @@ class ChromaRouter():
         self.router.add_api_route("/api/v1/get_status", self.get_status, methods=["POST"])
         self.router.add_api_route("/api/v1/get_results", self.get_results, methods=["POST"])
 
+        # if the type of the db is not duckdb, then disable celery
+        if not isinstance(self._db, Clickhouse):
+            self._celery_enabed = False
+
     # API Endpoints
-    # @app.get("/api/v1")
     def root(self):
         '''Heartbeat endpoint'''
         return {"nanosecond heartbeat": int(1000 * time.time_ns())}
 
-    # @app.post("/api/v1/add", status_code=status.HTTP_201_CREATED)
     def add(self, new_embedding: AddEmbedding):
         '''Save batched embeddings to database'''
 
@@ -77,7 +80,6 @@ class ChromaRouter():
 
         return {"response": "Added records to database"}
 
-    # @app.post("/api/v1/fetch")
     def fetch(self, embedding: FetchEmbedding):
         '''
         Fetches embeddings from the database
@@ -85,7 +87,6 @@ class ChromaRouter():
         '''
         return self._app._db.fetch(embedding.where, embedding.sort, embedding.limit, embedding.offset)
 
-    # @app.post("/api/v1/delete")
     def delete(self, embedding: DeleteEmbedding):
         '''
         Deletes embeddings from the database
@@ -107,20 +108,23 @@ class ChromaRouter():
         '''
         return {"count": self._app._db.count(model_space=model_space)}
 
-    # @app.post("/api/v1/reset")
     def reset(self):
         '''
         Reset the database and index - WARNING: Destructive! 
         '''
+        index_save_folder = self._app._ann_index.get_save_folder()
+        db_save_folder = self._app._db.get_save_folder()
+
         self._app._db = self._db()
         self._app._db.reset()
         self._app._ann_index.reset() # this has to come first I think
         self._app._ann_index = self._ann_index()
-        # if chroma_mode == 'in-memory':
-        #     create_index_data_dir()
+
+        self._app._ann_index.set_save_folder(index_save_folder)
+        self._app._db.set_save_folder(db_save_folder)
+        
         return True
 
-    # @app.post("/api/v1/get_nearest_neighbors")
     def get_nearest_neighbors(self,embedding: QueryEmbedding):
         '''
         return the distance, database ids, and embedding themselves for the input embedding
@@ -138,11 +142,9 @@ class ChromaRouter():
             "distances": distances.tolist()[0]
         }
 
-    # @app.post("/api/v1/raw_sql")
     def raw_sql(self, raw_sql: RawSql):
         return self._app._db.raw_sql(raw_sql.raw_sql)
 
-    # @app.post("/api/v1/create_index")
     def create_index(self, process_embedding: ProcessEmbedding):
         '''
         Currently generates an index for the embedding db
@@ -151,13 +153,12 @@ class ChromaRouter():
         # chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
         self._app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
 
-    # @app.post("/api/v1/process")
     def process(self, process_embedding: ProcessEmbedding):
         '''
         Currently generates an index for the embedding db
         '''
-        # if chroma_mode == 'in-memory':
-        #     raise Exception("in-memory mode does not process because it relies on celery and redis")
+        if not self._celery_enabed:
+            raise Exception("in-memory mode does not process because it relies on celery and redis")
 
         fetch = self._app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
         # chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
@@ -167,10 +168,9 @@ class ChromaRouter():
         # chroma_telemetry.capture('heavy-offline-analysis')
         return JSONResponse({"task_id": task.id})
 
-    # @app.post("/api/v1/tasks/{task_id}")
     def get_status(self, task_id):
-        # if chroma_mode == 'in-memory':
-        #     raise Exception("in-memory mode does not process because it relies on celery and redis")
+        if not self._celery_enabed:
+            raise Exception("in-memory mode does not process because it relies on celery and redis")
             
         task_result = AsyncResult(task_id)
         result = {
@@ -180,10 +180,9 @@ class ChromaRouter():
         }
         return JSONResponse(result)
 
-    # @app.post("/api/v1/get_results")
     def get_results(self, results: Results):
-        # if chroma_mode == 'in-memory':
-        #     raise Exception("in-memory mode does not process because it relies on celery and redis")
+        if not self._celery_enabed:
+            raise Exception("in-memory mode does not process because it relies on celery and redis")
 
         # if there is no index, generate one
         if not self._app._ann_index.has_index(results.model_space):

@@ -22,6 +22,8 @@ def clickhouse_to_duckdb_schema(table_schema):
 
 class DuckDB(Clickhouse):
 
+    _save_folder = None
+
     # duckdb has different types, so we want to convert the clickhouse schema to duckdb schema
     def _create_table_embeddings(self):
         self._conn.execute(f'''CREATE TABLE embeddings (
@@ -38,6 +40,12 @@ class DuckDB(Clickhouse):
         self._conn = duckdb.connect()
         self._create_table_embeddings()
         self._create_table_results()
+
+    def set_save_folder(self, path):
+        self._save_folder = path
+    
+    def get_save_folder(self):
+        return self._save_folder
 
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
     def add(self, model_space, embedding, input_uri, dataset=None, inference_class=None, label_class=None):
@@ -84,3 +92,27 @@ class DuckDB(Clickhouse):
             WHERE
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
         ''').fetchall()
+
+    def persist(self):
+        '''
+        Persist the database to disk
+        '''
+        if self._conn is None:
+            return
+
+        self._conn.execute(f'''
+            COPY 
+                (SELECT * FROM embeddings) 
+            TO '{self._save_folder}/chroma.parquet' 
+                (FORMAT PARQUET);
+        ''')
+
+    def load(self):
+        '''
+        Load the database from disk
+        '''
+        path = self._save_folder + "/chroma.parquet"
+        self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
+
+    def __del__(self):
+        self.persist()

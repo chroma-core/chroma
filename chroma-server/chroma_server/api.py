@@ -29,13 +29,27 @@ app = FastAPI(debug=True)
 app._db = db()
 app._ann_index = ann_index()
 
-def create_index_data_dir():
-    if not os.path.exists(os.getcwd() + '/index_data'):
-        os.makedirs(os.getcwd() + '/index_data')
-    app._ann_index.set_save_folder(os.getcwd() + '/index_data')
-
 if chroma_mode == 'in-memory':
-    create_index_data_dir()
+    filesystem_location = os.getcwd()
+
+    # create a dir
+    if not os.path.exists(filesystem_location + '/.chroma'):
+        os.makedirs(filesystem_location + '/.chroma')
+    
+    if not os.path.exists(filesystem_location + '/.chroma/index_data'):
+        os.makedirs(filesystem_location + '/.chroma/index_data')
+    
+    # specify where to save and load data from 
+    app._db.set_save_folder(filesystem_location + '/.chroma')
+    app._ann_index.set_save_folder(filesystem_location + '/.chroma/index_data')
+
+    print("Initializing Chroma...")
+    print("Data will be saved to: " + filesystem_location + '/.chroma')
+
+    # if the db exists, load it
+    if os.path.exists(filesystem_location + '/.chroma/chroma.parquet'):
+        print(f"Existing database found at {filesystem_location + '/.chroma/chroma.parquet'}. Loading...")
+        app._db.load()
 
 router = ChromaRouter(app=app, db=db, ann_index=ann_index)
 app.include_router(router.router)

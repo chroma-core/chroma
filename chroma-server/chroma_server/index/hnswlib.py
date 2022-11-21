@@ -156,3 +156,6 @@ class Hnswlib(Index):
         if os.path.exists(f'{self._save_folder}'):
             for f in os.listdir(f'{self._save_folder}'):
                 os.remove(os.path.join(f'{self._save_folder}', f))
+        # recreate the directory
+        if not os.path.exists(f'{self._save_folder}'):
+            os.makedirs(f'{self._save_folder}')

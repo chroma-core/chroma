@@ -204,3 +204,9 @@ class Clickhouse(Database):
                 results.custom_quality_score DESC
             LIMIT {n_results}
         ''')
+
+    def set_save_folder(self, path):
+       pass
+    
+    def get_save_folder(self):
+        pass

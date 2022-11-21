@@ -11,19 +11,37 @@ from chroma_server.types import (
     QueryEmbedding, CountEmbedding, DeleteEmbedding, 
     RawSql, Results, SpaceKeyInput)
 
-def create_index_data_dir():
-    if not os.path.exists(os.getcwd() + '/index_data'):
-        os.makedirs(os.getcwd() + '/index_data')
-    core._ann_index.set_save_folder(os.getcwd() + '/index_data')
-
 core = FastAPI(debug=True)
 core._db = DuckDB()
 core._ann_index = Hnswlib()
 
-create_index_data_dir()
-
 router = ChromaRouter(app=core, db=DuckDB, ann_index=Hnswlib)
 core.include_router(router.router)
+
+def init(filesystem_location: str = None):
+    if filesystem_location is None:
+        filesystem_location = os.getcwd()
+
+    # create a dir
+    if not os.path.exists(filesystem_location + '/.chroma'):
+        os.makedirs(filesystem_location + '/.chroma')
+    
+    if not os.path.exists(filesystem_location + '/.chroma/index_data'):
+        os.makedirs(filesystem_location + '/.chroma/index_data')
+    
+    # specify where to save and load data from 
+    core._db.set_save_folder(filesystem_location + '/.chroma')
+    core._ann_index.set_save_folder(filesystem_location + '/.chroma/index_data')
+
+    print("Initializing Chroma...")
+    print("Data will be saved to: " + filesystem_location + '/.chroma')
+
+    # if the db exists, load it
+    if os.path.exists(filesystem_location + '/.chroma/chroma.parquet'):
+        print(f"Existing database found at {filesystem_location + '/.chroma/chroma.parquet'}. Loading...")
+        core._db.load()
+
+core.init = init
 
 # headless mode
 core.heartbeat = router.root
