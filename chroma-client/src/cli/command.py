@@ -22,6 +22,10 @@ def list():
         datasets_comma_separated = ", ".join(data[item]['datasets'])
         table.add_row(item, f"{data[item]['count']:,}".replace(",", "_"), datasets_comma_separated, str(data[item]['dimensionality']))
 
+    # if data is empty, print a message
+    if not data:
+        table.add_row("", "", "Empty")
+
     console.print(table)
 
 @typer_app.command()

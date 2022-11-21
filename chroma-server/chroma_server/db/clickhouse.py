@@ -249,12 +249,10 @@ class Clickhouse(Database):
             SELECT length(embedding) FROM embeddings WHERE model_space = '{model_space}' LIMIT 1
         ''')[0][0]
         
-        # flatten inference_class and label_class
         datasets = [datasets[0] for datasets in datasets]
         inference_class = [inference_class[0] for inference_class in inference_class]
         label_class = [label_class[0] for label_class in label_class]
 
-        # count results
         count_results = self.count_results(model_space=model_space)
 
         return {
