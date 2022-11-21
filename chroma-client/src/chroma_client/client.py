@@ -16,6 +16,17 @@ class Chroma:
         if isinstance(model_space, str) and model_space:
             self._model_space = model_space
 
+    def send_request(self, url, data=None):
+        '''Try a request and return the response'''
+        try:
+            x = requests.get(url, data = json.dumps(data) )
+            if x.status_code == 200:
+                return x.json()
+            else:
+                return False
+        except:
+            return Exception(f"Could not connect to server at {self._api_url}. Please make sure the server is running.")
+
     def set_model_space(self, model_space):
         '''Sets the space key for the client, enables overriding the string concat'''
         self._model_space = model_space
@@ -179,12 +190,12 @@ class Chroma:
 
     def get_model_spaces(self):
         '''Gets the model spaces'''
-        return requests.get(self._api_url + "/get_model_spaces").json()
+        return self.send_request(self._api_url + "/get_model_spaces")
 
     def inspect(self, model_space=None):
         '''Inspects the database'''
-        return requests.get(self._api_url + f"/inspect/{model_space}").json()
+        return self.send_request(self._api_url  + f"/inspect/{model_space}")
 
     def peak(self, model_space=None):
         '''Inspects the database'''
-        return requests.get(self._api_url + f"/peak/{model_space}").json()
+        return self.send_request(self._api_url  + f"/peak/{model_space}")
