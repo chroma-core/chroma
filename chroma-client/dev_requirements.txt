@@ -3,6 +3,5 @@ build
 pytest
 setuptools_scm
 httpx
-chroma-server
 -e . # Include transitive dependencies and code from the current project
 
