@@ -8,7 +8,6 @@ from chroma_server.algorithms.core_algorithms import (activation_uncertainty,
 from chroma_server.db.clickhouse import Clickhouse
 from chroma_server.index.hnswlib import Hnswlib
 
-
 def score_and_store(
     training_dataset: str,
     inference_dataset: str,
@@ -49,16 +48,20 @@ def score_and_store(
 
     random_selection = random_sample(inference_data=inference_data, n_samples=n_random_samples)
 
+    # Only one set of results per model space 
     db_connection.delete_results(model_space=model_space)
-    db_connection.store_results(
-        activation_uncertainty_scores=activation_uncertainty_scores,
-        boundary_uncertainty_scores=boundary_uncertainty_scores,
-        representative_class_outlier_scores=representative_class_outlier_scores,
-        difficult_class_outlier_scores=difficult_class_outlier_scores,
-        representative_cluster_outlier_scores=representative_cluster_outlier_scores,
-        difficult_cluster_outlier_scores=difficult_cluster_outlier_scores,
-        random_selection=random_selection,
+
+    # Results have singular names as arguments so they match DB schema column names
+    db_connection.add_results(
         model_space=model_space,
+        uuids=inference_data["uuid"].tolist(),
+        activation_uncertainty_score=activation_uncertainty_scores,
+        boundary_uncertainty_score=boundary_uncertainty_scores,
+        representative_class_outlier_score=representative_class_outlier_scores,
+        difficult_class_outlier_score=difficult_class_outlier_scores,
+        representative_cluster_outlier_score=representative_cluster_outlier_scores,
+        difficult_cluster_outlier_score=difficult_cluster_outlier_scores,
+        random_selection=random_selection,
     )
 
     return None

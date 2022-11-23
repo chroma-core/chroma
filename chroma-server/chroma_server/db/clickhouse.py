@@ -2,6 +2,7 @@ from chroma_server.db.abstract import Database
 import uuid
 import time
 import os
+import itertools
 
 from clickhouse_driver import connect, Client
 
@@ -18,7 +19,13 @@ EMBEDDING_TABLE_SCHEMA = [
 RESULTS_TABLE_SCHEMA = [
     {'model_space': 'String'},
     {'uuid': 'UUID'},
-    {'custom_quality_score': ' Nullable(Float64)'},
+    {'activation_uncertainty_score': ' Float64'},
+    {'boundary_uncertainty_score': ' Float64'},
+    {'representative_class_outlier_score': ' Float64'},
+    {'difficult_class_outlier_score': ' Float64'},
+    {'representative_cluster_outlier_score': ' Float64'},
+    {'difficult_cluster_outlier_score': ' Float64'},
+    {'random_selection': 'UInt8'},
 ]
 
 def db_array_schema_to_clickhouse_schema(table_schema):
@@ -28,7 +35,7 @@ def db_array_schema_to_clickhouse_schema(table_schema):
             return_str += f"{k} {v}, "
     return return_str
 
-def db_schema_to_keys():
+def db_schema_to_keys(table_schema):
     return_str = ""
     for element in EMBEDDING_TABLE_SCHEMA:
         if element == EMBEDDING_TABLE_SCHEMA[-1]:
@@ -175,13 +182,19 @@ class Clickhouse(Database):
     def raw_sql(self, sql):
         return self._conn.execute(sql)
 
-    def add_results(self, model_spaces, uuids, custom_quality_score):
-        data_to_insert = []
-        for i in range(len(model_spaces)):
-            data_to_insert.append([model_spaces[i], uuids[i], custom_quality_score[i]])
+    def add_results(self, uuids, model_space, **kwargs):
 
-        self._conn.execute('''
-         INSERT INTO results (model_space, uuid, custom_quality_score) VALUES''', data_to_insert)
+        # Make sure the kwarg keys are in the results table schema
+        results_table_cols = {col_name for col_name, col_type in RESULTS_TABLE_SCHEMA}
+        results_cols = set(kwargs.keys())
+
+        if not (results_table_cols == results_cols):
+            raise Exception(f"Invalid results table columns: {results_cols - results_table_cols}")
+
+        data_to_insert = list(zip(itertools.repeat(model_space), uuids, *kwargs.values()))
+
+        self._conn.execute(f'''
+         INSERT INTO results (model_space, uuids, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
     
     def delete_results(self, model_space):
         self._conn.execute(f"DELETE FROM results WHERE model_space = '{model_space}'")
