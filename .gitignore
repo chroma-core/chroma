@@ -5,7 +5,7 @@
 __pycache__
 **/__pycache__
 
-chroma-server/chroma_logs.log
+*.log
 
 **/data__nogit
 
@@ -14,4 +14,4 @@ chroma-server/chroma_logs.log
 index_data
 /index_data
 
-chroma_logs.log
+venv

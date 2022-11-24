@@ -7,9 +7,7 @@ chroma.reset()
 # add
 for i in range(10):
     chroma.add(
-        embedding=[1,2,3,4,5,6,7,8,9,10],
-        input_uri="https://www.google.com",
-        dataset=None
+        embedding=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], input_uri="https://www.google.com", dataset=None
     )
 
 # fetch all
@@ -17,7 +15,7 @@ allres = chroma.get_all()
 print(allres)
 
 # count
-print("count is", chroma.count()['count'])
+print("count is", chroma.count()["count"])
 
 # persist
 chroma.persist()
@@ -33,4 +31,4 @@ chroma.process()
 
 # reset
 chroma.reset()
-print("count is", chroma.count()['count'])
+print("count is", chroma.count()["count"])
