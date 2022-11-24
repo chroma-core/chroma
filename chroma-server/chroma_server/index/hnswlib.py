@@ -10,7 +10,7 @@ from chroma_server.logger import logger
 
 class Hnswlib(Index):
 
-    _save_folder = '/index_data'
+    _save_folder = './index_data'
     _model_space = None
     _index = None
     _index_metadata = {
