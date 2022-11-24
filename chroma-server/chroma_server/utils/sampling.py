@@ -80,8 +80,8 @@ def get_sample(
     if total_proportions > 1 or total_proportions < 0:
         raise ValueError(f"Sample proportions must sum to between 0 and 1: {total_proportions}")
 
-    # Get uuids for each score type
-    uuids = {}
+    # Get uris for each score type
+    uris = {}
     for key, value in sample_proportions.items():
         # We random sample later
         if key == "random":
@@ -92,14 +92,11 @@ def get_sample(
             raise ValueError(f"Sample proportions must be between 0 and 1: {value}")
 
         n = int(n_samples * (value / total_proportions))
-        results = db_connection.get_results_by_column(column_name=key, n=n, model_space=model_space)
-        uuids.update(results.uuid.tolist())
-
-    # Fetch the uris for the uuids
-    uris = set(db_connection.get_by_ids(list(uuids), model_space=model_space).uri.tolist())
+        results = db_connection.get_results_by_column(column_name=key, n_results=n, model_space=model_space)
+        uris.update(results.input_uri.tolist())
 
     # Add random samples to fill out the sample set
     n_random = n_samples - len(uris)
-    uris.update(db_connection.get_random(n=n_random, model_space=model_space).uri.tolist())
+    uris.update(db_connection.get_random(n=n_random, model_space=model_space).input_uri.tolist())
 
     return list(uris)
