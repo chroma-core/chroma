@@ -211,12 +211,11 @@ class Clickhouse(Database):
             where_string = f"WHERE model_space = '{model_space}'"
         return self._conn.execute(f"SELECT COUNT() FROM results {where_string}")[0][0]
      
-    def return_results(self, model_space, n_results = 100):
-        return self._conn.execute(f'''
+    def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
+        return self._conn.query_dataframe(f'''
             SELECT
                 embeddings.input_uri,
-                embeddings.embedding,
-                results.custom_quality_score
+                results.{column_name}
             FROM
                 results
             INNER JOIN
@@ -226,6 +225,6 @@ class Clickhouse(Database):
             WHERE
                 results.model_space = '{model_space}'
             ORDER BY
-                results.custom_quality_score DESC
+                results.{column_name} {sort}
             LIMIT {n_results}
         ''')
