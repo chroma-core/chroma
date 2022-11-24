@@ -1,27 +1,30 @@
-from typing import Optional
+from typing import Dict, List, Optional
 
-from chroma_server.algorithms.core_algorithms import (activation_uncertainty,
-                                                      boundary_uncertainty,
-                                                      class_outliers,
-                                                      cluster_outliers,
-                                                      random_sample)
+import numpy as np
+from chroma_server.algorithms.core_algorithms import (
+    activation_uncertainty,
+    boundary_uncertainty,
+    class_outliers,
+    cluster_outliers,
+)
 from chroma_server.db.clickhouse import Clickhouse
 from chroma_server.index.hnswlib import Hnswlib
 
+
+# Score each datapoint in the inference data, and store the scores in the database
 def score_and_store(
-    training_dataset: str,
-    inference_dataset: str,
-    n_random_samples,
+    training_dataset_name: str,
+    inference_dataset_name: str,
     db_connection: Clickhouse,
     ann_index: Hnswlib,
     model_space: Optional[str] = "default_scope",
 ) -> None:
 
     training_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": training_dataset}
+        where_filter={"model_space": model_space, "dataset": training_dataset_name}
     )
     inference_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": inference_dataset}
+        where_filter={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
     ann_index.load(model_space=model_space)
@@ -46,9 +49,7 @@ def score_and_store(
         training_data=training_data, inference_data=inference_data
     )
 
-    random_selection = random_sample(inference_data=inference_data, n_samples=n_random_samples)
-
-    # Only one set of results per model space 
+    # Only one set of results per model space
     db_connection.delete_results(model_space=model_space)
 
     # Results have singular names as arguments so they match DB schema column names
@@ -61,7 +62,44 @@ def score_and_store(
         difficult_class_outlier_score=difficult_class_outlier_scores,
         representative_cluster_outlier_score=representative_cluster_outlier_scores,
         difficult_cluster_outlier_score=difficult_cluster_outlier_scores,
-        random_selection=random_selection,
     )
 
     return None
+
+
+# Given a target number of samples, and sample proportions by score type, return a list of unique URIs to label
+def get_sample(
+    n_samples: int,
+    sample_proportions: Dict[str, float],
+    db_connection: Clickhouse,
+    model_space: Optional[str] = "default_scope",
+) -> List[str]:
+
+    total_proportions = np.sum(sample_proportions.values())
+    # Raise an exception if the total proportions are not between 0 and 1
+    if total_proportions > 1 or total_proportions < 0:
+        raise ValueError(f"Sample proportions must sum to between 0 and 1: {total_proportions}")
+
+    # Get uuids for each score type
+    uuids = {}
+    for key, value in sample_proportions.items():
+        # We random sample later
+        if key == "random":
+            continue
+
+        # Raise an exception if the proportion is not between 0 and 1
+        if value > 1 or value < 0:
+            raise ValueError(f"Sample proportions must be between 0 and 1: {value}")
+
+        n = int(n_samples * (value / total_proportions))
+        results = db_connection.get_results_by_column(column_name=key, n=n, model_space=model_space)
+        uuids.update(results.uuid.tolist())
+
+    # Fetch the uris for the uuids
+    uris = set(db_connection.get_by_ids(list(uuids), model_space=model_space).uri.tolist())
+
+    # Add random samples to fill out the sample set
+    n_random = n_samples - len(uris)
+    uris.update(db_connection.get_random(n=n_random, model_space=model_space).uri.tolist())
+
+    return list(uris)

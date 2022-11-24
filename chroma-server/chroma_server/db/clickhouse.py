@@ -25,7 +25,6 @@ RESULTS_TABLE_SCHEMA = [
     {'difficult_class_outlier_score': ' Float64'},
     {'representative_cluster_outlier_score': ' Float64'},
     {'difficult_cluster_outlier_score': ' Float64'},
-    {'random_selection': 'UInt8'},
 ]
 
 def db_array_schema_to_clickhouse_schema(table_schema):
@@ -35,7 +34,7 @@ def db_array_schema_to_clickhouse_schema(table_schema):
             return_str += f"{k} {v}, "
     return return_str
 
-def db_schema_to_keys(table_schema):
+def db_schema_to_keys():
     return_str = ""
     for element in EMBEDDING_TABLE_SCHEMA:
         if element == EMBEDDING_TABLE_SCHEMA[-1]:
@@ -93,8 +92,8 @@ class Clickhouse(Database):
     def _fetch(self, where={}, columnar=False):
         return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''', columnar=columnar)
 
-    def fetch(self, where={}, sort=None, limit=None, offset=None, columnar=False):
-        if where["model_space"] is None:
+    def fetch(self, where_filter={}, sort=None, limit=None, offset=None):
+        if where_filter["model_space"] is None:
             return {"error": "model_space is required"}
 
         s3= time.time()
@@ -170,8 +169,15 @@ class Clickhouse(Database):
         return val
 
     def get_by_ids(self, ids=list):
-        return self._conn.execute(f'''
+        return self._conn.query_dataframe(f'''
             SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({ids})''')
+
+    def get_random(self, model_space=None, limit=1):
+        where_filter = ""
+        if model_space is not None:
+            where_filter = f"WHERE model_space = '{model_space}'"
+        return self._conn.query_dataframe(f'''
+            SELECT {db_schema_to_keys()} FROM embeddings {where_filter} ORDER BY rand() LIMIT {limit}''')
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
