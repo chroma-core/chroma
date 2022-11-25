@@ -19,12 +19,12 @@ EMBEDDING_TABLE_SCHEMA = [
 RESULTS_TABLE_SCHEMA = [
     {'model_space': 'String'},
     {'uuid': 'UUID'},
-    {'activation_uncertainty': 'Float32'},
-    {'boundary_uncertainty': 'Float32'},
-    # {'representative_class_outlier': 'Float32'},
-    # {'difficult_class_outlier': 'Float32'},
-    {'representative_cluster_outlier': 'Float32'},
-    {'difficult_cluster_outlier': 'Float32'},
+    {'activation_uncertainty': 'Float'},
+    {'boundary_uncertainty': 'Float'},
+    # {'representative_class_outlier': 'Float'},
+    # {'difficult_class_outlier': 'Float'},
+    {'representative_cluster_outlier': 'Float'},
+    {'difficult_cluster_outlier': 'Float'},
 ]
 
 def db_array_schema_to_clickhouse_schema(table_schema):
