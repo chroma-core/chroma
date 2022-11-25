@@ -130,18 +130,22 @@ async def reset():
 @app.post("/api/v1/get_nearest_neighbors")
 async def get_nearest_neighbors(embedding: QueryEmbedding):
     '''
-    return the distance, database ids, and embedding themselves for the input embedding
+    return the distance, database ids, and embedding themselves for a single input embedding
     '''
     if embedding.where['model_space'] is None:
         return {"error": "model_space is required"}
 
     results = app._db.fetch(embedding.where)
-    ids = [str(item[get_col_pos('uuid')]) for item in results] 
+    ids = []
+    if len(results) > 0:
+        ids = results.uuid.tolist() 
+    else:
+        return {"error": "No datapoints found for the supplied filter"}
 
     uuids, distances = app._ann_index.get_nearest_neighbors(embedding.where['model_space'], embedding.embedding, embedding.n_results, ids)
     return {
         "ids": uuids,
-        "embeddings": app._db.get_by_ids(uuids),
+        "embeddings": app._db.get_by_ids(uuids[0]),
         "distances": distances.tolist()[0]
     }
 
@@ -154,9 +158,9 @@ async def create_index(process_embedding: ProcessEmbedding):
     '''
     Currently generates an index for the embedding db
     '''
-    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
-    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
-    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
+    fetch = app._db.fetch({"model_space": process_embedding.model_space})
+    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
+    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
 
 @app.post("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
@@ -167,8 +171,8 @@ async def process(process_embedding: ProcessEmbedding):
         raise Exception("in-memory mode does not process because it relies on celery and redis")
 
     fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
-    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch[2])})
-    app._ann_index.run(process_embedding.model_space, fetch[1], fetch[2]) # more magic number, ugh
+    chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
+    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
 
     task = heavy_offline_analysis.delay(process_embedding.model_space)
     chroma_telemetry.capture('heavy-offline-analysis')

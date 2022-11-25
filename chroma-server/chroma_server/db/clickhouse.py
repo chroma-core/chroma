@@ -93,6 +93,7 @@ class Clickhouse(Database):
         return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''', columnar=columnar)
 
     def fetch(self, where={}, sort=None, limit=None, offset=None):
+        print(where)
         if where["model_space"] is None:
             return {"error": "model_space is required"}
 
@@ -135,7 +136,7 @@ class Clickhouse(Database):
         return val
 
     def _delete(self, where={}):
-        uuids_deleted = self._conn.execute(f'''SELECT toString(uuid) FROM embeddings {where}''')
+        uuids_deleted = self._conn.execute(f'''SELECT uuid FROM embeddings {where}''')
         self._conn.execute(f'''
             DELETE FROM 
                 embeddings
