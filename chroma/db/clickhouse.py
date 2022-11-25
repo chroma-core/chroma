@@ -63,7 +63,7 @@ class Clickhouse(DB):
         self._conn = Client(host=settings.clickhouse_host, port=clickhouse_port)
         self._create_table_embeddings()
         self._create_table_results()
-        self._idx = Hnswlib()
+        self._idx = Hnswlib(settings)
 
 
     def add(self, model_space, embedding, input_uri, dataset=None, inference_class=None, label_class=None):
@@ -117,6 +117,7 @@ class Clickhouse(DB):
 
         return val
 
+
     def _delete(self, where={}):
         uuids_deleted = self._conn.execute(f'''SELECT toString(uuid) FROM embeddings {where}''')
         self._conn.execute(f'''
@@ -125,6 +126,7 @@ class Clickhouse(DB):
         {where}
         ''')
         return uuids_deleted
+
 
     def delete(self, where={}):
         if where["model_space"] is None:
@@ -160,6 +162,20 @@ class Clickhouse(DB):
     def get_by_ids(self, ids=list):
         return self._conn.execute(f'''
             SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({ids})''')
+
+
+    def get_nearest_neighbors(self, where, embedding, n_results):
+
+        results = self.fetch(where)
+        ids = [str(item[get_col_pos('uuid')]) for item in results]
+
+        uuids, distances = self._idx.get_nearest_neighbors(where['model_space'], embedding, n_results, ids)
+
+        return {
+            "ids": uuids,
+            "embeddings": self._.get_by_ids(uuids),
+            "distances": distances.tolist()[0]
+        }
 
 
     def create_index(self, model_space):
@@ -229,4 +245,3 @@ class Clickhouse(DB):
         for i, col in enumerate(EMBEDDING_TABLE_SCHEMA):
             if col_name in col:
                 return i
-

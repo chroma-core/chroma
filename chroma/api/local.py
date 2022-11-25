@@ -76,17 +76,7 @@ class LocalAPI(API):
     def get_nearest_neighbors(self, embedding, n_results, where):
 
         where = self.where_with_model_space(where)
-
-        results = self._db.fetch(where)
-        ids = [str(item[get_col_pos('uuid')]) for item in results]
-
-        uuids, distances = self._db.get_nearest_neighbors(where['model_space'], embedding, n_results, ids)
-
-        return {
-            "ids": uuids,
-            "embeddings": self._db.get_by_ids(uuids),
-            "distances": distances.tolist()[0]
-        }
+        return self._db.get_nearest_neighbors(embedding, n_results, where)
 
 
     def raw_sql(self, raw_sql):

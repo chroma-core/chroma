@@ -30,3 +30,8 @@ class Index(ABC):
     @abstractmethod
     def has_index(self, model_space):
         pass
+
+
+    @abstractmethod
+    def get_nearest_neighbors(self, model_space, embedding, n_results, ids):
+        pass
