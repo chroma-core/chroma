@@ -92,8 +92,8 @@ class Clickhouse(Database):
     def _fetch(self, where={}, columnar=False):
         return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''', columnar=columnar)
 
-    def fetch(self, where_filter={}, sort=None, limit=None, offset=None):
-        if where_filter["model_space"] is None:
+    def fetch(self, where={}, sort=None, limit=None, offset=None):
+        if where["model_space"] is None:
             return {"error": "model_space is required"}
 
         s3= time.time()
