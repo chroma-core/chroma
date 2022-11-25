@@ -89,11 +89,10 @@ class Clickhouse(Database):
     def count(self, model_space=None):
         return self._count(model_space=model_space)[0][0]
 
-    def _fetch(self, where={}, columnar=False):
-        return self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''', columnar=columnar)
+    def _fetch(self, where={}):
+        return self._conn.query_dataframe(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
     def fetch(self, where={}, sort=None, limit=None, offset=None):
-        print(where)
         if where["model_space"] is None:
             return {"error": "model_space is required"}
 
@@ -124,13 +123,8 @@ class Clickhouse(Database):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-        val = self._conn.query_dataframe(f'''
-            SELECT 
-                {db_schema_to_keys()}
-            FROM 
-                embeddings
-        {where}
-        ''')
+        val = self._fetch(where=where)
+
         print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
 
         return val

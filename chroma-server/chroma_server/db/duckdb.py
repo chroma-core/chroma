@@ -52,10 +52,8 @@ class DuckDB(Clickhouse):
     def count(self, model_space=None):
         return self._count(model_space=model_space).fetchall()[0][0]
 
-    def _fetch(self, where={}, columnar=False):
-        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').fetchall()
-        if columnar:
-            val = list(zip(*val))
+    def _fetch(self, where={}):
+        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').df()
         return val
 
     def _delete(self, where={}):
