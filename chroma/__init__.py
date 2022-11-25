@@ -1,13 +1,17 @@
 import chroma.config
 
+
 __settings = chroma.config.Settings()
+
 
 def configure(**kwags):
     """Override Chroma's default settings, environment variables or .env files"""
     __settings = chroma.config.Settings(**kwargs)
 
+
 def get_settings():
     return __settings
+
 
 def get_db(settings=__settings):
     """Return a chroma.DB instance based on the provided or environmental settings."""

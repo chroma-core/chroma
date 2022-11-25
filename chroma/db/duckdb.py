@@ -1,5 +1,5 @@
 from chroma.db import DB
-from chroma_server.db.clickhouse import Clickhouse, db_array_schema_to_clickhouse_schema, EMBEDDING_TABLE_SCHEMA, RESULTS_TABLE_SCHEMA, db_schema_to_keys
+from chroma.db.clickhouse import Clickhouse, db_array_schema_to_clickhouse_schema, EMBEDDING_TABLE_SCHEMA, RESULTS_TABLE_SCHEMA, db_schema_to_keys
 import pandas as pd
 import numpy as np
 import uuid
@@ -101,7 +101,7 @@ class DuckDB(Clickhouse):
 
 class PersistentDuckDB(DuckDB):
 
-     _save_folder = None
+    _save_folder = None
 
     def __init__(self, settings):
         super().__init__()
