@@ -4,7 +4,7 @@ import numpy as np
 from chroma_server.algorithms.core_algorithms import (
     activation_uncertainty,
     boundary_uncertainty,
-    class_outliers,
+    # class_outliers,
     cluster_outliers,
 )
 from chroma_server.db.clickhouse import Clickhouse
@@ -39,12 +39,13 @@ def score_and_store(
         model_space=model_space,
     )
 
-    representative_class_outlier_scores, difficult_class_outlier_scores = class_outliers(
-        training_data=training_data,
-        inference_data=inference_data,
-        ann_index=ann_index,
-        model_space=model_space,
-    )
+    # TODO: Fix class outliers (ANN index issue)
+    # representative_class_outlier_scores, difficult_class_outlier_scores = class_outliers(
+    #     training_data=training_data,
+    #     inference_data=inference_data,
+    #     ann_index=ann_index,
+    #     model_space=model_space,
+    # )
     representative_cluster_outlier_scores, difficult_cluster_outlier_scores = cluster_outliers(
         training_data=training_data, inference_data=inference_data
     )
@@ -55,13 +56,14 @@ def score_and_store(
     # Results have singular names as arguments so they match DB schema column names
     db_connection.add_results(
         model_space=model_space,
-        uuids=inference_data["uuid"].tolist(),
-        activation_uncertainty_score=activation_uncertainty_scores,
-        boundary_uncertainty_score=boundary_uncertainty_scores,
-        representative_class_outlier_score=representative_class_outlier_scores,
-        difficult_class_outlier_score=difficult_class_outlier_scores,
-        representative_cluster_outlier_score=representative_cluster_outlier_scores,
-        difficult_cluster_outlier_score=difficult_cluster_outlier_scores,
+        uuid=inference_data["uuid"].tolist(),
+        activation_uncertainty=activation_uncertainty_scores,
+        boundary_uncertainty=boundary_uncertainty_scores,
+        # TODO: Fix class outliers (ANN index issue)
+        # representative_class_outlier_score=representative_class_outlier_scores,
+        # difficult_class_outlier_score=difficult_class_outlier_scores,
+        representative_cluster_outlier=representative_cluster_outlier_scores,
+        difficult_cluster_outlier=difficult_cluster_outlier_scores,
     )
 
     return None
@@ -75,13 +77,13 @@ def get_sample(
     model_space: Optional[str] = "default_scope",
 ) -> List[str]:
 
-    total_proportions = np.sum(sample_proportions.values())
+    total_proportions = np.sum(list(sample_proportions.values()))
     # Raise an exception if the total proportions are not between 0 and 1
     if total_proportions > 1 or total_proportions < 0:
         raise ValueError(f"Sample proportions must sum to between 0 and 1: {total_proportions}")
 
     # Get uris for each score type
-    uris = {}
+    uris = set()
     for key, value in sample_proportions.items():
         # We random sample later
         if key == "random":
@@ -92,7 +94,9 @@ def get_sample(
             raise ValueError(f"Sample proportions must be between 0 and 1: {value}")
 
         n = int(n_samples * (value / total_proportions))
-        results = db_connection.get_results_by_column(column_name=key, n_results=n, model_space=model_space)
+        results = db_connection.get_results_by_column(
+            column_name=key, n_results=n, model_space=model_space
+        )
         uris.update(results.input_uri.tolist())
 
     # Add random samples to fill out the sample set

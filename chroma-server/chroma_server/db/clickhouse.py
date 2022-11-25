@@ -19,12 +19,12 @@ EMBEDDING_TABLE_SCHEMA = [
 RESULTS_TABLE_SCHEMA = [
     {'model_space': 'String'},
     {'uuid': 'UUID'},
-    {'activation_uncertainty_score': ' Float64'},
-    {'boundary_uncertainty_score': ' Float64'},
-    {'representative_class_outlier_score': ' Float64'},
-    {'difficult_class_outlier_score': ' Float64'},
-    {'representative_cluster_outlier_score': ' Float64'},
-    {'difficult_cluster_outlier_score': ' Float64'},
+    {'activation_uncertainty': 'Float32'},
+    {'boundary_uncertainty': 'Float32'},
+    # {'representative_class_outlier': 'Float32'},
+    # {'difficult_class_outlier': 'Float32'},
+    {'representative_cluster_outlier': 'Float32'},
+    {'difficult_cluster_outlier': 'Float32'},
 ]
 
 def db_array_schema_to_clickhouse_schema(table_schema):
@@ -172,12 +172,12 @@ class Clickhouse(Database):
         return self._conn.query_dataframe(f'''
             SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({ids})''')
 
-    def get_random(self, model_space=None, limit=1):
+    def get_random(self, model_space=None, n=1):
         where_filter = ""
         if model_space is not None:
             where_filter = f"WHERE model_space = '{model_space}'"
         return self._conn.query_dataframe(f'''
-            SELECT {db_schema_to_keys()} FROM embeddings {where_filter} ORDER BY rand() LIMIT {limit}''')
+            SELECT {db_schema_to_keys()} FROM embeddings {where_filter} ORDER BY rand() LIMIT {n}''')
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
@@ -188,22 +188,27 @@ class Clickhouse(Database):
     def raw_sql(self, sql):
         return self._conn.execute(sql)
 
-    def add_results(self, uuids, model_space, **kwargs):
+    def add_results(self, uuid, model_space, **kwargs):
 
         # Make sure the kwarg keys are in the results table schema
-        results_table_cols = {col_name for col_name, col_type in RESULTS_TABLE_SCHEMA}
+        results_table_cols = {list(col.keys())[0] for col in RESULTS_TABLE_SCHEMA}
         results_cols = set(kwargs.keys())
+        results_cols.update(['uuid', 'model_space'])
 
         if not (results_table_cols == results_cols):
-            raise Exception(f"Invalid results table columns: {results_cols - results_table_cols}")
+            if not results_table_cols.issuperset(results_cols):
+                raise Exception(f"Invalid results columns: {results_cols - results_table_cols}")
+            else:
+                # Log a warning
+                print(f"Warning: results missing columns: {results_table_cols - results_cols}")
 
-        data_to_insert = list(zip(itertools.repeat(model_space), uuids, *kwargs.values()))
+        data_to_insert = list(zip(itertools.repeat(model_space), uuid, *kwargs.values()))
 
         self._conn.execute(f'''
-         INSERT INTO results (model_space, uuids, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
+         INSERT INTO results (model_space, uuid, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
     
     def delete_results(self, model_space):
-        self._conn.execute(f"DELETE FROM results WHERE model_space = '{model_space}'")
+        self._conn.execute(f"ALTER TABLE results DELETE WHERE model_space = '{model_space}'")
 
     def count_results(self, model_space=None):
         where_string = ""
