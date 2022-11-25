@@ -31,9 +31,13 @@ def activation_uncertainty(training_data: pd.DataFrame, inference_data: pd.DataF
         training_percentiles = training_sorted_indices / len(training_data_class_activation)
 
         # Compute the approximate percentile of each inference activation
+        # TODO: Do interpolation to get a more accurate percentile
         inference_positions = np.searchsorted(
             training_data_class_activation, inference_data_class_activation
         )
+        # Compensate for being past the last element
+        inference_positions[inference_positions == len(training_data_class_activation)] -= 1
+        
         inference_parcentiles = training_percentiles[inference_positions]
 
         activation_uncertainty[
@@ -102,6 +106,10 @@ def class_outliers(
         Tuple[numpy NDArray, numpy NDArray]: Representative class-based outlier percentiles, Difficult class-based outlier percentiles.
     """
 
+    # This does not yet function, raise an exception if this gets called
+    # See core_algorithms_examples.ipynb for an explanation. 
+    raise NotImplementedError
+
     representative_outliers = np.empty(len(inference_data), dtype=np.float32)
     difficult_outliers = np.empty(len(inference_data), dtype=np.float32)
     for class_name in inference_data.inference_class.unique():
@@ -143,6 +151,7 @@ def class_outliers(
 def cluster_outliers(
     training_data: pd.DataFrame,
     inference_data: pd.DataFrame,
+    training_subsample: Optional[int] = 10,
     min_cluster_size: Optional[int] = 500,
     min_samples: Optional[int] = 500,
     metric: Optional[str] = "euclidean",
@@ -151,6 +160,7 @@ def cluster_outliers(
     Args:
         training_data (DataFrame): training data as a Pandas DataFrame.
         inference_data (DataFrame): inference data for which to calculate the outlier score as a Pandas DataFrame.
+        training_subsample (int): (Optional) Subsampling factor for the training data. Defaults to 10.
         min_cluster_size (int): (Optional) Minimum number of points in a cluster. Defaults to 500.
         min_samples (int): (Optional) Number of samples in a neighbiorhood for a point to be considered. Defaults to 500.
         metric (str): (Optional) Distance metric to use. Defaults to 'euclidean'.
@@ -162,7 +172,8 @@ def cluster_outliers(
     training_clusterer = hdbscan.HDBSCAN(
         min_cluster_size=min_cluster_size, min_samples=min_samples, metric=metric
     )
-    training_clusterer.fit(training_data["embedding"].tolist())
+    training_clusterer.fit(training_data["embedding"].tolist()[::training_subsample])
+    training_clusterer.generate_prediction_data()
 
     # Cluster the inference data
     inference_clusterer = hdbscan.HDBSCAN(
@@ -181,7 +192,7 @@ def cluster_outliers(
     )
 
     # Get the max of the two probabilities for each cluster
-    max_probabilities = np.maximum(t_probabilities, inference_clusterer.probabilities_, axis=1)
+    max_probabilities = np.maximum(t_probabilities, inference_clusterer.probabilities_)
 
     difficult_outlier_percentiles = np.argsort(max_probabilities) / len(max_probabilities)
 
