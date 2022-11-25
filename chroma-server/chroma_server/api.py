@@ -101,7 +101,7 @@ async def delete(embedding: DeleteEmbedding):
         if 'model_space' in embedding.where:
             app._ann_index.delete(embedding.where['model_space'])
 
-    deleted_uuids = [uuid[0] for uuid in deleted_uuids] # de-tuple
+    # deleted_uuids = [uuid[0] for uuid in deleted_uuids] # de-tuple
     app._ann_index.delete_from_index(embedding.where['model_space'], deleted_uuids)
     return deleted_uuids
 

@@ -130,13 +130,13 @@ class Clickhouse(Database):
         return val
 
     def _delete(self, where={}):
-        uuids_deleted = self._conn.execute(f'''SELECT uuid FROM embeddings {where}''')
+        uuids_deleted = self._conn.query_dataframe(f'''SELECT uuid FROM embeddings {where}''')
         self._conn.execute(f'''
             DELETE FROM 
                 embeddings
         {where}
         ''')
-        return uuids_deleted
+        return uuids_deleted.uuid.tolist()
 
     def delete(self, where={}):
         if where["model_space"] is None:
@@ -165,7 +165,7 @@ class Clickhouse(Database):
 
     def get_by_ids(self, ids=list):
         return self._conn.query_dataframe(f'''
-            SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({ids})''')
+            SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})''')
 
     def get_random(self, model_space=None, n=1):
         where_filter = ""

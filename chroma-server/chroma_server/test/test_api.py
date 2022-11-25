@@ -157,7 +157,6 @@ async def test_delete_with_index():
         response = await ac.post(
             "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where":{"model_space": "test_space"}}
         )
-        print(response.json())
         assert response.json()['embeddings']['inference_class']['0'] == 'knife'
         response = await ac.post("/api/v1/delete", json={"where": {"model_space": "test_space", "inference_class": "knife"}})
         response = await ac.post(
