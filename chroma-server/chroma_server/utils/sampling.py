@@ -21,10 +21,10 @@ def score_and_store(
 ) -> None:
 
     training_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": training_dataset_name}
+        where={"model_space": model_space, "dataset": training_dataset_name}
     )
     inference_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": inference_dataset_name}
+        where={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
     ann_index.load(model_space=model_space)
