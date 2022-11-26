@@ -78,7 +78,6 @@ class Hnswlib(Index):
             self.load(model_space)
 
         if self._index is not None:
-            print(uuids)
             for uuid in uuids:
                 self._index.mark_deleted(self._uuid_to_id[uuid.hex])
                 del self._id_to_uuid[self._uuid_to_id[uuid.hex]]
