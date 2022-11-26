@@ -167,12 +167,23 @@ class Clickhouse(Database):
         return self._conn.query_dataframe(f'''
             SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})''')
 
-    def get_random(self, model_space=None, n=1):
-        where_filter = ""
-        if model_space is not None:
-            where_filter = f"WHERE model_space = '{model_space}'"
+    def get_random(self, where={}, n=1):
+        # check to see if query is a dict and if it is a flat list of key value pairs
+        if where is not None:
+            if not isinstance(where, dict):
+                raise Exception("Invalid where: " + str(where))
+            
+            # ensure where is a flat dict
+            for key in where:
+                if isinstance(where[key], dict):
+                    raise Exception("Invalid where: " + str(where))
+        
+        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
+        if where:
+            where = f"WHERE {where}"
+        
         return self._conn.query_dataframe(f'''
-            SELECT {db_schema_to_keys()} FROM embeddings {where_filter} ORDER BY rand() LIMIT {n}''')
+            SELECT {db_schema_to_keys()} FROM embeddings {where} ORDER BY rand() LIMIT {n}''')
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')

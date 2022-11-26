@@ -21,10 +21,10 @@ def score_and_store(
 ) -> None:
 
     training_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": training_dataset_name}
+        where={"model_space": model_space, "dataset": training_dataset_name}
     )
     inference_data = db_connection.fetch(
-        where_filter={"model_space": model_space, "dataset": inference_dataset_name}
+        where={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
     ann_index.load(model_space=model_space)
@@ -37,6 +37,7 @@ def score_and_store(
         inference_data=inference_data,
         ann_index=ann_index,
         model_space=model_space,
+        n_neighbors=10
     )
 
     # TODO: Fix class outliers (ANN index issue)
@@ -71,6 +72,7 @@ def score_and_store(
 
 # Given a target number of samples, and sample proportions by score type, return a list of unique URIs to label
 def get_sample(
+    dataset_name: str,
     n_samples: int,
     sample_proportions: Dict[str, float],
     db_connection: Clickhouse,
@@ -101,6 +103,6 @@ def get_sample(
 
     # Add random samples to fill out the sample set
     n_random = n_samples - len(uris)
-    uris.update(db_connection.get_random(n=n_random, model_space=model_space).input_uri.tolist())
+    uris.update(db_connection.get_random(n=n_random, where={"model_space": model_space, "dataset": dataset_name}).input_uri.tolist())
 
     return list(uris)

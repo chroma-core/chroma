@@ -77,7 +77,7 @@ def boundary_uncertainty(
     )
     neighbor_ids = np.array(neighbor_ids)
 
-    flat_idxs = [training_id_to_idx[n_id] for n_id in neighbor_ids.reshape(-1)]
+    flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
     neighbor_categories = (
         training_data["label_class"].iloc[flat_idxs].to_numpy().reshape(neighbor_ids.shape)
     )
