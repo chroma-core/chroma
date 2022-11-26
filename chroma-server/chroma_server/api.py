@@ -172,7 +172,7 @@ async def process(process_embedding: ProcessEmbedding):
     if chroma_mode == 'in-memory':
         raise Exception("in-memory mode does not process because it relies on celery and redis")
 
-    fetch = app._db.fetch({"model_space": process_embedding.model_space})#, columnar=True)
+    fetch = app._db.fetch({"model_space": process_embedding.model_space})
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
     app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
 
