@@ -37,7 +37,6 @@ def score_and_store(
         inference_data=inference_data,
         ann_index=ann_index,
         model_space=model_space,
-        n_neighbors=10
     )
 
     # TODO: Fix class outliers (ANN index issue)
