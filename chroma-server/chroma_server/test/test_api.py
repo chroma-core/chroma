@@ -70,7 +70,7 @@ async def test_fetch_from_db():
         params = {"where": {"model_space": "test_space"}}
         response = await ac.post("/api/v1/fetch", json=params)
     assert response.status_code == 200
-    assert len(response.json()) == 2
+    assert len(response.json()['embedding']) == 2
 
 @pytest.mark.anyio
 async def test_count_from_db():
@@ -124,7 +124,7 @@ async def test_get_nearest_neighbors_filter():
             },
         )
     assert response.status_code == 200
-    assert len(response.json()["ids"]) == 0
+    assert "error" in list(response.json().keys())
 
 @pytest.mark.anyio
 async def test_process():
@@ -157,12 +157,12 @@ async def test_delete_with_index():
         response = await ac.post(
             "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where":{"model_space": "test_space"}}
         )
-        assert response.json()['embeddings'][0][5] == 'knife'
+        assert response.json()['embeddings']['inference_class']['0'] == 'knife'
         response = await ac.post("/api/v1/delete", json={"where": {"model_space": "test_space", "inference_class": "knife"}})
         response = await ac.post(
             "/api/v1/get_nearest_neighbors", json={"embedding": [1.1, 2.3, 3.2], "n_results": 1, "where":{"model_space": "test_space"}}
         )
-        assert response.json()['embeddings'][0][5] == 'person'
+        assert response.json()['embeddings']['inference_class']['0']  == 'person'
 
 # test calculate results
 # @pytest.mark.anyio

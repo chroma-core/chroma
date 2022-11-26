@@ -52,10 +52,10 @@ class DuckDB(Clickhouse):
     def count(self, model_space=None):
         return self._count(model_space=model_space).fetchall()[0][0]
 
-    def _fetch(self, where={}, columnar=False):
-        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').fetchall()
-        if columnar:
-            val = list(zip(*val))
+    def _fetch(self, where={}):
+        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').df()
+        # Convert UUID strings to UUID objects
+        val['uuid'] = val['uuid'].apply(lambda x: uuid.UUID(x))
         return val
 
     def _delete(self, where={}):
@@ -65,7 +65,7 @@ class DuckDB(Clickhouse):
                 embeddings
         {where}
         ''').fetchall()[0]
-        return uuids_deleted
+        return [uuid.UUID(x[0]) for x in uuids_deleted]
 
     def get_by_ids(self, ids=list):
         # select from duckdb table where ids are in the list
@@ -83,4 +83,4 @@ class DuckDB(Clickhouse):
                 embeddings
             WHERE
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
-        ''').fetchall()
+        ''').df()
