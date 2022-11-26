@@ -1,6 +1,8 @@
 import time
 import os
 
+from chroma_server.utils.sampling import score_and_store, get_sample
+
 from chroma_server.db.clickhouse import Clickhouse, get_col_pos
 from chroma_server.db.duckdb import DuckDB
 from chroma_server.index.hnswlib import Hnswlib
@@ -170,13 +172,19 @@ async def process(process_embedding: ProcessEmbedding):
     if chroma_mode == 'in-memory':
         raise Exception("in-memory mode does not process because it relies on celery and redis")
 
-    fetch = app._db.fetch({"model_space": process_embedding.model_space}, columnar=True)
+    fetch = app._db.fetch({"model_space": process_embedding.model_space})
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
     app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
 
-    task = heavy_offline_analysis.delay(process_embedding.model_space)
-    chroma_telemetry.capture('heavy-offline-analysis')
-    return JSONResponse({"task_id": task.id})
+    chroma_telemetry.capture('score_and_store')
+    score_and_store(
+        training_dataset_name=process_embedding.training_dataset_name,
+        inference_dataset_name=process_embedding.inference_dataset_name,
+        db_connection=app._db,
+        ann_index=app._ann_index,
+        model_space=process_embedding.model_space,
+    )
+    return True
 
 @app.post("/api/v1/tasks/{task_id}")
 async def get_status(task_id):
@@ -198,22 +206,20 @@ async def get_results(results: Results):
 
     # if there is no index, generate one
     if not app._ann_index.has_index(results.model_space):
-        fetch = app._db.fetch({"model_space": results.model_space}, columnar=True)
-        chroma_telemetry.capture('run-process', {'n': len(fetch[2])})
-        print("Generating index for model space: ", results.model_space, " with ", len(fetch[2]), " embeddings")
-        app._ann_index.run(results.model_space, fetch[1], fetch[2]) # more magic number, ugh
-        print("Done generating index for model space: ", results.model_space)
+        raise Exception("no index found for model space: ", results.model_space, " - please run the process endpoint first")
 
     # if there are no results, generate them
-    print("app._db.count_results(results.model_space): ", app._db.count_results(results.model_space))
     if app._db.count_results(results.model_space) == 0:
-        print("starting heavy offline analysis")
-        task = heavy_offline_analysis(results.model_space)
-        print("ending heavy offline analysis")
-        return app._db.return_results(results.model_space, results.n_results)
+        raise Exception("no results found for model space: ", results.model_space, " - please run the process endpoint first")
 
     else:
-        return app._db.return_results(results.model_space, results.n_results)
+        sample_proportions = {
+            "activation_uncertainty": 0.3,
+            "boundary_uncertainty": 0.3,
+            "representative_cluster_outlier": 0.2,
+            "random": 0.2,
+        }
+        return get_sample(n_samples=1000, sample_proportions=sample_proportions, db_connection=app._db, model_space=results.model_space)
 
 # headless mode
 core = app
