@@ -103,7 +103,6 @@ async def delete(embedding: DeleteEmbedding):
         if 'model_space' in embedding.where:
             app._ann_index.delete(embedding.where['model_space'])
 
-    # deleted_uuids = [uuid[0] for uuid in deleted_uuids] # de-tuple
     app._ann_index.delete_from_index(embedding.where['model_space'], deleted_uuids)
     return deleted_uuids
 
@@ -162,7 +161,7 @@ async def create_index(process_embedding: ProcessEmbedding):
     '''
     fetch = app._db.fetch({"model_space": process_embedding.model_space})
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
-    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
+    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist())
 
 @app.post("/api/v1/process")
 async def process(process_embedding: ProcessEmbedding):
@@ -174,7 +173,7 @@ async def process(process_embedding: ProcessEmbedding):
 
     fetch = app._db.fetch({"model_space": process_embedding.model_space})
     chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
-    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist()) # more magic number, ugh
+    app._ann_index.run(process_embedding.model_space, fetch.uuid.tolist(), fetch.embedding.tolist())
 
     chroma_telemetry.capture('score_and_store')
     score_and_store(
