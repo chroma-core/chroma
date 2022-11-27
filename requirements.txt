@@ -2,7 +2,7 @@ fastapi==0.85.1
 uvicorn[standard]==0.18.3
 pyarrow==9.0.0
 requests==2.28.1
-numpy==1.23.5
+numpy==1.21.6
 pandas==1.5.1
 duckdb==0.5.1
 hnswlib @ git+https://oauth2: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@github.com/chroma-core/hnswlib.git
