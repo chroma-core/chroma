@@ -5,6 +5,7 @@ import time
 import hnswlib
 import numpy as np
 from chroma.db.index import Index
+from chroma.logger import logger
 
 
 class Hnswlib(Index):
@@ -29,7 +30,7 @@ class Hnswlib(Index):
 
         space = 'l2'
         ef=10
-        num_threads='4'
+        num_threads=4
 
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
@@ -85,7 +86,7 @@ class Hnswlib(Index):
         self._save()
 
 
-    def _save():
+    def _save(self):
 
         # create the directory if it doesn't exist
         if not os.path.exists(f'{self._save_folder}'):

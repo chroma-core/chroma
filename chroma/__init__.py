@@ -1,4 +1,5 @@
 import chroma.config
+import logging
 
 
 __settings = chroma.config.Settings()

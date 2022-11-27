@@ -64,7 +64,7 @@ class Clickhouse(DB):
         self._create_table_embeddings()
         self._create_table_results()
         self._idx = Hnswlib(settings)
-
+        self._settings = settings
 
     def add(self, model_space, embedding, input_uri, dataset=None, inference_class=None, label_class=None):
         data_to_insert = []
@@ -118,14 +118,25 @@ class Clickhouse(DB):
         return val
 
 
-    def _delete(self, where={}):
-        uuids_deleted = self._conn.execute(f'''SELECT toString(uuid) FROM embeddings {where}''')
+    def _count(self, model_space=None):
+        where_string = ""
+        if model_space is not None:
+            where_string = f"WHERE model_space = '{model_space}'"
+        return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")
+
+
+    def count(self, model_space=None):
+        return self._count(model_space=model_space)[0][0]
+
+
+    def _delete(self, where_str):
+        uuids_deleted = self._conn.execute(f'''SELECT toString(uuid) FROM embeddings {where_str}''')
         self._conn.execute(f'''
             DELETE FROM
                 embeddings
-        {where}
+        {where_str}
         ''')
-        return uuids_deleted
+        return [row[0] for row in uuids_deleted]
 
 
     def delete(self, where={}):
@@ -143,18 +154,18 @@ class Clickhouse(DB):
                 if isinstance(where[key], dict):
                     raise Exception("Invalid where: " + str(where))
 
-        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
+        where_str = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
 
-        if where:
-            where = f"WHERE {where}"
+        if where_str:
+            where_str = f"WHERE {where_str}"
 
-        deleted_uuids = self._delete(where=where)
-        print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
+        deleted_uuids = self._delete(where_str)
+        print(f"time to fetch {len(deleted_uuids)} embeddings for deletion: ", time.time() - s3)
 
         if len(where) == 1:
             self._idx.delete(where['model_space'])
-
-        self._idx.delete_from_index(where['model_space'], [uuid[0] for uuid in deleted_uuids])
+        else:
+            self._idx.delete_from_index(where['model_space'], deleted_uuids)
 
         return deleted_uuids
 
@@ -166,14 +177,15 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(self, where, embedding, n_results):
 
+
         results = self.fetch(where)
-        ids = [str(item[get_col_pos('uuid')]) for item in results]
+        ids = [str(item[self.get_col_pos('uuid')]) for item in results]
 
         uuids, distances = self._idx.get_nearest_neighbors(where['model_space'], embedding, n_results, ids)
 
         return {
             "ids": uuids,
-            "embeddings": self._.get_by_ids(uuids),
+            "embeddings": self.get_by_ids(uuids),
             "distances": distances.tolist()[0]
         }
 
@@ -194,7 +206,7 @@ class Clickhouse(DB):
         self._create_table_results()
 
         self._idx.reset()
-        self._idx = Hnswlib()
+        self._idx = Hnswlib(self._settings)
 
 
     def raw_sql(self, sql):
@@ -241,7 +253,7 @@ class Clickhouse(DB):
         ''')
 
 
-    def get_col_pos(col_name):
+    def get_col_pos(self, col_name):
         for i, col in enumerate(EMBEDDING_TABLE_SCHEMA):
             if col_name in col:
                 return i

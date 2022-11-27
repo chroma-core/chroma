@@ -23,7 +23,7 @@ class API(ABC):
             dataset: list = None,
             inference_class: list = None,
             label_class: list = None,
-            model_spaces: list = None):
+            model_space: list = None):
         """Add embeddings to the data store"""
         pass
 

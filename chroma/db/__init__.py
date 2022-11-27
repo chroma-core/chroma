@@ -17,6 +17,10 @@ class DB(ABC):
         pass
 
     @abstractmethod
+    def count(self, model_space=None):
+        pass
+
+    @abstractmethod
     def delete(self, where):
         pass
 

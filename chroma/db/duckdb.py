@@ -1,7 +1,9 @@
 from chroma.db import DB
+from chroma.db.index.hnswlib import Hnswlib
 from chroma.db.clickhouse import Clickhouse, db_array_schema_to_clickhouse_schema, EMBEDDING_TABLE_SCHEMA, RESULTS_TABLE_SCHEMA, db_schema_to_keys
 import pandas as pd
 import numpy as np
+import duckdb
 import uuid
 import time
 
@@ -46,6 +48,7 @@ class DuckDB(Clickhouse):
         self._create_table_embeddings()
         self._create_table_results()
         self._idx = Hnswlib(settings)
+        self._settings = settings
 
 
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
@@ -70,14 +73,14 @@ class DuckDB(Clickhouse):
         return val
 
 
-    def _delete(self, where={}):
-        uuids_deleted = self._conn.execute(f'''SELECT uuid FROM embeddings {where}''').fetchall()
+    def _delete(self, where_str):
+        uuids_deleted = self._conn.execute(f'''SELECT uuid FROM embeddings {where_str}''').fetchall()
         self._conn.execute(f'''
             DELETE FROM
                 embeddings
-        {where}
+        {where_str}
         ''').fetchall()[0]
-        return uuids_deleted
+        return [row[0] for row in uuids_deleted]
 
 
     def get_by_ids(self, ids=list):
