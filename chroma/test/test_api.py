@@ -87,18 +87,7 @@ def test_fetch_from_db(api_fixture, request):
     api.add(**batch_records)
     records = api.fetch(where={"model_space": "test_space"})
 
-    assert len(records) == 2
-
-
-@pytest.mark.parametrize('api_fixture', test_apis)
-def test_fetch_from_db(api_fixture, request):
-    api = request.getfixturevalue(api_fixture.__name__)
-
-    api.reset()
-    api.add(**batch_records)
-    records = api.fetch(where={"model_space": "test_space"})
-
-    assert len(records) == 2
+    assert len(records['embedding']) == 2
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -128,6 +117,24 @@ def test_get_nearest_neighbors(api_fixture, request):
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
+def test_get_nearest_neighbors_filter(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.add(**batch_records)
+    assert api.create_index(model_space="test_space")
+
+    with pytest.raises(Exception) as e:
+        nn = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
+                                       n_results=1,
+                                       where={"model_space": "test_space",
+                                              "inference_class": "monkey",
+                                              "dataset": "training"})
+
+    assert str(e.value).__contains__("found")
+
+
+@pytest.mark.parametrize('api_fixture', test_apis)
 def test_delete(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
@@ -152,10 +159,10 @@ def test_delete_with_index(api_fixture, request):
     api.create_index()
     nn = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
                                    n_results=1)
-    assert nn['embeddings'][0][5] == 'knife'
+    assert nn['embeddings']['inference_class'][0] == 'knife'
 
     assert api.delete(where={"inference_class": "knife"})
 
     nn2 = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
                                     n_results=1)
-    assert nn2['embeddings'][0][5] == 'person'
+    assert nn2['embeddings']['inference_class'][0] == 'person'

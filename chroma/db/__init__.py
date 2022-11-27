@@ -13,7 +13,7 @@ class DB(ABC):
 
 
     @abstractmethod
-    def fetch(self, where, sort, limit, offset, columnar):
+    def fetch(self, where, sort, limit, offset):
         pass
 
     @abstractmethod
@@ -60,7 +60,7 @@ class DB(ABC):
 
 
     @abstractmethod
-    def return_results(self, model_space, n_results):
+    def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
         pass
 
 
@@ -70,10 +70,11 @@ class DB(ABC):
 
 
     @abstractmethod
-    def add_results(self, model_space, uuids, quality_scores):
-        pass
-
-
-    @abstractmethod
-    def get_col_pos(self, col_name):
+    def add_results(self,
+                    uuid: list,
+                    model_space: str,
+                    activation_uncertainty: list = None,
+                    boundary_uncertainty: list = None,
+                    representative_cluster_outlier: list = None,
+                    difficult_cluster_outlier: list = None):
         pass

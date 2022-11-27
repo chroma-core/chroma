@@ -68,7 +68,7 @@ class API(ABC):
 
 
     @abstractmethod
-    def process(self, model_space=None):
+    def process(self, model_space=None, training_dataset_name="training", inference_dataset_name="inference"):
         '''
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything

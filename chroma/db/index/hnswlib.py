@@ -1,6 +1,7 @@
 import os
 import pickle
 import time
+import uuid
 
 import hnswlib
 import numpy as np
@@ -34,10 +35,9 @@ class Hnswlib(Index):
 
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
-
         for uuid, i in zip(uuids, range(len(uuids))):
-            self._id_to_uuid[i] = str(uuid)
-            self._uuid_to_id[str(uuid)] = i
+            self._id_to_uuid[i] = uuid
+            self._uuid_to_id[uuid.hex] = i
 
         index = hnswlib.Index(space=space, dim=dimensionality) # possible options are l2, cosine or ip
         index.init_index(max_elements=len(embeddings), ef_construction=100, M=16)
@@ -79,9 +79,9 @@ class Hnswlib(Index):
 
         if self._index is not None:
             for uuid in uuids:
-                self._index.mark_deleted(self._uuid_to_id[uuid])
-                del self._id_to_uuid[self._uuid_to_id[uuid]]
-                del self._uuid_to_id[uuid]
+                self._index.mark_deleted(self._uuid_to_id[uuid.hex])
+                del self._id_to_uuid[self._uuid_to_id[uuid.hex]]
+                del self._uuid_to_id[uuid.hex]
 
         self._save()
 
@@ -140,7 +140,7 @@ class Hnswlib(Index):
         # get ids from uuids as a set, if they are available
         ids = {}
         if uuids is not None:
-            ids = {self._uuid_to_id[uuid] for uuid in uuids}
+            ids = {self._uuid_to_id[uuid.hex] for uuid in uuids}
             if len(ids) < k :
                 k = len(ids)
 
@@ -154,8 +154,9 @@ class Hnswlib(Index):
         database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
         logger.debug(f'time to run knn query: {time.time() - s3}')
 
-        uuids = [self._id_to_uuid[id] for id in database_ids[0]]
+        print("database_ids", database_ids, distances)
 
+        uuids = [[self._id_to_uuid[id] for id in ids] for ids in database_ids]
         return uuids, distances
 
 

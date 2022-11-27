@@ -2,20 +2,11 @@ from chroma.api.local import LocalAPI
 from chroma.worker import heavy_offline_analysis
 from celery.result import AsyncResult
 
+
 class CeleryAPI(LocalAPI):
 
     def __init__(self, settings, db):
         super().__init__()
-
-
-    def process(self, model_space=None):
-
-        self.create_index(model_space)
-
-        task = heavy_offline_analysis.delay(model_space)
-        # chroma_telemetry.capture('heavy-offline-analysis')
-
-        return task.id
 
 
     def get_status(self, task_id):

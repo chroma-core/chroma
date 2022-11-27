@@ -17,6 +17,8 @@ class QueryEmbedding(BaseModel):
 
 class ProcessEmbedding(BaseModel):
     model_space: str = None
+    training_dataset_name: str = None
+    inference_dataset_name: str = None
 
 class FetchEmbedding(BaseModel):
     where: dict = {}

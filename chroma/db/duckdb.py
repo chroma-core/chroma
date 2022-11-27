@@ -66,10 +66,10 @@ class DuckDB(Clickhouse):
         return self._count(model_space=model_space).fetchall()[0][0]
 
 
-    def _fetch(self, where={}, columnar=False):
-        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').fetchall()
-        if columnar:
-            val = list(zip(*val))
+    def _fetch(self, where=""):
+        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').df()
+        # Convert UUID strings to UUID objects
+        val['uuid'] = val['uuid'].apply(lambda x: uuid.UUID(x))
         return val
 
 
@@ -80,13 +80,15 @@ class DuckDB(Clickhouse):
                 embeddings
         {where_str}
         ''').fetchall()[0]
-        return [row[0] for row in uuids_deleted]
+        return [uuid.UUID(x[0]) for x in uuids_deleted]
 
 
     def get_by_ids(self, ids=list):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
             raise Exception("ids must be a list")
+
+        print("ids:", ids)
 
         if not ids:
             # create an empty pandas dataframe
@@ -99,7 +101,7 @@ class DuckDB(Clickhouse):
                 embeddings
             WHERE
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
-        ''').fetchall()
+        ''').df()
 
 
 class PersistentDuckDB(DuckDB):
