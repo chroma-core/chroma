@@ -4,6 +4,6 @@ import chroma_client
 app = Flask(__name__)
 
 
-@app.route('/')
+@app.route("/")
 def hello():
-    return(str(chroma_client.fetch_new_labels()))
+    return str(chroma_client.fetch_new_labels())

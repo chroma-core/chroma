@@ -1,3 +1,0 @@
-httpx
-pytest
-setuptools_scm

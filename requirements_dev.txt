@@ -1,0 +1,5 @@
+build
+pytest
+setuptools_scm
+httpx
+black

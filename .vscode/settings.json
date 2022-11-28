@@ -1,0 +1,14 @@
+{
+    "git.ignoreLimitWarning": true,
+    "editor.rulers": [
+        120
+    ],
+    "editor.formatOnSave": true,
+    "python.formatting.provider": "black",
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.ipynb_checkpoints": true,
+        "**/.pytest_cache": true,
+        "**/chroma.egg-info": true
+    }
+}
