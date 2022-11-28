@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     celery_broker_url: str = None
     celery_result_backend: str = None
 
-    chroma_cache_dir: str = None
+    chroma_cache_dir: str = ".chroma"
 
     chroma_server_host: str = None
     chroma_server_http_port: str = None
