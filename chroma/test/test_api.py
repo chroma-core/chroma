@@ -74,7 +74,7 @@ batch_records = {"embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
                  "label_class": ["person", "person"]}
 
 @pytest.mark.parametrize('api_fixture', test_apis)
-def test_addx(api_fixture, request):
+def test_add(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
@@ -127,6 +127,8 @@ def test_fetch_from_db(api_fixture, request):
     records = api.fetch(where={"model_space": "test_space"})
 
     print("records:", records)
+
+    assert 1==2
 
     assert len(records['embedding']) == 2
 
