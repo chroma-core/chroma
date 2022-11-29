@@ -47,6 +47,8 @@ class LocalAPI(API):
             label_class
         )
 
+        return True
+
 
     def fetch(self, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
 
