@@ -13,3 +13,9 @@ chroma-server/chroma_logs.log
 
 index_data
 /index_data
+
+# Logs and stores 
+*.log
+*.pkl
+*.bin
+*.parquet
