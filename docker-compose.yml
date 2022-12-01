@@ -7,11 +7,11 @@ networks:
 services:
   server:
     build:
-      context: ./chroma-server
+      context: .
       dockerfile: Dockerfile
       target: chroma_server
     volumes:
-      - ./chroma-server/:/chroma-server/
+      - ./chroma/:/chroma/
       - index_data:/index_data
     command: uvicorn app:app --reload --workers 1 --host 0.0.0.0 --port 8000
     environment:
@@ -22,27 +22,9 @@ services:
       - 8000:8000
     depends_on:
       - clickhouse
-      - redis
     networks:
       - chroma-net
 
-  worker:
-    build:
-      context: ./chroma-server
-      dockerfile: DockerfileCelery
-    command: celery worker --app=chroma_server.worker.celery --loglevel=info 
-    volumes:
-      - ./chroma-server/:/chroma-server/
-      - index_data:/index_data
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    depends_on:
-      - server
-      - redis
-    networks:
-      - chroma-net
-  
   clickhouse:
     image: docker.io/bitnami/clickhouse:22.9
     environment:
@@ -59,11 +41,6 @@ services:
     networks:
       - chroma-net
 
-  redis:
-    image: redis:6-alpine
-    networks:
-      - chroma-net
-
 volumes:
   clickhouse_data:
     driver: local
@@ -71,4 +48,3 @@ volumes:
     driver: local
   backups:
     driver: local
-
