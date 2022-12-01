@@ -95,6 +95,7 @@ class API(ABC):
     @abstractmethod
     def get_results(self,
                     model_space:Optional[str] = None,
+                    dataset_name: str = "inference",
                     n_results:int = 100) -> pd.DataFrame:
         '''Gets the results for the given space key'''
         pass

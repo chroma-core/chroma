@@ -127,10 +127,10 @@ class FastAPI(API):
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
-    def get_results(self, model_space=None, n_results = 100):
+    def get_results(self, model_space=None, n_results = 100, dataset_name="inference"):
         '''Gets the results for the given space key'''
         resp = requests.post(self._api_url + "/get_results",
-                             data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results}))
+                             data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results, "dataset_name": dataset_name}))
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
