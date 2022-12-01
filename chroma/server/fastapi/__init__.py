@@ -96,8 +96,8 @@ class FastAPI(chroma.server.Server):
 
 
     def process(self, process: ProcessEmbedding):
-        task_id = self._api.process(process.model_space)
-        return JSONResponse({"task_id": task_id})
+        self._api.process(process.model_space, process.training_dataset_name, process.inference_dataset_name)
+        return True
 
 
     def get_status(self, task_id):
@@ -105,6 +105,9 @@ class FastAPI(chroma.server.Server):
 
 
     def get_results(self, results: Results):
-        return self._api.get_results(results.model_space, results.n_results).to_dict()
+        results = self._api.get_results(results.model_space, results.n_results)
+        print("results", results)
+        return results
 
+    
 

@@ -110,7 +110,7 @@ class FastAPI(API):
         '''
         payload = {"model_space": model_space or self._model_space,
                    "training_dataset_name": training_dataset_name,
-                   "inerence_dataset_name": inference_dataset_name}
+                   "inference_dataset_name": inference_dataset_name}
         resp = requests.post(self._api_url + "/process", data = json.dumps(payload))
         resp.raise_for_status()
         return resp.json()
