@@ -1,4 +1,3 @@
-from chroma_client import Chroma
 import pyarrow.parquet as pq
 import numpy as np
 from pandas.io.json import json_normalize
@@ -7,10 +6,17 @@ import time
 import os
 import pandas as pd
 
+import chroma
+from chroma.config import Settings
+
 
 if __name__ == "__main__":
 
-    file = "data__nogit/yolov3_objects_large_5k.parquet"
+    api = chroma.get_api(Settings(chroma_api_impl="rest",
+                              chroma_server_host="localhost",
+                              chroma_server_http_port="8000") )
+
+    file = "data__nogit/yolov3_objects_large.parquet"
 
     print("Loading parquet file: ", file)
     py = pq.read_table(file)
@@ -19,8 +25,9 @@ if __name__ == "__main__":
 
     data_length = len(df)
 
-    chroma = Chroma(model_space="yolov3")
-    chroma.reset()  # make sure we are using a fresh db
+    api.set_model_space("yolov3")
+    # print(api.count())
+    api.reset()  # make sure we are using a fresh db
     allstart = time.time()
     start = time.time()
 
@@ -30,7 +37,7 @@ if __name__ == "__main__":
     print("Loading in records with a batch size of: ", data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if i >= 20_000:
+        if i >= 120_000:
             break
 
         end = time.time()
@@ -62,21 +69,27 @@ if __name__ == "__main__":
 
         datasets = dataset
 
-        chroma.add(
+        if i < 10_000:
+            datasets = "train"
+        else:
+            datasets = "test"
+
+        api.add(
             embedding=embedding,
             input_uri=input_uri,
             dataset=dataset,
             inference_class=inference_classes,
+            model_space="yolov3",
         )
 
     allend = time.time()
     print("time to add all: ", "{:.2f}".format(allend - allstart) + "s")
 
-    fetched = chroma.count()
+    fetched = api.count()
     print("Records loaded into the database: ", fetched)
 
     start = time.time()
-    chroma.create_index()
+    api.create_index()
     end = time.time()
     print("Time to process: " + "{0:.2f}".format((end - start)) + "s")
 
@@ -168,24 +181,23 @@ if __name__ == "__main__":
         -8.424881935119629,
     ]
 
-    start = time.time()
-    get_nearest_neighbors = chroma.get_nearest_neighbors(
-        knife_embedding, 4, where={"inference_class": "knife", "dataset": "training"}
-    )
-    print("get_nearest_neighbors: ", get_nearest_neighbors)
-    res_df = pd.DataFrame(get_nearest_neighbors["embeddings"])
-    print(res_df.head())
+    # start = time.time()
+    # get_nearest_neighbors = api.get_nearest_neighbors(
+    #     knife_embedding, 4, where={"inference_class": "knife", "dataset": "training"}
+    # )
+    # print("get_nearest_neighbors: ", get_nearest_neighbors)
+    # res_df = pd.DataFrame(get_nearest_neighbors["embeddings"])
+    # print(res_df.head())
 
-    print("Distances to nearest neighbors: ", get_nearest_neighbors["distances"])
-    print("Internal ids of nearest neighbors: ", get_nearest_neighbors["ids"])
+    # print("Distances to nearest neighbors: ", get_nearest_neighbors["distances"])
+    # print("Internal ids of nearest neighbors: ", get_nearest_neighbors["ids"])
 
-    end = time.time()
-    print("Time to get nearest neighbors: " + "{0:.2f}".format((end - start)) + "s")
+    # end = time.time()
+    # print("Time to get nearest neighbors: " + "{0:.2f}".format((end - start)) + "s")
 
-    task = chroma.calculate_results()
-    print(task)
-    print(chroma.get_task_status(task["task_id"]))
+    api.process(training_dataset_name="train", inference_dataset_name="test", model_space="yolov3")
+    results = api.get_results(dataset_name="test", n_results=100)
+    print(results)
 
-    fetched = chroma.count()
+    fetched = api.count()
     print("Records loaded into the database: ", fetched)
-    del chroma

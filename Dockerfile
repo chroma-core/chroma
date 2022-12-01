@@ -9,8 +9,8 @@ COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-COPY ./chroma /chroma/
+COPY ./ /
 
 EXPOSE 8000
 
-CMD ["uvicorn", "chroma.server.fastapi:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+CMD ["uvicorn", "chroma.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

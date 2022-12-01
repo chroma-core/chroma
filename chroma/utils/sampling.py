@@ -27,7 +27,7 @@ def score_and_store(
         where={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
-    ann_index.load(model_space=model_space)
+    ann_index._load(model_space=model_space)
 
     activation_uncertainty_scores = activation_uncertainty(
         training_data=training_data, inference_data=inference_data

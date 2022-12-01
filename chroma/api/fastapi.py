@@ -107,14 +107,13 @@ class FastAPI(API):
     def process(self, model_space=None, training_dataset_name="training", inference_dataset_name="inference"):
         '''
         Processes embeddings in the database
-        - currently this only runs hnswlib, doesnt return anything
         '''
         payload = {"model_space": model_space or self._model_space,
                    "training_dataset_name": training_dataset_name,
                    "inerence_dataset_name": inference_dataset_name}
         resp = requests.post(self._api_url + "/process", data = json.dumps(payload))
         resp.raise_for_status()
-        return x.json()
+        return resp.json()
 
     def reset(self):
         '''Resets the database'''

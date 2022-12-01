@@ -39,4 +39,7 @@ build-backend = "setuptools.build_meta"
 local_scheme="no-local-version"
 
 [tool.setuptools]
-py-modules = []
+py-modules = ["chroma"]
+
+# [tool.setuptools.package-data]
+# chroma = ["."]
