@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Union, Sequence, Optional, TypedDict
+from uuid import UUID
+import pandas as pd
 
 class API(ABC):
 
@@ -11,64 +13,66 @@ class API(ABC):
 
 
     @abstractmethod
-    def heartbeat(self):
+    def heartbeat(self) -> int:
         '''Returns the current server time in nanoseconds to check if the server is alive'''
         pass
 
 
     @abstractmethod
     def add(self,
-            embedding: list,
-            input_uri: list,
-            dataset: list = None,
-            inference_class: list = None,
-            label_class: list = None,
-            model_space: list = None):
+            model_space: Union[str, Sequence[str]],
+            embedding: Sequence[Sequence[float]],
+            input_uri: Optional[Sequence[str]] = None,
+            dataset: Optional[Union[str, Sequence[str]]] = None,
+            inference_class: Optional[Sequence[str]] = None,
+            label_class: Optional[Sequence[str]] = None) -> bool:
         """Add embeddings to the data store"""
         pass
 
 
     @abstractmethod
-    def count(self, model_space=None):
+    def count(self, model_space: Optional[str]=None):
         '''Returns the number of embeddings in the database'''
         pass
 
 
     @abstractmethod
-    def fetch(self, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
+    def fetch(self,
+              where: Optional[dict[str, str]]={},
+              sort: Optional[str]=None,
+              limit: Optional[int]=None,
+              offset: Optional[int]=None,
+              page: Optional[int]=None,
+              page_size: Optional[int]=None) -> pd.DataFrame:
         '''Fetches embeddings from the database'''
         pass
 
 
     @abstractmethod
-    def delete(self, where={}):
+    def delete(self, where: Optional[dict[str, str]]={}) -> Sequence[UUID]:
         '''Deletes embeddings from the database'''
         pass
 
 
-    @abstractmethod
-    def add(self,
-        embedding: list,
-        input_uri: list,
-        dataset: list = None,
-        inference_class: list = None,
-        label_class: list = None,
-        model_spaces: list = None):
-        '''
-        Addss a batch of embeddings to the database
-        - pass in column oriented data lists
-        '''
-        pass
-
+    class NearestNeighborsResult(TypedDict):
+        ids: Sequence[UUID]
+        embeddings: pd.DataFrame
+        distances: Sequence[float]
 
     @abstractmethod
-    def get_nearest_neighbors(self, embedding, n_results=10, where={}):
+    def get_nearest_neighbors(self,
+                              embedding: Sequence[float],
+                              n_results: int=10,
+                              where: dict[str, str]={}) -> NearestNeighborsResult:
         '''Gets the nearest neighbors of a single embedding'''
         pass
 
 
     @abstractmethod
-    def process(self, model_space=None, training_dataset_name="training", inference_dataset_name="inference"):
+    def process(self,
+                model_space: Optional[str]=None,
+                training_dataset_name: str="training",
+                inference_dataset_name: str="inference") -> bool:
         '''
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything
@@ -77,19 +81,21 @@ class API(ABC):
 
 
     @abstractmethod
-    def reset(self):
+    def reset(self) -> bool:
         '''Resets the database'''
         pass
 
 
     @abstractmethod
-    def raw_sql(self, sql):
+    def raw_sql(self, sql: str) -> pd.DataFrame:
         '''Runs a raw SQL query against the database'''
         pass
 
 
     @abstractmethod
-    def get_results(self, model_space=None, n_results = 100):
+    def get_results(self,
+                    model_space:Optional[str] = None,
+                    n_results:int = 100) -> pd.DataFrame:
         '''Gets the results for the given space key'''
         pass
 
@@ -101,7 +107,8 @@ class API(ABC):
 
 
     @abstractmethod
-    def create_index(self, model_space=None):
+    def create_index(self,
+                     model_space:Optional[str] = None) -> bool:
         '''Creates an index for the given space key'''
         pass
 

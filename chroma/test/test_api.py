@@ -126,10 +126,6 @@ def test_fetch_from_db(api_fixture, request):
     api.add(**batch_records)
     records = api.fetch(where={"model_space": "test_space"})
 
-    print("records:", records)
-
-    assert 1==2
-
     assert len(records['embedding']) == 2
 
 

@@ -242,7 +242,7 @@ class Clickhouse(DB):
 
 
     def raw_sql(self, sql):
-        return self._conn.execute(sql)
+        return self._conn.query_dataframe(sql)
 
 
     def add_results(self, uuid, model_space, **kwargs):

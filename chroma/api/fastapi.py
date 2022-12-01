@@ -51,12 +51,13 @@ class FastAPI(API):
         return resp.json()
 
     def add(self,
-            embedding: list,
-            input_uri: list,
-            dataset: list = None,
-            inference_class: list = None,
-            label_class: list = None,
-            model_space: list = None):
+            model_space,
+            embedding,
+            input_uri=None,
+            dataset=None,
+            inference_class=None,
+            label_class=None):
+
         '''
         Addss a batch of embeddings to the database
         - pass in column oriented data lists

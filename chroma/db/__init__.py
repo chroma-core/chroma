@@ -8,7 +8,14 @@ class DB(ABC):
 
 
     @abstractmethod
-    def add(self, model_space, embedding, input_uri, dataset=None, custom_quality_score=None, inference_class=None, label_class=None):
+    def add(self,
+            model_space: str,
+            embedding,
+            input_uri,
+            dataset=None,
+            custom_quality_score=None,
+            inference_class=None,
+            label_class=None):
         pass
 
 

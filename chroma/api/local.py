@@ -13,12 +13,12 @@ class LocalAPI(API):
 
 
     def add(self,
-            embedding: list,
-            input_uri: list,
-            dataset: list = None,
-            inference_class: list = None,
-            label_class: list = None,
-            model_space: list = None):
+            model_space,
+            embedding,
+            input_uri=None,
+            dataset=None,
+            inference_class=None,
+            label_class=None):
 
         model_space = model_space or self.get_model_space()
 
@@ -110,8 +110,6 @@ class LocalAPI(API):
             ann_index=self._db._idx, #Breaks encapsulation should fix
             model_space=model_space,
         )
-        return True
-
 
         self.create_index(model_space)
         return True
