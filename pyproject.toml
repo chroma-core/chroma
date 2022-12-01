@@ -40,6 +40,3 @@ local_scheme="no-local-version"
 
 [tool.setuptools]
 py-modules = ["chroma"]
-
-# [tool.setuptools.package-data]
-# chroma = ["."]
