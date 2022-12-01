@@ -27,7 +27,7 @@ def score_and_store(
         where={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
-    ann_index.load(model_space=model_space)
+    ann_index._load(model_space=model_space)
 
     activation_uncertainty_scores = activation_uncertainty(
         training_data=training_data, inference_data=inference_data
@@ -53,10 +53,13 @@ def score_and_store(
     # Only one set of results per model space
     db_connection.delete_results(model_space=model_space)
 
+    # convert all inference_data["uuid"] to a list of strings
+    uuids = (str(uuid) for uuid in inference_data["uuid"].tolist())
+
     # Results have singular names as arguments so they match DB schema column names
     db_connection.add_results(
         model_space=model_space,
-        uuid=inference_data["uuid"].tolist(),
+        uuid=uuids,
         activation_uncertainty=activation_uncertainty_scores,
         boundary_uncertainty=boundary_uncertainty_scores,
         # TODO: Fix class outliers (ANN index issue)

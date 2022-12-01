@@ -122,6 +122,12 @@ class LocalAPI(API):
         raise NotImplementedError("Cannot get status of job: Celery is not configured")
 
 
-    def get_results(self, model_space=None, n_results=100):
-
-        raise NotImplementedError("Cannot get job results: Celery is not configured")
+    def get_results(self, model_space=None, n_results=100, dataset_name="inference"):
+        model_space = model_space or self._model_space
+        sample_proportions = {
+            "activation_uncertainty": 0.3,
+            "boundary_uncertainty": 0.3,
+            "representative_cluster_outlier": 0.2,
+            "random": 0.2,
+        }
+        return get_sample(n_samples=n_results, sample_proportions=sample_proportions, db_connection=self._db, model_space=model_space, dataset_name=dataset_name)
