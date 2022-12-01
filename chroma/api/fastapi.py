@@ -1,5 +1,6 @@
 from chroma.api import API
 from chroma.errors import NoDatapointsException
+import pandas as pd
 import requests
 import json
 
@@ -38,7 +39,7 @@ class FastAPI(API):
         }))
 
         resp.raise_for_status()
-        return resp.json()
+        return pd.DataFrame.from_dict(resp.json())
 
     def delete(self, where={}):
         '''Deletes embeddings from the database'''
@@ -99,6 +100,8 @@ class FastAPI(API):
             else:
                 raise Exception(val["error"])
 
+        val['embeddings'] = pd.DataFrame.from_dict(val['embeddings'])
+
         return val
 
     def process(self, model_space=None, training_dataset_name="training", inference_dataset_name="inference"):
@@ -123,14 +126,14 @@ class FastAPI(API):
         '''Runs a raw SQL query against the database'''
         resp = requests.post(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql}))
         resp.raise_for_status()
-        return resp.json()
+        return pd.DataFrame.from_dict(resp.json())
 
     def get_results(self, model_space=None, n_results = 100):
         '''Gets the results for the given space key'''
         resp = requests.post(self._api_url + "/get_results",
                              data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results}))
         resp.raise_for_status()
-        return resp.json()
+        return pd.DataFrame.from_dict(resp.json())
 
     def get_task_status(self, task_id):
         '''Gets the status of a task'''

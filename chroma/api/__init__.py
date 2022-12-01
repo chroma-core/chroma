@@ -31,7 +31,7 @@ class API(ABC):
 
 
     @abstractmethod
-    def count(self, model_space: Optional[str]=None):
+    def count(self, model_space: Optional[str]=None) -> int:
         '''Returns the number of embeddings in the database'''
         pass
 
