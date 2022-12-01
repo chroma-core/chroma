@@ -67,7 +67,7 @@ class Clickhouse(DB):
 
 
     def __init__(self, settings):
-        self._conn = Client(host=settings.clickhouse_host, port=clickhouse_port)
+        self._conn = Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
         self._create_table_embeddings()
         self._create_table_results()
         self._idx = Hnswlib(settings)
