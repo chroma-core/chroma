@@ -14,13 +14,14 @@ def activation_uncertainty(training_data: pd.DataFrame, inference_data: pd.DataF
     Returns:
         numpy NDArray: Class-wise activation uncertainty for each inference datapoint.
     """
+
     activation_uncertainty = np.empty(len(inference_data), dtype=np.float32)
     for class_name in inference_data["inference_class"].unique():
         training_data_class = training_data[training_data["label_class"] == class_name]
         training_data_class_activation = np.linalg.norm(
             training_data_class["embedding"].tolist(), axis=1
         )
-
+        
         inference_data_class = inference_data[inference_data["inference_class"] == class_name]
         inference_data_class_activation = np.linalg.norm(
             inference_data_class["embedding"].tolist(), axis=1
@@ -79,6 +80,7 @@ def boundary_uncertainty(
     print("training_data", training_data.head())
     print("inference_data", inference_data.head())
 
+    # this breaks
     neighbor_ids, distances = ann_index.get_nearest_neighbors(
         model_space=model_space,
         query=inference_data["embedding"].tolist(),
