@@ -69,23 +69,33 @@ def boundary_uncertainty(
     training_ids = training_data["uuid"].tolist()
     training_id_to_idx = {training_ids[i].hex: i for i in range(len(training_ids))}
 
+    print("uuids: ", len(training_ids), training_ids[0])
+    # print("training_id_to_idx: ", len(training_id_to_idx), training_id_to_idx)
+    # convert training_ids to a list of strings
+    # training_ids = [str(uuid) for uuid in training_ids]
+
+    print("model_space: ", model_space)
+    print("n_neighbors: ", n_neighbors)
+    print("training_data", training_data.head())
+    print("inference_data", inference_data.head())
+
     neighbor_ids, distances = ann_index.get_nearest_neighbors(
         model_space=model_space,
         query=inference_data["embedding"].tolist(),
         k=n_neighbors,
         uuids=training_ids,
     )
-    neighbor_ids = np.array(neighbor_ids)
+    # neighbor_ids = np.array(neighbor_ids)
 
-    flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
-    neighbor_categories = (
-        training_data["label_class"].iloc[flat_idxs].to_numpy().reshape(neighbor_ids.shape)
-    )
+    # flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
+    # neighbor_categories = (
+    #     training_data["label_class"].iloc[flat_idxs].to_numpy().reshape(neighbor_ids.shape)
+    # )
 
-    validation_inference_categories = inference_data["inference_class"].to_numpy()
-    matches = neighbor_categories == validation_inference_categories[:, np.newaxis]
+    # validation_inference_categories = inference_data["inference_class"].to_numpy()
+    # matches = neighbor_categories == validation_inference_categories[:, np.newaxis]
 
-    return np.sum(matches, axis=1) / n_neighbors
+    # return np.sum(matches, axis=1) / n_neighbors
 
 
 def class_outliers(

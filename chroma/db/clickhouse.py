@@ -262,7 +262,7 @@ class Clickhouse(DB):
         data_to_insert = list(zip(itertools.repeat(model_space), uuid, *kwargs.values()))
 
         self._conn.execute(f'''
-         INSERT INTO results (model_space, uuid, activation_uncertainty, bou{",".join(kwargs.keys())}) VALUES''', data_to_insert)
+         INSERT INTO results (model_space, uuid, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
 
 
     def delete_results(self, model_space):

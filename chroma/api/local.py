@@ -99,10 +99,10 @@ class LocalAPI(API):
                 training_dataset_name="training",
                 inference_dataset_name="inference"):
 
-
         self._db.create_index(model_space)
 
         #chroma_telemetry.capture('score_and_store')
+        print("running score_and_store")
         score_and_store(
             training_dataset_name=training_dataset_name,
             inference_dataset_name=inference_dataset_name,
@@ -111,7 +111,7 @@ class LocalAPI(API):
             model_space=model_space,
         )
 
-        self.create_index(model_space)
+        # self.create_index(model_space)
         return True
 
 

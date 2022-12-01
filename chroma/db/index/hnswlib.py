@@ -33,6 +33,11 @@ class Hnswlib(Index):
         ef=10
         num_threads=4
 
+        # print the first 10 uuids
+        # print(f'model_space: {model_space}')
+        # print(f'uuids: {uuids[:10]}')
+        # print(f'embeddings: {embeddings[:10]}')
+
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         for uuid, i in zip(uuids, range(len(uuids))):
@@ -53,6 +58,7 @@ class Hnswlib(Index):
             'time_created': time.time(),
         }
         self._save()
+        print("New index created with count", index.get_current_count())
 
 
     def delete(self, model_space):
@@ -153,8 +159,6 @@ class Hnswlib(Index):
         s3= time.time()
         database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
         logger.debug(f'time to run knn query: {time.time() - s3}')
-
-        print("database_ids", database_ids, distances)
 
         uuids = [[self._id_to_uuid[id] for id in ids] for ids in database_ids]
         return uuids, distances
