@@ -26,7 +26,7 @@ services:
       - chroma-net
 
   clickhouse:
-    image: docker.io/bitnami/clickhouse:22.9
+    image: clickhouse/clickhouse-server:22.9-alpine
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
       - CLICKHOUSE_TCP_PORT=9000

@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 python:3.10 AS chroma_server
+FROM --platform=linux/arm64 python:3.10 AS chroma_server
 
 #RUN apt-get update -qq
 #RUN apt-get install python3.10 python3-pip -y --no-install-recommends && rm -rf /var/lib/apt/lists_/*
