@@ -54,8 +54,8 @@ chroma_api.add_triage(
 	model_space="sample_space"
 )
 
-# print("count")
-# print(chroma_api.count())
+print("count")
+print(chroma_api.count())
 
 # # print("fetch", chroma_api.fetch())
 # print("Generating the index")
