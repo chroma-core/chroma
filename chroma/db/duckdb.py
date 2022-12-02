@@ -24,7 +24,7 @@ def clickhouse_to_duckdb_schema(table_schema):
     return table_schema
 
 
-# Note: inherits ClickHouse for convenience of copying behavior, not
+# TODO: inherits ClickHouse for convenience of copying behavior, not
 # because it's logically a subtype. Factoring out the common behavior
 # to a third superclass they both extend would be preferable.
 class DuckDB(Clickhouse):

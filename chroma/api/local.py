@@ -92,17 +92,17 @@ class LocalAPI(API):
         return self._db.raw_sql(raw_sql)
 
 
-    def create_index(self, model_space=None):
-
-        self._db.create_index(model_space or self._model_space)
+    def create_index(self, model_space=None, dataset_name=None):
+        self._db.create_index(model_space=model_space or self._model_space, dataset_name=dataset_name)
         return True
 
 
     def process(self, model_space=None,
                 training_dataset_name="training",
                 inference_dataset_name="inference"):
-
-        self._db.create_index(model_space)
+        
+        # Create the index only for the training set.
+        self._db.create_index(model_space=model_space, dataset_name=training_dataset_name)
 
         #chroma_telemetry.capture('score_and_store')
         score_and_store(
