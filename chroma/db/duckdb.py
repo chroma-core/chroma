@@ -88,8 +88,6 @@ class DuckDB(Clickhouse):
         if not isinstance(ids, list):
             raise Exception("ids must be a list")
 
-        print("ids:", ids)
-
         if not ids:
             # create an empty pandas dataframe
             return pd.DataFrame()
