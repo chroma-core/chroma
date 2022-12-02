@@ -39,7 +39,6 @@ def score_and_store(
         ann_index=ann_index,
         model_space=model_space,
     )
-    # boundary_uncertainty_scores = activation_uncertainty_scores
 
     # TODO: Fix class outliers (ANN index issue)
     # representative_class_outlier_scores, difficult_class_outlier_scores = class_outliers(

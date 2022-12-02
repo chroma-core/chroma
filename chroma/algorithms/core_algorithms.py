@@ -70,17 +70,12 @@ def boundary_uncertainty(
     training_ids = training_data["uuid"].tolist()
     training_id_to_idx = {training_ids[i].hex: i for i in range(len(training_ids))}
 
-    #neighbor_ids, distances
     neighbor_ids, distances = ann_index.get_nearest_neighbors(
         model_space=model_space,
         query=inference_data["embedding"].tolist(),
         k=n_neighbors,
         uuids=training_ids,
     )
-    # print("neighbor_ids",neighbor_ids[0])
-    # this line being on - it breaks the code - only sometimes though!!! agh! 
-    # database_ids, distances = self._index.knn_query(query, k=10, filter=filter_function)
-    # RuntimeError: Cannot return the results in a contigious 2D array. Probably ef or M is too small
     neighbor_ids = np.array(neighbor_ids)
 
     flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
