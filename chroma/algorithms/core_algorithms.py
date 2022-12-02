@@ -77,21 +77,21 @@ def boundary_uncertainty(
         k=n_neighbors,
         uuids=training_ids,
     )
-    print("neighbor_ids",neighbor_ids[0])
+    # print("neighbor_ids",neighbor_ids[0])
     # this line being on - it breaks the code - only sometimes though!!! agh! 
     # database_ids, distances = self._index.knn_query(query, k=10, filter=filter_function)
     # RuntimeError: Cannot return the results in a contigious 2D array. Probably ef or M is too small
-    # neighbor_ids = np.array(neighbor_ids)
+    neighbor_ids = np.array(neighbor_ids)
 
-    # flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
-    # neighbor_categories = (
-    #     training_data["label_class"].iloc[flat_idxs].to_numpy().reshape(neighbor_ids.shape)
-    # )
+    flat_idxs = [training_id_to_idx[n_id.hex] for n_id in neighbor_ids.reshape(-1)]
+    neighbor_categories = (
+        training_data["label_class"].iloc[flat_idxs].to_numpy().reshape(neighbor_ids.shape)
+    )
 
-    # validation_inference_categories = inference_data["inference_class"].to_numpy()
-    # matches = neighbor_categories == validation_inference_categories[:, np.newaxis]
+    validation_inference_categories = inference_data["inference_class"].to_numpy()
+    matches = neighbor_categories == validation_inference_categories[:, np.newaxis]
 
-    # return np.sum(matches, axis=1) / n_neighbors
+    return np.sum(matches, axis=1) / n_neighbors
 
 
 def class_outliers(
