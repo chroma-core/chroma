@@ -21,40 +21,40 @@ def score_and_store(
 ) -> None:
 
     # print all to this function
-    print("running score_and_store inside")
-    print("training_dataset_name", training_dataset_name)
-    print("inference_dataset_name", inference_dataset_name)
-    print("db_connection", db_connection)
-    print("ann_index", ann_index)
-    print("model_space", model_space)
+    # print("running score_and_store inside")
+    # print("training_dataset_name", training_dataset_name)
+    # print("inference_dataset_name", inference_dataset_name)
+    # print("db_connection", db_connection)
+    # print("ann_index", ann_index)
+    # print("model_space", model_space)
 
-    print("getting training data")
+    # print("getting training data")
     training_data = db_connection.fetch(
         where={"model_space": model_space, "dataset": training_dataset_name}
     )
-    print("training_data", len(training_data))
-    print("getting inference data")
+    # print("training_data", len(training_data))
+    # print("getting inference data")
     inference_data = db_connection.fetch(
         where={"model_space": model_space, "dataset": inference_dataset_name}
     )
-    print("inference_data", len(inference_data))
+    # print("inference_data", len(inference_data))
 
-    print("getting the index")
+    # print("getting the index")
     ann_index._load(model_space=model_space)
 
-    print("activation_uncertainty_scores")
+    # print("activation_uncertainty_scores")
     activation_uncertainty_scores = activation_uncertainty(
         training_data=training_data, inference_data=inference_data
     )
-    print("activation_uncertainty_scores", len(activation_uncertainty_scores))
+    # print("activation_uncertainty_scores", len(activation_uncertainty_scores))
 
-    print("boundary_uncertainty_scores")
-    # boundary_uncertainty_scores = boundary_uncertainty(
-    #     training_data=training_data,
-    #     inference_data=inference_data,
-    #     ann_index=ann_index,
-    #     model_space=model_space,
-    # )
+    # print("boundary_uncertainty_scores")
+    boundary_uncertainty_scores = boundary_uncertainty(
+        training_data=training_data,
+        inference_data=inference_data,
+        ann_index=ann_index,
+        model_space=model_space,
+    )
     boundary_uncertainty_scores = activation_uncertainty_scores
 
     # TODO: Fix class outliers (ANN index issue)
@@ -64,17 +64,17 @@ def score_and_store(
     #     ann_index=ann_index,
     #     model_space=model_space,
     # )
-    print("cluster_outliers")
+    # print("cluster_outliers")
     representative_cluster_outlier_scores, difficult_cluster_outlier_scores = cluster_outliers(
         training_data=training_data, inference_data=inference_data
     )
 
     # Only one set of results per model space
-    print("delete_results")
+    # print("delete_results")
     db_connection.delete_results(model_space=model_space)
 
     # Results have singular names as arguments so they match DB schema column names
-    print("add_results")
+    # print("add_results")
     db_connection.add_results(
         model_space=model_space,
         uuid=inference_data["uuid"].tolist(),

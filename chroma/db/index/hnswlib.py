@@ -157,7 +157,7 @@ class Hnswlib(Index):
         logger.debug(f'time to pre process our knn query: {time.time() - s2}')
 
         s3= time.time()
-        database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
+        database_ids, distances = self._index.knn_query(query, k=10, filter=filter_function)
         logger.debug(f'time to run knn query: {time.time() - s3}')
 
         uuids = [[self._id_to_uuid[id] for id in ids] for ids in database_ids]

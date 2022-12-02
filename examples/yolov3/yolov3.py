@@ -37,7 +37,7 @@ if __name__ == "__main__":
     print("Loading in records with a batch size of: ", data_length)
 
     for i in range(0, data_length, BATCH_SIZE):
-        if i >= 120_000:
+        if i >= 50_000:
             break
 
         end = time.time()
@@ -67,12 +67,10 @@ if __name__ == "__main__":
             for idx, annotation in enumerate(row["infer"]["annotations"]):
                 inference_classes.append(annotation["category_name"])
 
-        datasets = dataset
-
-        if i < 10_000:
-            datasets = "train"
+        if i < 25_000:
+            dataset = "train"
         else:
-            datasets = "test"
+            dataset = "test"
 
         api.add(
             embedding=embedding,
@@ -195,9 +193,16 @@ if __name__ == "__main__":
     # end = time.time()
     # print("Time to get nearest neighbors: " + "{0:.2f}".format((end - start)) + "s")
 
+    print(api.get_model_space())
+    print(api.count())
+    # print(api.fetch())
+    # print(api.fetch(where={"dataset": "train"}))
+
     api.process(training_dataset_name="train", inference_dataset_name="test", model_space="yolov3")
-    results = api.get_results(dataset_name="test", n_results=100)
+    results = api.get_results(model_space="yolov3", n_results=100, dataset_name="test")
     print(results)
 
-    fetched = api.count()
-    print("Records loaded into the database: ", fetched)
+    print(api.raw_sql("SELECT * FROM results"))
+
+    # fetched = api.count()
+    # print("Records loaded into the database: ", fetched)
