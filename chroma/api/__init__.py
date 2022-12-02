@@ -72,7 +72,7 @@ class API(ABC):
     def process(self,
                 model_space: Optional[str]=None,
                 training_dataset_name: str="training",
-                inference_dataset_name: str="inference") -> bool:
+                inference_dataset_name: str="unlabeled") -> bool:
         '''
         Processes embeddings in the database
         - currently this only runs hnswlib, doesnt return anything
@@ -137,26 +137,26 @@ class API(ABC):
         '''
         Small wrapper around add() to add a batch of training embedding - sets dataset to "training"
         '''
-        datasets = ["training"] * len(input_uri)
+        dataset = ["training"] * len(input_uri)
         return self.add(
             embedding=embedding,
             input_uri=input_uri,
-            dataset=datasets,
+            dataset=dataset,
             inference_class=inference_class,
             model_space=model_space,
             label_class=label_class
         )
 
 
-    def add_production(self, embedding: list, input_uri: list, inference_class: list, label_class: list = None, model_space: list = None):
+    def add_unlabeled(self, embedding: list, input_uri: list, inference_class: list, label_class: list = None, model_space: list = None):
         '''
         Small wrapper around add() to add a batch of production embedding - sets dataset to "production"
         '''
-        datasets = ["production"] * len(input_uri)
+        dataset = ["unlabeled"] * len(input_uri)
         return self.add(
             embedding=embedding,
             input_uri=input_uri,
-            dataset=datasets,
+            dataset=dataset,
             inference_class=inference_class,
             model_space=model_space,
             label_class=label_class
