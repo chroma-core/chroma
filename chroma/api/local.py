@@ -1,11 +1,14 @@
 import time
 from chroma.api import API
 from chroma.utils.sampling import score_and_store, get_sample
+from chroma.server.utils.telemetry.capture import Capture
 
 class LocalAPI(API):
 
     def __init__(self, settings, db):
         self._db = db
+        self._chroma_telemetry = Capture()
+        self._chroma_telemetry.capture('server-start')
 
 
     def heartbeat(self):

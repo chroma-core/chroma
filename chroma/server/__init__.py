@@ -6,6 +6,5 @@ from chroma.server.utils.telemetry.capture import Capture
 class Server(ABC):
 
     def __init__(self, settings):
-        self._chroma_telemetry = Capture()
-        self._chroma_telemetry.capture('server-start')
- #       init_error_reporting()
+        pass
+        # init_error_reporting()
