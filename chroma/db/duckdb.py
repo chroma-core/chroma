@@ -168,9 +168,9 @@ class PersistentDuckDB(DuckDB):
     _save_folder = None
 
     def __init__(self, settings):
-        super().__init__()
+        super().__init__(settings=settings)
         self._save_folder = settings.chroma_cache_dir
-
+        self.load()
 
     def set_save_folder(self, path):
         self._save_folder = path
@@ -187,10 +187,20 @@ class PersistentDuckDB(DuckDB):
         if self._conn is None:
             return
 
+        # if the db is empty, dont save
+        if self.count() == 0:
+            return
+
         self._conn.execute(f'''
             COPY
                 (SELECT * FROM embeddings)
             TO '{self._save_folder}/chroma.parquet'
+                (FORMAT PARQUET);
+        ''')
+        self._conn.execute(f'''
+            COPY
+                (SELECT * FROM results)
+            TO '{self._save_folder}/chroma_results.parquet'
                 (FORMAT PARQUET);
         ''')
 
@@ -199,9 +209,23 @@ class PersistentDuckDB(DuckDB):
         '''
         Load the database from disk
         '''
-        path = self._save_folder + "/chroma.parquet"
-        self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
+        import os
+
+        # load in the embeddings
+        if not os.path.exists(f"{self._save_folder}/chroma.parquet"):
+            print(f"No existing DB found in {self._save_folder}, skipping load")
+        else:
+            path = self._save_folder + "/chroma.parquet"
+            self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
+
+        # load in the results
+        if not os.path.exists(f"{self._save_folder}/chroma_results.parquet"):
+            pass
+        else:
+            path = self._save_folder + "/chroma_results.parquet"
+            self._conn.execute(f"INSERT INTO results SELECT * FROM read_parquet('{path}');")
 
 
     def __del__(self):
+        print("PersistentDuckDB del, about to run persist")
         self.persist()
