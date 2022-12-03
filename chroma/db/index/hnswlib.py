@@ -27,11 +27,7 @@ class Hnswlib(Index):
         self._save_folder = settings.chroma_cache_dir + "/index"
 
 
-    def run(self, model_space, uuids, embeddings):
-
-        space = 'l2'
-        ef=10
-        num_threads=4
+    def run(self, model_space, uuids, embeddings, space='l2', ef=10, num_threads=4):
 
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
@@ -153,8 +149,6 @@ class Hnswlib(Index):
         s3= time.time()
         database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
         logger.debug(f'time to run knn query: {time.time() - s3}')
-
-        print("database_ids", database_ids, distances)
 
         uuids = [[self._id_to_uuid[id] for id in ids] for ids in database_ids]
         return uuids, distances

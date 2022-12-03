@@ -27,11 +27,12 @@ def score_and_store(
         where={"model_space": model_space, "dataset": inference_dataset_name}
     )
 
-    ann_index.load(model_space=model_space)
+    ann_index._load(model_space=model_space)
 
     activation_uncertainty_scores = activation_uncertainty(
         training_data=training_data, inference_data=inference_data
     )
+
     boundary_uncertainty_scores = boundary_uncertainty(
         training_data=training_data,
         inference_data=inference_data,
@@ -47,7 +48,7 @@ def score_and_store(
     #     model_space=model_space,
     # )
     representative_cluster_outlier_scores, difficult_cluster_outlier_scores = cluster_outliers(
-        training_data=training_data, inference_data=inference_data
+        training_data=training_data, inference_data=inference_data, min_samples=100
     )
 
     # Only one set of results per model space

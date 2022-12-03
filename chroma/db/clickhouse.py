@@ -1,5 +1,6 @@
 from chroma.db import DB
 from chroma.db.index.hnswlib import Hnswlib
+from chroma.errors import NoDatapointsException
 import uuid
 import time
 import os
@@ -66,7 +67,7 @@ class Clickhouse(DB):
 
 
     def __init__(self, settings):
-        self._conn = Client(host=settings.clickhouse_host, port=clickhouse_port)
+        self._conn = Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
         self._create_table_embeddings()
         self._create_table_results()
         self._idx = Hnswlib(settings)
@@ -141,7 +142,7 @@ class Clickhouse(DB):
         self._conn.execute(f'''
             DELETE FROM
                 embeddings
-        {where_str}
+        {where}
         ''')
         return uuids_deleted.uuid.tolist()
 
@@ -209,7 +210,7 @@ class Clickhouse(DB):
         if len(results) > 0:
             ids = results.uuid.tolist()
         else:
-            raise Exception("No datapoints found for the supplied filter")
+            raise NoDatapointsException("No datapoints found for the supplied filter")
 
         uuids, distances = self._idx.get_nearest_neighbors(where['model_space'], embedding, n_results, ids)
 
@@ -219,9 +220,18 @@ class Clickhouse(DB):
             "distances": distances.tolist()[0]
         }
 
-
-    def create_index(self, model_space):
-        fetch = self.fetch({"model_space": model_space})
+    def create_index(self, model_space: str, dataset_name: str=None) -> None:
+        """Create an index for a model_space and optionally scoped to a dataset. 
+        Args:
+            model_space (str): The model_space to create an index for
+            dataset (str, optional): The dataset to scope the index to. Defaults to None.
+        Returns:
+            None
+        """
+        query = {"model_space": model_space}
+        if dataset_name is not None:
+            query["dataset"] = dataset_name
+        fetch = self.fetch(query)
         self._idx.run(model_space, fetch.uuid.tolist(), fetch.embedding.tolist())
         #chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
 
@@ -241,7 +251,7 @@ class Clickhouse(DB):
 
 
     def raw_sql(self, sql):
-        return self._conn.execute(sql)
+        return self._conn.query_dataframe(sql)
 
 
     def add_results(self, uuid, model_space, **kwargs):
@@ -261,7 +271,7 @@ class Clickhouse(DB):
         data_to_insert = list(zip(itertools.repeat(model_space), uuid, *kwargs.values()))
 
         self._conn.execute(f'''
-         INSERT INTO results (model_space, uuid, activation_uncertainty, bou{",".join(kwargs.keys())}) VALUES''', data_to_insert)
+         INSERT INTO results (model_space, uuid, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
 
 
     def delete_results(self, model_space):

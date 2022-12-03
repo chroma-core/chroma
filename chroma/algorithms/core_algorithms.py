@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import hdbscan
 import numpy as np
@@ -14,13 +14,14 @@ def activation_uncertainty(training_data: pd.DataFrame, inference_data: pd.DataF
     Returns:
         numpy NDArray: Class-wise activation uncertainty for each inference datapoint.
     """
+
     activation_uncertainty = np.empty(len(inference_data), dtype=np.float32)
     for class_name in inference_data["inference_class"].unique():
         training_data_class = training_data[training_data["label_class"] == class_name]
         training_data_class_activation = np.linalg.norm(
             training_data_class["embedding"].tolist(), axis=1
         )
-
+        
         inference_data_class = inference_data[inference_data["inference_class"] == class_name]
         inference_data_class_activation = np.linalg.norm(
             inference_data_class["embedding"].tolist(), axis=1
