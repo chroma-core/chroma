@@ -1,32 +1,32 @@
 version: '3.9'
 
 networks:
-  net:
+  test_net:
     driver: bridge
 
 services:
-  server:
+  test_server:
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
       - ./:/chroma
-      - index_data:/index_data
+      - test_index_data:/index_data
     command: uvicorn chroma.app:app --reload --workers 1 --host 0.0.0.0 --port 8000
     environment:
       - CHROMA_DB_IMPL=clickhouse
-      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_HOST=test_clickhouse
       - CLICKHOUSE_PORT=9000
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     ports:
       - 8000:8000
     depends_on:
-      - clickhouse
+      - test_clickhouse
     networks:
-      - net
+      - test_net
 
-  clickhouse:
+  test_clickhouse:
     image: clickhouse/clickhouse-server:22.9-alpine
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -36,16 +36,16 @@ services:
       - '8123:8123'
       - '9000:9000'
     volumes:
-      - clickhouse_data:/bitnami/clickhouse
-      - backups:/backups
+      - test_clickhouse_data:/bitnami/clickhouse
+      - test_backups:/backups
       - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
     networks:
-      - net
+      - test_net
 
 volumes:
-  clickhouse_data:
+  test_clickhouse_data:
     driver: local
-  index_data:
+  test_index_data:
     driver: local
-  backups:
+  test_backups:
     driver: local
