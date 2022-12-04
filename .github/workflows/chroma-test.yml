@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.10']
-        platform: [ubuntu-latest, macos-latest]
+        platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
