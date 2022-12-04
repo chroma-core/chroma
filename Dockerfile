@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 python:3.10 AS chroma_server
+FROM --platform=linux/arm64 python:3.10
 
 #RUN apt-get update -qq
 #RUN apt-get install python3.10 python3-pip -y --no-install-recommends && rm -rf /var/lib/apt/lists_/*
@@ -13,4 +13,4 @@ COPY ./ /
 
 EXPOSE 8000
 
-CMD ["uvicorn", "chroma.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+CMD ["uvicorn", "chroma.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]

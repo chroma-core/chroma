@@ -9,15 +9,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: chroma_server
     volumes:
       - ./:/chroma
       - index_data:/index_data
     command: uvicorn chroma.app:app --reload --workers 1 --host 0.0.0.0 --port 8000
     environment:
+      - CHROMA_DB_IMPL=clickhouse
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - CLICKHOUSE_TCP_PORT=9000
     ports:
       - 8000:8000
     depends_on:

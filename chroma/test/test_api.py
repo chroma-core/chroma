@@ -5,6 +5,7 @@ import pytest
 import time
 import tempfile
 import copy
+import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
@@ -14,6 +15,11 @@ def local_api():
     return chroma.get_api(Settings(chroma_api_impl="local",
                                    chroma_db_impl="duckdb",
                                    chroma_cache_dir=tempfile.gettempdir()))
+
+@pytest.fixture
+def fastapi_integration_api():
+    return chroma.get_api() # configured by environment variables
+
 
 def _build_fastapi_api():
     return chroma.get_api(Settings(chroma_api_impl="rest",
@@ -55,8 +61,11 @@ def fastapi_server():
     yield
     proc.kill()
 
-
 test_apis = [local_api, fastapi_api]
+
+if 'CHROMA_INTEGRATION_TEST' in os.environ:
+    print("Including integration tests")
+    test_apis.append(fastapi_integration_api)
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
