@@ -1,5 +1,6 @@
 import pytest
 import unittest
+import os
 from unittest.mock import patch
 
 import chroma
@@ -32,6 +33,7 @@ class GetAPITest(unittest.TestCase):
 
     @patch('chroma.db.duckdb.DuckDB', autospec=True)
     @patch('chroma.api.local.LocalAPI', autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
     def test_local(self, mock_api, mock_db):
         api = chroma.get_api(chroma.config.Settings(chroma_cache_dir="./foo"))
         assert mock_api.called
@@ -39,6 +41,7 @@ class GetAPITest(unittest.TestCase):
 
     @patch('chroma.db.duckdb.DuckDB', autospec=True)
     @patch('chroma.api.celery.CeleryAPI', autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
     def test_celery(self, mock_api, mock_db):
         api = chroma.get_api(chroma.config.Settings(chroma_api_impl="celery",
                                                     chroma_cache_dir="./foo",
@@ -49,6 +52,7 @@ class GetAPITest(unittest.TestCase):
 
 
     @patch('chroma.api.fastapi.FastAPI', autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
     def test_fastapi(self, mock):
         api = chroma.get_api(chroma.config.Settings(chroma_api_impl="rest",
                                                     chroma_cache_dir="./foo",
@@ -58,6 +62,7 @@ class GetAPITest(unittest.TestCase):
 
 
     @patch('chroma.api.arrowflight.ArrowFlightAPI', autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
     def test_arrowflight(self, mock):
         api = chroma.get_api(chroma.config.Settings(chroma_api_impl="arrowflight",
                                                     chroma_cache_dir="./foo",

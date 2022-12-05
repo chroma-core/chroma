@@ -16,3 +16,6 @@ index_data
 
 venv
 .env
+.chroma
+*.egg-info
+dist

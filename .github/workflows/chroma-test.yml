@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.10']
-        platform: [ubuntu-latest, macos-latest]
+        platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -26,3 +26,5 @@ jobs:
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
     - name: Test
       run: python -m pytest
+    - name: Integration Test
+      run: bin/integration-test
