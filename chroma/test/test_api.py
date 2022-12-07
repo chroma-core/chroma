@@ -24,7 +24,7 @@ def fastapi_integration_api():
 def _build_fastapi_api():
     return chroma.get_api(Settings(chroma_api_impl="rest",
                                    chroma_server_host="localhost",
-                                   chroma_server_http_port="8888"))
+                                   chroma_server_http_port="6666"))
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def run_server():
                         chroma_db_impl="duckdb",
                         chroma_cache_dir=tempfile.gettempdir()+"/test_server")
     server = chroma.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=8888, log_level="info")
+    uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="info")
 
 
 def await_server(attempts=0):
