@@ -11,10 +11,10 @@ from chroma.db.clickhouse import Clickhouse
 from chroma.db.index.hnswlib import Hnswlib
 
 
-# Score each datapoint in the inference data, and store the scores in the database
+# Score each datapoint in the unlabeled data, and store the scores in the database
 def score_and_store(
     training_dataset_name: str,
-    inference_dataset_name: str,
+    unlabeled_dataset_name: str,
     db_connection: Clickhouse,
     ann_index: Hnswlib,
     model_space: Optional[str] = "default_scope",
@@ -23,19 +23,19 @@ def score_and_store(
     training_data = db_connection.fetch(
         where={"model_space": model_space, "dataset": training_dataset_name}
     )
-    inference_data = db_connection.fetch(
-        where={"model_space": model_space, "dataset": inference_dataset_name}
+    unlabeled_data = db_connection.fetch(
+        where={"model_space": model_space, "dataset": unlabeled_dataset_name}
     )
 
     ann_index._load(model_space=model_space)
 
     activation_uncertainty_scores = activation_uncertainty(
-        training_data=training_data, inference_data=inference_data
+        training_data=training_data, unlabeled_data=unlabeled_data
     )
 
     boundary_uncertainty_scores = boundary_uncertainty(
         training_data=training_data,
-        inference_data=inference_data,
+        unlabeled_data=unlabeled_data,
         ann_index=ann_index,
         model_space=model_space,
     )
@@ -48,7 +48,7 @@ def score_and_store(
     #     model_space=model_space,
     # )
     representative_cluster_outlier_scores, difficult_cluster_outlier_scores = cluster_outliers(
-        training_data=training_data, inference_data=inference_data, min_samples=100
+        training_data=training_data, unlabeled_data=unlabeled_data, min_samples=100
     )
 
     # Only one set of results per model space
@@ -57,7 +57,7 @@ def score_and_store(
     # Results have singular names as arguments so they match DB schema column names
     db_connection.add_results(
         model_space=model_space,
-        uuid=inference_data["uuid"].tolist(),
+        uuid=unlabeled_data["uuid"].tolist(),
         activation_uncertainty=activation_uncertainty_scores,
         boundary_uncertainty=boundary_uncertainty_scores,
         # TODO: Fix class outliers (ANN index issue)
@@ -72,10 +72,10 @@ def score_and_store(
 
 # Given a target number of samples, and sample proportions by score type, return a list of unique URIs to label
 def get_sample(
-    dataset_name: str,
     n_samples: int,
     sample_proportions: Dict[str, float],
     db_connection: Clickhouse,
+    dataset_name: Optional[str] = "unlabeled",
     model_space: Optional[str] = "default_scope",
 ) -> List[str]:
 
@@ -103,6 +103,10 @@ def get_sample(
 
     # Add random samples to fill out the sample set
     n_random = n_samples - len(uris)
-    uris.update(db_connection.get_random(n=n_random, where={"model_space": model_space, "dataset": dataset_name}).input_uri.tolist())
+    uris.update(
+        db_connection.get_random(
+            n=n_random, where={"model_space": model_space, "dataset": dataset_name}
+        ).input_uri.tolist()
+    )
 
     return list(uris)

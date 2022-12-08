@@ -85,7 +85,7 @@ class LocalAPI(API):
         return True
 
     def process(
-        self, model_space=None, training_dataset_name="training", inference_dataset_name="unlabeled"
+        self, model_space=None, training_dataset_name="training", unlabeled_dataset_name="unlabeled"
     ):
 
         # Create the index only for the training set.
@@ -94,7 +94,7 @@ class LocalAPI(API):
         # chroma_telemetry.capture('score_and_store')
         score_and_store(
             training_dataset_name=training_dataset_name,
-            inference_dataset_name=inference_dataset_name,
+            unlabeled_dataset_name=unlabeled_dataset_name,
             db_connection=self._db,
             ann_index=self._db._idx,  # TODO: Breaks encapsulation should fix
             model_space=model_space,
@@ -106,7 +106,7 @@ class LocalAPI(API):
 
         raise NotImplementedError("Cannot get status of job: Celery is not configured")
 
-    def get_results(self, model_space=None, n_results=100, dataset_name="inference"):
+    def get_results(self, model_space=None, n_results=100, dataset_name="unlabeled"):
         model_space = model_space or self._model_space
         sample_proportions = {
             "activation_uncertainty": 0.3,
