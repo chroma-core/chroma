@@ -4,26 +4,58 @@ This project uses the testing, build and release standards specified
 by the PyPA organization and documented at
 https://packaging.python.org.
 
-## Environment
+## Setup
 
-To set up an environment allowing you to test, build or distribute the
-project, you will need to set up and activate a virtual environment
-specific to this library. For example:
+Set up a virtual environment and install the project's requirements
+and dev requirements:
 
 ```
 python3 -m venv venv      # Only need to do this once
 source venv/bin/activate  # Do this each time you use a new shell for the project
+pip install -r requirements.txt
+pip install -r requirements_dev.txt
 ```
 
-Then, install the development dependencies by running
+You can also install `chroma` the `pypi` package locally and in editable mode with `pip install -e .`. 
 
+## Running Chroma
+
+Chroma can be run via 3 modes:
+1. Standalone and in-memory:
+```python
+import chroma
+api = chroma.get_api()
+print(api.heartbeat())
 ```
-pip install -r dev_requirements.txt
+
+2. Standaline and in-memory with persistance:
+
+This by default saves your db and your indexes to a `.chroma` directory and can also load from them. 
+```python
+import chroma
+from chroma.config import Settings
+api = chroma.get_api(Settings(chroma_db_impl="duckdb+parquet"))
+print(api.heartbeat())
+```
+
+
+
+3. With a persistent backend and a small frontend client
+
+Run `docker-compose up -d --build`
+```python
+import chroma
+from chroma.config import Settings
+api = chroma.get_api(Settings(chroma_api_impl="rest",
+                              chroma_server_host="localhost",
+                              chroma_server_http_port="8000") )
+
+print(api.heartbeat())
 ```
 
 ## Testing
 
-Unit tests are in the `/tests` directory.
+Unit tests are in the `/chroma/test` directory.
 
 To run unit tests using your current environment, run `pytest`.
 
