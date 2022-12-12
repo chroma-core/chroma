@@ -28,8 +28,8 @@ class API(ABC):
     @abstractmethod
     def add(
         self,
-        model_space: Union[str, Sequence[str]],
         embedding: Sequence[Sequence[float]],
+        model_space: Union[str, Sequence[str]],
         input_uri: Optional[Sequence[str]] = None,
         dataset: Optional[Union[str, Sequence[str]]] = None,
         inference_class: Optional[Sequence[str]] = None,
@@ -252,84 +252,84 @@ class API(ABC):
 
     def add_training(
         self,
-        model_space: Union[str, Sequence[str]],
         embedding: Sequence[Sequence[float]],
-        input_uri: Optional[Sequence[str]] = None,
-        inference_class: Optional[Sequence[str]] = None,
-        label_class: Optional[Sequence[str]] = None,
+        input_uri: Sequence[str],
+        inference_class: Sequence[str],
+        label_class: Sequence[str],
+        model_space: Optional[Union[str, Sequence[str]]] = None,
     ) -> bool:
-        """Adds a batch of training data to the database.
-
+        """Adds a batch of training data to the database. Requires the embedding, input URI, inference class, and label class for each input.
 
         Args:
-            model_space (Union[str, Sequence[str]]): The model space name(s) to add the data to
             embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri (Optional[Sequence[str]], optional): The input URIs to add. Defaults to None.
-            inference_class (Optional[Sequence[str]], optional): The inference classes to add. Defaults to None.
-            label_class (Optional[Sequence[str]], optional): The label classes to add. Defaults to None.
+            input_uri ([Sequence[str]): The input URIs to add.
+            inference_class (Sequence[str]): The inference classes to add.
+            label_class (Sequence[str]): The label classes to add.
+            model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
 
         Returns:
             bool: True if the data was added successfully
         """
 
         dataset = ["training"] * len(input_uri)
+        if not model_space:
+            model_space = self._model_space
         return self.add(
             embedding=embedding,
             input_uri=input_uri,
             dataset=dataset,
             inference_class=inference_class,
-            model_space=model_space,
             label_class=label_class,
+            model_space=model_space,
         )
 
     def add_unlabeled(
         self,
-        model_space: Union[str, Sequence[str]],
         embedding: Sequence[Sequence[float]],
-        input_uri: Optional[Sequence[str]] = None,
-        inference_class: Optional[Sequence[str]] = None,
-        label_class: Optional[Sequence[str]] = None,
+        input_uri: Sequence[str],
+        inference_class: Sequence[str],
+        model_space: Optional[Union[str, Sequence[str]]] = None,
     ) -> bool:
-        """Adds a batch of unlabeled data to the database. By default, chroma selects data from this set for you to label.
+        """Adds a batch of unlabeled data to analyze. By default, chroma selects data from this set for you to label. Requires the embedding, input URI, and inference class for each input.
 
         Args:
-            model_space (Union[str, Sequence[str]]): The model space name(s) to add the data to
             embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri (Optional[Sequence[str]], optional): The input URIs to add. Defaults to None.
-            inference_class (Optional[Sequence[str]], optional): The inference classes to add. Defaults to None.
-            label_class (Optional[Sequence[str]], optional): The label classes to add. Defaults to None.
+            input_uri (Sequence[str]): The input URIs to add.
+            inference_class (Sequence[str]): The inference classes to add.
+            model_space (Optional[Union[str, Sequence[str]]]): The model space name(s) to add the data to. Defaults to the client's model space.
 
         Returns:
             bool: True if the data was added successfully
 
         """
         dataset = ["unlabeled"] * len(input_uri)
+        if not model_space:
+            model_space = self._model_space
         return self.add(
             embedding=embedding,
+            model_space=model_space,
             input_uri=input_uri,
             dataset=dataset,
             inference_class=inference_class,
-            model_space=model_space,
-            label_class=label_class,
         )
 
     def add_triage(
         self,
-        model_space: Union[str, Sequence[str]],
         embedding: Sequence[Sequence[float]],
-        input_uri: Optional[Sequence[str]] = None,
-        inference_class: Optional[Sequence[str]] = None,
-        label_class: Optional[Sequence[str]] = None,
+        input_uri: Sequence[str],
+        inference_class: Sequence[str],
+        label_class: Sequence[str],
+        model_space: Optional[Union[str, Sequence[str]]] = None,
     ) -> bool:
         """Adds a batch of triage data to the database. These are examples which humans have detected as being problematic. Chroma will find similar examples automatically, and prioritize them for labeling.
         ⚠️ This functionality is not yet implemented.
 
         Args:
-            model_space (Union[str, Sequence[str]]): The model space name(s) to add the data to
             embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri (Optional[Sequence[str]], optional): The input URIs to add. Defaults to None.
-            inference_class (Optional[Sequence[str]], optional): The inference classes to add. Defaults to None.
-            label_class (Optional[Sequence[str]], optional): The label classes to add. Defaults to None.
+            input_uri ([Sequence[str]): The input URIs to add.
+            inference_class (Sequence[str]): The inference classes to add.
+            label_class (Sequence[str]): The label classes to add.
+            model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
 
         Returns:
             bool: True if the data was added successfully
@@ -337,11 +337,13 @@ class API(ABC):
 
         """
         datasets = ["triage"] * len(input_uri)
+        if not model_space:
+            model_space = self._model_space
         return self.add(
             embedding=embedding,
+            model_space=model_space,
             input_uri=input_uri,
             dataset=datasets,
             inference_class=inference_class,
-            model_space=model_space,
             label_class=label_class,
         )
