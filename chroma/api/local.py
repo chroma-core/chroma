@@ -88,6 +88,8 @@ class LocalAPI(API):
         self, model_space=None, training_dataset_name="training", unlabeled_dataset_name="unlabeled"
     ):
 
+        model_space = model_space or self.get_model_space()
+
         # Create the index only for the training set.
         self._db.create_index(model_space=model_space, dataset_name=training_dataset_name)
 
