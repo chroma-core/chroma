@@ -1,5 +1,0 @@
-torch
-numpy
-pandas
-torchvision
-pydantic
