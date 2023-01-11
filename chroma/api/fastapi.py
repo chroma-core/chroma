@@ -104,13 +104,13 @@ class FastAPI(API):
 
         return val
 
-    def process(self, model_space=None, training_dataset_name="training", inference_dataset_name="inference"):
+    def process(self, model_space=None, training_dataset_name="training", unlabeled_dataset_name="unlabeled"):
         '''
         Processes embeddings in the database
         '''
         payload = {"model_space": model_space or self._model_space,
                    "training_dataset_name": training_dataset_name,
-                   "inference_dataset_name": inference_dataset_name}
+                   "unlabeled_dataset_name": unlabeled_dataset_name}
         resp = requests.post(self._api_url + "/process", data = json.dumps(payload))
         resp.raise_for_status()
         return resp.json()
@@ -127,7 +127,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
-    def get_results(self, model_space=None, n_results = 100, dataset_name="inference"):
+    def get_results(self, model_space=None, n_results = 100, dataset_name="unlabeled"):
         '''Gets the results for the given space key'''
         resp = requests.post(self._api_url + "/get_results",
                              data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results, "dataset_name": dataset_name}))

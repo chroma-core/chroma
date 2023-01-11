@@ -18,9 +18,9 @@ chroma_api.add_production(
 print(chroma_api.count(model_space="sample_space"))
 
 
-# chroma_api.process(training_dataset_name="training", inference_dataset_name="production", model_space="default_scope")
+# chroma_api.process(training_dataset_name="training", unlabeled_dataset_name="production", model_space="default_scope")
 # chroma_api.get_results()
-# chroma_api.process(training_dataset_name="training", inference_dataset_name="production", model_space="sample_space")
+# chroma_api.process(training_dataset_name="training", unlabeled_dataset_name="production", model_space="sample_space")
 # results = chroma_api.get_results(dataset_name="production", n_results=2)
 print(chroma_api.count(model_space="sample_space"))
 

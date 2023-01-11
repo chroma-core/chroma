@@ -96,7 +96,8 @@ class FastAPI(chroma.server.Server):
 
 
     def process(self, process: ProcessEmbedding):
-        self._api.process(process.model_space, process.training_dataset_name, process.inference_dataset_name)
+        print(process)
+        self._api.process(process.model_space, process.training_dataset_name, process.unlabeled_dataset_name)
         return True
 
 
