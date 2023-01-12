@@ -69,7 +69,7 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def get_nearest_neighbors(self, embedding, n_results, where={}):
+    def get_nearest_neighbors(self, embedding, n_results=10, where={}):
 
         where = self.where_with_model_space(where)
         return self._db.get_nearest_neighbors(where, embedding, n_results)
@@ -79,8 +79,11 @@ class LocalAPI(API):
         return self._db.raw_sql(raw_sql)
 
     def create_index(self, model_space=None, dataset_name=None):
+
+        model_space = model_space or self.get_model_space()
+
         self._db.create_index(
-            model_space=model_space or self._model_space, dataset_name=dataset_name
+            model_space=model_space, dataset_name=dataset_name
         )
         return True
 
