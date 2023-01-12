@@ -69,7 +69,7 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def get_nearest_neighbors(self, embedding, n_results, where={}):
+    def get_nearest_neighbors(self, embedding, n_results=10, where={}):
 
         where = self.where_with_model_space(where)
         return self._db.get_nearest_neighbors(where, embedding, n_results)
