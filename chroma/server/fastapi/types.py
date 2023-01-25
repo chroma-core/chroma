@@ -7,8 +7,8 @@ class AddEmbedding(BaseModel):
     embedding: list
     input_uri: Union[str, list]
     dataset: Union[str, list] = None
-    inference_class: Union[str, list] = None
-    label_class: Union[str, list] = None
+    # inference_class: Union[str, list] = None
+    # label_class: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
     where: dict = {}
@@ -32,10 +32,10 @@ class CountEmbedding(BaseModel):
 class RawSql(BaseModel):
     raw_sql: str = None
 
-class Results(BaseModel):
-    model_space: str
-    n_results: int = 100
-    dataset_name: str = None
+# class Results(BaseModel):
+#     model_space: str
+#     n_results: int = 100
+#     dataset_name: str = None
 
 class SpaceKeyInput(BaseModel):
     model_space: str

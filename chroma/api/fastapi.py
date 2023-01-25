@@ -55,9 +55,10 @@ class FastAPI(API):
             model_space,
             embedding,
             input_uri=None,
-            dataset=None,
-            inference_class=None,
-            label_class=None):
+            dataset=None):
+            # ,
+            # inference_class=None,
+            # label_class=None):
 
         '''
         Addss a batch of embeddings to the database
@@ -72,8 +73,8 @@ class FastAPI(API):
             "embedding": embedding,
             "input_uri": input_uri,
             "dataset": dataset,
-            "inference_class": inference_class,
-            "label_class": label_class
+            # "inference_class": inference_class,
+            # "label_class": label_class
         }) )
 
         resp.raise_for_status
@@ -104,16 +105,16 @@ class FastAPI(API):
 
         return val
 
-    def process(self, model_space=None, training_dataset_name="training", unlabeled_dataset_name="unlabeled"):
-        '''
-        Processes embeddings in the database
-        '''
-        payload = {"model_space": model_space or self._model_space,
-                   "training_dataset_name": training_dataset_name,
-                   "unlabeled_dataset_name": unlabeled_dataset_name}
-        resp = requests.post(self._api_url + "/process", data = json.dumps(payload))
-        resp.raise_for_status()
-        return resp.json()
+    # def process(self, model_space=None, training_dataset_name="training", unlabeled_dataset_name="unlabeled"):
+    #     '''
+    #     Processes embeddings in the database
+    #     '''
+    #     payload = {"model_space": model_space or self._model_space,
+    #                "training_dataset_name": training_dataset_name,
+    #                "unlabeled_dataset_name": unlabeled_dataset_name}
+    #     resp = requests.post(self._api_url + "/process", data = json.dumps(payload))
+    #     resp.raise_for_status()
+    #     return resp.json()
 
     def reset(self):
         '''Resets the database'''
@@ -127,18 +128,18 @@ class FastAPI(API):
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
-    def get_results(self, model_space=None, n_results = 100, dataset_name="unlabeled"):
-        '''Gets the results for the given space key'''
-        resp = requests.post(self._api_url + "/get_results",
-                             data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results, "dataset_name": dataset_name}))
-        resp.raise_for_status()
-        return pd.DataFrame.from_dict(resp.json())
+    # def get_results(self, model_space=None, n_results = 100, dataset_name="unlabeled"):
+    #     '''Gets the results for the given space key'''
+    #     resp = requests.post(self._api_url + "/get_results",
+    #                          data = json.dumps({"model_space": model_space or self._model_space, "n_results": n_results, "dataset_name": dataset_name}))
+    #     resp.raise_for_status()
+    #     return pd.DataFrame.from_dict(resp.json())
 
-    def get_task_status(self, task_id):
-        '''Gets the status of a task'''
-        resp = requests.post(self._api_url + f"/tasks/{task_id}")
-        resp.raise_for_status()
-        return resp.json
+    # def get_task_status(self, task_id):
+    #     '''Gets the status of a task'''
+    #     resp = requests.post(self._api_url + f"/tasks/{task_id}")
+    #     resp.raise_for_status()
+    #     return resp.json
 
     def create_index(self, model_space=None):
         '''Creates an index for the given space key'''

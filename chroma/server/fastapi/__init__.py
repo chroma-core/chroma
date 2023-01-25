@@ -6,7 +6,7 @@ import chroma.server
 from chroma.errors import NoDatapointsException
 from chroma.server.fastapi.types import (AddEmbedding, CountEmbedding, DeleteEmbedding,
                                          FetchEmbedding, ProcessEmbedding,
-                                         QueryEmbedding, RawSql, Results,
+                                         QueryEmbedding, RawSql, #Results,
                                          SpaceKeyInput)
 
 class FastAPI(chroma.server.Server):
@@ -26,9 +26,9 @@ class FastAPI(chroma.server.Server):
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
         self.router.add_api_route("/api/v1/get_nearest_neighbors", self.get_nearest_neighbors, methods=["POST"])
         self.router.add_api_route("/api/v1/create_index", self.create_index, methods=["POST"])
-        self.router.add_api_route("/api/v1/process", self.process, methods=["POST"])
-        self.router.add_api_route("/api/v1/get_status", self.get_status, methods=["POST"])
-        self.router.add_api_route("/api/v1/get_results", self.get_results, methods=["POST"])
+        # self.router.add_api_route("/api/v1/process", self.process, methods=["POST"])
+        # self.router.add_api_route("/api/v1/get_status", self.get_status, methods=["POST"])
+        # self.router.add_api_route("/api/v1/get_results", self.get_results, methods=["POST"])
 
         self._app.include_router(self.router)
 
@@ -46,8 +46,9 @@ class FastAPI(chroma.server.Server):
                              embedding=add.embedding,
                              input_uri=add.input_uri,
                              dataset=add.dataset,
-                             inference_class=add.inference_class,
-                             label_class=add.label_class)
+                            #  inference_class=add.inference_class,
+                            #  label_class=add.label_class
+                             )
 
 
     def fetch(self, fetch: FetchEmbedding):
@@ -95,18 +96,18 @@ class FastAPI(chroma.server.Server):
         return self._api.create_index(process.model_space)
 
 
-    def process(self, process: ProcessEmbedding):
-        self._api.process(process.model_space, process.training_dataset_name, process.unlabeled_dataset_name)
-        return True
+    # def process(self, process: ProcessEmbedding):
+    #     self._api.process(process.model_space, process.training_dataset_name, process.unlabeled_dataset_name)
+    #     return True
 
 
-    def get_status(self, task_id):
-        return JSONResponse(self._api.get_task_status(task_id))
+    # def get_status(self, task_id):
+    #     return JSONResponse(self._api.get_task_status(task_id))
 
 
-    def get_results(self, results: Results):
-        results = self._api.get_results(results.model_space, results.n_results, results.dataset_name)
-        return results
+    # def get_results(self, results: Results):
+    #     results = self._api.get_results(results.model_space, results.n_results, results.dataset_name)
+    #     return results
 
     
 

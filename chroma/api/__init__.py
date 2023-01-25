@@ -122,26 +122,26 @@ class API(ABC):
         """
         pass
 
-    @abstractmethod
-    def process(
-        self,
-        model_space: Optional[str] = None,
-        training_dataset_name: str = "training",
-        unlabeled_dataset_name: str = "unlabeled",
-    ) -> bool:
-        """
-        Processes analysis for the given model space, using the Chroma algorithms, to determine the best data to label. This is then available with `get_results`.
-        ⚠️ This method may take a long time to run.
+    # @abstractmethod
+    # def process(
+    #     self,
+    #     model_space: Optional[str] = None,
+    #     training_dataset_name: str = "training",
+    #     unlabeled_dataset_name: str = "unlabeled",
+    # ) -> bool:
+    #     """
+    #     Processes analysis for the given model space, using the Chroma algorithms, to determine the best data to label. This is then available with `get_results`.
+    #     ⚠️ This method may take a long time to run.
 
-        Args:
-            model_space (Optional[str], optional): The model space to process. Defaults to None.
-            training_dataset_name (str, optional): The name of the training dataset. Defaults to "training".
-            unlabeled_dataset_name (str, optional): The name of the unlabeled dataset. Defaults to "unlabeled".
+    #     Args:
+    #         model_space (Optional[str], optional): The model space to process. Defaults to None.
+    #         training_dataset_name (str, optional): The name of the training dataset. Defaults to "training".
+    #         unlabeled_dataset_name (str, optional): The name of the unlabeled dataset. Defaults to "unlabeled".
 
-        Returns:
-            bool: True if the processing was successful
-        """
-        pass
+    #     Returns:
+    #         bool: True if the processing was successful
+    #     """
+    #     pass
 
     @abstractmethod
     def reset(self) -> bool:
@@ -168,33 +168,33 @@ class API(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_results(
-        self,
-        model_space: Optional[str] = None,
-        dataset_name: str = "unlabeled",
-        n_results: int = 100,
-    ) -> pd.DataFrame:
-        """Get the set of unlabeled data to label, for a given unlabaled dataset and model space.
+    # @abstractmethod
+    # def get_results(
+    #     self,
+    #     model_space: Optional[str] = None,
+    #     dataset_name: str = "unlabeled",
+    #     n_results: int = 100,
+    # ) -> pd.DataFrame:
+    #     """Get the set of unlabeled data to label, for a given unlabaled dataset and model space.
 
-        Args:
-            model_space (Optional[str], optional): The model space to get the results for. Uses the client's set space if None.
-            dataset_name (str, optional): The name of the dataset to get the results for. Defaults to "unlabeled".
-            n_results (int, optional): The number of results to return. Defaults to 100.
+    #     Args:
+    #         model_space (Optional[str], optional): The model space to get the results for. Uses the client's set space if None.
+    #         dataset_name (str, optional): The name of the dataset to get the results for. Defaults to "unlabeled".
+    #         n_results (int, optional): The number of results to return. Defaults to 100.
 
-        Returns:
-            pd.DataFrame: A pandas dataframe containing the URIs of the inputs to label.
+    #     Returns:
+    #         pd.DataFrame: A pandas dataframe containing the URIs of the inputs to label.
 
-        """
-        pass
+    #     """
+    #     pass
 
-    @abstractmethod
-    def get_task_status(self, task_id):
-        """Gets the status of a task
-        ⚠️ Not implemented. Will error.
-        """
+    # @abstractmethod
+    # def get_task_status(self, task_id):
+    #     """Gets the status of a task
+    #     ⚠️ Not implemented. Will error.
+    #     """
 
-        pass
+    #     pass
 
     @abstractmethod
     def create_index(self, model_space: Optional[str] = None) -> bool:
@@ -250,100 +250,100 @@ class API(ABC):
 
         return where_clause
 
-    def add_training(
-        self,
-        embedding: Sequence[Sequence[float]],
-        input_uri: Sequence[str],
-        inference_class: Sequence[str],
-        label_class: Sequence[str],
-        model_space: Optional[Union[str, Sequence[str]]] = None,
-    ) -> bool:
-        """Adds a batch of training data to the database. Requires the embedding, input URI, inference class, and label class for each input.
+    # def add_training(
+    #     self,
+    #     embedding: Sequence[Sequence[float]],
+    #     input_uri: Sequence[str],
+    #     inference_class: Sequence[str],
+    #     label_class: Sequence[str],
+    #     model_space: Optional[Union[str, Sequence[str]]] = None,
+    # ) -> bool:
+    #     """Adds a batch of training data to the database. Requires the embedding, input URI, inference class, and label class for each input.
 
-        Args:
-            embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri ([Sequence[str]): The input URIs to add.
-            inference_class (Sequence[str]): The inference classes to add.
-            label_class (Sequence[str]): The label classes to add.
-            model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
+    #     Args:
+    #         embedding (Sequence[Sequence[float]]): The embeddings to add
+    #         input_uri ([Sequence[str]): The input URIs to add.
+    #         inference_class (Sequence[str]): The inference classes to add.
+    #         label_class (Sequence[str]): The label classes to add.
+    #         model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
 
-        Returns:
-            bool: True if the data was added successfully
-        """
+    #     Returns:
+    #         bool: True if the data was added successfully
+    #     """
 
-        dataset = ["training"] * len(input_uri)
-        if not model_space:
-            model_space = self._model_space
-        return self.add(
-            embedding=embedding,
-            input_uri=input_uri,
-            dataset=dataset,
-            inference_class=inference_class,
-            label_class=label_class,
-            model_space=model_space,
-        )
+    #     dataset = ["training"] * len(input_uri)
+    #     if not model_space:
+    #         model_space = self._model_space
+    #     return self.add(
+    #         embedding=embedding,
+    #         input_uri=input_uri,
+    #         dataset=dataset,
+    #         inference_class=inference_class,
+    #         label_class=label_class,
+    #         model_space=model_space,
+    #     )
 
-    def add_unlabeled(
-        self,
-        embedding: Sequence[Sequence[float]],
-        input_uri: Sequence[str],
-        inference_class: Sequence[str],
-        model_space: Optional[Union[str, Sequence[str]]] = None,
-    ) -> bool:
-        """Adds a batch of unlabeled data to analyze. By default, chroma selects data from this set for you to label. Requires the embedding, input URI, and inference class for each input.
+    # def add_unlabeled(
+    #     self,
+    #     embedding: Sequence[Sequence[float]],
+    #     input_uri: Sequence[str],
+    #     inference_class: Sequence[str],
+    #     model_space: Optional[Union[str, Sequence[str]]] = None,
+    # ) -> bool:
+    #     """Adds a batch of unlabeled data to analyze. By default, chroma selects data from this set for you to label. Requires the embedding, input URI, and inference class for each input.
 
-        Args:
-            embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri (Sequence[str]): The input URIs to add.
-            inference_class (Sequence[str]): The inference classes to add.
-            model_space (Optional[Union[str, Sequence[str]]]): The model space name(s) to add the data to. Defaults to the client's model space.
+    #     Args:
+    #         embedding (Sequence[Sequence[float]]): The embeddings to add
+    #         input_uri (Sequence[str]): The input URIs to add.
+    #         inference_class (Sequence[str]): The inference classes to add.
+    #         model_space (Optional[Union[str, Sequence[str]]]): The model space name(s) to add the data to. Defaults to the client's model space.
 
-        Returns:
-            bool: True if the data was added successfully
+    #     Returns:
+    #         bool: True if the data was added successfully
 
-        """
-        dataset = ["unlabeled"] * len(input_uri)
-        if not model_space:
-            model_space = self._model_space
-        return self.add(
-            embedding=embedding,
-            model_space=model_space,
-            input_uri=input_uri,
-            dataset=dataset,
-            inference_class=inference_class,
-        )
+    #     """
+    #     dataset = ["unlabeled"] * len(input_uri)
+    #     if not model_space:
+    #         model_space = self._model_space
+    #     return self.add(
+    #         embedding=embedding,
+    #         model_space=model_space,
+    #         input_uri=input_uri,
+    #         dataset=dataset,
+    #         inference_class=inference_class,
+    #     )
 
-    def add_triage(
-        self,
-        embedding: Sequence[Sequence[float]],
-        input_uri: Sequence[str],
-        inference_class: Sequence[str],
-        label_class: Sequence[str],
-        model_space: Optional[Union[str, Sequence[str]]] = None,
-    ) -> bool:
-        """Adds a batch of triage data to the database. These are examples which humans have detected as being problematic. Chroma will find similar examples automatically, and prioritize them for labeling.
-        ⚠️ This functionality is not yet implemented.
+    # def add_triage(
+    #     self,
+    #     embedding: Sequence[Sequence[float]],
+    #     input_uri: Sequence[str],
+    #     inference_class: Sequence[str],
+    #     label_class: Sequence[str],
+    #     model_space: Optional[Union[str, Sequence[str]]] = None,
+    # ) -> bool:
+    #     """Adds a batch of triage data to the database. These are examples which humans have detected as being problematic. Chroma will find similar examples automatically, and prioritize them for labeling.
+    #     ⚠️ This functionality is not yet implemented.
 
-        Args:
-            embedding (Sequence[Sequence[float]]): The embeddings to add
-            input_uri ([Sequence[str]): The input URIs to add.
-            inference_class (Sequence[str]): The inference classes to add.
-            label_class (Sequence[str]): The label classes to add.
-            model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
+    #     Args:
+    #         embedding (Sequence[Sequence[float]]): The embeddings to add
+    #         input_uri ([Sequence[str]): The input URIs to add.
+    #         inference_class (Sequence[str]): The inference classes to add.
+    #         label_class (Sequence[str]): The label classes to add.
+    #         model_space (Optional[Union[str, Sequence[str]]], optional): The model space name(s) to add the data to. Defaults to the client's model space.
 
-        Returns:
-            bool: True if the data was added successfully
+    #     Returns:
+    #         bool: True if the data was added successfully
 
 
-        """
-        datasets = ["triage"] * len(input_uri)
-        if not model_space:
-            model_space = self._model_space
-        return self.add(
-            embedding=embedding,
-            model_space=model_space,
-            input_uri=input_uri,
-            dataset=datasets,
-            inference_class=inference_class,
-            label_class=label_class,
-        )
+    #     """
+    #     datasets = ["triage"] * len(input_uri)
+    #     if not model_space:
+    #         model_space = self._model_space
+    #     return self.add(
+    #         embedding=embedding,
+    #         model_space=model_space,
+    #         input_uri=input_uri,
+    #         dataset=datasets,
+    #         inference_class=inference_class,
+    #         label_class=label_class,
+    #     )

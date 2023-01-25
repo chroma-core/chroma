@@ -14,8 +14,9 @@ class DB(ABC):
             input_uri,
             dataset=None,
             custom_quality_score=None,
-            inference_class=None,
-            label_class=None):
+            # inference_class=None,
+            # label_class=None
+            ):
         pass
 
 
@@ -61,27 +62,27 @@ class DB(ABC):
         pass
 
 
-    @abstractmethod
-    def count_results(self, model_space):
-        pass
+    # @abstractmethod
+    # def count_results(self, model_space):
+    #     pass
 
 
-    @abstractmethod
-    def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
-        pass
+    # @abstractmethod
+    # def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
+    #     pass
 
 
-    @abstractmethod
-    def delete_results(self, model_space):
-        pass
+    # @abstractmethod
+    # def delete_results(self, model_space):
+    #     pass
 
 
-    @abstractmethod
-    def add_results(self,
-                    uuid: list,
-                    model_space: str,
-                    activation_uncertainty: list = None,
-                    boundary_uncertainty: list = None,
-                    representative_cluster_outlier: list = None,
-                    difficult_cluster_outlier: list = None):
-        pass
+    # @abstractmethod
+    # def add_results(self,
+    #                 uuid: list,
+    #                 model_space: str,
+    #                 activation_uncertainty: list = None,
+    #                 boundary_uncertainty: list = None,
+    #                 representative_cluster_outlier: list = None,
+    #                 difficult_cluster_outlier: list = None):
+    #     pass
