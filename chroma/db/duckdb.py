@@ -50,16 +50,20 @@ class DuckDB(Clickhouse):
         self._idx = Hnswlib(settings)
         self._settings = settings
 
+        # https://duckdb.org/docs/extensions/overview
+        self._conn.execute("INSTALL 'json';")
+        self._conn.execute("LOAD 'json';")
+
 
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
-    def add(self, model_space, embedding, input_uri, dataset=None):#, inference_class=None, label_class=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, metadata=None):#, inference_class=None, label_class=None):
         data_to_insert = []
         for i in range(len(embedding)):
-            data_to_insert.append([model_space[i], str(uuid.uuid4()), embedding[i], input_uri[i], dataset[i]])#, inference_class[i], (label_class[i] if label_class is not None else None)])
+            data_to_insert.append([model_space[i], str(uuid.uuid4()), embedding[i], input_uri[i], dataset[i], metadata[i]])#, inference_class[i], (label_class[i] if label_class is not None else None)])
 
-        insert_string = "model_space, uuid, embedding, input_uri, dataset"#, inference_class, label_class"
+        insert_string = "model_space, uuid, embedding, input_uri, dataset, metadata"#, inference_class, label_class"
         self._conn.executemany(f'''
-         INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?)''', data_to_insert)
+         INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?)''', data_to_insert)
 
 
     def count(self, model_space=None):
@@ -197,12 +201,12 @@ class PersistentDuckDB(DuckDB):
             TO '{self._save_folder}/chroma.parquet'
                 (FORMAT PARQUET);
         ''')
-        self._conn.execute(f'''
-            COPY
-                (SELECT * FROM results)
-            TO '{self._save_folder}/chroma_results.parquet'
-                (FORMAT PARQUET);
-        ''')
+        # self._conn.execute(f'''
+        #     COPY
+        #         (SELECT * FROM results)
+        #     TO '{self._save_folder}/chroma_results.parquet'
+        #         (FORMAT PARQUET);
+        # ''')
 
 
     def load(self):
@@ -219,11 +223,11 @@ class PersistentDuckDB(DuckDB):
             self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
 
         # load in the results
-        if not os.path.exists(f"{self._save_folder}/chroma_results.parquet"):
-            pass
-        else:
-            path = self._save_folder + "/chroma_results.parquet"
-            self._conn.execute(f"INSERT INTO results SELECT * FROM read_parquet('{path}');")
+        # if not os.path.exists(f"{self._save_folder}/chroma_results.parquet"):
+        #     pass
+        # else:
+        #     path = self._save_folder + "/chroma_results.parquet"
+        #     self._conn.execute(f"INSERT INTO results SELECT * FROM read_parquet('{path}');")
 
 
     def __del__(self):

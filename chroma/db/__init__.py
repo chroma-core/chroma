@@ -14,6 +14,7 @@ class DB(ABC):
             input_uri,
             dataset=None,
             custom_quality_score=None,
+            metadata=None,
             # inference_class=None,
             # label_class=None
             ):

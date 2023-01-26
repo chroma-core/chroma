@@ -19,6 +19,7 @@ class LocalAPI(API):
         embedding,
         input_uri=None,
         dataset=None,
+        metadata=None,
         # inference_class=None,
         # label_class=None,
     ):
@@ -41,7 +42,10 @@ class LocalAPI(API):
         else:
             ds = dataset
 
-        self._db.add(model_space, embedding, input_uri, ds)#, inference_class, label_class)
+        if metadata is None:
+            metadata = [{} for _ in range(number_of_embeddings)]
+
+        self._db.add(model_space, embedding, input_uri, ds, metadata)#, inference_class, label_class)
 
         return True
 

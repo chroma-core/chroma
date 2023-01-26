@@ -14,6 +14,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {'embedding': 'Array(Float64)'},
     {'input_uri': 'String'},
     {'dataset': 'String'},
+    {'metadata': 'JSON'}
     # {'inference_class': 'String'},
     # {'label_class': 'Nullable(String)'},
 ]
@@ -50,12 +51,12 @@ class Clickhouse(DB):
 
     _conn = None
 
-
     def _create_table_embeddings(self):
         self._conn.execute(f'''CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY model_space''')
 
+        self._conn.execute(f'''SET allow_experimental_object_type = true''') # https://clickhouse.com/docs/en/sql-reference/data-types/json/
         self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
         self._conn.execute(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
 
@@ -73,12 +74,12 @@ class Clickhouse(DB):
         self._idx = Hnswlib(settings)
         self._settings = settings
 
-    def add(self, model_space, embedding, input_uri, dataset=None):#, inference_class=None, label_class=None):
+    def add(self, model_space, embedding, input_uri, dataset=None, metadata=None):#, inference_class=None, label_class=None):
         data_to_insert = []
         for i in range(len(embedding)):
-            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i]])#, inference_class[i], (label_class[i] if label_class is not None else None)])
+            data_to_insert.append([model_space[i], uuid.uuid4(), embedding[i], input_uri[i], dataset[i], metadata[i]])#, inference_class[i], (label_class[i] if label_class is not None else None)])
 
-        insert_string = "model_space, uuid, embedding, input_uri, dataset"#, inference_class, label_class"
+        insert_string = "model_space, uuid, embedding, input_uri, dataset, metadata"#, inference_class, label_class"
 
         self._conn.execute(f'''
          INSERT INTO embeddings ({insert_string}) VALUES''', data_to_insert)
