@@ -31,11 +31,6 @@ class CountEmbedding(BaseModel):
 class RawSql(BaseModel):
     raw_sql: str = None
 
-# class Results(BaseModel):
-#     model_space: str
-#     n_results: int = 100
-#     dataset_name: str = None
-
 class SpaceKeyInput(BaseModel):
     model_space: str
 
