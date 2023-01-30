@@ -19,9 +19,7 @@ class LocalAPI(API):
         embedding,
         input_uri=None,
         dataset=None,
-        metadata=None,
-        # inference_class=None,
-        # label_class=None,
+        metadata=None
     ):
 
         model_space = model_space or self.get_model_space()
@@ -45,7 +43,16 @@ class LocalAPI(API):
         if metadata is None:
             metadata = [{} for _ in range(number_of_embeddings)]
 
-        self._db.add(model_space, embedding, input_uri, ds, metadata)#, inference_class, label_class)
+        # convert all metadata values to strings : TODO: handle this better
+        # this is currently here because clickhouse-driver does not support json
+        for m in metadata:
+            for k, v in m.items():
+                m[k] = str(v)
+
+        # change input_uri to strings if not strings
+        input_uri = [str(x) for x in input_uri]
+
+        self._db.add(model_space, embedding, input_uri, ds, metadata)
 
         return True
 
