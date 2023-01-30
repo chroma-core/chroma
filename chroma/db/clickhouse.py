@@ -17,17 +17,6 @@ EMBEDDING_TABLE_SCHEMA = [
     {'metadata': 'Map(String, String)'}
 ]
 
-# RESULTS_TABLE_SCHEMA = [
-#     {'model_space': 'String'},
-#     {'uuid': 'UUID'},
-#     {'activation_uncertainty': 'Float'},
-#     {'boundary_uncertainty': 'Float'},
-#     # {'representative_class_outlier': 'Float'},
-#     # {'difficult_class_outlier': 'Float'},
-#     {'representative_cluster_outlier': 'Float'},
-#     {'difficult_cluster_outlier': 'Float'},
-# ]
-
 def db_array_schema_to_clickhouse_schema(table_schema):
     return_str = ""
     for element in table_schema:
@@ -57,16 +46,10 @@ class Clickhouse(DB):
         self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
         self._conn.execute(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
 
-    # def _create_table_results(self):
-    #     self._conn.execute(f'''CREATE TABLE IF NOT EXISTS results (
-    #         {db_array_schema_to_clickhouse_schema(RESULTS_TABLE_SCHEMA)}
-    #     ) ENGINE = MergeTree() ORDER BY model_space''')
-
 
     def __init__(self, settings):
         self._conn = Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
         self._create_table_embeddings()
-        # self._create_table_results()
         self._idx = Hnswlib(settings)
         self._settings = settings
 
@@ -252,9 +235,7 @@ class Clickhouse(DB):
 
     def reset(self):
         self._conn.execute('DROP TABLE embeddings')
-        # self._conn.execute('DROP TABLE results')
         self._create_table_embeddings()
-        # self._create_table_results()
 
         self._idx.reset()
         self._idx = Hnswlib(self._settings)
@@ -263,52 +244,3 @@ class Clickhouse(DB):
     def raw_sql(self, sql):
         return self._conn.query_dataframe(sql)
 
-
-    # def add_results(self, uuid, model_space, **kwargs):
-
-    #     # Make sure the kwarg keys are in the results table schema
-    #     results_table_cols = {list(col.keys())[0] for col in RESULTS_TABLE_SCHEMA}
-    #     results_cols = set(kwargs.keys())
-    #     results_cols.update(['uuid', 'model_space'])
-
-    #     if not (results_table_cols == results_cols):
-    #         if not results_table_cols.issuperset(results_cols):
-    #             raise Exception(f"Invalid results columns: {results_cols - results_table_cols}")
-    #         else:
-    #             # Log a warning
-    #             print(f"Warning: results missing columns: {results_table_cols - results_cols}")
-
-    #     data_to_insert = list(zip(itertools.repeat(model_space), uuid, *kwargs.values()))
-
-    #     self._conn.execute(f'''
-    #      INSERT INTO results (model_space, uuid, {",".join(kwargs.keys())}) VALUES''', data_to_insert)
-
-
-    # def delete_results(self, model_space):
-    #     self._conn.execute(f"ALTER TABLE results DELETE WHERE model_space = '{model_space}'")
-
-
-    # def count_results(self, model_space=None):
-    #     where_string = ""
-    #     if model_space is not None:
-    #         where_string = f"WHERE model_space = '{model_space}'"
-    #     return self._conn.execute(f"SELECT COUNT() FROM results {where_string}")[0][0]
-
-
-    # def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
-    #     return self._conn.query_dataframe(f'''
-    #         SELECT
-    #             embeddings.input_uri,
-    #             results.{column_name}
-    #         FROM
-    #             results
-    #         INNER JOIN
-    #             embeddings
-    #         ON
-    #             results.uuid = embeddings.uuid
-    #         WHERE
-    #             results.model_space = '{model_space}'
-    #         ORDER BY
-    #             results.{column_name} {sort}
-    #         LIMIT {n_results}
-    #     ''')

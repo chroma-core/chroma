@@ -1,6 +1,6 @@
 from chroma.db import DB
 from chroma.db.index.hnswlib import Hnswlib
-from chroma.db.clickhouse import Clickhouse, db_array_schema_to_clickhouse_schema, EMBEDDING_TABLE_SCHEMA, db_schema_to_keys#, RESULTS_TABLE_SCHEMA
+from chroma.db.clickhouse import Clickhouse, db_array_schema_to_clickhouse_schema, EMBEDDING_TABLE_SCHEMA, db_schema_to_keys
 import pandas as pd
 import numpy as np
 import json
@@ -39,17 +39,11 @@ class DuckDB(Clickhouse):
             {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(EMBEDDING_TABLE_SCHEMA))}
         ) ''')
 
-    # def _create_table_results(self):
-    #     self._conn.execute(f'''CREATE TABLE results (
-    #         {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(RESULTS_TABLE_SCHEMA))}
-    #     ) ''')
-
 
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
         self._conn = duckdb.connect()
         self._create_table_embeddings()
-        # self._create_table_results()
         self._idx = Hnswlib(settings)
         self._settings = settings
 
@@ -114,49 +108,6 @@ class DuckDB(Clickhouse):
 
     def raw_sql(self, sql):
         return self._conn.execute(sql).df()
-    
-    # def delete_results(self, model_space):
-    #     self._conn.execute(f"DELETE FROM results WHERE model_space = '{model_space}'")
-
-    # def add_results(self, uuid, model_space, **kwargs):
-
-    #     # Make sure the kwarg keys are in the results table schema
-    #     results_table_cols = {list(col.keys())[0] for col in RESULTS_TABLE_SCHEMA}
-    #     results_cols = set(kwargs.keys())
-    #     results_cols.update(['uuid', 'model_space'])
-
-    #     if not (results_table_cols == results_cols):
-    #         if not results_table_cols.issuperset(results_cols):
-    #             raise Exception(f"Invalid results columns: {results_cols - results_table_cols}")
-    #         else:
-    #             # Log a warning
-    #             print(f"Warning: results missing columns: {results_table_cols - results_cols}")
-
-    #     data_to_insert = list(zip(itertools.repeat(model_space), uuid, *kwargs.values()))
-    #     # convert numpy floats to python floats
-    #     data_to_insert = [[x[0], x[1], *[float(y) for y in x[2:]]] for x in data_to_insert]
-    #     question_marks = ", ".join(["?"] * len(kwargs.keys()))
-
-    #     self._conn.executemany(f'''
-    #      INSERT INTO results (model_space, uuid, {",".join(kwargs.keys())}) VALUES (?,?, {question_marks})''', data_to_insert)
-
-    # def get_results_by_column(self, column_name: str, model_space: str, n_results: int, sort: str = 'ASC'):
-    #     return self._conn.execute(f'''
-    #         SELECT
-    #             embeddings.input_uri,
-    #             results.{column_name}
-    #         FROM
-    #             results
-    #         INNER JOIN
-    #             embeddings
-    #         ON
-    #             results.uuid = embeddings.uuid
-    #         WHERE
-    #             results.model_space = '{model_space}'
-    #         ORDER BY
-    #             results.{column_name} {sort}
-    #         LIMIT {n_results}
-    #     ''').df()
 
     def get_random(self, where={}, n=1):
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -212,12 +163,6 @@ class PersistentDuckDB(DuckDB):
             TO '{self._save_folder}/chroma.parquet'
                 (FORMAT PARQUET);
         ''')
-        # self._conn.execute(f'''
-        #     COPY
-        #         (SELECT * FROM results)
-        #     TO '{self._save_folder}/chroma_results.parquet'
-        #         (FORMAT PARQUET);
-        # ''')
 
 
     def load(self):
@@ -232,14 +177,6 @@ class PersistentDuckDB(DuckDB):
         else:
             path = self._save_folder + "/chroma.parquet"
             self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
-
-        # load in the results
-        # if not os.path.exists(f"{self._save_folder}/chroma_results.parquet"):
-        #     pass
-        # else:
-        #     path = self._save_folder + "/chroma_results.parquet"
-        #     self._conn.execute(f"INSERT INTO results SELECT * FROM read_parquet('{path}');")
-
 
     def __del__(self):
         print("PersistentDuckDB del, about to run persist")
