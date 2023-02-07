@@ -42,7 +42,7 @@ def get_db(settings=__settings):
         raise Exception(f"Unknown value '{setting} for chroma_db_impl")
 
 
-def get_api(settings=__settings):
+def init(settings=__settings):
     """Return a chroma.API instance based on the provided or environmental
        settings, optionally overriding the DB instance."""
 

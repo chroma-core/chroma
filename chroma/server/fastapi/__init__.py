@@ -14,7 +14,7 @@ class FastAPI(chroma.server.Server):
     def __init__(self, settings):
         super().__init__(settings)
         self._app = fastapi.FastAPI(debug=True)
-        self._api = chroma.get_api(settings)
+        self._api = chroma.init(settings)
 
         self.router = fastapi.APIRouter()
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])

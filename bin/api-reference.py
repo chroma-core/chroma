@@ -4,10 +4,10 @@ import chroma
 from chroma.config import Settings
 
 # run in in-memory mode
-chroma_api = chroma.get_api()
+chroma_api = chroma.init()
 
 # uncomment to run in client-server mode
-# chroma_api = chroma.get_api(Settings(chroma_api_impl="rest",
+# chroma_api = chroma.init(Settings(chroma_api_impl="rest",
 #                               chroma_server_host="localhost",
 #                               chroma_server_http_port="8000") )
 

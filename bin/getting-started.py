@@ -1,6 +1,6 @@
 import chroma
 from chroma.config import Settings
-chroma_api = chroma.get_api()
+chroma_api = chroma.init()
 
 chroma_api.add_training(
     embedding=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4]], 

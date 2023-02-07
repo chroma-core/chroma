@@ -24,7 +24,7 @@ Chroma can be run via 3 modes:
 1. Standalone and in-memory:
 ```python
 import chroma
-api = chroma.get_api()
+api = chroma.init()
 print(api.heartbeat())
 ```
 
@@ -34,7 +34,7 @@ This by default saves your db and your indexes to a `.chroma` directory and can 
 ```python
 import chroma
 from chroma.config import Settings
-api = chroma.get_api(Settings(chroma_db_impl="duckdb+parquet"))
+api = chroma.init(Settings(chroma_db_impl="duckdb+parquet"))
 print(api.heartbeat())
 ```
 
@@ -46,7 +46,7 @@ Run `docker-compose up -d --build`
 ```python
 import chroma
 from chroma.config import Settings
-api = chroma.get_api(Settings(chroma_api_impl="rest",
+api = chroma.init(Settings(chroma_api_impl="rest",
                               chroma_server_host="localhost",
                               chroma_server_http_port="8000") )
 

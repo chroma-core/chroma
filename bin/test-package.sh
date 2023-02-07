@@ -21,4 +21,4 @@ source venv/bin/activate
 
 pip install $tarball
 
-python -c "import chroma; api = chroma.get_api(); print(api.heartbeat())"
+python -c "import chroma; api = chroma.init(); print(api.heartbeat())"
