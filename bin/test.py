@@ -1,10 +1,10 @@
 # Sanity check script to ensure that the Chroma client can connect
 # and is capable of recieving data.
-import chroma
-from chroma.config import Settings
+import chromadb
+from chromadb.config import Settings
 
 # run in in-memory mode
-chroma_api = chroma.init()
+chroma_api = chromadb.init()
 
 # uncomment to run in client-server mode
 # chroma_api = chroma.init(Settings(chroma_api_impl="rest",
@@ -12,7 +12,7 @@ chroma_api = chroma.init()
 #                               chroma_server_http_port="8000") )
 
 
-chroma_api.set_model_space("sample_space")
+chroma_api.set_collection_name("sample_space")
 print("Getting heartbeat to verify the server is up")
 print(chroma_api.heartbeat())
 
@@ -22,7 +22,7 @@ chroma_api.add(
     input_uri= ["/images/1", "/images/2", "/images/3"],
     dataset= "train",
     inference_class= ["spoon", "knife", "fork"],
-    model_space= "sample_space"
+    collection_name= "sample_space"
 )
 
 print("count")

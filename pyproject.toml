@@ -47,4 +47,4 @@ build-backend = "setuptools.build_meta"
 local_scheme="no-local-version"
 
 [tool.setuptools]
-packages = ["chroma"]
+packages = ["chromadb"]
