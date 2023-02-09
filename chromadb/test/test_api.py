@@ -12,17 +12,17 @@ from requests.exceptions import ConnectionError
 
 @pytest.fixture
 def local_api():
-    return chromadb.init(Settings(chroma_api_impl="local",
+    return chromadb.Client(Settings(chroma_api_impl="local",
                                    chroma_db_impl="duckdb",
                                    chroma_cache_dir=tempfile.gettempdir()))
 
 @pytest.fixture
 def fastapi_integration_api():
-    return chromadb.init() # configured by environment variables
+    return chromadb.Client() # configured by environment variables
 
 
 def _build_fastapi_api():
-    return chromadb.init(Settings(chroma_api_impl="rest",
+    return chromadb.Client(Settings(chroma_api_impl="rest",
                                    chroma_server_host="localhost",
                                    chroma_server_http_port="6666"))
 

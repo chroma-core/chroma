@@ -16,15 +16,15 @@ pip install -r requirements.txt
 pip install -r requirements_dev.txt
 ```
 
-You can also install `chroma` the `pypi` package locally and in editable mode with `pip install -e .`. 
+You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`. 
 
 ## Running Chroma
 
 Chroma can be run via 3 modes:
 1. Standalone and in-memory:
 ```python
-import chroma
-api = chroma.init()
+import chromadb
+api = chromadb.Client()
 print(api.heartbeat())
 ```
 
@@ -32,9 +32,9 @@ print(api.heartbeat())
 
 This by default saves your db and your indexes to a `.chroma` directory and can also load from them. 
 ```python
-import chroma
-from chroma.config import Settings
-api = chroma.init(Settings(chroma_db_impl="duckdb+parquet"))
+import chromadb
+from chromadb.config import Settings
+api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet"))
 print(api.heartbeat())
 ```
 
@@ -44,9 +44,9 @@ print(api.heartbeat())
 
 Run `docker-compose up -d --build`
 ```python
-import chroma
-from chroma.config import Settings
-api = chroma.init(Settings(chroma_api_impl="rest",
+import chromadb
+from chromadb.config import Settings
+api = chromadb.Client(Settings(chroma_api_impl="rest",
                               chroma_server_host="localhost",
                               chroma_server_http_port="8000") )
 
@@ -55,7 +55,7 @@ print(api.heartbeat())
 
 ## Testing
 
-Unit tests are in the `/chroma/test` directory.
+Unit tests are in the `/chromadb/test` directory.
 
 To run unit tests using your current environment, run `pytest`.
 
