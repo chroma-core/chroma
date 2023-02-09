@@ -3,6 +3,7 @@ from typing import Dict, Optional
 from chromadb.api import API
 from chromadb.utils.sampling import score_and_store, get_sample
 from chromadb.server.utils.telemetry.capture import Capture
+from chromadb.api.models.Collection import Collection
 
 import re
 
@@ -19,6 +20,7 @@ def is_valid_index_name(index_name):
 
 
 class LocalAPI(API):
+
     def __init__(self, settings, db):
         self._db = db
         self._chroma_telemetry = Capture()
@@ -27,6 +29,9 @@ class LocalAPI(API):
     def heartbeat(self):
         return int(1000 * time.time_ns())
 
+    # create a new Collection object method as a factory
+    def Collection(self, name):
+        return Collection(self, name)
 
     def create_collection(
         self,
@@ -65,26 +70,26 @@ class LocalAPI(API):
     def add(
         self,
         collection_name,
-        embedding,
-        metadata=None
+        embeddings,
+        metadatas=None
     ):
 
         collection_name = collection_name or self.get_collection_name()
-        number_of_embeddings = len(embedding)
+        number_of_embeddings = len(embeddings)
 
-        if metadata is None:
-            metadata = [{} for _ in range(number_of_embeddings)]
+        if metadatas is None:
+            metadatas = [{} for _ in range(number_of_embeddings)]
 
-        # convert all metadata values to strings : TODO: handle this better
+        # convert all metadatas values to strings : TODO: handle this better
         # this is currently here because clickhouse-driver does not support json
-        for m in metadata:
+        for m in metadatas:
             for k, v in m.items():
                 m[k] = str(v)
 
         collection_uuid = self.get_collection(collection_name).iloc[0].uuid
-
-        added_uuids = self._db.add(collection_uuid, embedding, metadata)
-        self._db.add_incremental(collection_uuid, added_uuids, embedding)
+        added_uuids = self._db.add(collection_uuid, embedding=embeddings, metadata=metadatas)
+        print("Added UUIDs: ", added_uuids)
+        # self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
         return True
 

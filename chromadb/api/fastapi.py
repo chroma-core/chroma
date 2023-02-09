@@ -4,11 +4,15 @@ from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
 import json
+from chromadb.api.models.Collection import Collection
 
 class FastAPI(API):
 
     def __init__(self, settings):
         self._api_url = f'http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1'
+
+    def Collection(self, name):
+        return Collection(self, name)
 
     def heartbeat(self):
         '''Returns the current server time in nanoseconds to check if the server is alive'''
