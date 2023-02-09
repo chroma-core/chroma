@@ -12,7 +12,7 @@ import itertools
 def clickhouse_to_duckdb_schema(table_schema):
     for item in table_schema:
             if 'embedding' in item:
-                item['embedding'] = 'REAL[]'
+                item['embedding'] = 'DOUBLE[]'
             # capitalize the key
             item[list(item.keys())[0]] = item[list(item.keys())[0]].upper()
             if 'NULLABLE' in item[list(item.keys())[0]]:
@@ -20,7 +20,7 @@ def clickhouse_to_duckdb_schema(table_schema):
             if 'UUID' in item[list(item.keys())[0]]:
                 item[list(item.keys())[0]] = 'STRING'
             if 'FLOAT64' in item[list(item.keys())[0]]:
-                item[list(item.keys())[0]] = 'REAL'
+                item[list(item.keys())[0]] = 'DOUBLE'
             if 'MAP(STRING, STRING)' in item[list(item.keys())[0]]:
                 item[list(item.keys())[0]] = 'JSON'
             if 'NULLABLE(MAP(STRING, STRING))' in item[list(item.keys())[0]]:

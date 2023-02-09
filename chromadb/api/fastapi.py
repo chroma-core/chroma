@@ -11,8 +11,8 @@ class FastAPI(API):
     def __init__(self, settings):
         self._api_url = f'http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1'
 
-    def Collection(self, name):
-        return Collection(self, name)
+    # def Collection(self, name):
+    #     return Collection(self, name)
 
     def heartbeat(self):
         '''Returns the current server time in nanoseconds to check if the server is alive'''
@@ -57,22 +57,33 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def fetch(self, collection_name, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
+    def peek(self, collection_name, limit=10):
+        print("runnign peek")
+        return self.fetch(collection_name, limit=limit)
+
+    def fetch(self, collection_name, ids=None, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
         '''Fetches embeddings from the database'''
 
         # where = self.where_with_collection_name(where)
+        if where is None:
+            where = {}
         where["collection_name"] = collection_name
 
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
 
+        print("fetching", collection_name, ids, where, sort, limit, offset)
+
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/fetch", data=json.dumps({
+            "ids":ids,
             "where":where,
             "sort":sort,
             "limit":limit,
             "offset":offset
         }))
+
+        print(resp.json())
 
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())

@@ -119,6 +119,8 @@ class Clickhouse(DB):
 
     def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
 
+        print("duckdb add, embeddings: ", embedding)
+
         data_to_insert = []
         for i in range(len(embedding)):
             data_to_insert.append([collection_uuid, uuid.uuid4(), embedding[i], metadata[i], documents[i], ids[i]])
@@ -135,9 +137,12 @@ class Clickhouse(DB):
         return self._conn.query_dataframe(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
     def _filter_metadata(self, key, value):
-        return f" AND metadata['{key}'] = '{value}'"
+        return "" # TODO
 
-    def fetch(self, where={}, sort=None, limit=None, offset=None):
+    def fetch(self, ids=None, where={}, sort=None, limit=None, offset=None):
+
+        print("clickhouse fetch, ids: ", ids)
+        print("clickhouse fetch, where: ", where)
 
         if "collection_name" in where:
             collection_uuid = self.get_collection(where["collection_name"]).iloc[0].uuid
@@ -161,10 +166,15 @@ class Clickhouse(DB):
             metadata_query = where["metadata"]
             del where["metadata"]
 
+        print('metadata_query', metadata_query)
+
         where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
         if metadata_query is not None:
             for key, value in metadata_query.items():
                 where += self._filter_metadata(key, value)
+
+        if ids is not None:
+            where += f" AND id IN {tuple(ids)}"
         
         if where:
             where = f"WHERE {where}"
@@ -179,6 +189,10 @@ class Clickhouse(DB):
 
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
+
+       
+
+        print("where: ", where)
 
         val = self._fetch(where=where)
 

@@ -17,3 +17,9 @@ class Collection:
 
     def add(self, embeddings, metadatas=None, documents=None, ids=None):
         return self.client.add(self.name,embeddings,metadatas, documents, ids)
+
+    def get(self, ids=None, where=None, sort=None, limit=None, offset=None):
+        return self.client.fetch(self.name, ids, where, sort, limit, offset)
+
+    def peek(self, limit=None):
+        return self.client.peek(self.name, limit)

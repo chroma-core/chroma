@@ -5,7 +5,7 @@ from typing import Union, Any
 class AddEmbedding(BaseModel):
     collection_name: Union[str, list]
     embedding: list
-    metadata: Union[str, list] = None
+    metadata: Union[str, list, dict] = None
     documents: Union[str, list] = None
     ids: Union[str, list] = None
 
@@ -20,6 +20,7 @@ class ProcessEmbedding(BaseModel):
     unlabeled_dataset_name: str = None
 
 class FetchEmbedding(BaseModel):
+    ids: list = None
     where: dict = {}
     sort: str = None
     limit: int = None

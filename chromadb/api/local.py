@@ -29,9 +29,8 @@ class LocalAPI(API):
     def heartbeat(self):
         return int(1000 * time.time_ns())
 
-    # create a new Collection object method as a factory
-    def Collection(self, name):
-        return Collection(self, name)
+    # def Collection(self, name):
+    #     return Collection(self, name)
 
     def create_collection(
         self,
@@ -91,23 +90,41 @@ class LocalAPI(API):
         number_of_embeddings = len(embeddings)
 
         if metadatas is None:
-            metadatas = [{} for _ in range(number_of_embeddings)]
+            if isinstance(embeddings[0], list):
+                metadatas = [{} for _ in range(number_of_embeddings)]
+            else:
+                metadatas = {}
 
         if ids is None:
-            ids = [None for _ in range(number_of_embeddings)]
+            if isinstance(embeddings[0], list):
+                ids = [None for _ in range(number_of_embeddings)]
+            else:
+                ids = None
 
         if documents is None:
-            documents = [None for _ in range(number_of_embeddings)]
+            if isinstance(embeddings[0], list):
+                documents = [None for _ in range(number_of_embeddings)]
+            else:
+                documents = None
 
         # convert all metadatas values to strings : TODO: handle this better
         # this is currently here because clickhouse-driver does not support json
-        for m in metadatas:
-            for k, v in m.items():
-                m[k] = str(v)
+        if isinstance(embeddings[0], list):
+            for m in metadatas:
+                for k, v in m.items():
+                    m[k] = str(v)
+        else:
+            for k, v in metadatas.items():
+                metadatas[k] = str(v)
+
+        if not isinstance(embeddings[0], list):
+            embeddings = [embeddings]
+            metadatas = [metadatas]
+            documents = [documents]
+            ids = [ids]
 
         collection_uuid = self._get_collection_db(collection_name).iloc[0].uuid
         added_uuids = self._db.add(collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids)
-        print("Added UUIDs: ", added_uuids)
         # self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
         return True
@@ -148,13 +165,20 @@ class LocalAPI(API):
         return True
 
 
-    def fetch(self, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
+    def fetch(self, collection_name, ids= None, where=None, sort=None, limit=None, offset=None, page=None, page_size=None):
+
+        if where is None:
+            where = {}
 
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db.fetch(where, sort, limit, offset)
+        new_where = {}
+        new_where['metadata'] = where
+        new_where['collection_name'] = collection_name
+
+        return self._db.fetch(ids, new_where, sort, limit, offset)
 
     def delete(self, where={}):
 
@@ -189,3 +213,7 @@ class LocalAPI(API):
             collection_uuid=collection_uuid
         )
         return True
+
+    def peek(self, collection_name=None, n=10):
+
+        return self.fetch(collection_name, limit=n)

@@ -79,7 +79,9 @@ class FastAPI(chromadb.server.Server):
 
     def fetch(self, name, fetch: FetchEmbedding):
         # name is passed in the where clause
-        df = self._api.fetch(where=fetch.where,
+        df = self._api.fetch(collection_name=name,
+                             ids=fetch.ids,
+                             where=fetch.where,
                              sort=fetch.sort,
                              limit=fetch.limit,
                              offset=fetch.offset)
