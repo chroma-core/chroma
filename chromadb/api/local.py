@@ -41,13 +41,24 @@ class LocalAPI(API):
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)
 
-        return self._db.create_collection(name, metadata)
+        self._db.create_collection(name, metadata)
+
+        return Collection(self, name)
 
     def get_collection(
         self,
         name: Optional[str] = None,
     ) -> int:
+        
+        self._db.get_collection(name)
+        return Collection(self, name)
+
+    def _get_collection_db(
+        self,
+        name: str
+    ) -> int:
         return self._db.get_collection(name)
+    
 
     def list_collections(self) -> int:
         return self._db.list_collections()
@@ -71,7 +82,9 @@ class LocalAPI(API):
         self,
         collection_name,
         embeddings,
-        metadatas=None
+        metadatas=None, 
+        documents=None,
+        ids=None
     ):
 
         collection_name = collection_name or self.get_collection_name()
@@ -80,14 +93,20 @@ class LocalAPI(API):
         if metadatas is None:
             metadatas = [{} for _ in range(number_of_embeddings)]
 
+        if ids is None:
+            ids = [None for _ in range(number_of_embeddings)]
+
+        if documents is None:
+            documents = [None for _ in range(number_of_embeddings)]
+
         # convert all metadatas values to strings : TODO: handle this better
         # this is currently here because clickhouse-driver does not support json
         for m in metadatas:
             for k, v in m.items():
                 m[k] = str(v)
 
-        collection_uuid = self.get_collection(collection_name).iloc[0].uuid
-        added_uuids = self._db.add(collection_uuid, embedding=embeddings, metadata=metadatas)
+        collection_uuid = self._get_collection_db(collection_name).iloc[0].uuid
+        added_uuids = self._db.add(collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids)
         print("Added UUIDs: ", added_uuids)
         # self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
@@ -113,7 +132,7 @@ class LocalAPI(API):
             for k, v in m.items():
                 m[k] = str(v)
 
-        collection_uuid = self.get_collection(collection_name).iloc[0].uuid
+        collection_uuid = self._get_collection_db(collection_name).iloc[0].uuid
 
         # find the uuids of the embeddings where the metadata matches
         # then update the embeddings for that 

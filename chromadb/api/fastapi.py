@@ -30,13 +30,13 @@ class FastAPI(API):
         '''Creates a collection'''
         resp = requests.post(self._api_url + "/collections", data=json.dumps({"name":name, "metadata":metadata}))
         resp.raise_for_status()
-        return resp.json()
+        return Collection(self, name)
 
     def get_collection(self, name: str) -> int:
         '''Returns a collection'''
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return resp.json()
+        return Collection(self, name)
 
     def update_collection(self, name: str, metadata: Optional[Dict] = None) -> int:
         '''Updates a collection'''
@@ -89,8 +89,10 @@ class FastAPI(API):
 
     def add(self,
             collection_name,
-            embedding,
-            metadata=None,
+            embeddings,
+            metadatas=None,
+            documents=None,
+            ids=None,
             ):
         '''
         Adds a batch of embeddings to the database
@@ -99,8 +101,10 @@ class FastAPI(API):
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/add", data = json.dumps({
             "collection_name": collection_name,
-            "embedding": embedding,
-            "metadata": metadata,
+            "embedding": embeddings,
+            "metadata": metadatas,
+            "documents": documents,
+            "ids": ids,
         }) )
 
         resp.raise_for_status

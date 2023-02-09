@@ -80,6 +80,8 @@ class API(ABC):
         embedding: Sequence[Sequence[float]],
         collection_name: Union[str, Sequence[str]],
         metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
+        documents: Optional[Union[str, Sequence[str]]] = None,
+        ids: Optional[Union[str, Sequence[str]]] = None,
     ) -> bool:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
@@ -87,6 +89,9 @@ class API(ABC):
         Args:
             collection_name (Union[str, Sequence[str]]): The model space(s) to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
+            metadata (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
+            documents (Optional[Union[str, Sequence[str]]], optional): The documents to associate with the embeddings. Defaults to None.
+            ids (Optional[Union[str, Sequence[str]]], optional): The ids to associate with the embeddings. Defaults to None.
         Returns:
             bool: True if the embeddings were added successfully
         """

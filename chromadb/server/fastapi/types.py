@@ -6,6 +6,8 @@ class AddEmbedding(BaseModel):
     collection_name: Union[str, list]
     embedding: list
     metadata: Union[str, list] = None
+    documents: Union[str, list] = None
+    ids: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
     where: dict = {}

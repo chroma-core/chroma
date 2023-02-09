@@ -19,18 +19,18 @@ class FastAPI(chromadb.server.Server):
         self.router = fastapi.APIRouter()
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
+
+        self.router.add_api_route("/api/v1/collections", self.list_collections, methods=["GET"])
+        self.router.add_api_route("/api/v1/collections", self.create_collection, methods=["POST"])
 
         self.router.add_api_route("/api/v1/collections/{name}/add", self.add, methods=["POST"], status_code=status.HTTP_201_CREATED)
         self.router.add_api_route("/api/v1/collections/{name}/update", self.update, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/fetch", self.fetch, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/delete", self.delete, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/count", self.count, methods=["GET"])
-        self.router.add_api_route("/api/v1/collections/{name}/raw_sql", self.raw_sql, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/search", self.get_nearest_neighbors, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/create_index", self.create_index, methods=["POST"])
-
-        self.router.add_api_route("/api/v1/collections", self.list_collections, methods=["GET"])
-        self.router.add_api_route("/api/v1/collections", self.create_collection, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}", self.get_collection, methods=["GET"])
         self.router.add_api_route("/api/v1/collections/{name}", self.update_collection, methods=["PUT"])
         self.router.add_api_route("/api/v1/collections/{name}", self.delete_collection, methods=["DELETE"])
@@ -64,8 +64,10 @@ class FastAPI(chromadb.server.Server):
 
     def add(self, name: str, add: AddEmbedding):
         return self._api.add(collection_name=name,
-                             embedding=add.embedding,
-                             metadata=add.metadata
+                             embeddings=add.embedding,
+                             metadatas=add.metadata,
+                             documents=add.documents,
+                             ids=add.ids
                             )
 
     def update(self, name: str, add: AddEmbedding):
@@ -103,7 +105,6 @@ class FastAPI(chromadb.server.Server):
 
 
     def get_nearest_neighbors(self, name, query: QueryEmbedding):
-        print("get_nearest_neighbors", query)
         try:
             nnresult = self._api.search(where=query.where,
                                                        embedding=query.embedding,
