@@ -110,12 +110,12 @@ def test_add_minimal(api_fixture, request):
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
-def test_fetch_from_db(api_fixture, request):
+def test_get_from_db(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
     api.add(**batch_records)
-    records = api.fetch(where={"collection_name": "test_space"})
+    records = api.get(where={"collection_name": "test_space"})
 
     assert len(records['embedding']) == 2
 

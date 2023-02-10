@@ -62,7 +62,7 @@ class LocalAPI(API):
         return self._db.get_collection(name)
     
 
-    def list_collections(self) -> int:
+    def list_collections(self) -> list:
         return self._db.list_collections()
 
 
@@ -177,7 +177,7 @@ class LocalAPI(API):
         return True
 
 
-    def fetch(self, collection_name, ids= None, where=None, sort=None, limit=None, offset=None, page=None, page_size=None):
+    def get(self, collection_name, ids= None, where=None, sort=None, limit=None, offset=None, page=None, page_size=None):
 
         if where is None:
             where = {}
@@ -186,7 +186,7 @@ class LocalAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db.fetch(collection_name=collection_name, ids=ids, where=where, sort=sort, limit=limit, offset=offset)
+        return self._db.get(collection_name=collection_name, ids=ids, where=where, sort=sort, limit=limit, offset=offset)
 
 
     def delete(self, collection_name, where={}):
@@ -206,12 +206,12 @@ class LocalAPI(API):
         return True
 
 
-    def query(self, collection_name, embeddings, n_results=10, where={}):
+    def query(self, collection_name, query_embeddings, n_results=10, where={}):
 
         return self._db.get_nearest_neighbors(
             collection_name=collection_name, 
             where=where, 
-            embeddings=embeddings, 
+            embeddings=query_embeddings, 
             n_results=n_results
         )
 
@@ -232,4 +232,4 @@ class LocalAPI(API):
 
     def peek(self, collection_name, n=10):
 
-        return self.fetch(collection_name=collection_name, limit=n)
+        return self.get(collection_name=collection_name, limit=n)

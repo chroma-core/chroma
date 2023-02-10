@@ -16,10 +16,10 @@ class Collection:
         return self.client.count(collection_name=self.name)
 
     def add(self, embeddings, metadatas=None, documents=None, ids=None):
-        return self.client.add(self.name,embeddings,metadatas, documents, ids)
+        return self.client.add(self.name, embeddings, metadatas, documents, ids)
 
     def get(self, ids=None, where=None, sort=None, limit=None, offset=None):
-        return self.client.fetch(self.name, ids, where, sort, limit, offset)
+        return self.client.get(self.name, ids, where, sort, limit, offset)
 
     def peek(self, limit=None):
         return self.client.peek(self.name, limit)
@@ -27,7 +27,7 @@ class Collection:
     def query(self, query_embeddings, n_results=10, where={}):
         return self.client.query(
             collection_name= self.name, 
-            embeddings= query_embeddings, 
+            query_embeddings= query_embeddings, 
             n_results= n_results, 
             where= where
         )

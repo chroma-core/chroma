@@ -63,8 +63,8 @@ class API(ABC):
         """Gets a collection from the database by either name or uuid
 
         Args:
-            name (Optional[str]): The name of the collection to fetch. Defaults to None.
-            the uuid (Optional[UUID]): The uuid of the collection to fetch. Defaults to None.
+            name (Optional[str]): The name of the collection to get. Defaults to None.
+            the uuid (Optional[UUID]): The uuid of the collection to get. Defaults to None.
 
         Returns:
             dict: the requested collection
@@ -127,7 +127,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def fetch(
+    def get(
         self,
         where: Optional[Dict[str, str]] = {},
         sort: Optional[str] = None,
@@ -136,7 +136,7 @@ class API(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> pd.DataFrame:
-        """Fetches embeddings from the database. Supports filtering, sorting, and pagination.
+        """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
 
         Args:

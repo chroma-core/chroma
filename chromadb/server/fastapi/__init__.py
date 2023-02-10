@@ -5,7 +5,7 @@ import chromadb
 import chromadb.server
 from chromadb.errors import NoDatapointsException
 from chromadb.server.fastapi.types import (AddEmbedding, CountEmbedding, DeleteEmbedding,
-                                         FetchEmbedding, ProcessEmbedding,
+                                         GetEmbedding, ProcessEmbedding,
                                          QueryEmbedding, RawSql, #Results,
                                          SpaceKeyInput, CreateCollection, UpdateCollection)
 
@@ -26,7 +26,7 @@ class FastAPI(chromadb.server.Server):
 
         self.router.add_api_route("/api/v1/collections/{collection_name}/add", self.add, methods=["POST"], status_code=status.HTTP_201_CREATED)
         self.router.add_api_route("/api/v1/collections/{collection_name}/update", self.update, methods=["POST"])
-        self.router.add_api_route("/api/v1/collections/{collection_name}/fetch", self.fetch, methods=["POST"])
+        self.router.add_api_route("/api/v1/collections/{collection_name}/get", self.get, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{collection_name}/delete", self.delete, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{collection_name}/count", self.count, methods=["GET"])
         self.router.add_api_route("/api/v1/collections/{collection_name}/query", self.get_nearest_neighbors, methods=["POST"])
@@ -67,7 +67,7 @@ class FastAPI(chromadb.server.Server):
 
 
     def add(self, collection_name: str, add: AddEmbedding):
-        return self._api.add(name= collection_name,
+        return self._api.add(collection_name= collection_name,
                              embeddings= add.embeddings,
                              metadatas= add.metadatas,
                              documents= add.documents,
@@ -81,13 +81,13 @@ class FastAPI(chromadb.server.Server):
                             )
 
 
-    def fetch(self, collection_name, fetch: FetchEmbedding):
-        return self._api.fetch(collection_name= collection_name,
-                             ids= fetch.ids,
-                             where= fetch.where,
-                             sort= fetch.sort,
-                             limit= fetch.limit,
-                             offset= fetch.offset)
+    def get(self, collection_name, get: GetEmbedding):
+        return self._api.get(collection_name= collection_name,
+                             ids= get.ids,
+                             where= get.where,
+                             sort= get.sort,
+                             limit= get.limit,
+                             offset= get.offset)
 
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):
@@ -106,9 +106,11 @@ class FastAPI(chromadb.server.Server):
         try:
             nnresult = self._api.query(collection_name= collection_name,
                                         where= query.where,
-                                        embedding= query.embedding,
+                                        query_embeddings= query.query_embeddings,
                                         n_results= query.n_results)
-            nnresult['embeddings'] = nnresult['embeddings'].to_dict()
+
+            print(nnresult)
+            nnresult['embeddings'] = nnresult['embeddings']#.to_dict()
             return nnresult
         except NoDatapointsException:
             return {"error": "no data points"}

@@ -62,16 +62,16 @@ class FastAPI(API):
 
 
     def peek(self, collection_name, limit=10):
-        return self.fetch(collection_name, limit=limit)
+        return self.get(collection_name, limit=limit)
 
 
-    def fetch(self, collection_name, ids=None, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
-        '''Fetches embeddings from the database'''
+    def get(self, collection_name, ids=None, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
+        '''Gets embeddings from the database'''
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
 
-        resp = requests.post(self._api_url + "/collections/" + collection_name + "/fetch", data=json.dumps({
+        resp = requests.post(self._api_url + "/collections/" + collection_name + "/get", data=json.dumps({
             "ids":ids,
             "where":where,
             "sort":sort,
@@ -134,11 +134,11 @@ class FastAPI(API):
         return True
 
 
-    def query(self, collection_name, embedding, n_results=10, where={}):
+    def query(self, collection_name, query_embeddings, n_results=10, where={}):
         '''Gets the nearest neighbors of a single embedding'''
 
-        resp = requests.post(self._api_url + "/collections/" + collection_name + "/search", data = json.dumps({
-            "embedding": embedding,
+        resp = requests.post(self._api_url + "/collections/" + collection_name + "/query", data = json.dumps({
+            "query_embeddings": query_embeddings,
             "n_results": n_results,
             "where": where
         }) )

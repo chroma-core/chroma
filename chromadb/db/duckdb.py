@@ -123,10 +123,13 @@ class DuckDB(Clickhouse):
         return f" json_extract_string(metadata,'$.{key}') = '{value}'"
 
 
-    def _fetch(self, where):
-        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').df()
-        # Convert UUID strings to UUID objects
-        val['uuid'] = val['uuid'].apply(lambda x: uuid.UUID(x))
+    def _get(self, where):
+        val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').fetchall()
+        for i in range(len(val)):
+            val[i] = list(val[i])
+            val[i][0] = uuid.UUID(val[i][0])
+            val[i][1] = uuid.UUID(val[i][1])
+
         return val
 
 

@@ -17,7 +17,7 @@ collection2 = client.create_collection(name="test2")
 client.delete_collection(name="test2")
 print(client.list_collections())
 
-# # add many
+# add many
 collection.add( 
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
     metadatas=[{"uri": "img1.png", "style": "style1"}, {"uri": "img2.png", "style": "style2"}, {"uri": "img3.png", "style": "style1"}, {"uri": "img4.png", "style": "style1"}, {"uri": "img5.png", "style": "style1"}, {"uri": "img6.png", "style": "style1"}, {"uri": "img7.png", "style": "style1"}, {"uri": "img8.png", "style": "style1"}],
@@ -25,7 +25,7 @@ collection.add(
     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
 )
 
-# # add one
+# add one
 collection.add(
     embeddings=[1.5, 2.9, 3.4],
     metadatas={"uri": "img9.png", "style": "style1"},
@@ -36,7 +36,7 @@ collection.add(
 print(collection.peek(5))
 print(collection.count()) # NIT: count count take a where filter too
 
-# doesnt work in clickhouse yet because of metadata filtering
+# # doesnt work in clickhouse yet because of metadata filtering
 print("get ids", collection.get(
     ids=["id1", "id2"],
 ))
@@ -48,7 +48,7 @@ print("get both", collection.get(
     where={"style": "style1"},
 ))
 
-# # supports multiple at once 
+# NIT: verify supports multiple at once is actually working
 print("query", collection.query( 
     query_embeddings=[[1.1, 2.3, 3.2], [5.1, 4.3, 2.2]],
     # OR // COULD BE an AND and return a tuple
@@ -56,7 +56,6 @@ print("query", collection.query(
     n_results=2,
     # where={"style": "style2"}, 
 ))
-
 
 # collection.upsert( # always succeeds
 #     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
@@ -90,6 +89,6 @@ print("query", collection.query(
 # collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
 # collection = client.update_collection(oldName="test", newName="test2") # this feels a little odd to me (Jeff) -> collection.update(name="test2")
 
-client.delete_collection(name="test")
+# client.delete_collection(name="test")
 
 # todo: add fails if collisions on id

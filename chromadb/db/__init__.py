@@ -42,7 +42,7 @@ class DB(ABC):
 
 
     @abstractmethod
-    def fetch(self, where, sort, limit, offset):
+    def get(self, where, sort, limit, offset):
         pass
 
     @abstractmethod

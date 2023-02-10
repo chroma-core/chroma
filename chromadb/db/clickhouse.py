@@ -50,8 +50,8 @@ class Clickhouse(DB):
     # 
     def __init__(self, settings):
         self._conn = clickhouse_connect.get_client(host=settings.clickhouse_host, port=int(settings.clickhouse_port)) #Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
-        self._conn.command(f'''SET allow_experimental_lightweight_delete = true''')
-        self._conn.command(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
+        self._conn.query(f'''SET allow_experimental_lightweight_delete = true''')
+        self._conn.query(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
 
         self._create_table_collections()
         self._create_table_embeddings()
@@ -78,8 +78,7 @@ class Clickhouse(DB):
         res = self._conn.query(f'''
             SELECT uuid FROM collections WHERE name = '{name}'
         ''')
-        print(res.result_rows)
-        return res.result_rows
+        return res.result_rows[0][0]
 
 
     # 
@@ -92,9 +91,9 @@ class Clickhouse(DB):
         # poor man's unique constraint
         checkname = self._conn.query(f'''
             SELECT * FROM collections WHERE name = '{name}'
-        ''')
+        ''').result_rows
 
-        if checkname.row_count > 0:
+        if len(checkname) > 0:
             raise Exception("Collection already exists with that name")
 
         collection_uuid = uuid.uuid4()
@@ -108,13 +107,13 @@ class Clickhouse(DB):
     def get_collection(self, name):
         return self._conn.query(f'''
          SELECT * FROM collections WHERE name = '{name}'
-         ''')
+         ''').result_rows
     
 
     def list_collections(self):
         return self._conn.query(f'''
          SELECT * FROM collections
-         ''')
+         ''').result_rows
 
 
     def update_collection(self, name=None, metadata=None):
@@ -154,15 +153,15 @@ class Clickhouse(DB):
         return [x[1] for x in data_to_insert] # return uuids
 
 
-    def _fetch(self, where={}):
-        return self._conn.query(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
+    def _get(self, where={}):
+        return self._conn.query(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').result_rows
 
 
     def _filter_metadata(self, key, value):
-        return f" AND JSONExtractString(metadata,'{key}') = '{value}'"
+        return f" JSONExtractString(metadata,'{key}') = '{value}'"
 
 
-    def fetch(self, where={}, collection_name=None, collection_uuid=None, ids=None, sort=None, limit=None, offset=None):
+    def get(self, where={}, collection_name=None, collection_uuid=None, ids=None, sort=None, limit=None, offset=None):
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
@@ -204,9 +203,9 @@ class Clickhouse(DB):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-        val = self._fetch(where=where)
+        val = self._get(where=where)
 
-        print(f"time to fetch {len(val)} embeddings: ", time.time() - s3)
+        print(f"time to get {len(val)} embeddings: ", time.time() - s3)
 
         return val
 
@@ -224,7 +223,7 @@ class Clickhouse(DB):
 
 
     def _delete(self, where_str=None):
-        uuids_deleted = self._conn.query(f'''SELECT uuid FROM embeddings {where_str}''')
+        uuids_deleted = self._conn.query(f'''SELECT uuid FROM embeddings {where_str}''').result_rows
 
         self._conn.execute(f'''
             DELETE FROM
@@ -254,7 +253,7 @@ class Clickhouse(DB):
         if where_str:
             where_str = f"WHERE {where_str}"
         deleted_uuids = self._delete(where_str)
-        print(f"time to fetch {len(deleted_uuids)} embeddings for deletion: ", time.time() - s3)
+        print(f"time to get {len(deleted_uuids)} embeddings for deletion: ", time.time() - s3)
 
         if len(where) == 1:
             self._idx.delete(collection_uuid)
@@ -267,7 +266,7 @@ class Clickhouse(DB):
     def get_by_ids(self, ids=list):
         return self._conn.query(f'''
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
-        ''')
+        ''').result_rows
 
 
     def get_nearest_neighbors(self, where, embeddings, n_results, collection_name=None, collection_uuid=None):
@@ -275,9 +274,10 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        results = self.fetch(collection_uuid=collection_uuid, where=where)
+        results = self.get(collection_uuid=collection_uuid, where=where)
+
         if len(results) > 0:
-            ids = results.uuid.tolist()
+            ids = [x[1] for x in results]
         else:
             raise NoDatapointsException("No datapoints found for the supplied filter")
 
@@ -298,9 +298,9 @@ class Clickhouse(DB):
         Returns:
             None
         """
-        fetch = self.fetch(collection_uuid=collection_uuid)
-        self._idx.run(collection_uuid, fetch.uuid.tolist(), fetch.embedding.tolist())
-        #chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
+        get = self.get(collection_uuid=collection_uuid)
+        self._idx.run(collection_uuid, get.uuid.tolist(), get.embedding.tolist())
+        #chroma_telemetry.capture('created-index-run-process', {'n': len(get)})
 
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
@@ -322,5 +322,5 @@ class Clickhouse(DB):
 
 
     def raw_sql(self, sql):
-        return self._conn.query(sql)
+        return self._conn.query(sql).result_rows
 
