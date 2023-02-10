@@ -124,7 +124,7 @@ class Clickhouse(DB):
 
         print("new_metadata", new_metadata)
 
-        self._conn.command(f'''
+        return self._conn.command(f'''
          ALTER TABLE 
             collections 
          UPDATE

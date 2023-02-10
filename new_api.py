@@ -1,21 +1,19 @@
 import chromadb 
 from chromadb.config import Settings
 
-# client = chromadb.Client()
-client = chromadb.Client(Settings(chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"))
+client = chromadb.Client()
+# client = chromadb.Client(Settings(chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"))
 # print(client)
 
-print(client.heartbeat())
+# print(client.heartbeat())
 client.reset() 
 collection = client.create_collection(name="test")
-print(collection)
 getcollection = client.get_collection(name="test")
-print(getcollection)
-print(collection.count())
+# print(collection.count())
 
 collection2 = client.create_collection(name="test2")
 client.delete_collection(name="test2")
-print(client.list_collections())
+# print(client.list_collections())
 
 collection.modify(name="test2")
 print(collection)

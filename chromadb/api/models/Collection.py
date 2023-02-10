@@ -33,6 +33,7 @@ class Collection:
         )
 
     def modify(self, name=None, metadata=None):
-        response = self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
-        print(response)
-        # update self.name
+        self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        if name:
+            self.name = name
+        
