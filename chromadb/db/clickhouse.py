@@ -176,18 +176,20 @@ class Clickhouse(DB):
             if not isinstance(where[key], str):
                 raise Exception("Invalid metadata: " + str(where))
 
-        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
-        if where is not None:
-            for key, value in where.items():
-                where += self._filter_metadata(key, value)
+        where = " AND ".join([self._filter_metadata(key, value) for key, value in where.items()])
 
         if ids is not None:
-            where += f" AND id IN {tuple(ids)}"
-        
-        if where:
-            where = f"WHERE {where}"
+            if len(where) > 6: # NIT: hacky
+                where += " AND "
 
-        where += f" AND collection_uuid = '{collection_uuid}'"
+            where += f" id IN {tuple(ids)}"
+        
+        where = f"WHERE {where}"
+
+        if len(where) > 6: # NIT: hacky
+            where += " AND "
+
+        where += f"collection_uuid = '{collection_uuid}'"
 
         if sort is not None:
             where += f" ORDER BY {sort}"

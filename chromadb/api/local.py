@@ -37,29 +37,29 @@ class LocalAPI(API):
     # 
     def create_collection(
         self,
-        collection_name: str,
+        name: str,
         metadata: Optional[Dict] = None,
     ) -> int:
-        if not is_valid_index_name(collection_name):
-            raise ValueError("Invalid index name: %s" % collection_name) # NIT: tell the user why
+        if not is_valid_index_name(name):
+            raise ValueError("Invalid index name: %s" % name) # NIT: tell the user why
 
-        self._db.create_collection(collection_name, metadata)
-        return Collection(self, collection_name)
+        self._db.create_collection(name, metadata)
+        return Collection(self, name)
 
 
     def get_collection(
         self,
-        collection_name: str,
+        name: str,
     ) -> int:
-        self._db.get_collection(collection_name)
-        return Collection(self, collection_name)
+        self._db.get_collection(name)
+        return Collection(self, name)
 
 
     def _get_collection_db(
         self,
-        collection_name: str
+        name: str
     ) -> int:
-        return self._db.get_collection(collection_name)
+        return self._db.get_collection(name)
     
 
     def list_collections(self) -> int:
@@ -69,18 +69,18 @@ class LocalAPI(API):
     # TODO: this need to actually do what the API says
     def update_collection(
         self,
-        collection_name: str,
+        name: str,
         metadata: Optional[Dict] = None,
     ) -> int:
         # NIT: make sure we have a valid name like we do in create
-        return self._db.update_collection(collection_name, metadata)
+        return self._db.update_collection(name, metadata)
 
 
     def delete_collection(
         self,
-        collection_name: str
+        name: str
     ) -> int:
-        return self._db.delete_collection(collection_name)
+        return self._db.delete_collection(name)
     
 
     #

@@ -56,6 +56,12 @@ class DuckDB(Clickhouse):
             {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(EMBEDDING_TABLE_SCHEMA))}
         ) ''')
 
+    # 
+    #  UTILITY METHODS
+    # 
+    def get_collection_uuid_from_name(self, name):
+        return self._conn.execute(f'''SELECT uuid FROM collections WHERE name = ?''', [name]).fetchall()[0][0]
+
    
     # 
     #  COLLECTION METHODS
