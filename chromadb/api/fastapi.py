@@ -97,8 +97,8 @@ class FastAPI(API):
         '''
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/add", data = json.dumps({
-            "embedding": embeddings,
-            "metadata": metadatas,
+            "embeddings": embeddings,
+            "metadatas": metadatas,
             "documents": documents,
             "ids": ids,
         }) )

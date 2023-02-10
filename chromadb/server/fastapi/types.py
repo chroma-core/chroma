@@ -4,8 +4,8 @@ from typing import Union, Any
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
     collection_name: Union[str, list]
-    embedding: list
-    metadata: Union[str, list, dict] = None
+    embeddings: list
+    metadatas: Union[str, list, dict] = None
     documents: Union[str, list] = None
     ids: Union[str, list] = None
 

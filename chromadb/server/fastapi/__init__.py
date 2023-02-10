@@ -57,8 +57,8 @@ class FastAPI(chromadb.server.Server):
     def get_collection(self, collection_name: str):
         return self._api.get_collection(collection_name)
     
-    def update_collection(self, name, collection: UpdateCollection):
-        return self._api.update_collection(name= name,
+    def update_collection(self, collection_name, collection: UpdateCollection):
+        return self._api.update_collection(collection_name= collection_name,
                                             metadata= collection.metadata
                                             )
 
@@ -68,8 +68,8 @@ class FastAPI(chromadb.server.Server):
 
     def add(self, collection_name: str, add: AddEmbedding):
         return self._api.add(collection_name= collection_name,
-                             embeddings= add.embedding,
-                             metadatas= add.metadata,
+                             embeddings= add.embeddings,
+                             metadatas= add.metadatas,
                              documents= add.documents,
                              ids= add.ids
                             )
@@ -96,8 +96,8 @@ class FastAPI(chromadb.server.Server):
         return df.to_dict()
 
 
-    def delete(self, delete: DeleteEmbedding):
-        return self._api.delete(where=delete.where)
+    def delete(self, collection_name: str, delete: DeleteEmbedding):
+        return self._api.delete(where=delete.where, collection_name=collection_name)
 
 
     def count(self, collection_name: str):
