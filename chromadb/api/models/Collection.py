@@ -1,5 +1,14 @@
 from typing import TYPE_CHECKING, Optional, Union, Sequence
-from chromadb.api.types import Where, Embeddings, IDs, Metadatas, Documents
+
+from chromadb.api.types import (
+    NearestNeighborsResult,
+    Where,
+    Embeddings,
+    IDs,
+    Metadatas,
+    Documents,
+    Item,
+)
 
 if TYPE_CHECKING:
     from chromadb.api import API
@@ -19,16 +28,16 @@ class Collection:
         }
 
     def count(self) -> int:
-        return self.client.count(collection_name=self.name)
+        return self.client._count(collection_name=self.name)
 
     def add(
         self,
+        ids: IDs,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        ids: Optional[IDs] = None,
     ):
-        return self.client.add(self.name, embeddings, metadatas, documents, ids)
+        self.client._add(ids, self.name, embeddings, metadatas, documents)
 
     def get(
         self,
@@ -37,22 +46,24 @@ class Collection:
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ):
-        return self.client.get(self.name, ids, where, sort, limit, offset)
+    ) -> Sequence[Item]:
+        return self.client._get(self.name, ids, where, sort, limit, offset)
 
-    def peek(self, limit: int = None):
-        return self.client.peek(self.name, limit)
+    def peek(self, limit: int = 10) -> list[Item]:
+        return self.client._peek(self.name, limit)
 
-    def query(self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}):
-        return self.client.query(
+    def query(
+        self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}
+    ) -> Sequence[NearestNeighborsResult]:
+        return self.client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
         )
 
-    def modify(self, name: str = None, metadata=None):
-        self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
+    def modify(self, name: Optional[str] = None, metadata=None):
+        self.client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
 
@@ -75,4 +86,4 @@ class Collection:
         raise NotImplementedError()
 
     def delete(self, ids=None, where=None):
-        return self.client.delete(self.name, ids, where)
+        return self.client._delete(self.name, ids, where)

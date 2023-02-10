@@ -1,7 +1,7 @@
-from typing import Union, Sequence, Dict
+from typing import Union, Sequence, Dict, TypedDict
 
 ID = str
-IDs = list[ID]
+IDs = Sequence[ID]
 
 Embedding = Sequence[float]
 Embeddings = Union[Sequence[Embedding], Embedding]
@@ -13,3 +13,8 @@ Where = Dict[str, str]
 Documents = Union[str, Sequence[str]]
 
 Item = Dict
+
+
+class NearestNeighborsResult(TypedDict):
+    items: list[Item]
+    distances: Sequence[float]

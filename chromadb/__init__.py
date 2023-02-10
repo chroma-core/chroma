@@ -23,20 +23,23 @@ def get_db(settings=__settings):
         assert settings[key], f"Setting '{key}' is required when chroma_db_impl={setting}"
 
     if setting == "clickhouse":
-        require('clickhouse_host')
-        require('clickhouse_port')
-        require('chroma_cache_dir')
+        require("clickhouse_host")
+        require("clickhouse_port")
+        require("chroma_cache_dir")
         print("Using Clickhouse for database")
         import chromadb.db.clickhouse
+
         return chromadb.db.clickhouse.Clickhouse(settings)
-    elif setting  == "duckdb+parquet":
-        require('chroma_cache_dir')
+    elif setting == "duckdb+parquet":
+        require("chroma_cache_dir")
         import chromadb.db.duckdb
+
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
-        require('chroma_cache_dir')
+        require("chroma_cache_dir")
         print("Using DuckDB in-memory for database. Data will be transient.")
         import chromadb.db.duckdb
+
         return chromadb.db.duckdb.DuckDB(settings)
     else:
         raise Exception(f"Unknown value '{setting} for chroma_db_impl")
@@ -44,7 +47,7 @@ def get_db(settings=__settings):
 
 def Client(settings=__settings):
     """Return a chroma.API instance based on the provided or environmental
-       settings, optionally overriding the DB instance."""
+    settings, optionally overriding the DB instance."""
 
     setting = settings.chroma_api_impl.lower()
 
@@ -56,10 +59,12 @@ def Client(settings=__settings):
         require('chroma_server_http_port')
         print("Running Chroma in client mode using REST to connect to remote server")
         import chromadb.api.fastapi
+
         return chromadb.api.fastapi.FastAPI(settings)
     elif setting == "local":
         print("Running Chroma using direct local API.")
         import chromadb.api.local
+
         return chromadb.api.local.LocalAPI(settings, get_db(settings))
     else:
         raise Exception(f"Unknown value '{setting} for chroma_api_impl")

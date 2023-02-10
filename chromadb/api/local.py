@@ -55,13 +55,12 @@ class LocalAPI(API):
     def list_collections(self) -> list:
         return self._db.list_collections()
 
-
     def modify(
         self,
         current_name: str,
-        new_name: str = None,
+        new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
-    ) -> int:
+    ):
         # NIT: make sure we have a valid name like we do in create
         if new_name is not None:
             if not is_valid_index_name(new_name):
@@ -75,13 +74,13 @@ class LocalAPI(API):
     #
     # ITEM METHODS
     #
-    def add(
+    def _add(
         self,
+        ids,
         collection_name: str,
         embeddings,
         metadatas=None,
         documents=None,
-        ids=None,
         increment_index=True,
     ):
 
@@ -133,7 +132,7 @@ class LocalAPI(API):
 
         return True  # NIT: should this return the ids of the succesfully added items?
 
-    def update(self, collection_name: str, embedding, metadata=None):
+    def _update(self, collection_name: str, embedding, metadata=None):
 
         number_of_embeddings = len(embedding)
 
@@ -161,7 +160,7 @@ class LocalAPI(API):
 
         return True
 
-    def get(
+    def _get(
         self,
         collection_name,
         ids=None,
@@ -189,7 +188,7 @@ class LocalAPI(API):
             offset=offset,
         )
 
-    def delete(self, collection_name, ids=None, where=None):
+    def _delete(self, collection_name, ids=None, where=None):
 
         if where is None:
             where = {}
@@ -197,7 +196,7 @@ class LocalAPI(API):
         deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids)
         return deleted_uuids
 
-    def count(self, collection_name):
+    def _count(self, collection_name):
 
         return self._db.count(collection_name=collection_name)
 
@@ -206,7 +205,7 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
 
         return self._db.get_nearest_neighbors(
             collection_name=collection_name,
@@ -225,6 +224,5 @@ class LocalAPI(API):
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
-    def peek(self, collection_name, n=10):
-
-        return self.get(collection_name=collection_name, limit=n)
+    def _peek(self, collection_name, n=10):
+        return self._get(collection_name=collection_name, limit=n)

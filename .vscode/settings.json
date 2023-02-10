@@ -10,5 +10,6 @@
         "**/.ipynb_checkpoints": true,
         "**/.pytest_cache": true,
         "**/chroma.egg-info": true
-    }
+    },
+    "python.analysis.typeCheckingMode": "basic"
 }

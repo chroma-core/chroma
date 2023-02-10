@@ -1,7 +1,7 @@
 import chromadb
 from chromadb.config import Settings
 
-USE_LOCAL = False
+USE_LOCAL = True
 
 # Local and server versions return mismatching datatypes. For now using this patch for testing, but we have to make this uniform.
 def verify_get_result_shape(result, expected):

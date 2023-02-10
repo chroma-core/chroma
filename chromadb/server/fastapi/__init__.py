@@ -88,17 +88,17 @@ class FastAPI(chromadb.server.Server):
 
     def update_collection(self, collection_name, collection: UpdateCollection):
 
-        return self._api.modify(current_name=collection_name, 
-                                new_name= collection.new_name,
-                                new_metadata= collection.new_metadata
-                                )
-
+        return self._api.modify(
+            current_name=collection_name,
+            new_name=collection.new_name,
+            new_metadata=collection.new_metadata,
+        )
 
     def delete_collection(self, collection_name: str):
         return self._api.delete_collection(collection_name)
 
     def add(self, collection_name: str, add: AddEmbedding):
-        return self._api.add(
+        return self._api._add(
             collection_name=collection_name,
             embeddings=add.embeddings,
             metadatas=add.metadatas,
@@ -107,12 +107,12 @@ class FastAPI(chromadb.server.Server):
         )
 
     def update(self, collection_name: str, add: AddEmbedding):
-        return self._api.update(
-            name=collection_name, embedding=add.embedding, metadata=add.metadata
+        return self._api._update(
+            collection_name=collection_name, embedding=add.embeddings, metadata=add.metadatas
         )
 
     def get(self, collection_name, get: GetEmbedding):
-        return self._api.get(
+        return self._api._get(
             collection_name=collection_name,
             ids=get.ids,
             where=get.where,
@@ -122,17 +122,19 @@ class FastAPI(chromadb.server.Server):
         )
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):
-        return self._api.delete(where=delete.where, ids=delete.ids, collection_name=collection_name)
+        return self._api._delete(
+            where=delete.where, ids=delete.ids, collection_name=collection_name
+        )
 
     def count(self, collection_name: str):
-        return self._api.count(collection_name)
+        return self._api._count(collection_name)
 
     def reset(self):
         return self._api.reset()
 
     def get_nearest_neighbors(self, collection_name, query: QueryEmbedding):
         try:
-            nnresult = self._api.query(
+            nnresult = self._api._query(
                 collection_name=collection_name,
                 where=query.where,
                 query_embeddings=query.query_embeddings,
