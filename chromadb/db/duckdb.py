@@ -188,7 +188,7 @@ class PersistentDuckDB(DuckDB):
 
     def __init__(self, settings):
         super().__init__(settings=settings)
-        self._save_folder = settings.chroma_cache_dir
+        self._save_folder = settings.persist_directory
         self.load()
 
 
@@ -209,13 +209,20 @@ class PersistentDuckDB(DuckDB):
             return
 
         # if the db is empty, dont save
-        if self.count() == 0:
+        if self._conn.query(f"SELECT COUNT() FROM embeddings") == 0:
             return
 
         self._conn.execute(f'''
             COPY
                 (SELECT * FROM embeddings)
-            TO '{self._save_folder}/chroma.parquet'
+            TO '{self._save_folder}/chroma-embeddings.parquet'
+                (FORMAT PARQUET);
+        ''')
+
+        self._conn.execute(f'''
+            COPY
+                (SELECT * FROM collections)
+            TO '{self._save_folder}/chroma-collections.parquet'
                 (FORMAT PARQUET);
         ''')
 
@@ -227,13 +234,32 @@ class PersistentDuckDB(DuckDB):
         import os
 
         # load in the embeddings
-        if not os.path.exists(f"{self._save_folder}/chroma.parquet"):
+        if not os.path.exists(f"{self._save_folder}/chroma-embeddings.parquet"):
             print(f"No existing DB found in {self._save_folder}, skipping load")
         else:
-            path = self._save_folder + "/chroma.parquet"
+            path = self._save_folder + "/chroma-embeddings.parquet"
             self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
+            print(f"""loaded in {self._conn.query(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings""")
+
+        # load in the collections
+        if not os.path.exists(f"{self._save_folder}/chroma-collections.parquet"):
+            print(f"No existing DB found in {self._save_folder}, skipping load")
+        else:
+            path = self._save_folder + "/chroma-collections.parquet"
+            self._conn.execute(f"INSERT INTO collections SELECT * FROM read_parquet('{path}');")
+            print(f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections""")
 
 
     def __del__(self):
         print("PersistentDuckDB del, about to run persist")
         self.persist()
+
+    def reset(self):
+        super().reset()
+        # empty the save folder
+        import shutil
+        import os
+        shutil.rmtree(self._save_folder)
+        os.mkdir(self._save_folder)
+
+

@@ -14,7 +14,7 @@ from requests.exceptions import ConnectionError
 def local_api():
     return chromadb.Client(Settings(chroma_api_impl="local",
                                    chroma_db_impl="duckdb",
-                                   chroma_cache_dir=tempfile.gettempdir()))
+                                   persist_directory=tempfile.gettempdir()))
 
 @pytest.fixture
 def fastapi_integration_api():
@@ -35,7 +35,7 @@ def fastapi_api():
 def run_server():
     settings = Settings(chroma_api_impl="local",
                         chroma_db_impl="duckdb",
-                        chroma_cache_dir=tempfile.gettempdir()+"/test_server")
+                        persist_directory=tempfile.gettempdir()+"/test_server")
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="info")
 

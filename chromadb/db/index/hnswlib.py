@@ -24,7 +24,7 @@ class Hnswlib(Index):
 
 
     def __init__(self, settings):
-        self._save_folder = settings.chroma_cache_dir + "/index"
+        self._save_folder = settings.persist_directory + "/index"
 
 
     def run(self, collection_uuid, uuids, embeddings, space='l2', ef=10, num_threads=4):
