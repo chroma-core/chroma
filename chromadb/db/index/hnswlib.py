@@ -196,4 +196,18 @@ class Hnswlib(Index):
         if not os.path.exists(f'{self._save_folder}'):
             os.makedirs(f'{self._save_folder}')
 
+    def delete_index(self, uuid):
+        uuid = str(uuid)
+        if (self._collection_uuid == uuid):
+            _index = None
+            _collection_uuid = None
+            _index_metadata = None
+            _id_to_uuid = {}
+            _uuid_to_id = {}
+
+        if os.path.exists(f'{self._save_folder}'):
+            for f in os.listdir(f'{self._save_folder}'):
+                if uuid in f:
+                    os.remove(os.path.join(f'{self._save_folder}', f))
+
 

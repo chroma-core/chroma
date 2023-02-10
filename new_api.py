@@ -19,7 +19,6 @@ print(client.list_collections())
 
 # collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
 # collection = client.update_collection(oldName="test", newName="test2") # this feels a little odd to me (Jeff) -> collection.update(name="test2")
-# client.delete_collection(name="test")
 
 # add many
 collection.add( 
@@ -60,6 +59,8 @@ print("query", collection.query(
     n_results=2,
     # where={"style": "style2"}, 
 ))
+
+# client.delete_collection(name="test")
 
 # collection.upsert( # always succeeds
 #     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
