@@ -82,8 +82,13 @@ class DuckDB(Clickhouse):
     def list_collections(self):
         return self._conn.execute(f'''SELECT * FROM collections''').fetchall()
 
-    def update_collection(self, name, metadata):
-        return self._conn.execute(f'''UPDATE collections SET metadata = ? WHERE name = ?''', [json.dumps(metadata), name])
+    def update_collection(self, current_name, new_name, new_metadata):
+        if new_name is None:
+            new_name = current_name
+        if new_metadata is None:
+            new_metadata = self.get_collection(current_name).metadata[0]
+
+        self._conn.execute(f'''UPDATE collections SET name = ?, metadata = ? WHERE name = ?''', [new_name, json.dumps(new_metadata), current_name])
 
     def delete_collection(self, name):
         return self._conn.execute(f'''DELETE FROM collections WHERE name = ?''', [name])

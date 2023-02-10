@@ -25,7 +25,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> int:
+    def list_collections(self) -> list[Collection]:
         """Returns all collections in the database
 
         Args:

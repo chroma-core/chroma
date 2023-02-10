@@ -140,24 +140,25 @@ class Clickhouse(DB):
         ).result_rows
 
     def list_collections(self):
-        return self._conn.query(
-            f"""
-         SELECT * FROM collections
-         """
-        ).result_rows
+        return self._conn.query(f"""SELECT * FROM collections""").result_rows
 
-    def update_collection(self, name=None, metadata=None):
-        # can not cast dict to map in clickhouse so we go through tuple # NIT: maybe not necessary now with formal JSON type
-        metadata = [(key, value) for key, value in metadata.items()]
+    def update_collection(self, current_name, new_name, new_metadata):
+        if new_name is None:
+            new_name = current_name
+        if new_metadata is None:
+            new_metadata = self.get_collection(current_name)[0]
 
-        self._conn.command(
+        return self._conn.command(
             f"""
+
          ALTER TABLE 
             collections 
          UPDATE
-            metadata = {metadata}
+            metadata = {new_metadata}, 
+            name = '{new_name}'
          WHERE 
-            name = '{name}'
+
+            name = '{current_name}'
          """
         )
 

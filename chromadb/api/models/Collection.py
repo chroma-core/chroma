@@ -51,6 +51,11 @@ class Collection:
             where=where,
         )
 
+    def modify(self, name: str = None, metadata=None):
+        self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        if name:
+            self.name = name
+
     def update(
         self,
         ids: IDs,
