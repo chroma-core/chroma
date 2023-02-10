@@ -50,7 +50,7 @@ class FastAPI(chromadb.server.Server):
         return self._api.list_collections()
 
     def create_collection(self, collection: CreateCollection):
-        return self._api.create_collection(collection_name= collection.name,
+        return self._api.create_collection(name= collection.name,
                                             metadata= collection.metadata
                                         )
 
@@ -58,7 +58,7 @@ class FastAPI(chromadb.server.Server):
         return self._api.get_collection(collection_name)
     
     def update_collection(self, collection_name, collection: UpdateCollection):
-        return self._api.update_collection(collection_name= collection_name,
+        return self._api.update_collection(name= collection_name,
                                             metadata= collection.metadata
                                             )
 
@@ -67,7 +67,7 @@ class FastAPI(chromadb.server.Server):
 
 
     def add(self, collection_name: str, add: AddEmbedding):
-        return self._api.add(collection_name= collection_name,
+        return self._api.add(name= collection_name,
                              embeddings= add.embeddings,
                              metadatas= add.metadatas,
                              documents= add.documents,
@@ -75,25 +75,19 @@ class FastAPI(chromadb.server.Server):
                             )
 
     def update(self, collection_name: str, add: AddEmbedding):
-        return self._api.update(collection_name= collection_name,
+        return self._api.update(name= collection_name,
                              embedding= add.embedding,
                              metadata= add.metadata
                             )
 
 
     def fetch(self, collection_name, fetch: FetchEmbedding):
-        df = self._api.fetch(collection_name= collection_name,
+        return self._api.fetch(collection_name= collection_name,
                              ids= fetch.ids,
                              where= fetch.where,
                              sort= fetch.sort,
                              limit= fetch.limit,
                              offset= fetch.offset)
-        # Would use DataFrame.to_json, but Clickhouse apparently
-        # returns some weird bytes that DataFrame.to_json can't
-        # handle.
-        # Perf was always going to be bad with JSON+dataframe, this
-        # shouldn't be too much worse.
-        return df.to_dict()
 
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):

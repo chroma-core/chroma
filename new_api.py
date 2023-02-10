@@ -1,9 +1,9 @@
 import chromadb 
 from chromadb.config import Settings
 
-client = chromadb.Client()
-print(client)
-# client = chromadb.Client(Settings(chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"))
+# client = chromadb.Client()
+client = chromadb.Client(Settings(chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"))
+# print(client)
 
 print(client.heartbeat())
 client.reset() 
@@ -34,7 +34,7 @@ collection.add(
 )
 
 print(collection.peek(5))
-print(collection.count()) # NIT: count count take a filter too
+print(collection.count()) # NIT: count count take a where filter too
 
 # doesnt work in clickhouse yet because of metadata filtering
 print("get ids", collection.get(

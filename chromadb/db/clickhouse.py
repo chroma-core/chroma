@@ -75,9 +75,11 @@ class Clickhouse(DB):
     #  UTILITY METHODS
     # 
     def get_collection_uuid_from_name(self, name):
-        return self._conn.query_df(f'''
+        res = self._conn.query(f'''
             SELECT uuid FROM collections WHERE name = '{name}'
-        ''').iloc[0].uuid
+        ''')
+        print(res.result_rows)
+        return res.result_rows
 
 
     # 
@@ -97,20 +99,20 @@ class Clickhouse(DB):
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []
-        data_to_insert.append([collection_uuid, name, metadata])
+        data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
 
         self._conn.insert('collections', data_to_insert, column_names=['uuid', 'name', 'metadata'])
         return collection_uuid
 
 
     def get_collection(self, name):
-        return self._conn.query_df(f'''
+        return self._conn.query(f'''
          SELECT * FROM collections WHERE name = '{name}'
          ''')
     
 
     def list_collections(self):
-        return self._conn.query_df(f'''
+        return self._conn.query(f'''
          SELECT * FROM collections
          ''')
 
@@ -153,7 +155,7 @@ class Clickhouse(DB):
 
 
     def _fetch(self, where={}):
-        return self._conn.query_df(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
+        return self._conn.query(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
 
     def _filter_metadata(self, key, value):
@@ -222,7 +224,7 @@ class Clickhouse(DB):
 
 
     def _delete(self, where_str=None):
-        uuids_deleted = self._conn.query_df(f'''SELECT uuid FROM embeddings {where_str}''')
+        uuids_deleted = self._conn.query(f'''SELECT uuid FROM embeddings {where_str}''')
 
         self._conn.execute(f'''
             DELETE FROM
@@ -263,10 +265,9 @@ class Clickhouse(DB):
 
 
     def get_by_ids(self, ids=list):
-        df = self._conn.query_df(f'''
+        return self._conn.query(f'''
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         ''')
-        return df
 
 
     def get_nearest_neighbors(self, where, embeddings, n_results, collection_name=None, collection_uuid=None):
@@ -321,5 +322,5 @@ class Clickhouse(DB):
 
 
     def raw_sql(self, sql):
-        return self._conn.query_df(sql)
+        return self._conn.query(sql)
 
