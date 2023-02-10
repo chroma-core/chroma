@@ -121,8 +121,6 @@ class Clickhouse(DB):
         if new_metadata is None:
             new_metadata = self.get_collection(current_name)[0]
 
-        print("new_metadata", new_metadata)
-
         return self._conn.command(f'''
          ALTER TABLE 
             collections 

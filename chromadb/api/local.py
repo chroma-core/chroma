@@ -77,10 +77,7 @@ class LocalAPI(API):
             if not is_valid_index_name(new_name):
                 raise ValueError("Invalid index name: %s" % new_name)
 
-        resp = self._db.update_collection(current_name, new_name, new_metadata)
-        print("local modify", resp)
-
-        return resp
+        self._db.update_collection(current_name, new_name, new_metadata)
 
 
     def delete_collection(
