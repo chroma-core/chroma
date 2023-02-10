@@ -105,10 +105,13 @@ class FastAPI(API):
         metadatas=None,
         documents=None,
         ids=None,
+        increment_index=True,
     ):
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
+        - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
+        -     and then manually create the index yourself with collection.create_index()
         """
 
         resp = requests.post(
@@ -119,6 +122,7 @@ class FastAPI(API):
                     "metadatas": metadatas,
                     "documents": documents,
                     "ids": ids,
+                    "increment_index": increment_index,
                 }
             ),
         )

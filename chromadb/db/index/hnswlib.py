@@ -7,6 +7,7 @@ import hnswlib
 import numpy as np
 from chromadb.db.index import Index
 from chromadb.logger import logger
+from chromadb.errors import NoIndexException
 
 
 class Hnswlib(Index):
@@ -160,6 +161,9 @@ class Hnswlib(Index):
 
         if self._collection_uuid != collection_uuid:
             self._load(collection_uuid)
+
+        if self._index is None:
+            raise NoIndexException('Index not found, please create an instance before querying')
 
         s2= time.time()
         # get ids from uuids as a set, if they are available
