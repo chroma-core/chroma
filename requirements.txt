@@ -10,6 +10,7 @@ hdbscan==0.8.29
 redis==3.5.3
 celery==4.4.7
 clickhouse_driver==0.2.4
+clickhouse-connect==0.5.7
 posthog==2.1.2
 uuid==1.30
 sentry_sdk==1.10.1

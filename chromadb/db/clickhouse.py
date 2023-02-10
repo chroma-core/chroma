@@ -6,7 +6,8 @@ import time
 import os
 import itertools
 
-from clickhouse_driver import connect, Client
+# from clickhouse_driver import connect, Client
+import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [
     {'uuid': 'UUID'},
@@ -45,9 +46,9 @@ class Clickhouse(DB):
     _conn = None
 
     def __init__(self, settings):
-        self._conn = Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
-        self._conn.execute(f'''SET allow_experimental_lightweight_delete = true''')
-        self._conn.execute(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
+        self._conn = clickhouse_connect.get_client(host=settings.clickhouse_host, port=int(settings.clickhouse_port)) #Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
+        self._conn.command(f'''SET allow_experimental_lightweight_delete = true''')
+        self._conn.command(f'''SET mutations_sync = 1''') # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
 
         self._create_table_collections()
         self._create_table_embeddings()
@@ -55,12 +56,12 @@ class Clickhouse(DB):
         self._settings = settings
 
     def _create_table_collections(self):
-        self._conn.execute(f'''CREATE TABLE IF NOT EXISTS collections (
+        self._conn.command(f'''CREATE TABLE IF NOT EXISTS collections (
             {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY uuid''')
 
     def _create_table_embeddings(self):
-        self._conn.execute(f'''CREATE TABLE IF NOT EXISTS embeddings (
+        self._conn.command(f'''CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY collection_uuid''')
 
@@ -71,29 +72,27 @@ class Clickhouse(DB):
             metadata = {}
 
         # poor man's unique constraint
-        checkname = self._conn.execute(f'''
+        checkname = self._conn.query(f'''
             SELECT * FROM collections WHERE name = '{name}'
         ''')
 
-        if len(checkname) > 0:
+        if checkname.row_count > 0:
             raise Exception("Collection already exists with that name")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []
         data_to_insert.append([collection_uuid, name, metadata])
 
-        self._conn.execute(f'''
-         INSERT INTO collections (uuid, name, metadata) VALUES
-         ''', data_to_insert)
+        self._conn.insert('collections', data_to_insert, column_names=['uuid', 'name', 'metadata'])
         return collection_uuid
 
     def get_collection(self, name):
-        return self._conn.query_dataframe(f'''
+        return self._conn.query_df(f'''
          SELECT * FROM collections WHERE name = '{name}'
          ''')
     
     def list_collections(self):
-        return self._conn.query_dataframe(f'''
+        return self._conn.query_df(f'''
          SELECT * FROM collections
          ''')
 
@@ -101,7 +100,7 @@ class Clickhouse(DB):
         # can not cast dict to map in clickhouse so we go through tuple
         metadata = [(key, value) for key, value in metadata.items()]
         
-        self._conn.execute(f'''
+        self._conn.command(f'''
          ALTER TABLE 
             collections 
          UPDATE
@@ -111,7 +110,7 @@ class Clickhouse(DB):
          ''')
 
     def delete_collection(self, name):
-        self._conn.execute(f'''
+        self._conn.command(f'''
          DELETE FROM collections WHERE name = '{name}'
          ''')
 
@@ -125,16 +124,14 @@ class Clickhouse(DB):
         for i in range(len(embedding)):
             data_to_insert.append([collection_uuid, uuid.uuid4(), embedding[i], metadata[i], documents[i], ids[i]])
 
-        insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
-
-        self._conn.execute(f'''
-         INSERT INTO embeddings ({insert_string}) VALUES''', data_to_insert)
+        column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
+        self._conn.insert('embeddings', data_to_insert, column_names=column_names)
 
         return [x[1] for x in data_to_insert] # return uuids
 
 
     def _fetch(self, where={}):
-        return self._conn.query_dataframe(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
+        return self._conn.query_df(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
     def _filter_metadata(self, key, value):
         return "" # TODO
@@ -150,15 +147,15 @@ class Clickhouse(DB):
             where['collection_uuid'] = collection_uuid
 
         s3= time.time()
-        # check to see if query is a dict and if it is a flat list of key value pairs
+        # check to see if query is a dict and if it is a flat list of key value<string> pairs
         if where is not None:
             if not isinstance(where, dict):
                 raise Exception("Invalid where: " + str(where))
 
-            # ensure where is a flat dict - otherwise we cant use clickhouse Map (and JSON current not supported in clickhouse-driver)
-            # for key in where:
-            #     if isinstance(where[key], dict):
-            #         raise Exception("Invalid where: " + str(where))
+            # ensure where only contains strings, as we only support string equality for now
+            for key in where:
+                if isinstance(where[key], str):
+                    raise Exception("Invalid where: " + str(where))
 
         metadata_query = None
         # if where has a metadata key, we need to do a special query
@@ -205,7 +202,7 @@ class Clickhouse(DB):
         where_string = ""
         if collection_uuid is not None:
             where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._conn.execute(f"SELECT COUNT() FROM embeddings {where_string}")
+        return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
 
 
     def count(self, collection_name=None):
@@ -214,7 +211,7 @@ class Clickhouse(DB):
 
 
     def _delete(self, where_str=None):
-        uuids_deleted = self._conn.query_dataframe(f'''SELECT uuid FROM embeddings {where_str}''')
+        uuids_deleted = self._conn.query_df(f'''SELECT uuid FROM embeddings {where_str}''')
 
         self._conn.execute(f'''
             DELETE FROM
@@ -259,7 +256,7 @@ class Clickhouse(DB):
 
 
     def get_by_ids(self, ids=list):
-        df = self._conn.query_dataframe(f'''
+        df = self._conn.query_df(f'''
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         ''')
         return df
@@ -280,7 +277,7 @@ class Clickhouse(DB):
         if where:
             where = f"WHERE {where}"
 
-        return self._conn.query_dataframe(f'''
+        return self._conn.query_df(f'''
             SELECT {db_schema_to_keys()} FROM embeddings {where} ORDER BY rand() LIMIT {n}''')
 
 
@@ -326,8 +323,8 @@ class Clickhouse(DB):
 
 
     def reset(self):
-        self._conn.execute('DROP TABLE collections')
-        self._conn.execute('DROP TABLE embeddings')
+        self._conn.command('DROP TABLE collections')
+        self._conn.command('DROP TABLE embeddings')
         self._create_table_collections()
         self._create_table_embeddings()
         
@@ -336,5 +333,5 @@ class Clickhouse(DB):
 
 
     def raw_sql(self, sql):
-        return self._conn.query_dataframe(sql)
+        return self._conn.query_df(sql)
 
