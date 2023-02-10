@@ -77,3 +77,6 @@ class Collection:
 
     def delete(self, ids=None, where=None):
         return self.client.delete(self.name, ids, where)
+
+    def create_index(self):
+        return self.client.create_index(self.name)
