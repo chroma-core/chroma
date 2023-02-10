@@ -39,11 +39,10 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(self, name)
 
-    def update_collection(self, name: str, metadata: Optional[Dict] = None) -> int:
-        """Updates a collection"""
-        resp = requests.put(
-            self._api_url + "/collections/" + name, data=json.dumps({"metadata": metadata})
-        )
+
+    def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
+        '''Updates a collection'''
+        resp = requests.put(self._api_url + "/collections/" + current_name, data=json.dumps({"metadata":new_metadata, "name":new_name}))
         resp.raise_for_status()
         return resp.json()
 
