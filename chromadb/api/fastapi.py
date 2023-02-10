@@ -11,8 +11,6 @@ class FastAPI(API):
     def __init__(self, settings):
         self._api_url = f'http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1'
 
-    # def Collection(self, name):
-    #     return Collection(self, name)
 
     def heartbeat(self):
         '''Returns the current server time in nanoseconds to check if the server is alive'''
@@ -20,11 +18,13 @@ class FastAPI(API):
         resp.raise_for_status()
         return int(resp.json()['nanosecond heartbeat'])
 
+
     def list_collections(self) -> int:
         '''Returns a list of all collections'''
         resp = requests.get(self._api_url + "/collections")
         resp.raise_for_status()
         return resp.json()
+
 
     def create_collection(self, name: str, metadata: Optional[Dict] = None) -> int:
         '''Creates a collection'''
@@ -32,17 +32,20 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(self, name)
 
+
     def get_collection(self, name: str) -> int:
         '''Returns a collection'''
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
         return Collection(self, name)
 
+
     def update_collection(self, name: str, metadata: Optional[Dict] = None) -> int:
         '''Updates a collection'''
         resp = requests.put(self._api_url + "/collections/" + name, data=json.dumps({"metadata":metadata}))
         resp.raise_for_status()
         return resp.json()
+
 
     def delete_collection(self, name: str) -> int:
         '''Deletes a collection'''
@@ -57,24 +60,18 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
+
     def peek(self, collection_name, limit=10):
-        print("runnign peek")
-        return self.fetch(collection_name, limit=limit)
+        return self.get(collection_name, limit=limit)
 
-    def fetch(self, collection_name, ids=None, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
-        '''Fetches embeddings from the database'''
 
-        # @hammadb 1/9/23 Where clause does not need collection_name. Leaving comment in for this time of quick development
-        # where = self.where_with_collection_name(where)
-        # where["collection_name"] = collection_name
-
+    def get(self, collection_name, ids=None, where={}, sort=None, limit=None, offset=None, page=None, page_size=None):
+        '''Gets embeddings from the database'''
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
 
-        print("fetching", collection_name, ids, where, sort, limit, offset)
-
-        resp = requests.post(self._api_url + "/collections/" + collection_name + "/fetch", data=json.dumps({
+        resp = requests.post(self._api_url + "/collections/" + collection_name + "/get", data=json.dumps({
             "ids":ids,
             "where":where,
             "sort":sort,
@@ -82,20 +79,18 @@ class FastAPI(API):
             "offset":offset
         }))
 
-        print(resp.json())
-
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
+
     def delete(self, collection_name, where={}):
         '''Deletes embeddings from the database'''
-
-        where = self.where_with_collection_name(where)
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/delete", data=json.dumps({"where":where}))
 
         resp.raise_for_status()
         return resp.json()
+
 
     def add(self,
             collection_name,
@@ -110,15 +105,15 @@ class FastAPI(API):
         '''
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/add", data = json.dumps({
-            "collection_name": collection_name,
-            "embedding": embeddings,
-            "metadata": metadatas,
+            "embeddings": embeddings,
+            "metadatas": metadatas,
             "documents": documents,
             "ids": ids,
         }) )
 
         resp.raise_for_status
         return True
+
 
     def update(self,
             collection_name,
@@ -131,7 +126,6 @@ class FastAPI(API):
         '''
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/update", data = json.dumps({
-            "collection_name": collection_name,
             "embedding": embedding,
             "metadata": metadata,
         }) )
@@ -139,11 +133,12 @@ class FastAPI(API):
         resp.raise_for_status
         return True
 
-    def query(self, collection_name, embedding, n_results=10, where={}):
+
+    def query(self, collection_name, query_embeddings, n_results=10, where={}):
         '''Gets the nearest neighbors of a single embedding'''
 
-        resp = requests.post(self._api_url + "/collections/" + collection_name + "/search", data = json.dumps({
-            "embedding": embedding,
+        resp = requests.post(self._api_url + "/collections/" + collection_name + "/query", data = json.dumps({
+            "query_embeddings": query_embeddings,
             "n_results": n_results,
             "where": where
         }) )
@@ -161,17 +156,20 @@ class FastAPI(API):
 
         return val
 
+
     def reset(self):
         '''Resets the database'''
         resp = requests.post(self._api_url + "/reset")
         resp.raise_for_status()
         return resp.json
 
+
     def raw_sql(self, sql):
         '''Runs a raw SQL query against the database'''
         resp = requests.post(self._api_url + "/raw_sql", data = json.dumps({"raw_sql": sql}))
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
+
 
     def create_index(self, collection_name=None):
         '''Creates an index for the given space key'''

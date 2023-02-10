@@ -24,7 +24,7 @@ dependencies = [
   'duckdb ~= 0.5',
   'posthog ~= 2.1',
   'uuid ~= 1.30',
-  'clickhouse_driver ~= 0.2'
+  'clickhouse_connect ~= 0.5.7'
 ]
 
 [tool.black]

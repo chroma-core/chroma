@@ -104,9 +104,10 @@ def get_sample(
     # Add random samples to fill out the sample set
     n_random = n_samples - len(uris)
     uris.update(
-        db_connection.get_random(
-            n=n_random, where={"model_space": model_space, "dataset": dataset_name}
-        ).input_uri.tolist()
+        # No longer implemented
+        # db_connection.get_random(
+        #     n=n_random, where={"model_space": model_space, "dataset": dataset_name}
+        # ).input_uri.tolist()
     )
 
     return list(uris)

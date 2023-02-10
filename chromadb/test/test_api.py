@@ -92,22 +92,6 @@ def test_add(api_fixture, request):
     assert api.count(collection_name="test_space") == 2
 
 
-@pytest.mark.parametrize('api_fixture', test_apis)
-def test_add_with_default_collection_name(api_fixture, request):
-    api = request.getfixturevalue(api_fixture.__name__)
-
-    api.reset()
-
-    api.set_collection_name('foobar')
-
-    records = copy.deepcopy(batch_records)
-    records['collection_name'] = None
-    api.add(**records)
-
-    assert api.count() == 2
-    assert api.count(collection_name='foobar') == 2
-
-
 minimal_records = {"embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
                    "input_uri": ["https://example.com", "https://example.com"],
                    "dataset": "training",
@@ -126,12 +110,12 @@ def test_add_minimal(api_fixture, request):
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
-def test_fetch_from_db(api_fixture, request):
+def test_get_from_db(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
     api.add(**batch_records)
-    records = api.fetch(where={"collection_name": "test_space"})
+    records = api.get(where={"collection_name": "test_space"})
 
     assert len(records['embedding']) == 2
 
@@ -188,7 +172,6 @@ def test_delete(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.set_collection_name("test_space")
     api.add(**batch_records)
     assert api.count() == 2
     assert api.delete(where={"collection_name": "foobar"}) == []
@@ -202,7 +185,6 @@ def test_delete_with_index(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.set_collection_name("test_space")
     api.add(**batch_records)
     assert api.count() == 2
     api.create_index()

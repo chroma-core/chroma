@@ -6,8 +6,6 @@ import pandas as pd
 
 class API(ABC):
 
-    _collection_name = "default_space"
-
     @abstractmethod
     def __init__(self):
         pass
@@ -65,8 +63,8 @@ class API(ABC):
         """Gets a collection from the database by either name or uuid
 
         Args:
-            name (Optional[str]): The name of the collection to fetch. Defaults to None.
-            the uuid (Optional[UUID]): The uuid of the collection to fetch. Defaults to None.
+            name (Optional[str]): The name of the collection to get. Defaults to None.
+            the uuid (Optional[UUID]): The uuid of the collection to get. Defaults to None.
 
         Returns:
             dict: the requested collection
@@ -129,7 +127,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def fetch(
+    def get(
         self,
         where: Optional[Dict[str, str]] = {},
         sort: Optional[str] = None,
@@ -138,7 +136,7 @@ class API(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> pd.DataFrame:
-        """Fetches embeddings from the database. Supports filtering, sorting, and pagination.
+        """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
 
         Args:
@@ -230,42 +228,4 @@ class API(ABC):
         """
         pass
 
-    def set_collection_name(self, collection_name: str) -> None:
-        """Sets the model space name for the client, allowing it to be omitted elsewhere
-
-        Args:
-            collection_name (str): The model space name
-
-        Returns:
-            None
-
-        """
-        self._collection_name = collection_name
-
-    def get_collection_name(self) -> str:
-        """Returns the model space name the client has
-
-        Args:
-            None
-
-        Returns:
-            str: The model space name
-
-        """
-        return self._collection_name
-
-    def where_with_collection_name(self, where_clause: Dict[str, str]) -> Dict[str, str]:
-        """Returns a where clause that specifies the default model space iff it wasn't already specified
-        ⚠️ This method should not be used directly.
-
-        Args:
-            where_clause (dict): The where clause to add the model space name to
-
-        Returns:
-            dict: The where clause with the model space name added
-        """
-
-        if self._collection_name and "collection_name" not in where_clause:
-            where_clause["collection_name"] = self._collection_name
-
-        return where_clause
+   

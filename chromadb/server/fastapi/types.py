@@ -3,15 +3,14 @@ from typing import Union, Any
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
-    collection_name: Union[str, list]
-    embedding: list
-    metadata: Union[str, list, dict] = None
+    embeddings: list
+    metadatas: Union[list, dict] = None
     documents: Union[str, list] = None
     ids: Union[str, list] = None
 
 class QueryEmbedding(BaseModel):
     where: dict = {}
-    embedding: list
+    query_embeddings: list
     n_results: int = 10
 
 class ProcessEmbedding(BaseModel):
@@ -19,9 +18,9 @@ class ProcessEmbedding(BaseModel):
     training_dataset_name: str = None
     unlabeled_dataset_name: str = None
 
-class FetchEmbedding(BaseModel):
+class GetEmbedding(BaseModel):
     ids: list = None
-    where: dict = {}
+    where: dict = None
     sort: str = None
     limit: int = None
     offset: int = None
