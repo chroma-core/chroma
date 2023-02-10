@@ -44,7 +44,6 @@ print("add", chroma.add(
 #     metadata=[{"apples": "bananas"}, {"apples": "oranges"}]
 # ))
 
-# chroma.set_collection_name("test")
 
 
 

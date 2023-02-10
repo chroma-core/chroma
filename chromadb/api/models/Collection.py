@@ -26,8 +26,8 @@ class Collection:
 
     def query(self, query_embeddings, n_results=10, where={}):
         return self.client.query(
-            collection_name = self.name, 
-            embeddings = query_embeddings, 
-            n_results = n_results, 
-            where = where
+            collection_name= self.name, 
+            embeddings= query_embeddings, 
+            n_results= n_results, 
+            where= where
         )

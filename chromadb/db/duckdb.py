@@ -100,14 +100,12 @@ class DuckDB(Clickhouse):
         return [uuid.UUID(x[1]) for x in data_to_insert] # return uuids
 
 
-    def _count(self, collection_uuid=None):
-        where_string = ""
-        if collection_uuid is not None:
-            where_string = f"WHERE collection_uuid = '{collection_uuid}'"
+    def _count(self, collection_uuid):
+        where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}")
 
     def count(self, collection_name=None):
-        collection_uuid = self.get_collection(collection_name).iloc[0].uuid
+        collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
     def _filter_metadata(self, key, value):

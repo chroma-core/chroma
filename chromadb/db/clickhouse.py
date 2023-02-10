@@ -66,6 +66,11 @@ class Clickhouse(DB):
         ) ENGINE = MergeTree() ORDER BY collection_uuid''')
 
 
+    def get_collection_uuid_from_name(self, name):
+        return self._conn.query_df(f'''
+            SELECT uuid FROM collections WHERE name = '{name}'
+        ''').iloc[0].uuid
+
 
     def create_collection(self, name, metadata=None):
         if metadata is None:
@@ -139,13 +144,10 @@ class Clickhouse(DB):
 
         return f" AND JSONExtractString(metadata,'{key}') = '{value}'"
 
-    def fetch(self, ids=None, where={}, sort=None, limit=None, offset=None):
-
-
     def fetch(self, where={}, collection_name=None, collection_uuid=None, ids=None, sort=None, limit=None, offset=None):
 
         if collection_name is not None:
-            collection_uuid = self.get_collection(collection_name).iloc[0].uuid
+            collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value<string> pairs
@@ -163,8 +165,6 @@ class Clickhouse(DB):
             for key in metadata_query:
                 if not isinstance(metadata_query[key], str):
                     raise Exception("Invalid metadata: " + str(metadata_query))
-
-        print('metadata_query', metadata_query)
 
         where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
         if metadata_query is not None:
@@ -205,7 +205,7 @@ class Clickhouse(DB):
 
 
     def count(self, collection_name=None):
-        collection_uuid = self.get_collection(collection_name).iloc[0].uuid
+        collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid)[0][0]
 
 
@@ -220,13 +220,9 @@ class Clickhouse(DB):
         return uuids_deleted.uuid.tolist() if len(uuids_deleted) > 0 else []
 
 
-    def delete(self, where={}):
-        if where["collection_name"] is None:
-            return {"error": "collection_name is required. Use reset to clear the entire db"}
-
-        collection_uuid = self.get_collection(where["collection_name"]).iloc[0].uuid
-        del where["collection_name"]
-        where['collection_uuid'] = collection_uuid
+    def delete(self, where={}, collection_name=None, collection_uuid=None, ids=None):
+        if collection_name is not None:
+            collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -283,7 +279,7 @@ class Clickhouse(DB):
     def get_nearest_neighbors(self, where, embeddings, n_results, collection_name=None, collection_uuid=None):
 
         if collection_name is not None:
-            collection_uuid = self.get_collection(collection_name).iloc[0].uuid
+            collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         results = self.fetch(collection_uuid=collection_uuid, where=where)
         if len(results) > 0:
