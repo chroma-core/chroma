@@ -83,7 +83,6 @@ class DuckDB(Clickhouse):
         return self._conn.execute(f'''SELECT * FROM collections''').fetchall()
 
     def update_collection(self, current_name, new_name, new_metadata):
-        # new_name or new_metadata can be None
         if new_name is None:
             new_name = current_name
         if new_metadata is None:

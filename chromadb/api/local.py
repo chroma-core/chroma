@@ -66,7 +66,6 @@ class LocalAPI(API):
         return self._db.list_collections()
 
 
-    # TODO: this need to actually do what the API says
     def modify(
         self,
         current_name: str,

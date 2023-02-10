@@ -116,7 +116,6 @@ class Clickhouse(DB):
          ''').result_rows
 
     def update_collection(self, current_name, new_name, new_metadata):
-        # new_name or new_metadata can be None
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
@@ -128,9 +127,10 @@ class Clickhouse(DB):
          ALTER TABLE 
             collections 
          UPDATE
-            metadata = {new_metadata}
-         WHERE 
+            metadata = {new_metadata}, 
             name = '{new_name}'
+         WHERE 
+            name = '{current_name}'
          ''')
 
 
