@@ -39,7 +39,7 @@ class LocalAPI(API):
         self,
         name: str,
         metadata: Optional[Dict] = None,
-    ) -> int:
+    ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name) # NIT: tell the user why
 
@@ -50,7 +50,7 @@ class LocalAPI(API):
     def get_collection(
         self,
         name: str,
-    ) -> int:
+    ) -> Collection:
         self._db.get_collection(name)
         return Collection(self, name)
 

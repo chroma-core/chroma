@@ -7,14 +7,22 @@ client = chromadb.Client(Settings(chroma_api_impl="rest", chroma_server_host="lo
 
 print(client.heartbeat())
 client.reset() 
+
 collection = client.create_collection(name="test")
 print(collection)
+
 getcollection = client.get_collection(name="test")
 print(getcollection)
+
 print(collection.count())
 
+assert collection.count() == 0
+assert len(client.list_collections()) == 1
+
 collection2 = client.create_collection(name="test2")
+assert len(client.list_collections()) == 2
 client.delete_collection(name="test2")
+assert len(client.list_collections()) == 1
 print(client.list_collections())
 
 # collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
@@ -39,18 +47,29 @@ collection.add(
 
 print(collection.peek(5))
 print(collection.count()) # NIT: count count take a where filter too
+assert collection.count() == 9
 
-# # doesnt work in clickhouse yet because of metadata filtering
-print("get ids", collection.get(
+### Test get by ids ###
+get_ids_result = collection.get(
     ids=["id1", "id2"],
-))
-print(" get where", collection.get(
-    where={"style": "style1", "uri": "img2.png"},
-))
-print("get both", collection.get(
-    ids=["id1", "id2"],
+)
+print("\nGET ids\n", get_ids_result) 
+assert get_ids_result.shape[0] == 2
+
+### Test get where clause ###
+get_where_result = collection.get(
+    where={"style": "style1", "uri": "img1.png"},
+)
+print("\nGet where\n", get_where_result)
+assert get_where_result.shape[0] == 1
+
+### Test get both ###
+get_both_result = collection.get(
+    ids=["id1", "id3"],
     where={"style": "style1"},
-))
+)
+print("\nGet both\n", get_both_result)
+assert get_both_result.shape[0] == 2
 
 # NIT: verify supports multiple at once is actually working
 print("query", collection.query( 

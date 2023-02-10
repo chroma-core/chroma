@@ -26,14 +26,14 @@ class FastAPI(API):
         return resp.json()
 
 
-    def create_collection(self, name: str, metadata: Optional[Dict] = None) -> int:
+    def create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
         '''Creates a collection'''
         resp = requests.post(self._api_url + "/collections", data=json.dumps({"name":name, "metadata":metadata}))
         resp.raise_for_status()
         return Collection(self, name)
 
 
-    def get_collection(self, name: str) -> int:
+    def get_collection(self, name: str) -> Collection:
         '''Returns a collection'''
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
