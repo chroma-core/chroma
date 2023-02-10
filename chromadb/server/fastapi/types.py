@@ -42,4 +42,5 @@ class CreateCollection(BaseModel):
     metadata: dict = None
 
 class UpdateCollection(BaseModel):
-    metadata: dict = None
+    new_name: str = None
+    new_metadata: dict = None

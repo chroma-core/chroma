@@ -67,13 +67,18 @@ class LocalAPI(API):
 
 
     # TODO: this need to actually do what the API says
-    def update_collection(
+    def modify(
         self,
-        name: str,
-        metadata: Optional[Dict] = None,
+        current_name: str,
+        new_name: str = None,
+        new_metadata: Optional[Dict] = None,
     ) -> int:
         # NIT: make sure we have a valid name like we do in create
-        return self._db.update_collection(name, metadata)
+        if new_name is not None:
+            if not is_valid_index_name(new_name):
+                raise ValueError("Invalid index name: %s" % new_name)
+
+        return self._db.update_collection(current_name, new_name, new_metadata)
 
 
     def delete_collection(

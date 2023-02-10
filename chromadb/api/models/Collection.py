@@ -31,3 +31,8 @@ class Collection:
             n_results= n_results, 
             where= where
         )
+
+    def modify(self, name=None, metadata=None):
+        response = self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        print(response)
+        # update self.name
