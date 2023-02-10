@@ -50,7 +50,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def delete(self, where):
+    def delete(self, ids, where):
         pass
 
     @abstractmethod
