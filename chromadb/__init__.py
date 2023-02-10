@@ -55,8 +55,8 @@ def Client(settings=__settings):
         assert settings[key], f"Setting '{key}' is required when chroma_api_impl={setting}"
 
     if setting == "rest":
-        require("chroma_server_host")
-        require("chroma_server_http_port")
+        require('chroma_server_host')
+        require('chroma_server_http_port')
         print("Running Chroma in client mode using REST to connect to remote server")
         import chromadb.api.fastapi
 
