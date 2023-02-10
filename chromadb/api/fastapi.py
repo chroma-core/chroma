@@ -39,10 +39,12 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(self, name)
 
-
     def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
-        '''Updates a collection'''
-        resp = requests.put(self._api_url + "/collections/" + current_name, data=json.dumps({"metadata":new_metadata, "name":new_name}))
+        """Updates a collection"""
+        resp = requests.put(
+            self._api_url + "/collections/" + current_name,
+            data=json.dumps({"metadata": new_metadata, "name": new_name}),
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -52,16 +54,16 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def count(self, collection_name=None):
+    def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""
         resp = requests.get(self._api_url + "/collections/" + collection_name + "/count")
         resp.raise_for_status()
         return resp.json()
 
-    def peek(self, collection_name, limit=10):
-        return self.get(collection_name, limit=limit)
+    def _peek(self, collection_name, limit=10):
+        return self._get(collection_name, limit=limit)
 
-    def get(
+    def _get(
         self,
         collection_name,
         ids=None,
@@ -87,7 +89,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
-    def delete(self, collection_name, ids=None, where={}):
+    def _delete(self, collection_name, ids=None, where={}):
         """Deletes embeddings from the database"""
 
         resp = requests.post(
@@ -98,19 +100,19 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def add(
+    def _add(
         self,
+        ids,
         collection_name,
         embeddings,
         metadatas=None,
         documents=None,
-        ids=None,
     ):
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-
+        print(f"COLLECTION NAME: {collection_name}")
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/add",
             data=json.dumps(
@@ -126,7 +128,7 @@ class FastAPI(API):
         resp.raise_for_status
         return True
 
-    def update(
+    def _update(
         self,
         collection_name,
         embedding,
@@ -150,7 +152,7 @@ class FastAPI(API):
         resp.raise_for_status
         return True
 
-    def query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
@@ -185,7 +187,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return pd.DataFrame.from_dict(resp.json())
 
-    def create_index(self, collection_name=None):
+    def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
         resp.raise_for_status()
