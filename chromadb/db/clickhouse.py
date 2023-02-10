@@ -5,8 +5,8 @@ import uuid
 import time
 import os
 import itertools
+import json
 
-# from clickhouse_driver import connect, Client
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [
@@ -21,7 +21,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {'embedding': 'Array(Float64)'},
     {'document': 'Nullable(String)'},
     {'id': 'Nullable(String)'},
-    {'metadata': 'Map(String, String)'}
+    {'metadata': 'String'}
 ]
 
 def db_array_schema_to_clickhouse_schema(table_schema):
@@ -119,6 +119,7 @@ class Clickhouse(DB):
     def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
 
         print("duckdb add, embeddings: ", embedding)
+        metadata = [json.dumps(x) if not isinstance(x, str) else x for x in metadata]
 
         data_to_insert = []
         for i in range(len(embedding)):
@@ -134,7 +135,7 @@ class Clickhouse(DB):
         return self._conn.query_df(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
     def _filter_metadata(self, key, value):
-        return "" # TODO
+        return f" AND JSONExtractString(metadata,'{key}') = '{value}'"
 
     def fetch(self, ids=None, where={}, sort=None, limit=None, offset=None):
 
@@ -152,16 +153,16 @@ class Clickhouse(DB):
             if not isinstance(where, dict):
                 raise Exception("Invalid where: " + str(where))
 
-            # ensure where only contains strings, as we only support string equality for now
-            for key in where:
-                if isinstance(where[key], str):
-                    raise Exception("Invalid where: " + str(where))
-
         metadata_query = None
         # if where has a metadata key, we need to do a special query
         if "metadata" in where:
             metadata_query = where["metadata"]
             del where["metadata"]
+
+            # ensure metadata only contains strings, as we only support string equality for now
+            for key in metadata_query:
+                if not isinstance(metadata_query[key], str):
+                    raise Exception("Invalid metadata: " + str(metadata_query))
 
         print('metadata_query', metadata_query)
 
@@ -187,8 +188,7 @@ class Clickhouse(DB):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-       
-
+    
         print("where: ", where)
 
         val = self._fetch(where=where)

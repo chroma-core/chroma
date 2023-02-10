@@ -97,6 +97,12 @@ class DuckDB(Clickhouse):
          INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?)''', data_to_insert)
 
 
+    def _count(self, collection_uuid=None):
+        where_string = ""
+        if collection_uuid is not None:
+            where_string = f"WHERE collection_uuid = '{collection_uuid}'"
+        return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}")
+
     def count(self, collection_name=None):
         collection_uuid = self.get_collection(collection_name).iloc[0].uuid
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
@@ -159,6 +165,16 @@ class DuckDB(Clickhouse):
 
         return self._conn.execute(f'''
             SELECT {db_schema_to_keys()} FROM embeddings {where} LIMIT {n}''').df() # ORDER BY rand()
+    
+    # TODO: This method should share logic with clickhouse impl
+    def reset(self):
+        self._conn.execute('DROP TABLE collections')
+        self._conn.execute('DROP TABLE embeddings')
+        self._create_table_collections()
+        self._create_table_embeddings()
+        
+        self._idx.reset()
+        self._idx = Hnswlib(self._settings)
 
 
 class PersistentDuckDB(DuckDB):
