@@ -1,7 +1,6 @@
 import time
 from typing import Dict, Optional
 from chromadb.api import API
-from chromadb.utils.sampling import score_and_store, get_sample
 from chromadb.server.utils.telemetry.capture import Capture
 from chromadb.api.models.Collection import Collection
 
