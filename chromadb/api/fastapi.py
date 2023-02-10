@@ -171,8 +171,6 @@ class FastAPI(API):
             else:
                 raise Exception(val["error"])
 
-        val["embeddings"] = pd.DataFrame.from_dict(val["embeddings"])
-
         return val
 
     def reset(self):

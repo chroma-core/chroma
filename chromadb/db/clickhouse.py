@@ -297,11 +297,18 @@ class Clickhouse(DB):
             collection_uuid, embeddings, n_results, ids
         )
 
-        return {
-            "ids": uuids,
-            "embeddings": self.get_by_ids(uuids[0]),
-            "distances": distances.tolist()[0],
-        }
+        return_data = []
+        for uuidArray, distanceArray in zip(uuids, distances):
+            item = {}
+            item['items'] = []
+            item['distances'] = []
+            for uuid, distance in zip(uuidArray, distanceArray):
+                item['items'].append(self.get_by_ids([uuid])[0])
+                item['distances'].append(distance.tolist())
+            return_data.append(item)
+
+        return return_data
+
 
     def create_index(self, collection_uuid) -> None:
         """Create an index for a collection_uuid and optionally scoped to a dataset.

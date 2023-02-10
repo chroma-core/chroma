@@ -17,7 +17,6 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
 )
 
-
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings):
         super().__init__(settings)
@@ -141,9 +140,6 @@ class FastAPI(chromadb.server.Server):
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
             )
-
-            print(nnresult)
-            nnresult["embeddings"] = nnresult["embeddings"]  # .to_dict()
             return nnresult
         except NoDatapointsException:
             return {"error": "no data points"}
