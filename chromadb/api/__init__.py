@@ -3,10 +3,10 @@ from typing import Union, Sequence, Optional, TypedDict, List, Dict
 from uuid import UUID
 import pandas as pd
 from chromadb.api.models.Collection import Collection
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where
 
 
 class API(ABC):
-
     @abstractmethod
     def __init__(self):
         pass
@@ -76,11 +76,11 @@ class API(ABC):
     @abstractmethod
     def add(
         self,
-        embedding: Union[Sequence[Sequence[float]], Sequence[float]],
+        embedding: Optional[Embeddings],
         collection_name: Union[str, Sequence[str]],
-        metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
-        documents: Optional[Union[str, Sequence[str]]] = None,
-        ids: Optional[Union[str, Sequence[str]]] = None,
+        metadata: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        ids: Optional[IDs] = None,
     ) -> bool:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
@@ -130,7 +130,7 @@ class API(ABC):
     @abstractmethod
     def get(
         self,
-        where: Optional[Dict[str, str]] = {},
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
@@ -155,7 +155,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def delete(self, where: Optional[Dict[str, str]] = {}) -> Sequence[UUID]:
+    def delete(self, where: Optional[Where] = {}) -> Sequence[UUID]:
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
@@ -174,11 +174,11 @@ class API(ABC):
 
     @abstractmethod
     def query(
-        self, 
-        collection_name: str, 
-        embeddings: Union[Sequence[Sequence[float]], Sequence[float]], 
-        n_results: int = 10, 
-        where: Dict[str, str] = {}
+        self,
+        collection_name: str,
+        embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
     ) -> NearestNeighborsResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.
@@ -228,5 +228,3 @@ class API(ABC):
 
         """
         pass
-
-   

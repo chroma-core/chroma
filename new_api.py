@@ -26,9 +26,13 @@ print(client.heartbeat())
 client.reset()
 
 collection = client.create_collection(name="test")
+# Check type of Collection
+assert type(collection) == chromadb.api.models.Collection.Collection
 print(collection)
 
 getcollection = client.get_collection(name="test")
+# Check type of Collection
+assert type(getcollection) == chromadb.api.models.Collection.Collection
 print(getcollection)
 
 print(collection.count())
@@ -41,6 +45,7 @@ assert len(client.list_collections()) == 2
 client.delete_collection(name="test2")
 assert len(client.list_collections()) == 1
 print(client.list_collections())
+# Check type of list_collections
 
 # collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
 # collection = client.update_collection(oldName="test", newName="test2") # this feels a little odd to me (Jeff) -> collection.update(name="test2")

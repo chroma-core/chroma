@@ -94,6 +94,7 @@ class Clickhouse(DB):
         where = " AND ".join([self._filter_metadata(key, value) for key, value in where.items()])
 
         if ids is not None:
+            # Check if where was created
             if len(where) > 6:  # NIT: hacky
                 where += " AND "
 
