@@ -17,6 +17,10 @@ collection2 = client.create_collection(name="test2")
 client.delete_collection(name="test2")
 print(client.list_collections())
 
+# collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
+# collection = client.update_collection(oldName="test", newName="test2") # this feels a little odd to me (Jeff) -> collection.update(name="test2")
+# client.delete_collection(name="test")
+
 # add many
 collection.add( 
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
@@ -64,11 +68,6 @@ print("query", collection.query(
 #     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"], 
 # )
 
-# collection.get( # you get it all back and you just fucking deal with it
-#     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
-# 		# where/filter?
-# )
-
 # collection.delete( # propagates to the index
 #     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
 # 	# where/filter?
@@ -86,9 +85,3 @@ print("query", collection.query(
 # )
 
 
-# collection.create_index # wipes out the index you have (if you have one) and creates a fresh one
-# collection = client.update_collection(oldName="test", newName="test2") # this feels a little odd to me (Jeff) -> collection.update(name="test2")
-
-# client.delete_collection(name="test")
-
-# todo: add fails if collisions on id
