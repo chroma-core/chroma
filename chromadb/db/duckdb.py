@@ -93,8 +93,11 @@ class DuckDB(Clickhouse):
             data_to_insert.append([collection_uuid, str(uuid.uuid4()), embedding[i], metadata[i], documents[i], ids[i]])
 
         insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
+
         self._conn.executemany(f'''
          INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?)''', data_to_insert)
+        
+        return [uuid.UUID(x[1]) for x in data_to_insert] # return uuids
 
 
     def _count(self, collection_uuid=None):
@@ -108,7 +111,7 @@ class DuckDB(Clickhouse):
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
     def _filter_metadata(self, key, value):
-        return f" AND json_extract_string(metadata,'$.{key}') = '{value}'"
+        return f" json_extract_string(metadata,'$.{key}') = '{value}'"
 
     def _fetch(self, where=""):
         val = self._conn.execute(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''').df()

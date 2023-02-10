@@ -29,7 +29,7 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/collections/{name}/fetch", self.fetch, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/delete", self.delete, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/count", self.count, methods=["GET"])
-        self.router.add_api_route("/api/v1/collections/{name}/search", self.get_nearest_neighbors, methods=["POST"])
+        self.router.add_api_route("/api/v1/collections/{name}/query", self.get_nearest_neighbors, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}/create_index", self.create_index, methods=["POST"])
         self.router.add_api_route("/api/v1/collections/{name}", self.get_collection, methods=["GET"])
         self.router.add_api_route("/api/v1/collections/{name}", self.update_collection, methods=["PUT"])
@@ -108,9 +108,10 @@ class FastAPI(chromadb.server.Server):
 
     def get_nearest_neighbors(self, name, query: QueryEmbedding):
         try:
-            nnresult = self._api.search(where=query.where,
-                                                       embedding=query.embedding,
-                                                       n_results=query.n_results)
+            nnresult = self._api.query(collection_name=name,
+                                        where=query.where,
+                                        embedding=query.embedding,
+                                        n_results=query.n_results)
             nnresult['embeddings'] = nnresult['embeddings'].to_dict()
             return nnresult
         except NoDatapointsException:

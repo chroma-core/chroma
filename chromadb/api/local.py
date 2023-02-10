@@ -29,9 +29,6 @@ class LocalAPI(API):
     def heartbeat(self):
         return int(1000 * time.time_ns())
 
-    # def Collection(self, name):
-    #     return Collection(self, name)
-
     def create_collection(
         self,
         name: str,
@@ -125,7 +122,7 @@ class LocalAPI(API):
 
         collection_uuid = self._get_collection_db(collection_name).iloc[0].uuid
         added_uuids = self._db.add(collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids)
-        # self._db.add_incremental(collection_uuid, added_uuids, embeddings)
+        self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
         return True
 
@@ -196,9 +193,14 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def search(self, embedding, n_results=10, where={}):
-        # collection_name should already be in where
-        return self._db.get_nearest_neighbors(where, embedding, n_results)
+    def query(self, collection_name, embeddings, n_results=10, where={}):
+
+        return self._db.get_nearest_neighbors(
+            collection_name=collection_name, 
+            where=where, 
+            embeddings=embeddings, 
+            n_results=n_results
+        )
 
     def raw_sql(self, raw_sql):
 

@@ -139,11 +139,8 @@ class FastAPI(API):
         resp.raise_for_status
         return True
 
-    def search(self, collection_name, embedding, n_results=10, where={}):
+    def query(self, collection_name, embedding, n_results=10, where={}):
         '''Gets the nearest neighbors of a single embedding'''
-
-        # where = self.where_with_collection_name(where)
-        where["collection_name"] = collection_name
 
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/search", data = json.dumps({
             "embedding": embedding,
