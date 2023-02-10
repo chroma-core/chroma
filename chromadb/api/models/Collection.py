@@ -27,8 +27,8 @@ class Collection:
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         ids: Optional[IDs] = None,
-    ) -> None:
-        self.client.add(self.name, embeddings, metadatas, documents, ids)
+    ):
+        return self.client.add(self.name, embeddings, metadatas, documents, ids)
 
     def get(
         self,
