@@ -39,16 +39,6 @@ class GetAPITest(unittest.TestCase):
         assert mock_api.called
         assert mock_db.called
 
-    @patch('chroma.db.duckdb.DuckDB', autospec=True)
-    @patch('chroma.api.celery.CeleryAPI', autospec=True)
-    @patch.dict(os.environ, {}, clear=True)
-    def test_celery(self, mock_api, mock_db):
-        api = chromadb.Client(chromadb.config.Settings(chroma_api_impl="celery",
-                                                    chroma_cache_dir="./foo",
-                                                    celery_broker_url="foo",
-                                                    celery_result_backend="foo"))
-        assert mock_api.called
-        assert mock_db.called
 
 
     @patch('chroma.api.fastapi.FastAPI', autospec=True)
@@ -59,14 +49,3 @@ class GetAPITest(unittest.TestCase):
                                                     chroma_server_host='foo',
                                                     chroma_server_http_port='80'))
         assert mock.called
-
-
-    @patch('chroma.api.arrowflight.ArrowFlightAPI', autospec=True)
-    @patch.dict(os.environ, {}, clear=True)
-    def test_arrowflight(self, mock):
-        api = chromadb.Client(chromadb.config.Settings(chroma_api_impl="arrowflight",
-                                                    chroma_cache_dir="./foo",
-                                                    chroma_server_host='foo',
-                                                    chroma_server_grpc_port='9999'))
-        assert mock.called
-

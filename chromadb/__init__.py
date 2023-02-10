@@ -51,24 +51,12 @@ def Client(settings=__settings):
     def require(key):
         assert settings[key], f"Setting '{key}' is required when chroma_api_impl={setting}"
 
-    if setting == "arrowflight":
-        require('chroma_server_host')
-        require('chroma_server_grpc_port')
-        print("Running Chroma in client mode using ArrowFlight to connect to remote server")
-        import chromadb.api.arrowflight
-        return chromadb.api.arrowflight.ArrowFlightAPI(settings)
-    elif setting == "rest":
+    if setting == "rest":
         require('chroma_server_host')
         require('chroma_server_http_port')
         print("Running Chroma in client mode using REST to connect to remote server")
         import chromadb.api.fastapi
         return chromadb.api.fastapi.FastAPI(settings)
-    elif setting == "celery":
-        require('celery_broker_url')
-        require('celery_result_backend')
-        print("Running Chroma in server mode with Celery jobs enabled.")
-        import chromadb.api.celery
-        return chromadb.api.celery.CeleryAPI(settings, get_db(settings))
     elif setting == "local":
         print("Running Chroma using direct local API.")
         import chromadb.api.local
