@@ -119,8 +119,6 @@ class Clickhouse(DB):
 
     def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
 
-        print("duckdb add, embeddings: ", embedding)
-
         data_to_insert = []
         for i in range(len(embedding)):
             data_to_insert.append([collection_uuid, uuid.uuid4(), embedding[i], metadata[i], documents[i], ids[i]])
@@ -137,17 +135,12 @@ class Clickhouse(DB):
         return self._conn.query_dataframe(f'''SELECT {db_schema_to_keys()} FROM embeddings {where}''')
 
     def _filter_metadata(self, key, value):
-        return "" # TODO
+        return "" 
 
-    def fetch(self, ids=None, where={}, sort=None, limit=None, offset=None):
+    def fetch(self, where={}, collection_name=None, collection_uuid=None, ids=None, sort=None, limit=None, offset=None):
 
-        print("clickhouse fetch, ids: ", ids)
-        print("clickhouse fetch, where: ", where)
-
-        if "collection_name" in where:
-            collection_uuid = self.get_collection(where["collection_name"]).iloc[0].uuid
-            del where["collection_name"]
-            where['collection_uuid'] = collection_uuid
+        if collection_name is not None:
+            collection_uuid = self.get_collection(collection_name).iloc[0].uuid
 
         s3= time.time()
         # check to see if query is a dict and if it is a flat list of key value pairs
@@ -155,29 +148,17 @@ class Clickhouse(DB):
             if not isinstance(where, dict):
                 raise Exception("Invalid where: " + str(where))
 
-            # ensure where is a flat dict - otherwise we cant use clickhouse Map (and JSON current not supported in clickhouse-driver)
-            # for key in where:
-            #     if isinstance(where[key], dict):
-            #         raise Exception("Invalid where: " + str(where))
-
-        metadata_query = None
-        # if where has a metadata key, we need to do a special query
-        if "metadata" in where:
-            metadata_query = where["metadata"]
-            del where["metadata"]
-
-        print('metadata_query', metadata_query)
-
-        where = " AND ".join([f"{key} = '{value}'" for key, value in where.items()])
-        if metadata_query is not None:
-            for key, value in metadata_query.items():
-                where += self._filter_metadata(key, value)
+        where = ""
+        if len(where) > 0:
+            where = " AND ".join([self._filter_metadata(key, value) for key, value in where.items()])
 
         if ids is not None:
             where += f" AND id IN {tuple(ids)}"
         
         if where:
             where = f"WHERE {where}"
+
+        where += f" AND collection_uuid = '{collection_uuid}'"
 
         if sort is not None:
             where += f" ORDER BY {sort}"
@@ -190,9 +171,6 @@ class Clickhouse(DB):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-       
-
-        print("where: ", where)
 
         val = self._fetch(where=where)
 
@@ -284,19 +262,18 @@ class Clickhouse(DB):
             SELECT {db_schema_to_keys()} FROM embeddings {where} ORDER BY rand() LIMIT {n}''')
 
 
-    def get_nearest_neighbors(self, where, embedding, n_results):
+    def get_nearest_neighbors(self, where, embeddings, n_results, collection_name=None, collection_uuid=None):
 
-        collection_uuid = self.get_collection(where["collection_name"]).iloc[0].uuid
-        del where["collection_name"]
-        where['collection_uuid'] = collection_uuid
+        if collection_name is not None:
+            collection_uuid = self.get_collection(collection_name).iloc[0].uuid
 
-        results = self.fetch(where)
+        results = self.fetch(collection_uuid=collection_uuid, where=where)
         if len(results) > 0:
             ids = results.uuid.tolist()
         else:
             raise NoDatapointsException("No datapoints found for the supplied filter")
 
-        uuids, distances = self._idx.get_nearest_neighbors(where['collection_uuid'], embedding, n_results, ids)
+        uuids, distances = self._idx.get_nearest_neighbors(collection_uuid, embeddings, n_results, ids)
 
         return {
             "ids": uuids,
@@ -314,7 +291,7 @@ class Clickhouse(DB):
         """
         print(f"creating index for {collection_uuid}")
         query = {"collection_uuid": collection_uuid}
-        fetch = self.fetch(query)
+        fetch = self.fetch(collection_uuid=collection_uuid, where=query)
         self._idx.run(collection_uuid, fetch.uuid.tolist(), fetch.embedding.tolist())
         #chroma_telemetry.capture('created-index-run-process', {'n': len(fetch)})
 

@@ -40,8 +40,6 @@ class Hnswlib(Index):
         index.set_ef(ef)
         index.set_num_threads(num_threads)
         index.add_items(embeddings, range(len(uuids)))
-        print("self._id_to_uuid", self._id_to_uuid)
-        print("run range", range(len(uuids)-1))
 
         self._index = index
         self._collection_uuid = collection_uuid
@@ -54,10 +52,6 @@ class Hnswlib(Index):
 
     
     def add_incremental(self, collection_uuid, uuids, embeddings):
-        print("\n\nADD INCREMENTAL")
-        print("embeddings", embeddings)
-        print("uuids", uuids)
-        
         if self._collection_uuid != collection_uuid:
             self._load(collection_uuid)
 
@@ -82,8 +76,6 @@ class Hnswlib(Index):
 
             # update the metadata
             self._index_metadata['elements'] += new_elements
-
-        print("got here?")
 
         self._save()
 

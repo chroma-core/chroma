@@ -77,7 +77,7 @@ class API(ABC):
     @abstractmethod
     def add(
         self,
-        embedding: Sequence[Sequence[float]],
+        embedding: Union[Sequence[Sequence[float]], Sequence[float]],
         collection_name: Union[str, Sequence[str]],
         metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
         documents: Optional[Union[str, Sequence[str]]] = None,
@@ -174,8 +174,12 @@ class API(ABC):
         distances: Sequence[float]
 
     @abstractmethod
-    def search(
-        self, embedding: Sequence[float], n_results: int = 10, where: Dict[str, str] = {}
+    def query(
+        self, 
+        collection_name: str, 
+        embeddings: Union[Sequence[Sequence[float]], Sequence[float]], 
+        n_results: int = 10, 
+        where: Dict[str, str] = {}
     ) -> NearestNeighborsResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.
