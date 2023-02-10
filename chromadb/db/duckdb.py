@@ -164,7 +164,7 @@ class DuckDB(Clickhouse):
                 embeddings
             WHERE
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
-        ''').df()
+        ''').fetchall()
 
 
     def raw_sql(self, sql):
