@@ -26,14 +26,17 @@ class Collection:
 
     def query(self, query_embeddings, n_results=10, where={}):
         return self.client.query(
-            collection_name= self.name, 
-            query_embeddings= query_embeddings, 
-            n_results= n_results, 
-            where= where
+            collection_name=self.name,
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+            where=where,
         )
-
+      
     def modify(self, name=None, metadata=None):
         self.client.modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
-        
+
+    #def delete(self, ids=None, where=None):
+    #    return self.client.delete(self.name, ids, where)
+

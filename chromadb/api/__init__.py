@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Union, Sequence, Optional, TypedDict, List, Dict
 from uuid import UUID
 import pandas as pd
+from chromadb.api.models.Collection import Collection
 
 
 class API(ABC):
@@ -41,7 +42,7 @@ class API(ABC):
         self,
         name: str,
         metadata: Optional[Dict] = None,
-    ) -> int:
+    ) -> Collection:
         """Creates a new collection in the database
 
         Args:
@@ -59,7 +60,7 @@ class API(ABC):
         self,
         name: Optional[str] = None,
         uuid: Optional[UUID] = None,
-    ) -> int:
+    ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
         Args:
