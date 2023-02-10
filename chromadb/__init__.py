@@ -25,18 +25,18 @@ def get_db(settings=__settings):
     if setting == "clickhouse":
         require("clickhouse_host")
         require("clickhouse_port")
-        require("chroma_cache_dir")
+        require("persist_directory")
         print("Using Clickhouse for database")
         import chromadb.db.clickhouse
 
         return chromadb.db.clickhouse.Clickhouse(settings)
     elif setting == "duckdb+parquet":
-        require("chroma_cache_dir")
+        require("persist_directory")
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
-        require("chroma_cache_dir")
+        require("persist_directory")
         print("Using DuckDB in-memory for database. Data will be transient.")
         import chromadb.db.duckdb
 
