@@ -118,9 +118,6 @@ class DuckDB(Clickhouse):
             [new_name, json.dumps(new_metadata), current_name],
         )
 
-    def delete_collection(self, name):
-        return self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
-
     #
     #  ITEM METHODS
     #
