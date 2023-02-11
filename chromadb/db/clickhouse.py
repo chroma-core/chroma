@@ -161,11 +161,18 @@ class Clickhouse(DB):
         )
 
     def delete_collection(self, name):
-        self._conn.command(
-            f"""
+        collection_uuid = self.get_collection_uuid_from_name(name)
+        self._conn.command(f'''
+        DELETE FROM embeddings WHERE collection_uuid = '{collection_uuid}'
+        ''')
+
+        self._conn.command(f'''
          DELETE FROM collections WHERE name = '{name}'
-         """
-        )
+         ''')
+
+        self._idx.delete_index(collection_uuid)
+        return True
+
 
     #
     #  ITEM METHODS

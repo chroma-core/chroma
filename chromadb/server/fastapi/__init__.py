@@ -147,7 +147,7 @@ class FastAPI(chromadb.server.Server):
             return {"error": "no data points"}
 
     def raw_sql(self, raw_sql: RawSql):
-        return self._api.raw_sql(raw_sql.raw_sql).to_dict()
+        return self._api.raw_sql(raw_sql.raw_sql)
 
     def create_index(self, collection_name: str):
         return self._api.create_index(collection_name)
