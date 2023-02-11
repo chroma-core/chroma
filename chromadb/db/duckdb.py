@@ -98,14 +98,14 @@ class DuckDB(Clickhouse):
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
 
-
     def delete_collection(self, name):
         collection_uuid = self.get_collection_uuid_from_name(name)
-        self._conn.execute(f'''DELETE FROM embeddings WHERE collection_uuid = ?''', [collection_uuid])
+        self._conn.execute(
+            f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
+        )
         self._idx.delete_index(collection_uuid)
-        self._conn.execute(f'''DELETE FROM collections WHERE name = ?''', [name])
+        self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
         return True
-
 
     def update_collection(self, current_name, new_name, new_metadata):
         if new_name is None:
@@ -273,7 +273,9 @@ class PersistentDuckDB(DuckDB):
         else:
             path = self._save_folder + "/chroma-embeddings.parquet"
             self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
-            print(f"""loaded in {self._conn.query(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings""")
+            print(
+                f"""loaded in {self._conn.query(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
+            )
 
         # load in the collections
         if not os.path.exists(f"{self._save_folder}/chroma-collections.parquet"):
@@ -281,7 +283,9 @@ class PersistentDuckDB(DuckDB):
         else:
             path = self._save_folder + "/chroma-collections.parquet"
             self._conn.execute(f"INSERT INTO collections SELECT * FROM read_parquet('{path}');")
-            print(f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections""")
+            print(
+                f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections"""
+            )
 
     def __del__(self):
         print("PersistentDuckDB del, about to run persist")
@@ -292,7 +296,6 @@ class PersistentDuckDB(DuckDB):
         # empty the save folder
         import shutil
         import os
+
         shutil.rmtree(self._save_folder)
         os.mkdir(self._save_folder)
-
-

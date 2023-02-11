@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, Callable
 from chromadb.api import API
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.server.utils.telemetry.capture import Capture
@@ -37,12 +37,13 @@ class LocalAPI(API):
         self,
         name: str,
         metadata: Optional[Dict] = None,
+        embedding_fn: Optional[Callable] = None,
     ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
 
         self._db.create_collection(name, metadata)
-        return Collection(client=self, name=name)
+        return Collection(client=self, name=name, embedding_fn=embedding_fn)
 
     def get_collection(
         self,

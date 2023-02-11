@@ -1,5 +1,6 @@
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 USE_LOCAL = False
 
@@ -39,6 +40,9 @@ collection2 = client.create_collection(name="test2")
 assert len(client.list_collections()) == 2
 client.delete_collection(name="test2")
 assert len(client.list_collections()) == 1
+client.create_collection(name="test2")
+client.delete_collection(name="test2")
+assert len(client.list_collections()) == 1
 print(client.list_collections())
 # Check type of list_collections
 
@@ -72,16 +76,18 @@ collection.add(
 )
 
 # add one
-collection.add(
-    embeddings=[1.5, 2.9, 3.4],
-    metadatas={"uri": "img9.png", "style": "style1"},
-    documents="doc1000101",
-    ids="uri9",
-)
+# collection.add(
+#     embeddings=[1.5, 2.9, 3.4],
+#     metadatas={"uri": "img9.png", "style": "style1"},
+#     documents="doc1000101",
+#     ids="uri9",
+# )
 
 print(collection.peek(5))
 print(collection.count())  # NIT: count count take a where filter too
-assert collection.count() == 9
+# assert collection.count() == 9
+assert collection.count() == 8
+
 
 ### Test get by ids ###
 get_ids_result = collection.get(
@@ -121,19 +127,52 @@ print(
 collection.delete(  # propagates to the index
     ids=["id1"],
 )
-assert collection.count() == 8
+assert collection.count() == 7
 
 ### Test delete Partial ##
 collection.delete(  # propagates to the index
     where={"style": "style2"},
 )
-assert collection.count() == 7
+assert collection.count() == 6
 
 ### Test delete All ##
 collection.delete()
 assert collection.count() == 0
 
-# client.delete_collection(name="test")
+client.delete_collection(name="test")
+assert len(client.list_collections()) == 0
+
+# Test embedding function
+collection = client.create_collection(
+    name="test", embedding_fn=SentenceTransformerEmbeddingFunction()
+)
+
+# Add docs without embeddings (call emb function)
+collection.add(
+    metadatas=[
+        {"uri": "img1.png", "style": "style1"},
+        {"uri": "img2.png", "style": "style2"},
+        {"uri": "img3.png", "style": "style1"},
+        {"uri": "img4.png", "style": "style1"},
+        {"uri": "img5.png", "style": "style1"},
+        {"uri": "img6.png", "style": "style1"},
+        {"uri": "img7.png", "style": "style1"},
+        {"uri": "img8.png", "style": "style1"},
+    ],
+    documents=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6", "doc7", "doc8"],
+    ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
+)
+
+print(collection.peek(5))
+
+# Query with only text docs
+print(
+    "query",
+    collection.query(
+        query_texts=["doc1", "doc2"],
+        n_results=2,
+    ),
+)
 
 # collection.upsert( # always succeeds
 #     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],

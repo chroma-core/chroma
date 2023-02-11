@@ -1,15 +1,16 @@
-from typing import TYPE_CHECKING, Optional, Union, Sequence
+from typing import TYPE_CHECKING, Callable, Optional, Sequence
 from pydantic import BaseModel, PrivateAttr
 import json
 
 from chromadb.api.types import (
-    QueryResult,
     Where,
     Embeddings,
     IDs,
     Metadatas,
     Documents,
+    EmbeddingFunction,
     GetResult,
+    QueryResult,
 )
 
 if TYPE_CHECKING:
@@ -19,9 +20,11 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     _client: "API" = PrivateAttr()
+    _embedding_fn: Optional[EmbeddingFunction] = PrivateAttr()
 
-    def __init__(self, client: "API", name: str):
+    def __init__(self, client: "API", name: str, embedding_fn: Optional[EmbeddingFunction] = None):
         self._client = client
+        self._embedding_fn = embedding_fn
         super().__init__(name=name)
 
     def __repr__(self):
@@ -33,12 +36,38 @@ class Collection(BaseModel):
     def add(
         self,
         ids: IDs,
-        embeddings: Embeddings,
+        embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
+        # Check that one of embeddings or documents is provided
+        if embeddings is None and documents is None:
+            raise ValueError("You must provide either embeddings or documents, or both")
+
+        # Check that, if they're provided, the lengths of the arrays match the length of ids
+        if embeddings is not None and len(embeddings) != len(ids):
+            raise ValueError(
+                f"Number of embeddings {len(embeddings)} must match number of ids {len(ids)}"
+            )
+        if metadatas is not None and len(metadatas) != len(ids):
+            raise ValueError(
+                f"Number of metadatas {len(metadatas)} must match number of ids {len(ids)}"
+            )
+        if documents is not None and len(documents) != len(ids):
+            raise ValueError(
+                f"Number of documents {len(documents)} must match number of ids {len(ids)}"
+            )
+
+        # If document embeddings are not provided, we need to compute them
+        if embeddings is None:
+            if self._embedding_fn is None:
+                raise ValueError("You must provide embeddings or a function to compute them")
+            embeddings = self._embedding_fn(documents)
+
         self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
+        # NIT: return something?
+        return
 
     def get(
         self,
@@ -54,8 +83,27 @@ class Collection(BaseModel):
         return self._client._peek(self.name, limit)
 
     def query(
-        self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}
+        self,
+        query_embeddings: Optional[Embeddings] = None,
+        query_texts: Optional[Documents] = None,
+        n_results: int = 10,
+        where: Where = {},
     ) -> QueryResult:
+
+        # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
+        if (query_embeddings is None and query_texts is None) or (
+            query_embeddings is not None and query_texts is not None
+        ):
+            raise ValueError(
+                "You must provide either query embeddings or query texts, but not both"
+            )
+
+        # If query_embeddings are not provided, we need to compute them from the query_texts
+        if query_embeddings is None:
+            if self._embedding_fn is None:
+                raise ValueError("You must provide embeddings or a function to compute them")
+            query_embeddings = self._embedding_fn(query_texts)
+
         return self._client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,

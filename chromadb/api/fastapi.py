@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 from chromadb.api import API
 from chromadb.errors import NoDatapointsException
 import pandas as pd
@@ -31,13 +31,18 @@ class FastAPI(API):
 
         return collections
 
-    def create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+    def create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_fn: Optional[Callable] = None,
+    ) -> Collection:
         """Creates a collection"""
         resp = requests.post(
             self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata})
         )
         resp.raise_for_status()
-        return Collection(client=self, name=name)
+        return Collection(client=self, name=name, embedding_fn=embedding_fn)
 
     def get_collection(self, name: str) -> Collection:
         """Returns a collection"""
