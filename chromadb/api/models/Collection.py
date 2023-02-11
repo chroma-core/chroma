@@ -39,7 +39,6 @@ class Collection(BaseModel):
     ):
         self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
 
-
     def get(
         self,
         ids: Optional[IDs] = None,

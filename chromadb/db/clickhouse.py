@@ -316,8 +316,10 @@ class Clickhouse(DB):
             None
         """
         get = self.get(collection_uuid=collection_uuid)
-        embeddings = [x[2] for x in get]
+
         uuids = [x[1] for x in get]
+        embeddings = [x[2] for x in get]
+
         self._idx.run(collection_uuid, uuids, embeddings)
         # chroma_telemetry.capture('created-index-run-process', {'n': len(get)})
 
