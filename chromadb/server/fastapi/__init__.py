@@ -104,6 +104,7 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
             documents=add.documents,
             ids=add.ids,
+            increment_index=add.increment_index,
         )
 
     def update(self, collection_name: str, add: AddEmbedding):
