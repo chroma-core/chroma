@@ -23,5 +23,9 @@ class GetResult(TypedDict):
     metadatas: list[Metadata]
 
 
-class QueryResult(GetResult):
-    distances: list[float]
+class QueryResult(TypedDict):
+    ids: list[IDs]
+    embeddings: list[list[Embedding]]
+    documents: list[list[Document]]
+    metadatas: list[list[Metadata]]
+    distances: list[list[float]]

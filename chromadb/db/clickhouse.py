@@ -162,17 +162,20 @@ class Clickhouse(DB):
 
     def delete_collection(self, name):
         collection_uuid = self.get_collection_uuid_from_name(name)
-        self._conn.command(f'''
+        self._conn.command(
+            f"""
         DELETE FROM embeddings WHERE collection_uuid = '{collection_uuid}'
-        ''')
+        """
+        )
 
-        self._conn.command(f'''
+        self._conn.command(
+            f"""
          DELETE FROM collections WHERE name = '{name}'
-         ''')
+         """
+        )
 
         self._idx.delete_index(collection_uuid)
         return True
-
 
     #
     #  ITEM METHODS
@@ -277,7 +280,7 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids=list):
+    def get_by_ids(self, ids: list):
         return self._conn.query(
             f"""
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
@@ -286,7 +289,7 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(
         self, where, embeddings, n_results, collection_name=None, collection_uuid=None
-    ):
+    ) -> tuple[list[list[uuid.UUID]], list[list[float]]]:
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
@@ -302,17 +305,7 @@ class Clickhouse(DB):
             collection_uuid, embeddings, n_results, ids
         )
 
-        return_data = []
-        for uuidArray, distanceArray in zip(uuids, distances):
-            item = {}
-            item["items"] = []
-            item["distances"] = []
-            for uuid, distance in zip(uuidArray, distanceArray):
-                item["items"].append(self.get_by_ids([uuid])[0])
-                item["distances"].append(distance.tolist())
-            return_data.append(item)
-
-        return return_data
+        return uuids, distances
 
     def create_index(self, collection_uuid) -> None:
         """Create an index for a collection_uuid and optionally scoped to a dataset.

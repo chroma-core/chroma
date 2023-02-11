@@ -56,13 +56,6 @@ class Collection(BaseModel):
     def query(
         self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}
     ) -> QueryResult:
-        result = self._client._query(
-            collection_name=self.name,
-            query_embeddings=query_embeddings,
-            n_results=n_results,
-            where=where,
-        )
-        print(result)
         return self._client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,

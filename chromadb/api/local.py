@@ -2,7 +2,7 @@ import json
 import time
 from typing import Dict, Optional, Sequence
 from chromadb.api import API
-from chromadb.api.types import GetResult
+from chromadb.api.types import GetResult, QueryResult
 from chromadb.server.utils.telemetry.capture import Capture
 from chromadb.api.models.Collection import Collection
 
@@ -166,7 +166,7 @@ class LocalAPI(API):
 
         return True
 
-    def _db_result_to_api_result(self, db_result) -> GetResult:
+    def _db_result_to_get_result(self, db_result) -> GetResult:
         query_result = GetResult(embeddings=[], documents=[], ids=[], metadatas=[])
         for entry in db_result:
             query_result["embeddings"].append(entry[2])
@@ -194,7 +194,7 @@ class LocalAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db_result_to_api_result(
+        return self._db_result_to_get_result(
             self._db.get(
                 collection_name=collection_name,
                 ids=ids,
@@ -218,18 +218,38 @@ class LocalAPI(API):
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
-
         self._db.reset()
         return True
 
     def _query(self, collection_name, query_embeddings, n_results=10, where={}):
-
-        return self._db.get_nearest_neighbors(
+        uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
             where=where,
             embeddings=query_embeddings,
             n_results=n_results,
         )
+
+        query_result = QueryResult(embeddings=[], documents=[], ids=[], metadatas=[], distances=[])
+        for i in range(len(uuids)):
+            embeddings = []
+            documents = []
+            ids = []
+            metadatas = []
+            db_result = self._db.get_by_ids(uuids[i])
+
+            for entry in db_result:
+                embeddings.append(entry[2])
+                documents.append(entry[3])
+                ids.append(entry[4])
+                metadatas.append(json.loads(entry[5]))
+
+            query_result["embeddings"].append(embeddings)
+            query_result["documents"].append(documents)
+            query_result["ids"].append(ids)
+            query_result["metadatas"].append(metadatas)
+            query_result["distances"].append(distances[i].tolist())
+
+        return query_result
 
     def raw_sql(self, raw_sql):
 

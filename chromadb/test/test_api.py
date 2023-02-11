@@ -133,7 +133,6 @@ def test_get_from_db(api_fixture, request):
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
     records = collection.get()
-    print(records)
     for key in records.keys():
         assert len(records[key]) == 2
 
@@ -163,8 +162,8 @@ def test_get_nearest_neighbors(api_fixture, request):
 
     nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={})
 
-    print("nn", nn)
-    assert len(nn[0]["items"]) == 1
+    for key in nn.keys():
+        assert len(nn[key]) == 1
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -256,7 +255,8 @@ def test_increment_index_on(api_fixture, request):
     # increment index
     # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
     nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
-    assert len(nn[0]["items"]) == 1
+    for key in nn.keys():
+        assert len(nn[key]) == 1
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -271,7 +271,8 @@ def test_increment_index_off(api_fixture, request):
     # incremental index
     collection.create_index()
     nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
-    assert len(nn[0]["items"]) == 1
+    for key in nn.keys():
+        assert len(nn[key]) == 1
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)

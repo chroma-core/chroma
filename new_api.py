@@ -107,7 +107,7 @@ assert len(get_both_result["documents"]) == 2
 
 # NIT: verify supports multiple at once is actually working
 print(
-    "query",
+    "\nquery",
     collection.query(
         query_embeddings=[[1.1, 2.3, 3.2], [5.1, 4.3, 2.2]],
         # OR // COULD BE an AND and return a tuple
