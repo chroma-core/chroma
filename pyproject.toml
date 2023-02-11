@@ -20,8 +20,7 @@ dependencies = [
   'requests ~= 2.28',
   'pydantic ~= 1.9',
   'hdbscan ~= 0.8',
-  'hnswlib @ git+https://oauth2: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@github.com/chroma-core/hnswlib.git',
-  'duckdb ~= 0.5',
+  'hnswlib ~= 0.7',
   'posthog ~= 2.1',
   'uuid ~= 1.30',
   'clickhouse_connect ~= 0.5.7'
