@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Any
-from chromadb.api.types import Item
+from typing import Sequence
 
 
 class DB(ABC):

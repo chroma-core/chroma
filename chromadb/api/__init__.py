@@ -7,7 +7,7 @@ from chromadb.api.types import (
     Documents,
     Embeddings,
     IDs,
-    Item,
+    QueryResult,
     Metadatas,
     NearestNeighborsResult,
     Where,
@@ -155,7 +155,7 @@ class API(ABC):
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-    ) -> Sequence[Item]:
+    ) -> QueryResult:
 
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.

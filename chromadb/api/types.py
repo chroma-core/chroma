@@ -1,20 +1,27 @@
-from typing import Union, Sequence, Dict, TypedDict
+from typing import Union, Sequence, Dict, TypedDict, Optional
 
 ID = str
-IDs = Sequence[ID]
+IDs = list[ID]
 
 Embedding = Sequence[float]
+# TODO: Use generic one or many type
 Embeddings = Union[Sequence[Embedding], Embedding]
 
 Metadata = Dict[str, str]
 Metadatas = Union[Metadata, Sequence[Metadata]]
 
 Where = Dict[str, str]
-Documents = Union[str, Sequence[str]]
+Document = str
+Documents = Union[Document, Sequence[Document]]
 
-Item = Dict
+
+class QueryResult(TypedDict):
+    ids: IDs
+    embeddings: list[Embedding]
+    documents: list[Document]
+    metadatas: list[Metadata]
 
 
 class NearestNeighborsResult(TypedDict):
-    items: list[Item]
+    items: list[dict]
     distances: Sequence[float]

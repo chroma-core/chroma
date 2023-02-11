@@ -93,7 +93,7 @@ class FastAPI(API):
         )
 
         resp.raise_for_status()
-        return pd.DataFrame.from_dict(resp.json())
+        return resp.json()
 
     def _delete(self, collection_name, ids=None, where={}):
         """Deletes embeddings from the database"""

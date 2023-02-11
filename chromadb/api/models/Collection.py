@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Union, Sequence
 from pydantic import BaseModel, PrivateAttr
+import json
 
 from chromadb.api.types import (
     NearestNeighborsResult,
@@ -8,7 +9,7 @@ from chromadb.api.types import (
     IDs,
     Metadatas,
     Documents,
-    Item,
+    QueryResult,
 )
 
 if TYPE_CHECKING:
@@ -46,11 +47,12 @@ class Collection(BaseModel):
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[Item]:
-        return self._client._get(self.name, ids, where, sort, limit, offset)
+    ) -> QueryResult:
+        db_get = self._client._get(self.name, ids, where, sort, limit, offset)
+        return self._db_result_to_query_result(db_get)
 
-    def peek(self, limit: int = 10) -> Sequence[Item]:
-        return self._client._peek(self.name, limit)
+    def peek(self, limit: int = 10) -> QueryResult:
+        return self._db_result_to_query_result(self._client._peek(self.name, limit))
 
     def query(
         self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}
@@ -91,3 +93,11 @@ class Collection(BaseModel):
     def create_index(self):
         self._client.create_index(self.name)
 
+    def _db_result_to_query_result(self, db_result) -> QueryResult:
+        query_result = QueryResult(embeddings=[], documents=[], ids=[], metadatas=[])
+        for entry in db_result:
+            query_result["embeddings"].append(entry[2])
+            query_result["documents"].append(entry[3])
+            query_result["ids"].append(entry[4])
+            query_result["metadatas"].append(json.loads(entry[5]))
+        return query_result

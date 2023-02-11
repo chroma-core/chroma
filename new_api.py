@@ -1,15 +1,7 @@
 import chromadb
 from chromadb.config import Settings
 
-USE_LOCAL = True
-
-# Local and server versions return mismatching datatypes. For now using this patch for testing, but we have to make this uniform.
-def verify_get_result_shape(result, expected):
-    if USE_LOCAL:
-        return len(result) == expected
-    else:
-        return result.shape[0] == expected
-
+USE_LOCAL = False
 
 client = None
 if USE_LOCAL:
@@ -96,14 +88,14 @@ get_ids_result = collection.get(
     ids=["id1", "id2"],
 )
 print("\nGET ids\n", get_ids_result)
-assert verify_get_result_shape(get_ids_result, 2)
+assert len(get_ids_result["embeddings"]) == 2
 
 ### Test get where clause ###
 get_where_result = collection.get(
     where={"style": "style1", "uri": "img1.png"},
 )
 print("\nGet where\n", get_where_result)
-assert verify_get_result_shape(get_where_result, 1)
+assert len(get_where_result["ids"]) == 1
 
 ### Test get both ###
 get_both_result = collection.get(
@@ -111,7 +103,7 @@ get_both_result = collection.get(
     where={"style": "style1"},
 )
 print("\nGet both\n", get_both_result)
-assert verify_get_result_shape(get_both_result, 2)
+assert len(get_both_result["documents"]) == 2
 
 # NIT: verify supports multiple at once is actually working
 print(
