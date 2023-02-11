@@ -6,7 +6,7 @@ import time
 import os
 import itertools
 import json
-
+from typing import Sequence, Any
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
@@ -41,15 +41,13 @@ def db_schema_to_keys():
 
 class Clickhouse(DB):
 
-    _conn = None
-
     #
     #  INIT METHODS
     #
     def __init__(self, settings):
         self._conn = clickhouse_connect.get_client(
             host=settings.clickhouse_host, port=int(settings.clickhouse_port)
-        )  # Client(host=settings.clickhouse_host, port=settings.clickhouse_port)
+        )
         self._conn.query(f"""SET allow_experimental_lightweight_delete = 1;""")
         self._conn.query(
             f"""SET mutations_sync = 1;"""
@@ -139,7 +137,7 @@ class Clickhouse(DB):
          """
         ).result_rows
 
-    def list_collections(self):
+    def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.query(f"""SELECT * FROM collections""").result_rows
 
     def update_collection(self, current_name, new_name, new_metadata):
@@ -297,11 +295,17 @@ class Clickhouse(DB):
             collection_uuid, embeddings, n_results, ids
         )
 
-        return {
-            "ids": uuids,
-            "embeddings": self.get_by_ids(uuids[0]),
-            "distances": distances.tolist()[0],
-        }
+        return_data = []
+        for uuidArray, distanceArray in zip(uuids, distances):
+            item = {}
+            item["items"] = []
+            item["distances"] = []
+            for uuid, distance in zip(uuidArray, distanceArray):
+                item["items"].append(self.get_by_ids([uuid])[0])
+                item["distances"].append(distance.tolist())
+            return_data.append(item)
+
+        return return_data
 
     def create_index(self, collection_uuid) -> None:
         """Create an index for a collection_uuid and optionally scoped to a dataset.
@@ -312,8 +316,10 @@ class Clickhouse(DB):
             None
         """
         get = self.get(collection_uuid=collection_uuid)
+
         uuids = [x[1] for x in get]
         embeddings = [x[2] for x in get]
+
         self._idx.run(collection_uuid, uuids, embeddings)
         # chroma_telemetry.capture('created-index-run-process', {'n': len(get)})
 

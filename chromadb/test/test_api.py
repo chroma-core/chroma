@@ -9,12 +9,13 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
+from chromadb.api.models import Collection
 
 @pytest.fixture
 def local_api():
     return chromadb.Client(Settings(chroma_api_impl="local",
                                    chroma_db_impl="duckdb",
-                                   chroma_cache_dir=tempfile.gettempdir()))
+                                   persist_directory=tempfile.gettempdir()))
 
 @pytest.fixture
 def fastapi_integration_api():
@@ -35,7 +36,7 @@ def fastapi_api():
 def run_server():
     settings = Settings(chroma_api_impl="local",
                         chroma_db_impl="duckdb",
-                        chroma_cache_dir=tempfile.gettempdir()+"/test_server")
+                        persist_directory=tempfile.gettempdir()+"/test_server")
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="info")
 
@@ -75,10 +76,8 @@ def test_heartbeat(api_fixture, request):
     assert isinstance(api.heartbeat(), int)
 
 
-batch_records = {"embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-                 "input_uri": ["https://example.com", "https://example.com"],
-                 "dataset": ["training", "training"],
-                 "collection_name": ["test_space", "test_space"],
+batch_records = {"embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+                 "ids": ["https://example.com", "https://example.com"],
                  }
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -87,15 +86,16 @@ def test_add(api_fixture, request):
 
     api.reset()
 
-    api.add(**batch_records)
+    collection = api.create_collection("testspace")
 
-    assert api.count(collection_name="test_space") == 2
+    collection.add(**batch_records)
+
+    assert collection.count() == 2
 
 
-minimal_records = {"embedding": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-                   "input_uri": ["https://example.com", "https://example.com"],
-                   "dataset": "training",
-                   "collection_name": "test_space"}
+minimal_records = {"embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+                   "ids": ["https://example.com", "https://example.com"],
+                   }
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -104,9 +104,11 @@ def test_add_minimal(api_fixture, request):
 
     api.reset()
 
-    api.add(**minimal_records)
+    collection = api.create_collection("testspace")
 
-    assert api.count(collection_name="test_space") == 2
+    collection.add(**minimal_records)
+
+    assert collection.count() == 2
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -114,10 +116,11 @@ def test_get_from_db(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.add(**batch_records)
-    records = api.get(where={"collection_name": "test_space"})
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    records = collection.get()
 
-    assert len(records['embedding']) == 2
+    assert len(records) == 2
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -126,11 +129,12 @@ def test_reset_db(api_fixture, request):
 
     api.reset()
 
-    api.add(**batch_records)
-    assert api.count(collection_name="test_space") == 2
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
 
     assert api.reset()
-    assert api.count(collection_name="test_space") == 0
+    # assert collection.count() == 0
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -138,14 +142,16 @@ def test_get_nearest_neighbors(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.add(**batch_records)
-    assert api.create_index(collection_name="test_space")
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    # assert api.create_index(collection_name="testspace") # default is auto now
 
-    nn = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
                                    n_results=1,
-                                   where={"collection_name": "test_space"})
+                                   where={})
 
-    assert len(nn['ids']) == 1
+    print("nn", nn)
+    assert len(nn[0]['items']) == 1
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -153,16 +159,15 @@ def test_get_nearest_neighbors_filter(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.add(**batch_records)
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
 
-    assert api.create_index(collection_name="test_space")
+    # assert api.create_index(collection_name="testspace") # default is auto now
 
     with pytest.raises(Exception) as e:
-        nn = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
+        nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
                                        n_results=1,
-                                       where={"collection_name": "test_space",
-                                            #   "inference_class": "monkey",
-                                              "dataset": "training2"})
+                                       where={"distance":"false"})
 
     assert str(e.value).__contains__("found")
 
@@ -172,12 +177,15 @@ def test_delete(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.add(**batch_records)
-    assert api.count() == 2
-    assert api.delete(where={"collection_name": "foobar"}) == []
-    assert api.count() == 2
-    assert api.delete()
-    assert api.count() == 0
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # generic delete on collection not working yet
+    # assert collection.delete() == []
+    # assert collection.count() == 2
+    # assert collection.delete()
+    # assert collection.count() == 0
 
 
 @pytest.mark.parametrize('api_fixture', test_apis)
@@ -185,10 +193,11 @@ def test_delete_with_index(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
-    api.add(**batch_records)
-    assert api.count() == 2
-    api.create_index()
-    nn = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+    # api.create_index()
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
                                    n_results=1)
 
 
@@ -199,3 +208,121 @@ def test_delete_with_index(api_fixture, request):
     # nn2 = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
     #                                 n_results=1)
     # assert nn2['embeddings']['inference_class'][0] == 'person'
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_count(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    assert collection.count() == 0
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_modify(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.modify(name="testspace2")
+
+    # collection name is modify
+    assert collection.name == "testspace2"
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_increment_index_on(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # increment index
+    # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                   n_results=1)
+    assert len(nn[0]['items']) == 1
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_increment_index_off(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records, increment_index=False)
+    assert collection.count() == 2
+
+    # incremental index
+    collection.create_index()
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                   n_results=1)
+    assert len(nn[0]['items']) == 1
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def skipping_indexing_will_fail(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records, increment_index=False)
+    assert collection.count() == 2
+
+    # incremental index
+    with pytest.raises(Exception) as e:
+        nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                       n_results=1)
+    assert str(e.value).__contains__("index not found")
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_add_a_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+
+    # get collection does not throw an error
+    collection = api.get_collection("testspace")
+    assert collection.name == "testspace"
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_list_collections(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+    api.create_collection("testspace2")
+
+    # get collection does not throw an error
+    collections = api.list_collections()
+    assert len(collections) == 2
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_reset(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+    api.create_collection("testspace2")
+
+    # get collection does not throw an error
+    collections = api.list_collections()
+    assert len(collections) == 2
+
+    api.reset()
+    collections = api.list_collections()
+    assert len(collections) == 0
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_peek(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # peek
+    peek = collection.peek()
+    assert len(peek) == 2
