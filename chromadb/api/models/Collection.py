@@ -35,8 +35,10 @@ class Collection(BaseModel):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        increment_index: bool = True,
     ):
-        self._client._add(ids, self.name, embeddings, metadatas, documents)
+        self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
+
 
     def get(
         self,
@@ -86,3 +88,7 @@ class Collection(BaseModel):
 
     def delete(self, ids=None, where=None):
         return self._client._delete(self.name, ids, where)
+
+    def create_index(self):
+        self._client.create_index(self.name)
+

@@ -113,6 +113,7 @@ class FastAPI(API):
         embeddings,
         metadatas=None,
         documents=None,
+        increment_index=True,
     ):
         """
         Adds a batch of embeddings to the database
@@ -126,6 +127,7 @@ class FastAPI(API):
                     "metadatas": metadatas,
                     "documents": documents,
                     "ids": ids,
+                    "increment_index": increment_index,
                 }
             ),
         )

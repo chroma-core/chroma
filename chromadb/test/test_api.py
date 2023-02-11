@@ -9,6 +9,7 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
+from chromadb.api.models import Collection
 
 @pytest.fixture
 def local_api():
@@ -207,3 +208,121 @@ def test_delete_with_index(api_fixture, request):
     # nn2 = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
     #                                 n_results=1)
     # assert nn2['embeddings']['inference_class'][0] == 'person'
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_count(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    assert collection.count() == 0
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_modify(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.modify(name="testspace2")
+
+    # collection name is modify
+    assert collection.name == "testspace2"
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_increment_index_on(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # increment index
+    # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                   n_results=1)
+    assert len(nn[0]['items']) == 1
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_increment_index_off(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records, increment_index=False)
+    assert collection.count() == 2
+
+    # incremental index
+    collection.create_index()
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                   n_results=1)
+    assert len(nn[0]['items']) == 1
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def skipping_indexing_will_fail(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records, increment_index=False)
+    assert collection.count() == 2
+
+    # incremental index
+    with pytest.raises(Exception) as e:
+        nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]],
+                                       n_results=1)
+    assert str(e.value).__contains__("index not found")
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_add_a_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+
+    # get collection does not throw an error
+    collection = api.get_collection("testspace")
+    assert collection.name == "testspace"
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_list_collections(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+    api.create_collection("testspace2")
+
+    # get collection does not throw an error
+    collections = api.list_collections()
+    assert len(collections) == 2
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_reset(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+    api.create_collection("testspace2")
+
+    # get collection does not throw an error
+    collections = api.list_collections()
+    assert len(collections) == 2
+
+    api.reset()
+    collections = api.list_collections()
+    assert len(collections) == 0
+
+@pytest.mark.parametrize('api_fixture', test_apis)
+def test_peek(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # peek
+    peek = collection.peek()
+    assert len(peek) == 2

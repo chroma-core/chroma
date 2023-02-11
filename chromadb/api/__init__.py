@@ -97,6 +97,7 @@ class API(ABC):
         embedding: Optional[Embeddings],
         metadata: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        increment_index: bool = True,
     ):
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
