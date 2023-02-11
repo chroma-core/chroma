@@ -3,13 +3,13 @@ from pydantic import BaseModel, PrivateAttr
 import json
 
 from chromadb.api.types import (
-    NearestNeighborsResult,
+    QueryResult,
     Where,
     Embeddings,
     IDs,
     Metadatas,
     Documents,
-    QueryResult,
+    GetResult,
 )
 
 if TYPE_CHECKING:
@@ -47,16 +47,22 @@ class Collection(BaseModel):
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> QueryResult:
-        db_get = self._client._get(self.name, ids, where, sort, limit, offset)
-        return self._db_result_to_query_result(db_get)
+    ) -> GetResult:
+        return self._client._get(self.name, ids, where, sort, limit, offset)
 
-    def peek(self, limit: int = 10) -> QueryResult:
-        return self._db_result_to_query_result(self._client._peek(self.name, limit))
+    def peek(self, limit: int = 10) -> GetResult:
+        return self._client._peek(self.name, limit)
 
     def query(
         self, query_embeddings: Embeddings, n_results: int = 10, where: Where = {}
-    ) -> Sequence[NearestNeighborsResult]:
+    ) -> QueryResult:
+        result = self._client._query(
+            collection_name=self.name,
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+            where=where,
+        )
+        print(result)
         return self._client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,
@@ -92,12 +98,3 @@ class Collection(BaseModel):
 
     def create_index(self):
         self._client.create_index(self.name)
-
-    def _db_result_to_query_result(self, db_result) -> QueryResult:
-        query_result = QueryResult(embeddings=[], documents=[], ids=[], metadatas=[])
-        for entry in db_result:
-            query_result["embeddings"].append(entry[2])
-            query_result["documents"].append(entry[3])
-            query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(json.loads(entry[5]))
-        return query_result

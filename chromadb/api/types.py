@@ -1,4 +1,5 @@
 from typing import Union, Sequence, Dict, TypedDict, Optional
+import json
 
 ID = str
 IDs = list[ID]
@@ -15,13 +16,12 @@ Document = str
 Documents = Union[Document, Sequence[Document]]
 
 
-class QueryResult(TypedDict):
+class GetResult(TypedDict):
     ids: IDs
     embeddings: list[Embedding]
     documents: list[Document]
     metadatas: list[Metadata]
 
 
-class NearestNeighborsResult(TypedDict):
-    items: list[dict]
-    distances: Sequence[float]
+class QueryResult(GetResult):
+    distances: list[float]

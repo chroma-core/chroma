@@ -1,6 +1,8 @@
+import json
 import time
 from typing import Dict, Optional, Sequence
 from chromadb.api import API
+from chromadb.api.types import GetResult
 from chromadb.server.utils.telemetry.capture import Capture
 from chromadb.api.models.Collection import Collection
 
@@ -164,6 +166,15 @@ class LocalAPI(API):
 
         return True
 
+    def _db_result_to_api_result(self, db_result) -> GetResult:
+        query_result = GetResult(embeddings=[], documents=[], ids=[], metadatas=[])
+        for entry in db_result:
+            query_result["embeddings"].append(entry[2])
+            query_result["documents"].append(entry[3])
+            query_result["ids"].append(entry[4])
+            query_result["metadatas"].append(json.loads(entry[5]))
+        return query_result
+
     def _get(
         self,
         collection_name,
@@ -183,13 +194,15 @@ class LocalAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db.get(
-            collection_name=collection_name,
-            ids=ids,
-            where=where,
-            sort=sort,
-            limit=limit,
-            offset=offset,
+        return self._db_result_to_api_result(
+            self._db.get(
+                collection_name=collection_name,
+                ids=ids,
+                where=where,
+                sort=sort,
+                limit=limit,
+                offset=offset,
+            )
         )
 
     def _delete(self, collection_name, ids=None, where=None):
