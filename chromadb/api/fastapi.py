@@ -4,6 +4,7 @@ from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
 import json
+from typing import Sequence
 from chromadb.api.models.Collection import Collection
 
 
@@ -19,11 +20,16 @@ class FastAPI(API):
         resp.raise_for_status()
         return int(resp.json()["nanosecond heartbeat"])
 
-    def list_collections(self) -> int:
+    def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = requests.get(self._api_url + "/collections")
         resp.raise_for_status()
-        return resp.json()
+        json_collections = resp.json()
+        collections = []
+        for json_collection in json_collections:
+            collections.append(Collection(self, **json_collection))
+
+        return collections
 
     def create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
         """Creates a collection"""
@@ -31,13 +37,13 @@ class FastAPI(API):
             self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata})
         )
         resp.raise_for_status()
-        return Collection(self, name)
+        return Collection(client=self, name=name)
 
     def get_collection(self, name: str) -> Collection:
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return Collection(self, name)
+        return Collection(client=self, name=name)
 
     def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
         """Updates a collection"""
@@ -112,7 +118,6 @@ class FastAPI(API):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        print(f"COLLECTION NAME: {collection_name}")
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/add",
             data=json.dumps(

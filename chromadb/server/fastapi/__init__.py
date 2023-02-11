@@ -17,6 +17,7 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
 )
 
+
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings):
         super().__init__(settings)
