@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 from chromadb.api import API
 from chromadb.server.utils.telemetry.capture import Capture
 from chromadb.api.models.Collection import Collection
@@ -40,20 +40,24 @@ class LocalAPI(API):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
 
         self._db.create_collection(name, metadata)
-        return Collection(self, name)
+        return Collection(client=self, name=name)
 
     def get_collection(
         self,
         name: str,
     ) -> Collection:
         self._db.get_collection(name)
-        return Collection(self, name)
+        return Collection(client=self, name=name)
 
     def _get_collection_db(self, name: str) -> int:
         return self._db.get_collection(name)
 
-    def list_collections(self) -> list:
-        return self._db.list_collections()
+    def list_collections(self) -> Sequence[Collection]:
+        collections = []
+        db_collections = self._db.list_collections()
+        for db_collection in db_collections:
+            collections.append(Collection(client=self, name=db_collection[1]))
+        return collections
 
     def modify(
         self,

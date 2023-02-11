@@ -33,7 +33,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> list[Collection]:
+    def list_collections(self) -> Sequence[Collection]:
         """Returns all collections in the database
 
         Args:
@@ -155,7 +155,7 @@ class API(ABC):
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-    ) -> list[Item]:
+    ) -> Sequence[Item]:
 
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
