@@ -2,10 +2,19 @@ from abc import ABC, abstractmethod
 from typing import Union, Sequence, Optional, TypedDict, List, Dict
 from uuid import UUID
 import pandas as pd
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import (
+    Documents,
+    Embeddings,
+    IDs,
+    Item,
+    Metadatas,
+    NearestNeighborsResult,
+    Where,
+)
 
 
 class API(ABC):
-
     @abstractmethod
     def __init__(self):
         pass
@@ -24,7 +33,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> int:
+    def list_collections(self) -> Sequence[Collection]:
         """Returns all collections in the database
 
         Args:
@@ -41,7 +50,7 @@ class API(ABC):
         self,
         name: str,
         metadata: Optional[Dict] = None,
-    ) -> int:
+    ) -> Collection:
         """Creates a new collection in the database
 
         Args:
@@ -59,7 +68,7 @@ class API(ABC):
         self,
         name: Optional[str] = None,
         uuid: Optional[UUID] = None,
-    ) -> int:
+    ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
         Args:
@@ -72,15 +81,24 @@ class API(ABC):
         """
         pass
 
-    @abstractmethod
-    def add(
+    def _modify(
         self,
-        embedding: Union[Sequence[Sequence[float]], Sequence[float]],
+        current_name: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Dict] = None,
+    ):
+        pass
+
+    @abstractmethod
+    def _add(
+        self,
+        ids: IDs,
         collection_name: Union[str, Sequence[str]],
-        metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
-        documents: Optional[Union[str, Sequence[str]]] = None,
-        ids: Optional[Union[str, Sequence[str]]] = None,
-    ) -> bool:
+        embedding: Optional[Embeddings],
+        metadata: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ):
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
@@ -90,31 +108,27 @@ class API(ABC):
             metadata (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
             documents (Optional[Union[str, Sequence[str]]], optional): The documents to associate with the embeddings. Defaults to None.
             ids (Optional[Union[str, Sequence[str]]], optional): The ids to associate with the embeddings. Defaults to None.
-        Returns:
-            bool: True if the embeddings were added successfully
         """
         pass
 
     @abstractmethod
-    def update(
+    def _update(
         self,
         embedding: Sequence[Sequence[float]],
         collection_name: Union[str, Sequence[str]],
         metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
-    ) -> bool:
+    ):
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
             collection_name (Union[str, Sequence[str]]): The model space(s) to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
-        Returns:
-            bool: True if the embeddings were added successfully
         """
         pass
 
     @abstractmethod
-    def count(self, collection_name: Optional[str] = None) -> int:
+    def _count(self, collection_name: Optional[str] = None) -> int:
         """Returns the number of embeddings in the database
 
         Args:
@@ -127,15 +141,22 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def get(
+    def _peek(self, collection_name: str, n: int = 10):
+        pass
+
+    @abstractmethod
+    def _get(
         self,
-        where: Optional[Dict[str, str]] = {},
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-    ) -> pd.DataFrame:
+    ) -> Sequence[Item]:
+
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
 
@@ -154,31 +175,23 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def delete(self, where: Optional[Dict[str, str]] = {}) -> Sequence[UUID]:
+    def _delete(self, collection_name: str, ids: Optional[IDs], where: Optional[Where] = {}):
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
         Args:
             where (Optional[Dict[str, str]], optional): A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
-
-        Returns:
-            Sequence[UUID]: A list of the UUIDs of the embeddings that were deleted
         """
         pass
 
-    class NearestNeighborsResult(TypedDict):
-        ids: Sequence[UUID]
-        embeddings: pd.DataFrame
-        distances: Sequence[float]
-
     @abstractmethod
-    def query(
-        self, 
-        collection_name: str, 
-        embeddings: Union[Sequence[Sequence[float]], Sequence[float]], 
-        n_results: int = 10, 
-        where: Dict[str, str] = {}
-    ) -> NearestNeighborsResult:
+    def _query(
+        self,
+        collection_name: str,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+    ) -> Sequence[NearestNeighborsResult]:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.
 
@@ -227,5 +240,3 @@ class API(ABC):
 
         """
         pass
-
-   
