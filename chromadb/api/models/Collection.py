@@ -87,7 +87,7 @@ class Collection(BaseModel):
         query_embeddings: Optional[Embeddings] = None,
         query_texts: Optional[Documents] = None,
         n_results: int = 10,
-        where: Where = {},
+        where: Optional[Where] = None,
     ) -> QueryResult:
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
@@ -103,6 +103,9 @@ class Collection(BaseModel):
             if self._embedding_fn is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
             query_embeddings = self._embedding_fn(query_texts)
+
+        if where is None:
+            where = {}
 
         return self._client._query(
             collection_name=self.name,
