@@ -13,14 +13,14 @@ __Chroma is the open-source embedding database__. Chroma makes it easy to build 
 ## ChatGPT for ______
 
 For example, the "`Chat your data`" use case:
-1. Add documents (add your own embeddings, embedding function, or let Chroma embed them) to your database.
+1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
 3. Compose documents into the context window of an LLM like `GTP3` for additional summarization or analysis. 
 
 
 ## Features
 - __Simple__: Fully typed, fully tested, fully documented == happiness
-- __Integrations__: `Langchain` and `gpt-index`
+- __Integrations__: `🦜️🔗 Langchain` and `🦙 gpt-index`
 - __Dev, Test, Prod__: the same API runs in your python notebook and up to a cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
 - __Fast__: 50-100x faster than other popular solutions
