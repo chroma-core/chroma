@@ -6,7 +6,7 @@ import time
 import os
 import itertools
 import json
-from typing import Sequence, Any
+from typing import Sequence, Any, List, Tuple
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
@@ -289,7 +289,7 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(
         self, where, embeddings, n_results, collection_name=None, collection_uuid=None
-    ) -> tuple[list[list[uuid.UUID]], list[list[float]]]:
+    ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)

@@ -11,7 +11,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache-2.0",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -23,7 +23,12 @@ dependencies = [
   'hnswlib ~= 0.7',
   'posthog ~= 2.1',
   'uuid ~= 1.30',
-  'clickhouse_connect ~= 0.5.7'
+  'clickhouse_connect ~= 0.5.7',
+  'duckdb ~= 0.5.1',
+  'fastapi ~=0.85.1',
+  'uvicorn[standard] ~= 0.18.3',
+  'numpy ~= 1.21.6',
+  'sentry_sdk ~= 1.10.1'
 ]
 
 [tool.black]

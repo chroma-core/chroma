@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Callable, Optional, Sequence, cast
+from typing import TYPE_CHECKING, Callable, Optional, Sequence, cast, List
 from pydantic import BaseModel, PrivateAttr
 import json
 
@@ -115,7 +115,7 @@ class Collection(BaseModel):
             if self._embedding_fn is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
             # We know query texts is not None at this point, cast for the typechecker
-            query_embeddings = self._embedding_fn(cast(list[Document], query_texts))
+            query_embeddings = self._embedding_fn(cast(List[Document], query_texts))
 
         if where is None:
             where = {}
