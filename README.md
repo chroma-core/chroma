@@ -56,8 +56,9 @@ Chroma is a rapidly developing project. We welcome PR contributors and ideas for
 ## Embeddings?
 What are embeddings?
 - [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
+- __Literal__: Embedding something turns it from image/text/audio into a list of numbers. 🖼️/📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model. 
 - __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find. 
-- __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer. 
+- __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
 - __A small example__: If you search your photos for "famous bridge in San Francisco". Through embedding the photo and it's metadata - it should return photos of the Golden Gate Bridge.
 
 
