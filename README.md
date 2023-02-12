@@ -3,22 +3,22 @@
 
 ## Chroma
 
-Chroma is the open-source embedding database. 
+__Chroma is the open-source embedding database__. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs. 
 
 - [💬 Community Discord]()
 - [📖 Documentation]()
 - [💡 Colab Example]()
-- [Homepage]()
+- [🏠 Homepage]()
 
-Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs. 
+## ChatGPT for ______
 
 For example, the "`Chat your data`" use case:
 1. Add documents (add your own embeddings, embedding function, or let Chroma embed them) to your database `collection.add`
 2. Query relevant documents, `collection.query`
 
-`What are embeddings?` [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
 
-### Features
+
+## Features
 - __Simple__: Fully typed, fully tested, fully documented == happiness
 - __Integrations__: `Langchain` and `gpt-index`
 - __Dev, Test, Prod__: the same API runs in your python notebook and up to a cluster
@@ -26,7 +26,7 @@ For example, the "`Chat your data`" use case:
 - __Fast__: 50-100x faster than other popular solutions
 - __Free__: Apache 2.0 Licensed
 
-### Get up and running
+## Get up and running
 ```python
 pip install chromadb
 ```
@@ -47,18 +47,20 @@ collection.query(
 )
 ```
 
-### Get involved
+## Get involved
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project. 
 - [Join the conversation on Discord]()
 - [Review the roadmap and contribute your ideas]()
 - [Grab an issue and open a PR]()
 
-### Use cases
-- Question answering
-- Semantic search
-- Recommndations
-- Chatbots
+## Embeddings?
+What are embeddings?
+- [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
+- __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find. 
+- __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer. 
+- __A small example__: If you search your photos for "famous bridge in San Francisco". Through embedding the photo and it's metadata - it should return photos of the Golden Gate Bridge.
 
-### License
 
-Apache 2.0
+## License
+
+[Apache 2.0](./LICENSE)
