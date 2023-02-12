@@ -216,7 +216,11 @@ class DuckDB(Clickhouse):
 
         self._idx.reset()
         self._idx = Hnswlib(self._settings)
-
+    
+    def __del__(self):
+        print("Exiting: Cleaning up .chroma directory")
+        self._idx.reset()
+    
 
 class PersistentDuckDB(DuckDB):
 
@@ -224,6 +228,12 @@ class PersistentDuckDB(DuckDB):
 
     def __init__(self, settings):
         super().__init__(settings=settings)
+
+        if settings.persist_directory == ".chroma":
+            raise Exception(
+                "You cannot use the default persist directory, please set a different directory"
+            )
+
         self._save_folder = settings.persist_directory
         self.load()
 
