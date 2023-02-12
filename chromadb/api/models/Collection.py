@@ -1,8 +1,11 @@
-from typing import TYPE_CHECKING, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Optional, Sequence, cast
 from pydantic import BaseModel, PrivateAttr
 import json
 
 from chromadb.api.types import (
+    Embedding,
+    Metadata,
+    Document,
     Where,
     Embeddings,
     IDs,
@@ -11,6 +14,9 @@ from chromadb.api.types import (
     EmbeddingFunction,
     GetResult,
     QueryResult,
+    ID,
+    OneOrMany,
+    maybe_cast_one_to_many,
 )
 
 if TYPE_CHECKING:
@@ -35,12 +41,17 @@ class Collection(BaseModel):
 
     def add(
         self,
-        ids: IDs,
-        embeddings: Optional[Embeddings] = None,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
         increment_index: bool = True,
     ):
+        ids = maybe_cast_one_to_many(ids)
+        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
+        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        documents = maybe_cast_one_to_many(documents) if documents else None
+
         # Check that one of embeddings or documents is provided
         if embeddings is None and documents is None:
             raise ValueError("You must provide either embeddings or documents, or both")
@@ -60,23 +71,22 @@ class Collection(BaseModel):
             )
 
         # If document embeddings are not provided, we need to compute them
-        if embeddings is None:
+        if embeddings is None and documents is not None:
             if self._embedding_fn is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
             embeddings = self._embedding_fn(documents)
 
         self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
-        # NIT: return something?
-        return
 
     def get(
         self,
-        ids: Optional[IDs] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> GetResult:
+        ids = maybe_cast_one_to_many(ids) if ids else None
         return self._client._get(self.name, ids, where, sort, limit, offset)
 
     def peek(self, limit: int = 10) -> GetResult:
@@ -84,11 +94,13 @@ class Collection(BaseModel):
 
     def query(
         self,
-        query_embeddings: Optional[Embeddings] = None,
-        query_texts: Optional[Documents] = None,
+        query_embeddings: Optional[OneOrMany[Embedding]] = None,
+        query_texts: Optional[OneOrMany[Document]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
     ) -> QueryResult:
+        query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
+        query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
         if (query_embeddings is None and query_texts is None) or (
@@ -102,7 +114,8 @@ class Collection(BaseModel):
         if query_embeddings is None:
             if self._embedding_fn is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
-            query_embeddings = self._embedding_fn(query_texts)
+            # We know query texts is not None at this point, cast for the typechecker
+            query_embeddings = self._embedding_fn(cast(list[Document], query_texts))
 
         if where is None:
             where = {}

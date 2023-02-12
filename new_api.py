@@ -76,17 +76,16 @@ collection.add(
 )
 
 # add one
-# collection.add(
-#     embeddings=[1.5, 2.9, 3.4],
-#     metadatas={"uri": "img9.png", "style": "style1"},
-#     documents="doc1000101",
-#     ids="uri9",
-# )
+collection.add(
+    embeddings=[1.5, 2.9, 3.4],
+    metadatas={"uri": "img9.png", "style": "style1"},
+    documents="doc1000101",
+    ids="uri9",
+)
 
 print(collection.peek(5))
 print(collection.count())  # NIT: count count take a where filter too
-# assert collection.count() == 9
-assert collection.count() == 8
+assert collection.count() == 9
 
 
 ### Test get by ids ###
@@ -127,13 +126,13 @@ print(
 collection.delete(  # propagates to the index
     ids=["id1"],
 )
-assert collection.count() == 7
+assert collection.count() == 8
 
 ### Test delete Partial ##
 collection.delete(  # propagates to the index
     where={"style": "style2"},
 )
-assert collection.count() == 6
+assert collection.count() == 7
 
 ### Test delete All ##
 collection.delete()
@@ -163,7 +162,11 @@ collection.add(
     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
 )
 
+# Add single doc without embeddings (call emb function)
+collection.add(metadatas={"uri": "img9.png", "style": "style1"}, documents="doc9", ids="id9")
+
 print(collection.peek(5))
+assert collection.count() == 9
 
 # Query with only text docs
 print(
@@ -179,11 +182,6 @@ print(
 #     metadatas=[{"uri": "img1.png", "style": "style1"}, {"uri": "img2.png", "style": "style1"}, {"uri": "img3.png", "style": "style1"}, {"uri": "img4.png", "style": "style1"}, {"uri": "img5.png", "style": "style1"}, {"uri": "img6.png", "style": "style1"}, {"uri": "img7.png", "style": "style1"}, {"uri": "img8.png", "style": "style1"}],
 #     documents=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6", "doc7", "doc8"],
 #     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
-# )
-
-# collection.delete( # propagates to the index
-#     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
-# 	# where/filter?
 # )
 
 # collection.update( # fails if id doesnt exist
