@@ -34,7 +34,7 @@ pip install chromadb
 ```python 
 import chromadb
 client = chromadb.Client()
-collection = client.create_collection("hello world")
+collection = client.create_collection("all-my-documents")
 collection.add(
     embeddings=[[1.5, 2.9, 3.4], [9.8, 2.3, 2.9]],
     metadatas=[{"source": "notion"}, {"source": "google-docs"}],
