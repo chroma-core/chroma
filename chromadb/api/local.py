@@ -3,7 +3,6 @@ import time
 from typing import Dict, Optional, Sequence, Callable
 from chromadb.api import API
 from chromadb.api.types import GetResult, QueryResult
-from chromadb.server.utils.telemetry.capture import Capture
 from chromadb.api.models.Collection import Collection
 
 import re
@@ -24,8 +23,6 @@ def is_valid_index_name(index_name):
 class LocalAPI(API):
     def __init__(self, settings, db):
         self._db = db
-        self._chroma_telemetry = Capture()
-        self._chroma_telemetry.capture("server-start")
 
     def heartbeat(self):
         return int(1000 * time.time_ns())

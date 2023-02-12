@@ -321,7 +321,6 @@ class Clickhouse(DB):
         embeddings = [x[2] for x in get]
 
         self._idx.run(collection_uuid, uuids, embeddings)
-        # chroma_telemetry.capture('created-index-run-process', {'n': len(get)})
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
         self._idx.add_incremental(collection_uuid, uuids, embeddings)

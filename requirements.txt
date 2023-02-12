@@ -8,7 +8,5 @@ duckdb==0.5.1
 hnswlib==0.7.0
 hdbscan==0.8.29
 clickhouse-connect==0.5.7
-posthog==2.1.2
 uuid==1.30
-sentry_sdk==1.10.1
 pydantic==1.9.0

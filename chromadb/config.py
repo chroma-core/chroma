@@ -3,8 +3,6 @@ from pydantic import BaseSettings, Field
 
 class Settings(BaseSettings):
 
-    disable_anonymized_telemetry: bool = False
-    telemetry_anonymized_uuid: str = ""
     environment: str = ""
 
     chroma_db_impl: str = "duckdb"
