@@ -9,7 +9,6 @@ from chromadb.db.clickhouse import (
 )
 from typing import Sequence
 import pandas as pd
-import numpy as np
 import json
 import duckdb
 import uuid
