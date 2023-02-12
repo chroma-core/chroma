@@ -37,13 +37,12 @@ client = chromadb.Client()
 collection = client.create_collection("hello world")
 collection.add(
     embeddings=[[1.5, 2.9, 3.4], [9.8, 2.3, 2.9]],
-    metadatas=[{"style": "style1"}, {"style": "style2"}],
-    ids=["uri9", "uri10"],
+    metadatas=[{"source": "notion"}, {"source": "google-docs"}],
+    ids=["n/102", "gd/972"],
 )
-collection.query(
-    query_embeddings=[[1.1, 2.3, 3.2], [5.1, 4.3, 2.2]],
-    n_results=2,
-    where={"style": "style2"}
+results = collection.query(
+    query_texts=["How do I do ..."],
+    n_results=3
 )
 ```
 
