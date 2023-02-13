@@ -16,5 +16,7 @@ export CHROMA_API_IMPL=rest
 export CHROMA_SERVER_HOST=localhost
 export CHROMA_SERVER_HTTP_PORT=8000
 
+sleep 30
+
 pytest -k heartbeat
 
