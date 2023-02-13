@@ -236,8 +236,6 @@ class Clickhouse(DB):
 
         val = self._get(where=where)
 
-        print(f"time to get {len(val)} embeddings: ", time.time() - s3)
-
         return val
 
     def _count(self, collection_uuid):
@@ -272,7 +270,6 @@ class Clickhouse(DB):
         where_str = self._create_where_clause(collection_uuid, ids=ids, where=where)
 
         deleted_uuids = self._delete(where_str)
-        print(f"time to get {len(deleted_uuids)} embeddings for deletion: ", time.time() - s3)
 
         # if len(where) == 1:
         #     self._idx.delete(collection_uuid)
@@ -294,13 +291,15 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        results = self.get(collection_uuid=collection_uuid, where=where)
+        if not len(where) == 0:
+            results = self.get(collection_uuid=collection_uuid, where=where)
 
-        if len(results) > 0:
-            ids = [x[1] for x in results]
+            if len(results) > 0:
+                ids = [x[1] for x in results]
+            else:
+                raise NoDatapointsException("No datapoints found for the supplied filter")
         else:
-            raise NoDatapointsException("No datapoints found for the supplied filter")
-
+            ids = None
         uuids, distances = self._idx.get_nearest_neighbors(
             collection_uuid, embeddings, n_results, ids
         )
