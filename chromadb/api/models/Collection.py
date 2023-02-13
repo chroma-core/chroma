@@ -1,16 +1,12 @@
 from typing import TYPE_CHECKING, Optional, cast, List
 from pydantic import BaseModel, PrivateAttr
-import json
 
 from chromadb.api.types import (
     Embedding,
     Metadata,
     Document,
     Where,
-    Embeddings,
     IDs,
-    Metadatas,
-    Documents,
     EmbeddingFunction,
     GetResult,
     QueryResult,
@@ -48,6 +44,7 @@ class Collection(BaseModel):
         return f"Collection(name={self.name})"
 
     def count(self) -> int:
+        """The total number of embeddings added to the database"""
         return self._client._count(collection_name=self.name)
 
     def add(
@@ -58,6 +55,15 @@ class Collection(BaseModel):
         documents: Optional[OneOrMany[Document]] = None,
         increment_index: bool = True,
     ):
+        """Add embeddings to the data store.
+        Args:
+            ids: The ids of the embeddings you wish to add
+            embedding: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_fn set for the Collection. Optional.
+            metadata: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            documents: The documents to associate with the embeddings. Optional.
+            ids: The ids to associate with the embeddings. Optional.
+        """
+
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
         metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
@@ -93,14 +99,27 @@ class Collection(BaseModel):
         self,
         ids: Optional[OneOrMany[ID]] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> GetResult:
+        """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
+        all embeddings up to limit starting at offset.
+
+        Args:
+            ids: The ids of the embeddings to get. Optional.
+            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+            limit: The number of documents to return. Optional.
+            offset: The offset to start returning results from. Useful for paging results with limit. Optional.
+        """
         ids = maybe_cast_one_to_many(ids) if ids else None
-        return self._client._get(self.name, ids, where, sort, limit, offset)
+        return self._client._get(self.name, ids, where, None, limit, offset)
 
     def peek(self, limit: int = 10) -> GetResult:
+        """Get the first few results in the database up to limit
+
+        Args:
+            limit: The number of results to return.
+        """
         return self._client._peek(self.name, limit)
 
     def query(
@@ -110,6 +129,15 @@ class Collection(BaseModel):
         n_results: int = 10,
         where: Optional[Where] = None,
     ) -> QueryResult:
+        """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
+
+        Args:
+            query_embeddings: The embeddings to get the closes neighbors of. Optional.
+            query_texts: The document texts to get the closes neighbors of. Optional.
+            n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
+            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+        """
+
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
 
@@ -139,6 +167,12 @@ class Collection(BaseModel):
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
+        """Modify the collection name or metadata
+
+        Args:
+            name: The updated name for the collection. Optional.
+            metadata: The updated metadata for the collection. Optional.
+        """
         self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
@@ -150,6 +184,15 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
     ):
+        """Update the embeddings, metadatas or documents for provided ids.
+
+        Args:
+            ids: The ids of the embeddings to update
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_fn set for the Collection. Optional.
+            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            documents: The documents to associate with the embeddings. Optional.
+        """
+
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
         metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
@@ -157,7 +200,7 @@ class Collection(BaseModel):
 
         # Must update one of embeddings, metadatas, or documents
         if embeddings is None and documents is None and metadatas is None:
-            raise ValueError("You must update one of embeddings, documents or metadatas.")
+            raise ValueError("You must update at least one of embeddings, documents or metadatas.")
 
         # Check that one of embeddings or documents is provided
         if embeddings is not None and documents is None:
@@ -185,7 +228,13 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def delete(self, ids=None, where=None):
+    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None):
+        """Delete the embeddings based on ids and/or a where filter
+
+        Args:
+            ids: The ids of the embeddings to delete
+            where: A dict of key, value string pairs to filter deletions by. E.g. {"color" : "red"}. Optional.
+        """
         return self._client._delete(self.name, ids, where)
 
     def create_index(self):
