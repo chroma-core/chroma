@@ -23,7 +23,6 @@ For example, the `"Chat your data"` use case:
 - __Integrations__: `🦜️🔗 Langchain` and `🦙 gpt-index`
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
-- __Fast__: 50-100x faster than other popular solutions
 - __Free__: Apache 2.0 Licensed
 
 ## Get up and running
