@@ -16,7 +16,7 @@ services:
     environment:
       - CHROMA_DB_IMPL=clickhouse
       - CLICKHOUSE_HOST=test_clickhouse
-      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_PORT=8123
     ports:
       - 8000:8000
     depends_on:
