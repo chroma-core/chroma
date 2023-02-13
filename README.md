@@ -20,7 +20,7 @@ For example, the `"Chat your data"` use case:
 
 ## Features
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
-- __Integrations__: `🦜️🔗 Langchain` and more soon
+- __Integrations__: `🦜️🔗 LangChain` and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
 - __Free__: Apache 2.0 Licensed
