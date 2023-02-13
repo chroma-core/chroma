@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Callable, Optional, Sequence, cast, List
+from typing import TYPE_CHECKING, Optional, cast, List
 from pydantic import BaseModel, PrivateAttr
 import json
 
@@ -145,12 +145,45 @@ class Collection(BaseModel):
 
     def update(
         self,
-        ids: IDs,
-        embeddings: Optional[Embeddings],
-        metadatas: Optional[Metadatas],
-        documents: Optional[Documents],
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
     ):
-        raise NotImplementedError()
+        ids = maybe_cast_one_to_many(ids)
+        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
+        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        documents = maybe_cast_one_to_many(documents) if documents else None
+
+        # Must update one of embeddings, metadatas, or documents
+        if embeddings is None and documents is None and metadatas is None:
+            raise ValueError("You must update one of embeddings, documents or metadatas.")
+
+        # Check that one of embeddings or documents is provided
+        if embeddings is not None and documents is None:
+            raise ValueError("You must provide updated documents with updated embeddings")
+
+        # Check that, if they're provided, the lengths of the arrays match the length of ids
+        if embeddings is not None and len(embeddings) != len(ids):
+            raise ValueError(
+                f"Number of embeddings {len(embeddings)} must match number of ids {len(ids)}"
+            )
+        if metadatas is not None and len(metadatas) != len(ids):
+            raise ValueError(
+                f"Number of metadatas {len(metadatas)} must match number of ids {len(ids)}"
+            )
+        if documents is not None and len(documents) != len(ids):
+            raise ValueError(
+                f"Number of documents {len(documents)} must match number of ids {len(ids)}"
+            )
+
+        # If document embeddings are not provided, we need to compute them
+        if embeddings is None and documents is not None:
+            if self._embedding_fn is None:
+                raise ValueError("You must provide embeddings or a function to compute them")
+            embeddings = self._embedding_fn(documents)
+
+        self._client._update(self.name, ids, embeddings, metadatas, documents)
 
     def upsert(
         self,

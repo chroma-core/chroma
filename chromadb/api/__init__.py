@@ -4,6 +4,7 @@ from uuid import UUID
 import pandas as pd
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    ID,
     Documents,
     Embeddings,
     IDs,
@@ -115,9 +116,11 @@ class API(ABC):
     @abstractmethod
     def _update(
         self,
-        embedding: Sequence[Sequence[float]],
-        collection_name: Union[str, Sequence[str]],
-        metadata: Optional[Union[Dict, Sequence[Dict]]] = None,
+        collection_name: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
     ):
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.

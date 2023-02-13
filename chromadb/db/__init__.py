@@ -28,6 +28,10 @@ class DB(ABC):
         pass
 
     @abstractmethod
+    def get_collection_uuid_from_name(self, collection_name: str) -> str:
+        pass
+
+    @abstractmethod
     def add(
         self,
         collection_name: str,
@@ -40,7 +44,16 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get(self, where, sort, limit, offset):
+    def get(
+        self,
+        where={},
+        collection_name=None,
+        collection_uuid=None,
+        ids=None,
+        sort=None,
+        limit=None,
+        offset=None,
+    ):
         pass
 
     @abstractmethod

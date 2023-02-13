@@ -1,3 +1,4 @@
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
@@ -7,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import Sequence
+from typing import Optional, Sequence
 import pandas as pd
 import json
 import duckdb
@@ -170,6 +171,46 @@ class DuckDB(Clickhouse):
 
         return val
 
+    def _update(
+        self,
+        collection_uuid,
+        ids: IDs,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+    ):
+
+        update_data = []
+        for i in range(len(ids)):
+            data = []
+            update_data.append(data)
+            if embeddings is not None:
+                data.append(embeddings[i])
+            if metadatas is not None:
+                data.append(json.dumps(metadatas[i]))
+            if documents is not None:
+                data.append(documents[i])
+            data.append(ids[i])
+
+        update_fields = []
+        if embeddings is not None:
+            update_fields.append(f"embedding = ?")
+        if metadatas is not None:
+            update_fields.append(f"metadata = ?")
+        if documents is not None:
+            update_fields.append(f"document = ?")
+
+        update_statement = f"""
+        UPDATE 
+            embeddings
+        SET
+            {", ".join(update_fields)}
+        WHERE
+            id = ? AND 
+            collection_uuid = '{collection_uuid}';
+        """
+        self._conn.executemany(update_statement, update_data)
+
     def _delete(self, where_str):
         uuids_deleted = self._conn.execute(
             f"""SELECT uuid FROM embeddings {where_str}"""
@@ -215,11 +256,11 @@ class DuckDB(Clickhouse):
 
         self._idx.reset()
         self._idx = Hnswlib(self._settings)
-    
+
     def __del__(self):
         print("Exiting: Cleaning up .chroma directory")
         self._idx.reset()
-    
+
 
 class PersistentDuckDB(DuckDB):
 

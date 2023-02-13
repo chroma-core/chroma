@@ -169,20 +169,89 @@ print(collection.peek(5))
 assert collection.count() == 9
 
 # Query with only text docs
-print(
-    "query",
-    collection.query(
-        query_texts=["doc1", "doc2"],
-        n_results=2,
-    ),
+# print(
+#     "query",
+#     collection.query(
+#         query_texts=["doc1", "doc2"],
+#         n_results=2,
+#     ),
+# )
+
+
+### TEST UPDATE ###
+collection = client.create_collection(
+    "test_update", embedding_fn=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
+)
+assert collection.count() == 0
+
+collection.add(
+    embeddings=[
+        [1.1, 2.3, 3.2],
+        [4.5, 6.9, 4.4],
+        [1.1, 2.3, 3.2],
+        [4.5, 6.9, 4.4],
+        [1.1, 2.3, 3.2],
+        [4.5, 6.9, 4.4],
+        [1.1, 2.3, 3.2],
+        [4.5, 6.9, 4.4],
+    ],
+    metadatas=[
+        {"uri": "img1.png", "style": "style1"},
+        {"uri": "img2.png", "style": "style2"},
+        {"uri": "img3.png", "style": "style1"},
+        {"uri": "img4.png", "style": "style1"},
+        {"uri": "img5.png", "style": "style1"},
+        {"uri": "img6.png", "style": "style1"},
+        {"uri": "img7.png", "style": "style1"},
+        {"uri": "img8.png", "style": "style1"},
+    ],
+    documents=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6", "doc7", "doc8"],
+    ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
 )
 
+# Test update all fields again
+collection.update(
+    ids=["id1", "id2"],
+    embeddings=[[0.0, 0.0, 0.5], [2.0, 0.0, 2.0]],
+    metadatas=[
+        {"uri": "img1.1.png", "style": "style1"},
+        {"uri": "img2.1.png", "style": "style1"},
+    ],
+    documents=["cod1", "cod2"],
+)
+
+results = collection.get(ids=["id1", "id2"])
+assert results["documents"][0] == "cod1"
+assert results["metadatas"][0]["uri"] == "img1.1.png"
+assert results["documents"][1] == "cod2"
+assert results["metadatas"][1]["uri"] == "img2.1.png"
+
+
+# Test update just document, embedding should get computed via function
+collection.update(
+    ids=["id1"],
+    documents=["cod1"],
+)
+
+item1 = collection.get(ids="id1")
+assert item1["metadatas"][0]["uri"] == "img1.1.png"
+assert item1["embeddings"][0][0] == 0.1
+
+# Test update just metadata
+collection.update(
+    ids="id1",
+    metadatas={"uri": "img1.2.png", "style": "style1"},
+)
+
+item1 = collection.get(ids="id1")
+assert item1["metadatas"][0]["uri"] == "img1.2.png"
+assert item1["embeddings"][0][0] == 0.1
+assert item1["documents"][0] == "cod1"
 collection.delete()
-client.delete_collection(name="test")
 
-# Test default embedding function
-
+### Test default embedding function ###
 # Create collection with no embedding function
+client.delete_collection(name="test")
 collection = client.create_collection(name="test")
 
 # Add docs without embeddings (call emb function)
@@ -216,15 +285,4 @@ print(
 #     metadatas=[{"uri": "img1.png", "style": "style1"}, {"uri": "img2.png", "style": "style1"}, {"uri": "img3.png", "style": "style1"}, {"uri": "img4.png", "style": "style1"}, {"uri": "img5.png", "style": "style1"}, {"uri": "img6.png", "style": "style1"}, {"uri": "img7.png", "style": "style1"}, {"uri": "img8.png", "style": "style1"}],
 #     documents=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6", "doc7", "doc8"],
 #     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
-# )
-
-# collection.update( # fails if id doesnt exist
-#     ids=["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"],
-#     # THE BELOW IS OPTIONAL
-#     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
-#     metadatas=[{"uri": "img1.png", "style": "style1"}, {"uri": "img2.png", "style": "style1"}, {"uri": "img3.png", "style": "style1"}, {"uri": "img4.png", "style": "style1"}, {"uri": "img5.png", "style": "style1"}, {"uri": "img6.png", "style": "style1"}, {"uri": "img7.png", "style": "style1"}, {"uri": "img8.png", "style": "style1"}],
-#     documents=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6", "doc7", "doc8"],
-#     # flags -- probably cut this for now to avoid dirty state between the index and items
-#     # update_embeddings=True,
-#     # update_index=False
 # )

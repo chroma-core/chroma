@@ -1,5 +1,15 @@
 from typing import Callable, Dict, Optional
 from chromadb.api import API
+from chromadb.api.types import (
+    ID,
+    Document,
+    Documents,
+    Embedding,
+    Embeddings,
+    IDs,
+    Metadata,
+    Metadatas,
+)
 from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
@@ -144,9 +154,11 @@ class FastAPI(API):
 
     def _update(
         self,
-        collection_name,
-        embedding,
-        metadata=None,
+        collection_name: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
     ):
         """
         Updates a batch of embeddings in the database
@@ -157,8 +169,10 @@ class FastAPI(API):
             self._api_url + "/collections/" + collection_name + "/update",
             data=json.dumps(
                 {
-                    "embedding": embedding,
-                    "metadata": metadata,
+                    "ids": ids,
+                    "embeddings": embeddings,
+                    "metadatas": metadatas,
+                    "documents": documents,
                 }
             ),
         )

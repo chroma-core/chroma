@@ -2,7 +2,8 @@ import json
 import time
 from typing import Dict, Optional, Sequence, Callable
 from chromadb.api import API
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.db import DB
+from chromadb.api.types import GetResult, IDs, QueryResult
 from chromadb.api.models.Collection import Collection
 
 import re
@@ -21,7 +22,7 @@ def is_valid_index_name(index_name):
 
 
 class LocalAPI(API):
-    def __init__(self, settings, db):
+    def __init__(self, settings, db: DB):
         self._db = db
 
     def heartbeat(self):
@@ -136,31 +137,16 @@ class LocalAPI(API):
 
         return True  # NIT: should this return the ids of the succesfully added items?
 
-    def _update(self, collection_name: str, embedding, metadata=None):
-
-        number_of_embeddings = len(embedding)
-
-        if metadata is None:
-            metadata = [{} for _ in range(number_of_embeddings)]
-
-        # convert all metadata values to strings : TODO: handle this better
-        # this is currently here because clickhouse-driver does not support json
-        for m in metadata:
-            for k, v in m.items():
-                m[k] = str(v)
-
+    def _update(
+        self,
+        collection_name: str,
+        ids: IDs,
+        embeddings=None,
+        metadatas=None,
+        documents=None,
+    ):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
-
-        # find the uuids of the embeddings where the metadata matches
-        # then update the embeddings for that
-        # then update the index position for that embedding
-        for item in metadata:
-            uuid = self._db.get_uuid(collection_uuid, item)
-            if uuid is not None:
-                self._db.update(collection_uuid, uuid, embedding, metadata)
-
-        # added_uuids = self._db.add(collection_uuid, embedding, metadata)
-        # self._db.add_incremental(collection_uuid, added_uuids, embedding)
+        self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
 
         return True
 

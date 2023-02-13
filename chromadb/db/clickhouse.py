@@ -1,3 +1,4 @@
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.errors import NoDatapointsException
@@ -6,7 +7,7 @@ import time
 import os
 import itertools
 import json
-from typing import Sequence, Any, List, Tuple
+from typing import Optional, Sequence, List, Tuple
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
@@ -195,6 +196,65 @@ class Clickhouse(DB):
 
         return [x[1] for x in data_to_insert]  # return uuids
 
+    def _update(
+        self,
+        collection_uuid,
+        ids: IDs,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+    ):
+
+        updates = []
+        parameters = {}
+        for i in range(len(ids)):
+            update_fields = []
+            parameters[f"i{i}"] = ids[i]
+            if embeddings is not None:
+                update_fields.append(f"embedding = {{e{i}:Array(Float64)}}")
+                parameters[f"e{i}"] = embeddings[i]
+            if metadatas is not None:
+                update_fields.append(f"metadata = {{m{i}:String}}")
+                parameters[f"m{i}"] = metadatas[i]
+            if documents is not None:
+                update_fields.append(f"document = {{d{i}:String}}")
+                parameters[f"d{i}"] = documents[i]
+
+            update_statement = f"""
+            UPDATE 
+                {",".join(update_fields)}
+            WHERE
+                id = {{i{i}:String}} AND 
+                collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
+            """
+            updates.append(update_statement)
+
+        update_clauses = ("").join(updates)
+        self._conn.command(f"ALTER TABLE embeddings {update_clauses}", parameters=parameters)
+
+    def update(
+        self,
+        collection_uuid,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+    ):
+
+        # Verify all IDs exist
+        existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
+        if len(existing_items) != len(ids):
+            raise ValueError("Some of the supplied ids for update were not found")
+
+        # Update the db
+        self._update(collection_uuid, ids, embeddings, metadatas, documents)
+
+        # Update the index
+        if embeddings is not None:
+            update_uuids = [x[1] for x in existing_items]
+            self._idx.delete_from_index(collection_uuid, update_uuids)
+            self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
+
     def _get(self, where={}):
         return self._conn.query(
             f"""SELECT {db_schema_to_keys()} FROM embeddings {where}"""
@@ -324,8 +384,8 @@ class Clickhouse(DB):
     def add_incremental(self, collection_uuid, uuids, embeddings):
         self._idx.add_incremental(collection_uuid, uuids, embeddings)
 
-    def has_index(self, collection_uuid):
-        return self._idx.has_index(self, collection_uuid)
+    def has_index(self, collection_uuid: str):
+        return self._idx.has_index(collection_uuid)
 
     def reset(self):
         self._conn.command("DROP TABLE collections")

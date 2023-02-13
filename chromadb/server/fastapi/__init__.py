@@ -15,6 +15,7 @@ from chromadb.server.fastapi.types import (
     SpaceKeyInput,
     CreateCollection,
     UpdateCollection,
+    UpdateEmbedding,
 )
 
 
@@ -108,9 +109,13 @@ class FastAPI(chromadb.server.Server):
             increment_index=add.increment_index,
         )
 
-    def update(self, collection_name: str, add: AddEmbedding):
+    def update(self, collection_name: str, add: UpdateEmbedding):
         return self._api._update(
-            collection_name=collection_name, embedding=add.embeddings, metadata=add.metadatas
+            ids=add.ids,
+            collection_name=collection_name,
+            embeddings=add.embeddings,
+            documents=add.documents,
+            metadatas=add.metadatas,
         )
 
     def get(self, collection_name, get: GetEmbedding):

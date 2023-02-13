@@ -10,6 +10,14 @@ class AddEmbedding(BaseModel):
     increment_index: bool = True
 
 
+class UpdateEmbedding(BaseModel):
+    embeddings: list = None
+    metadatas: Union[list, dict] = None
+    documents: Union[str, list] = None
+    ids: Union[str, list] = None
+    increment_index: bool = True
+
+
 class QueryEmbedding(BaseModel):
     where: dict = {}
     query_embeddings: list
