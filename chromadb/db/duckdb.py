@@ -301,9 +301,9 @@ class PersistentDuckDB(DuckDB):
                 (SELECT * FROM embeddings)
             TO '{self._save_folder}/chroma-embeddings.parquet'
                 (FORMAT PARQUET);
-        ''')
+        """)
 
-        self._conn.execute(f'''
+        self._conn.execute(f"""
             COPY
                 (SELECT * FROM collections)
             TO '{self._save_folder}/chroma-collections.parquet'
