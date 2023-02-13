@@ -1,4 +1,3 @@
-from typing import Protocol
 from chromadb.api.types import Documents, EmbeddingFunction
 
 

@@ -28,9 +28,20 @@ class Collection(BaseModel):
     _client: "API" = PrivateAttr()
     _embedding_fn: Optional[EmbeddingFunction] = PrivateAttr()
 
-    def __init__(self, client: "API", name: str, embedding_fn: Optional[EmbeddingFunction] = None):
+    def __init__(
+        self,
+        client: "API",
+        name: str,
+        embedding_fn: Optional[EmbeddingFunction] = None,
+    ):
         self._client = client
-        self._embedding_fn = embedding_fn
+        if embedding_fn is not None:
+            self._embedding_fn = embedding_fn
+        else:
+            import chromadb.utils.embedding_functions as ef
+
+            self._embedding_fn = ef.SentenceTransformerEmbeddingFunction()
+
         super().__init__(name=name)
 
     def __repr__(self):
