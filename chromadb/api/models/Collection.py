@@ -185,15 +185,6 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def upsert(
-        self,
-        ids: IDs,
-        embeddings: Optional[Embeddings],
-        metadatas: Optional[Metadatas],
-        documents: Optional[Documents],
-    ):
-        raise NotImplementedError()
-
     def delete(self, ids=None, where=None):
         return self._client._delete(self.name, ids, where)
 
