@@ -148,8 +148,7 @@ def test_reset_db(api_fixture, request):
     assert collection.count() == 2
 
     assert api.reset()
-    # assert collection.count() == 0
-
+    assert len(api.list_collections()) == 0
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_nearest_neighbors(api_fixture, request):
