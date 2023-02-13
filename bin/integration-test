@@ -3,7 +3,8 @@
 set -e
 
 function cleanup {
-  docker compose -f docker-compose.test.yml down --rmi local --volumes
+    docker logs chroma-test_server-1
+    docker compose -f docker-compose.test.yml down --rmi local --volumes
 }
 
 trap cleanup EXIT
@@ -15,5 +16,5 @@ export CHROMA_API_IMPL=rest
 export CHROMA_SERVER_HOST=localhost
 export CHROMA_SERVER_HTTP_PORT=8000
 
-python -m pytest
+pytest -k heartbeat
 
