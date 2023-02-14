@@ -207,6 +207,12 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json
 
+    def persist(self):
+        """Persists the database"""
+        resp = requests.post(self._api_url + "/persist")
+        resp.raise_for_status()
+        return resp.json
+
     def raw_sql(self, sql):
         """Runs a raw SQL query against the database"""
         resp = requests.post(self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql}))
