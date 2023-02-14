@@ -45,14 +45,14 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[Dict] = None,
-        embedding_fn: Optional[Callable] = None,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Creates a collection"""
         resp = requests.post(
             self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata})
         )
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_fn=embedding_fn)
+        return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def get_collection(self, name: str) -> Collection:
         """Returns a collection"""
