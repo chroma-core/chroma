@@ -126,6 +126,7 @@ class Clickhouse(DB):
 
         if len(checkname) > 0:
             if get_or_create:
+                print(f"collection with name {name} already exists, returning existing collection")
                 return self.get_collection(name)
             else:
                 raise Exception(f"collection with name {name} already exists")

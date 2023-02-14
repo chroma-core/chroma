@@ -87,6 +87,7 @@ class DuckDB(Clickhouse):
         dupe_check = self.get_collection(name)
         if not dupe_check.empty:
             if get_or_create:
+                print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
                 raise Exception(f"collection with name {name} already exists")
