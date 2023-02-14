@@ -3,9 +3,6 @@
 set -e
 
 function cleanup {
-    echo "SHUTTING DOWN =================================="
-    docker logs chroma-test_clickhouse-1
-    docker logs chroma-test_server-1
     docker compose -f docker-compose.test.yml down --rmi local --volumes
 }
 
@@ -18,7 +15,5 @@ export CHROMA_API_IMPL=rest
 export CHROMA_SERVER_HOST=localhost
 export CHROMA_SERVER_HTTP_PORT=8000
 
-sleep 30
-
-pytest -k heartbeat
+pytest
 
