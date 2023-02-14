@@ -262,6 +262,23 @@ class Clickhouse(DB):
             return f" JSONExtractInt(metadata,'{key}') = {value}"
         elif type(value) == float:
             return f" JSONExtractFloat(metadata,'{key}') = {value}"
+        elif type(value) == dict:
+            # Operator expression
+            operator, operand = list(value.items())[0]
+            if operator == "$gt":
+                return f" JSONExtractFloat(metadata,'{key}') > {operand}"
+            elif operator == "$lt":
+                return f" JSONExtractFloat(metadata,'{key}') < {operand}"
+            elif operator == "$gte":
+                return f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+            elif operator == "$lte":
+                return f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+            elif operator == "$ne":
+                if type(operand) == str:
+                    return f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                return f" JSONExtractFloat(metadata,'{key}') != {operand}"
+            else:
+                raise ValueError(f"Operator {operator} not supported")
 
     def get(
         self,
