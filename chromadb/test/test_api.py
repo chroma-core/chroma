@@ -1,4 +1,5 @@
 import chromadb
+from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
@@ -345,3 +346,146 @@ def test_peek(api_fixture, request):
     peek = collection.peek()
     for key in peek.keys():
         assert len(peek[key]) == 2
+
+
+
+#### TEST METADATA AND METADATA FILTERING ####
+# region
+ 
+metadata_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2}]
+}
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_add_get_int_float(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    items = collection.get(ids=["id1", "id2"])
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["float_value"] == 1.001
+    assert items["metadatas"][1]["int_value"] == 2
+    assert type(items["metadatas"][0]["int_value"]) == int
+    assert type(items["metadatas"][0]["float_value"]) == float
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_add_query_int_float(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    items: QueryResult = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    assert items["metadatas"][0][0]["int_value"] == 1
+    assert items["metadatas"][0][0]["float_value"] == 1.001
+    assert type(items["metadatas"][0][0]["int_value"]) == int
+    assert type(items["metadatas"][0][0]["float_value"]) == float
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_get_where_string(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    items = collection.get(where={"string_value": "one"}) 
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_get_where_int(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    items = collection.get(where={"int_value": 1})
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_get_where_float(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    items = collection.get(where={"float_value": 1.001})
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+    assert items["metadatas"][0]["float_value"] == 1.001
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_update_get_int_float(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_int")
+    collection.add(**metadata_records)
+    
+    collection.update(ids=["id1"], metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}])
+    items = collection.get(ids=["id1"])
+    assert items["metadatas"][0]["int_value"] == 2
+    assert items["metadatas"][0]["string_value"] == "two"
+    assert items["metadatas"][0]["float_value"] == 2.002
+
+bad_metadata_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"value": {"nested": "5"}}, {"value": [1,2,3]}]
+}
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_validation_add(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_metadata_validation")
+    with pytest.raises(ValueError) as e:
+        collection.add(**bad_metadata_records)
+    assert "Metadata" in str(e.value)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_validation_update(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_metadata_validation")
+    collection.add(**metadata_records)
+    with pytest.raises(ValueError) as e:
+        collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
+    assert "Metadata" in str(e.value)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_validation_get(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_validation")
+    with pytest.raises(ValueError) as e:
+        collection.get(where={"value": {"nested": "5"}})
+    assert "Where" in str(e.value)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_validation_query(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_validation")
+    with pytest.raises(ValueError) as e:
+        collection.get(where={"value": {"nested": "5"}})
+    assert "Where" in str(e.value)
+
+
+# endregion 
+
+

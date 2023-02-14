@@ -13,6 +13,8 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     maybe_cast_one_to_many,
+    validate_metadatas,
+    validate_where,
 )
 
 if TYPE_CHECKING:
@@ -66,7 +68,7 @@ class Collection(BaseModel):
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Check that one of embeddings or documents is provided
@@ -111,6 +113,7 @@ class Collection(BaseModel):
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
         """
+        where = validate_where(where) if where else None
         ids = maybe_cast_one_to_many(ids) if ids else None
         return self._client._get(self.name, ids, where, None, limit, offset)
 
@@ -137,7 +140,7 @@ class Collection(BaseModel):
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
             where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
         """
-
+        where = validate_where(where) if where else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
 
@@ -195,7 +198,7 @@ class Collection(BaseModel):
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Must update one of embeddings, metadatas, or documents
@@ -235,6 +238,7 @@ class Collection(BaseModel):
             ids: The ids of the embeddings to delete
             where: A dict of key, value string pairs to filter deletions by. E.g. {"color" : "red"}. Optional.
         """
+        where = validate_where(where) if where else None
         return self._client._delete(self.name, ids, where)
 
     def create_index(self):
