@@ -157,9 +157,9 @@ class DuckDB(Clickhouse):
         if type(value) == str:
             return f" json_extract_string(metadata,'$.{key}') = '{value}'"
         if type(value) == int:
-            return f" CAST(json_extract_string(metadata,'$.{key}') AS INT) = {value}"
+            return f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}"
         if type(value) == float:
-            return f" CAST(json_extract_string(metadata,'$.{key}') AS DOUBLE) = {value}"
+            return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
 
     def _get(self, where):
         val = self._conn.execute(
