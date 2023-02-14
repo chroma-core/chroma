@@ -16,7 +16,7 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne"]
+WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
 OperatorExpression = Dict[WhereOperator, Union[str, int, float]]
 Where = Dict[str, str | int | float | OperatorExpression]
 
@@ -99,8 +99,8 @@ def validate_where(where: Where) -> Where:
                     if not isinstance(operand, (int, float)):
                         raise ValueError(f"Where operand value {operand} must be an int or float for operator {operator}")
 
-                if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne"]:
-                    raise ValueError(f"Where operator must be one of $gt, $gte, $lt, $lte, $ne")
+                if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]:
+                    raise ValueError(f"Where operator must be one of $gt, $gte, $lt, $lte, $ne", "$eq")
 
                 if not isinstance(operand, (str, int, float)):
                     raise ValueError(f"Where operand value {operand} must be a string, int, or float")

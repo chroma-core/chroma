@@ -543,13 +543,15 @@ def test_where_ne_string(api_fixture, request):
     assert len(items["metadatas"]) == 1
 
 @pytest.mark.parametrize("api_fixture", test_apis)
-def test_where_ne_number(api_fixture, request):
+def test_where_ne_eq_number(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
     api.reset()
     collection = api.create_collection("test_where_lte")
     collection.add(**operator_records)
     items = collection.get(where={"int_value": {"$ne": 1}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"float_value": {"$eq": 2.002}})
     assert len(items["metadatas"]) == 1
 
 @pytest.mark.parametrize("api_fixture", test_apis)

@@ -154,14 +154,15 @@ class DuckDB(Clickhouse):
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
     def _filter_metadata(self, key, value):
+        # Shortcut for $eq
         if type(value) == str:
             return f" json_extract_string(metadata,'$.{key}') = '{value}'"
         if type(value) == int:
             return f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}"
         if type(value) == float:
             return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
+        # Operator expression
         elif type(value) == dict:
-            # Operator expression
             operator, operand = list(value.items())[0]
             if operator == "$gt":
                 return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) > {operand}"
@@ -175,6 +176,10 @@ class DuckDB(Clickhouse):
                 if type(operand) == str:
                     return f" json_extract_string(metadata,'$.{key}') != '{operand}'"
                 return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) != {operand}"
+            elif operator == "$eq":
+                if type(operand) == str:
+                    return f" json_extract_string(metadata,'$.{key}') = '{operand}'"
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {operand}"
             else:
                 raise ValueError(f"Operator {operator} not supported")
 
