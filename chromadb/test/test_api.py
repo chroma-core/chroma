@@ -140,6 +140,24 @@ def test_add(api_fixture, request):
 
     assert collection.count() == 2
 
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_or_create(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    collection.add(**batch_records)
+
+    assert collection.count() == 2
+
+    with pytest.raises(Exception):
+        collection = api.create_collection("testspace")
+
+    collection = api.get_or_create_collection("testspace")
+
+    assert collection.count() == 2
 
 minimal_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
