@@ -58,7 +58,23 @@ class API(ABC):
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+        Returns:
+            dict: the created collection
 
+        """
+        pass
+    
+    @abstractmethod
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+    ) -> Collection:
+        """Creates a new collection in the database, or returns it if an identical one exists
+
+        Args:
+            name (str): The name of the collection to create. The name must be unique.
+            metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
         Returns:
             dict: the created collection
 

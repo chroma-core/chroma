@@ -84,8 +84,13 @@ class DuckDB(Clickhouse):
             metadata = {}
 
         # poor man's unique constraint
-        if not self.get_collection(name).empty:
-            raise Exception(f"collection with name {name} already exists")
+        dupe_check = self.get_collection(name)
+        if not dupe_check.empty:
+            if metadata['get_or_create'] == False:
+                raise Exception(f"collection with name {name} already exists")
+            else:
+                return dupe_check
+            
 
         return self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",

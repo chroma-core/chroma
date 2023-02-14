@@ -125,7 +125,10 @@ class Clickhouse(DB):
         ).result_rows
 
         if len(checkname) > 0:
-            raise Exception("Collection already exists with that name")
+            if metadata['get_or_create'] == False:
+                raise Exception(f"collection with name {name} already exists")
+            else:
+                return self.get_collection(name)
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []

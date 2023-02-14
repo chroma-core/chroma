@@ -60,6 +60,19 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(client=self, name=name)
 
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
+    ) -> Collection:
+        """Get a collection, or return it if it exists"""
+        resp = requests.post(
+            self._api_url + "/collections", data=json.dumps({"get_or_create": True, "name": name, "metadata": metadata})
+        )
+        resp.raise_for_status()
+        return Collection(client=self, name=name, embedding_function=embedding_function)
+
     def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
         """Updates a collection"""
         resp = requests.put(

@@ -11,6 +11,9 @@ class DB(ABC):
     def create_collection(self, name, metadata=None):
         pass
 
+    def get_or_create_collection(self, name, metadata=None):
+        pass
+
     @abstractmethod
     def get_collection(self, collection_uuid):
         pass
