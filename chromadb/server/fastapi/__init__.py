@@ -28,6 +28,7 @@ class FastAPI(chromadb.server.Server):
         self.router = fastapi.APIRouter()
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
         self.router.add_api_route("/api/v1/collections", self.list_collections, methods=["GET"])
@@ -78,6 +79,9 @@ class FastAPI(chromadb.server.Server):
 
     def root(self):
         return {"nanosecond heartbeat": self._api.heartbeat()}
+
+    def persist(self):
+        self._api.persist()
 
     def list_collections(self):
         return self._api.list_collections()

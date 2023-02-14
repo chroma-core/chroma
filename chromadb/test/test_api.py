@@ -22,6 +22,16 @@ def local_api():
         )
     )
 
+@pytest.fixture
+def local_persist_api():
+    return chromadb.Client(
+        Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=tempfile.gettempdir() + "/test_server",
+        )
+    )
+
 
 @pytest.fixture
 def fastapi_integration_api():
@@ -79,6 +89,31 @@ if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
     test_apis.append(fastapi_integration_api)
 
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_persist(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    collection.add(**batch_records)
+
+    assert collection.count() == 2
+
+    api.persist()
+    del api
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    collection = api.get_collection("testspace")
+    assert collection.count() == 2
+
+    api.delete_collection("testspace")
+    api.persist()
+    del api
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    assert api.list_collections() == []
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_heartbeat(api_fixture, request):

@@ -261,6 +261,9 @@ class DuckDB(Clickhouse):
         print("Exiting: Cleaning up .chroma directory")
         self._idx.reset()
 
+    def persist(self):
+        raise NotImplementedError("chroma_db_impl='duckdb+parquet' to get persistence functionality")
+
 
 class PersistentDuckDB(DuckDB):
 

@@ -247,3 +247,7 @@ class LocalAPI(API):
 
     def _peek(self, collection_name, n=10):
         return self._get(collection_name=collection_name, limit=n)
+
+    def persist(self):
+        self._db.persist()
+        return True
