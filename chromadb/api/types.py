@@ -1,4 +1,4 @@
-from typing import Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from typing import Literal, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
 
 ID = str
 IDs = List[ID]
@@ -16,7 +16,9 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-Where = Dict[str, str | int | float]
+WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
+OperatorExpression = Dict[WhereOperator, Union[str, int, float]]
+Where = Dict[str, str | int | float | OperatorExpression]
 
 
 class GetResult(TypedDict):
@@ -77,12 +79,29 @@ def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     return metadatas
     
 def validate_where(where: Where) -> Where:
-    """Validates where to ensure it is a dictionary of strings to strings, ints, or floats"""
+    """Validates where to ensure it is a dictionary of strings to strings, ints, floats or operator expressions"""
     if not isinstance(where, dict):
         raise ValueError("Where must be a dictionary")
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Where key {key} must be a string")
-        if not isinstance(value, (str, int, float)):
-            raise ValueError(f"Where value {value} must be a string, int, or float")
+        if not isinstance(value, (str, int, float, dict)):
+            raise ValueError(f"Where value {value} must be a string, int, or float, or operator expression")
+        # Value is a operator expression
+        if isinstance(value, dict):
+            # Ensure there is only one operator
+            if len(value) != 1:
+                raise ValueError(f"Where operator expression {value} must have exactly one operator")
+            
+            for operator, operand in value.items():
+                # Only numbers can be compared with gt, gte, lt, lte
+                if operator in ["$gt", "$gte", "$lt", "$lte"]:
+                    if not isinstance(operand, (int, float)):
+                        raise ValueError(f"Where operand value {operand} must be an int or float for operator {operator}")
+
+                if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]:
+                    raise ValueError(f"Where operator must be one of $gt, $gte, $lt, $lte, $ne", "$eq")
+
+                if not isinstance(operand, (str, int, float)):
+                    raise ValueError(f"Where operand value {operand} must be a string, int, or float")
     return where

@@ -486,6 +486,91 @@ def test_where_validation_query(api_fixture, request):
     assert "Where" in str(e.value)
 
 
+operator_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2, "float_value": 2.002, "string_value": "two"}]
+}
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_lt(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lt")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$lt": 2}})
+    assert len(items["metadatas"]) == 1
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_lte(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$lte": 2.0}})
+    assert len(items["metadatas"]) == 2
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_gt(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"float_value": {"$gt": -1.4}})
+    assert len(items["metadatas"]) == 2
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_gte(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"float_value": {"$gte": 2.002}})
+    assert len(items["metadatas"]) == 1
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_ne_string(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_value": {"$ne": "two"}})
+    assert len(items["metadatas"]) == 1
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_ne_eq_number(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$ne": 1}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"float_value": {"$eq": 2.002}})
+    assert len(items["metadatas"]) == 1
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_where_valid_operators(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_valid_operators")
+    collection.add(**operator_records)
+    with pytest.raises(ValueError) as e:
+        collection.get(where={"int_value": {"$invalid": 2}})
+
+    with pytest.raises(ValueError) as e:
+        collection.get(where={"int_value": {"$lt": "2"}})
+    
+    with pytest.raises(ValueError) as e:
+        collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
+
 # endregion 
+
 
 

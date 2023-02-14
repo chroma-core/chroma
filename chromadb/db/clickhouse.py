@@ -256,12 +256,34 @@ class Clickhouse(DB):
         return [[*x[:5], json.loads(x[5])] for x in res]
 
     def _filter_metadata(self, key, value):
+        # Shortcut for $eq
         if type(value) == str:
             return f" JSONExtractString(metadata,'{key}') = '{value}'"
         elif type(value) == int:
             return f" JSONExtractInt(metadata,'{key}') = {value}"
         elif type(value) == float:
             return f" JSONExtractFloat(metadata,'{key}') = {value}"
+        # Operator expression
+        elif type(value) == dict:
+            operator, operand = list(value.items())[0]
+            if operator == "$gt":
+                return f" JSONExtractFloat(metadata,'{key}') > {operand}"
+            elif operator == "$lt":
+                return f" JSONExtractFloat(metadata,'{key}') < {operand}"
+            elif operator == "$gte":
+                return f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+            elif operator == "$lte":
+                return f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+            elif operator == "$ne":
+                if type(operand) == str:
+                    return f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                return f" JSONExtractFloat(metadata,'{key}') != {operand}"
+            elif operator == "$eq":
+                if type(operand) == str:
+                    return f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                return f" JSONExtractFloat(metadata,'{key}') = {operand}"
+            else:
+                raise ValueError(f"Operator {operator} not supported")
 
     def get(
         self,
