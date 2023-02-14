@@ -143,7 +143,7 @@ assert len(client.list_collections()) == 0
 
 # Test embedding function
 collection = client.create_collection(
-    name="test", embedding_fn=SentenceTransformerEmbeddingFunction()
+    name="test", embedding_function=SentenceTransformerEmbeddingFunction()
 )
 
 # Add docs without embeddings (call emb function)
@@ -180,7 +180,7 @@ assert collection.count() == 9
 
 ### TEST UPDATE ###
 collection = client.create_collection(
-    "test_update", embedding_fn=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
+    "test_update", embedding_function=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
 )
 assert collection.count() == 0
 
