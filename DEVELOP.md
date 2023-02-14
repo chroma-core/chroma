@@ -34,10 +34,10 @@ This by default saves your db and your indexes to a `.chroma` directory and can 
 ```python
 import chromadb
 from chromadb.config import Settings
-api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet"))
+api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet", 
+                      persist_directory="/path/to/persist/directory"))
 print(api.heartbeat())
 ```
-
 
 
 3. With a persistent backend and a small frontend client
