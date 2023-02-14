@@ -31,8 +31,6 @@ def clickhouse_to_duckdb_schema(table_schema):
             item[list(item.keys())[0]] = "STRING"
         if "FLOAT64" in item[list(item.keys())[0]]:
             item[list(item.keys())[0]] = "DOUBLE"
-        # NIT: here we need to turn metadata into JSON for duckdb
-
     return table_schema
 
 
@@ -122,9 +120,7 @@ class DuckDB(Clickhouse):
     #  ITEM METHODS
     #
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
-    def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
-
-        metadata = [json.dumps(x) if not isinstance(x, str) else x for x in metadata]
+    def add(self, collection_uuid, embedding, metadata, documents, ids):
 
         data_to_insert = []
         for i in range(len(embedding)):
@@ -133,7 +129,7 @@ class DuckDB(Clickhouse):
                     collection_uuid,
                     str(uuid.uuid4()),
                     embedding[i],
-                    metadata[i],
+                    json.dumps(metadata[i]),
                     documents[i],
                     ids[i],
                 ]
@@ -158,7 +154,34 @@ class DuckDB(Clickhouse):
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
     def _filter_metadata(self, key, value):
-        return f" json_extract_string(metadata,'$.{key}') = '{value}'"
+        # Shortcut for $eq
+        if type(value) == str:
+            return f" json_extract_string(metadata,'$.{key}') = '{value}'"
+        if type(value) == int:
+            return f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}"
+        if type(value) == float:
+            return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
+        # Operator expression
+        elif type(value) == dict:
+            operator, operand = list(value.items())[0]
+            if operator == "$gt":
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) > {operand}"
+            elif operator == "$lt":
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) < {operand}"
+            elif operator == "$gte":
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) >= {operand}"
+            elif operator == "$lte":
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) <= {operand}"
+            elif operator == "$ne":
+                if type(operand) == str:
+                    return f" json_extract_string(metadata,'$.{key}') != '{operand}'"
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) != {operand}"
+            elif operator == "$eq":
+                if type(operand) == str:
+                    return f" json_extract_string(metadata,'$.{key}') = '{operand}'"
+                return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {operand}"
+            else:
+                raise ValueError(f"Operator {operator} not supported")
 
     def _get(self, where):
         val = self._conn.execute(
@@ -168,6 +191,8 @@ class DuckDB(Clickhouse):
             val[i] = list(val[i])
             val[i][0] = uuid.UUID(val[i][0])
             val[i][1] = uuid.UUID(val[i][1])
+            # json.loads metadata
+            val[i][5] = json.loads(val[i][5])
 
         return val
 
