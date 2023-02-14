@@ -36,11 +36,12 @@ class LocalAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        get_or_create: bool = False
     ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
 
-        self._db.create_collection(name, metadata)
+        self._db.create_collection(name, metadata, get_or_create=get_or_create)
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def get_or_create_collection(
@@ -49,16 +50,7 @@ class LocalAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        if not is_valid_index_name(name):
-            raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
-
-        if metadata is None:
-            metadata = {}
-            
-        metadata['get_or_create'] = True
-
-        self._db.create_collection(name, metadata)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
     def get_collection(
         self,

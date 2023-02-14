@@ -52,6 +52,7 @@ class API(ABC):
         self,
         name: str,
         metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
     ) -> Collection:
         """Creates a new collection in the database
 
@@ -63,14 +64,14 @@ class API(ABC):
 
         """
         pass
-    
+
     @abstractmethod
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict] = None
     ) -> Collection:
-        """Creates a new collection in the database, or returns it if an identical one exists
+        """Calls create_collection with get_or_create=True
 
         Args:
             name (str): The name of the collection to create. The name must be unique.
@@ -80,7 +81,7 @@ class API(ABC):
 
         """
         pass
-
+    
     @abstractmethod
     def get_collection(
         self,

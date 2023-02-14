@@ -46,10 +46,11 @@ class FastAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
         resp = requests.post(
-            self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata})
+            self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create})
         )
         resp.raise_for_status()
         return Collection(client=self, name=name, embedding_function=embedding_function)
@@ -67,11 +68,8 @@ class FastAPI(API):
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Get a collection, or return it if it exists"""
-        resp = requests.post(
-            self._api_url + "/collections", data=json.dumps({"get_or_create": True, "name": name, "metadata": metadata})
-        )
-        resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        
+        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
     def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
         """Updates a collection"""

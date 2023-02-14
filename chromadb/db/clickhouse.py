@@ -113,7 +113,7 @@ class Clickhouse(DB):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name, metadata=None, get_or_create=False):
         if metadata is None:
             metadata = {}
 
@@ -125,10 +125,10 @@ class Clickhouse(DB):
         ).result_rows
 
         if len(checkname) > 0:
-            if metadata['get_or_create'] == False:
-                raise Exception(f"collection with name {name} already exists")
-            else:
+            if get_or_create:
                 return self.get_collection(name)
+            else:
+                raise Exception(f"collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []

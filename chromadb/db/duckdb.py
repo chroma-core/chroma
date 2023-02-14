@@ -79,17 +79,17 @@ class DuckDB(Clickhouse):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name, metadata=None, get_or_create=False):
         if metadata is None:
             metadata = {}
 
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
         if not dupe_check.empty:
-            if metadata['get_or_create'] == False:
-                raise Exception(f"collection with name {name} already exists")
-            else:
+            if get_or_create:
                 return dupe_check
+            else:
+                raise Exception(f"collection with name {name} already exists")
             
 
         return self._conn.execute(

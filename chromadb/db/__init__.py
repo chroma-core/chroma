@@ -8,7 +8,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name, metadata=None, get_or_create=False):
         pass
 
     def get_or_create_collection(self, name, metadata=None):
