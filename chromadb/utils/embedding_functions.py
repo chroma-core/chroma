@@ -28,9 +28,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         self._model_name = model_name
     def __call__(self, texts: Documents) -> Embeddings:
         # Call the OpenAI Embedding API in parallel for each document
-        # https://beta.openai.com/docs/api-reference/embeddings
-        return self._client.create(
-            texts=Documents,
+        return [result["embedding"] for result in self._client.create(
+            input=texts,
             engine=self._model_name,
-        )["data"][0]["embedding"]
-            
+        )["data"]]
