@@ -5,7 +5,7 @@
 
 __Chroma is the open-source embedding database__. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs. 
 
-- [💬 Community Discord](https://discord.gg/zuTmeakP)
+- [💬 Community Discord](https://discord.gg/MMeYNTmh3x)
 - [📖 Documentation](https://docs.trychroma.com/)
 - [💡 Colab Example](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 - [🏠 Homepage](https://www.trychroma.com/)
@@ -47,7 +47,7 @@ results = collection.query(
 
 ## Get involved
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project. 
-- [Join the conversation on Discord](https://discord.gg/zuTmeakP)
+- [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x)
 - [Review the roadmap and contribute your ideas](https://github.com/chroma-core/chroma/wiki/Roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues)
 
