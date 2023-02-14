@@ -28,3 +28,7 @@ jobs:
       run: python -m pytest
     - name: Integration Test
       run: bin/integration-test
+    - name: Debug with SSH
+      uses: lhotari/action-upterm@v1
+      with:
+        limit-access-to-users: levand
