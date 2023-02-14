@@ -179,13 +179,19 @@ class Clickhouse(DB):
     #
     #  ITEM METHODS
     #
-    def add(self, collection_uuid, embedding, metadata, documents, ids):
+    def add(self, collection_uuid, embeddings, metadatas, documents, ids):
 
-        data_to_insert = []
-        for i in range(len(embedding)):
-            data_to_insert.append(
-                [collection_uuid, uuid.uuid4(), embedding[i], json.dumps(metadata[i]), documents[i], ids[i]]
-            )
+        data_to_insert = [
+            [
+                collection_uuid, 
+                uuid.uuid4(), 
+                embedding, 
+                json.dumps(metadatas[i]) if metadatas else None, 
+                documents[i] if documents else None, 
+                ids[i]
+            ]
+            for i, embedding in enumerate(embeddings)
+        ]
 
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
         self._conn.insert("embeddings", data_to_insert, column_names=column_names)
@@ -372,6 +378,19 @@ class Clickhouse(DB):
     def get_nearest_neighbors(
         self, where, embeddings, n_results, collection_name=None, collection_uuid=None
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
+
+        idx_metadata = self._idx.get_metadata()
+        # Check query embeddings dimensionality
+        if idx_metadata["dimensionality"] != len(embeddings[0]):
+            raise ValueError(
+                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
+            )
+        
+        # Check number of requested results
+        if n_results > idx_metadata["elements"]:
+            raise ValueError(
+                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
+            )
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)

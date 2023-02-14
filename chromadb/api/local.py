@@ -89,30 +89,9 @@ class LocalAPI(API):
         increment_index=True,
     ):
 
-        number_of_embeddings = len(embeddings)
-
-        # fill in empty objects if not provided
-        if metadatas is None:
-            if isinstance(embeddings[0], list):
-                metadatas = [{} for _ in range(number_of_embeddings)]
-            else:
-                metadatas = {}
-
-        if ids is None:
-            if isinstance(embeddings[0], list):
-                ids = [None for _ in range(number_of_embeddings)]
-            else:
-                ids = None
-
-        if documents is None:
-            if isinstance(embeddings[0], list):
-                documents = [None for _ in range(number_of_embeddings)]
-            else:
-                documents = None
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
-            collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids
+            collection_uuid, embeddings=embeddings, metadatas=metadatas, documents=documents, ids=ids
         )
 
         if increment_index:
