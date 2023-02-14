@@ -35,13 +35,13 @@ class LocalAPI(API):
         self,
         name: str,
         metadata: Optional[Dict] = None,
-        embedding_fn: Optional[Callable] = None,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
 
         self._db.create_collection(name, metadata)
-        return Collection(client=self, name=name, embedding_fn=embedding_fn)
+        return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def get_collection(
         self,
@@ -110,23 +110,6 @@ class LocalAPI(API):
             else:
                 documents = None
 
-        # convert all metadatas values to strings : TODO: handle this better
-        # this is currently here because clickhouse-driver does not support json
-        if isinstance(embeddings[0], list):
-            for m in metadatas:
-                for k, v in m.items():
-                    m[k] = str(v)
-        else:
-            for k, v in metadatas.items():
-                metadatas[k] = str(v)
-
-        # convert to array for downstream processing
-        if not isinstance(embeddings[0], list):
-            embeddings = [embeddings]
-            metadatas = [metadatas]
-            documents = [documents]
-            ids = [ids]
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids
@@ -156,7 +139,7 @@ class LocalAPI(API):
             query_result["embeddings"].append(entry[2])
             query_result["documents"].append(entry[3])
             query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(json.loads(entry[5]))
+            query_result["metadatas"].append(entry[5])
         return query_result
 
     def _get(

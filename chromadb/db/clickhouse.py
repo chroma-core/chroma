@@ -93,11 +93,6 @@ class Clickhouse(DB):
         return res.result_rows[0][0]
 
     def _create_where_clause(self, collection_uuid, ids=None, where={}):
-        # ensure where only contains strings, as we only support string equality for now
-        for key in where:
-            if not isinstance(where[key], str):
-                raise Exception("Invalid metadata: " + str(where))
-
         where = " AND ".join([self._filter_metadata(key, value) for key, value in where.items()])
 
         if ids is not None:
@@ -189,14 +184,12 @@ class Clickhouse(DB):
     #
     #  ITEM METHODS
     #
-    def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
-
-        metadata = [json.dumps(x) if not isinstance(x, str) else x for x in metadata]
+    def add(self, collection_uuid, embedding, metadata, documents, ids):
 
         data_to_insert = []
         for i in range(len(embedding)):
             data_to_insert.append(
-                [collection_uuid, uuid.uuid4(), embedding[i], metadata[i], documents[i], ids[i]]
+                [collection_uuid, uuid.uuid4(), embedding[i], json.dumps(metadata[i]), documents[i], ids[i]]
             )
 
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
@@ -223,7 +216,7 @@ class Clickhouse(DB):
                 parameters[f"e{i}"] = embeddings[i]
             if metadatas is not None:
                 update_fields.append(f"metadata = {{m{i}:String}}")
-                parameters[f"m{i}"] = metadatas[i]
+                parameters[f"m{i}"] = json.dumps(metadatas[i])
             if documents is not None:
                 update_fields.append(f"document = {{d{i}:String}}")
                 parameters[f"d{i}"] = documents[i]
@@ -264,12 +257,41 @@ class Clickhouse(DB):
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
     def _get(self, where={}):
-        return self._get_conn().query(
+        res = self._get_conn().query(
             f"""SELECT {db_schema_to_keys()} FROM embeddings {where}"""
         ).result_rows
+        # json.load the metadata
+        return [[*x[:5], json.loads(x[5])] for x in res]
 
     def _filter_metadata(self, key, value):
-        return f" JSONExtractString(metadata,'{key}') = '{value}'"
+        # Shortcut for $eq
+        if type(value) == str:
+            return f" JSONExtractString(metadata,'{key}') = '{value}'"
+        elif type(value) == int:
+            return f" JSONExtractInt(metadata,'{key}') = {value}"
+        elif type(value) == float:
+            return f" JSONExtractFloat(metadata,'{key}') = {value}"
+        # Operator expression
+        elif type(value) == dict:
+            operator, operand = list(value.items())[0]
+            if operator == "$gt":
+                return f" JSONExtractFloat(metadata,'{key}') > {operand}"
+            elif operator == "$lt":
+                return f" JSONExtractFloat(metadata,'{key}') < {operand}"
+            elif operator == "$gte":
+                return f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+            elif operator == "$lte":
+                return f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+            elif operator == "$ne":
+                if type(operand) == str:
+                    return f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                return f" JSONExtractFloat(metadata,'{key}') != {operand}"
+            elif operator == "$eq":
+                if type(operand) == str:
+                    return f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                return f" JSONExtractFloat(metadata,'{key}') = {operand}"
+            else:
+                raise ValueError(f"Operator {operator} not supported")
 
     def get(
         self,

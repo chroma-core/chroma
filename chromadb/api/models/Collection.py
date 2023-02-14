@@ -13,6 +13,8 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     maybe_cast_one_to_many,
+    validate_metadatas,
+    validate_where,
 )
 
 if TYPE_CHECKING:
@@ -22,21 +24,21 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     _client: "API" = PrivateAttr()
-    _embedding_fn: Optional[EmbeddingFunction] = PrivateAttr()
+    _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
     def __init__(
         self,
         client: "API",
         name: str,
-        embedding_fn: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ):
         self._client = client
-        if embedding_fn is not None:
-            self._embedding_fn = embedding_fn
+        if embedding_function is not None:
+            self._embedding_function = embedding_function
         else:
             import chromadb.utils.embedding_functions as ef
 
-            self._embedding_fn = ef.SentenceTransformerEmbeddingFunction()
+            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
 
         super().__init__(name=name)
 
@@ -58,7 +60,7 @@ class Collection(BaseModel):
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
-            embedding: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_fn set for the Collection. Optional.
+            embedding: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadata: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
             ids: The ids to associate with the embeddings. Optional.
@@ -66,7 +68,7 @@ class Collection(BaseModel):
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Check that one of embeddings or documents is provided
@@ -89,9 +91,9 @@ class Collection(BaseModel):
 
         # If document embeddings are not provided, we need to compute them
         if embeddings is None and documents is not None:
-            if self._embedding_fn is None:
+            if self._embedding_function is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
-            embeddings = self._embedding_fn(documents)
+            embeddings = self._embedding_function(documents)
 
         self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
 
@@ -107,10 +109,11 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
         """
+        where = validate_where(where) if where else None
         ids = maybe_cast_one_to_many(ids) if ids else None
         return self._client._get(self.name, ids, where, None, limit, offset)
 
@@ -135,9 +138,9 @@ class Collection(BaseModel):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
-            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
         """
-
+        where = validate_where(where) if where else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
 
@@ -151,10 +154,10 @@ class Collection(BaseModel):
 
         # If query_embeddings are not provided, we need to compute them from the query_texts
         if query_embeddings is None:
-            if self._embedding_fn is None:
+            if self._embedding_function is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
             # We know query texts is not None at this point, cast for the typechecker
-            query_embeddings = self._embedding_fn(cast(List[Document], query_texts))
+            query_embeddings = self._embedding_function(cast(List[Document], query_texts))
 
         if where is None:
             where = {}
@@ -188,14 +191,14 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to update
-            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_fn set for the Collection. Optional.
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
         """
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Must update one of embeddings, metadatas, or documents
@@ -222,9 +225,9 @@ class Collection(BaseModel):
 
         # If document embeddings are not provided, we need to compute them
         if embeddings is None and documents is not None:
-            if self._embedding_fn is None:
+            if self._embedding_function is None:
                 raise ValueError("You must provide embeddings or a function to compute them")
-            embeddings = self._embedding_fn(documents)
+            embeddings = self._embedding_function(documents)
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
@@ -233,8 +236,9 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A dict of key, value string pairs to filter deletions by. E.g. {"color" : "red"}. Optional.
+            where:  A dict of key, value string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
         """
+        where = validate_where(where) if where else None
         return self._client._delete(self.name, ids, where)
 
     def create_index(self):
