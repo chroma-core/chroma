@@ -50,7 +50,6 @@ class LocalAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        print("Calling it from here!")
         return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
     def get_collection(

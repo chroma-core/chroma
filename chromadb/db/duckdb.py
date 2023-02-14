@@ -86,8 +86,6 @@ class DuckDB(Clickhouse):
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
         if not dupe_check.empty:
-            print("Current value is:")
-            print(get_or_create)
             if get_or_create == True:
                 print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
