@@ -21,7 +21,6 @@ EMBEDDING_TABLE_SCHEMA = [
     {"metadata": "String"},
 ]
 
-
 def db_array_schema_to_clickhouse_schema(table_schema):
     return_str = ""
     for element in table_schema:
@@ -46,28 +45,34 @@ class Clickhouse(DB):
     #  INIT METHODS
     #
     def __init__(self, settings):
+        self._conn = None
+        self._idx = Hnswlib(settings)
+        self._settings = settings
+
+    def _init_conn(self):
         self._conn = clickhouse_connect.get_client(
-            host=settings.clickhouse_host, port=int(settings.clickhouse_port)
+            host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
         self._conn.query(f"""SET allow_experimental_lightweight_delete = 1;""")
         self._conn.query(
             f"""SET mutations_sync = 1;"""
         )  # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
+        self._create_table_collections(self._conn)
+        self._create_table_embeddings(self._conn)
 
-        self._create_table_collections()
-        self._create_table_embeddings()
-        self._idx = Hnswlib(settings)
-        self._settings = settings
+    def _get_conn(self):
+        if self._conn is None:
+            self._init_conn()
+        return self._conn
 
-    def _create_table_collections(self):
-        self._conn.command(
+    def _create_table_collections(self, conn):
+        conn.command(
             f"""CREATE TABLE IF NOT EXISTS collections (
             {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
-        ) ENGINE = MergeTree() ORDER BY uuid"""
-        )
+        ) ENGINE = MergeTree() ORDER BY uuid""")
 
-    def _create_table_embeddings(self):
-        self._conn.command(
+    def _create_table_embeddings(self, conn):
+        conn.command(
             f"""CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY collection_uuid"""
@@ -80,7 +85,7 @@ class Clickhouse(DB):
         raise NotImplementedError("Clickhouse is a persistent database, this method is not needed")
 
     def get_collection_uuid_from_name(self, name):
-        res = self._conn.query(
+        res = self._get_conn().query(
             f"""
             SELECT uuid FROM collections WHERE name = '{name}'
         """
@@ -118,7 +123,7 @@ class Clickhouse(DB):
             metadata = {}
 
         # poor man's unique constraint
-        checkname = self._conn.query(
+        checkname = self._get_conn().query(
             f"""
             SELECT * FROM collections WHERE name = '{name}'
         """
@@ -131,18 +136,18 @@ class Clickhouse(DB):
         data_to_insert = []
         data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
 
-        self._conn.insert("collections", data_to_insert, column_names=["uuid", "name", "metadata"])
+        self._get_conn().insert("collections", data_to_insert, column_names=["uuid", "name", "metadata"])
         return collection_uuid
 
     def get_collection(self, name):
-        return self._conn.query(
+        return self._get_conn().query(
             f"""
          SELECT * FROM collections WHERE name = '{name}'
          """
         ).result_rows
 
     def list_collections(self) -> Sequence[Sequence[str]]:
-        return self._conn.query(f"""SELECT * FROM collections""").result_rows
+        return self._get_conn().query(f"""SELECT * FROM collections""").result_rows
 
     def update_collection(self, current_name, new_name, new_metadata):
         if new_name is None:
@@ -150,7 +155,7 @@ class Clickhouse(DB):
         if new_metadata is None:
             new_metadata = self.get_collection(current_name)[0]
 
-        return self._conn.command(
+        return self._get_conn().command(
             f"""
 
          ALTER TABLE 
@@ -166,13 +171,13 @@ class Clickhouse(DB):
 
     def delete_collection(self, name):
         collection_uuid = self.get_collection_uuid_from_name(name)
-        self._conn.command(
+        self._get_conn().command(
             f"""
         DELETE FROM embeddings WHERE collection_uuid = '{collection_uuid}'
         """
         )
 
-        self._conn.command(
+        self._get_conn().command(
             f"""
          DELETE FROM collections WHERE name = '{name}'
          """
@@ -195,7 +200,7 @@ class Clickhouse(DB):
             )
 
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
-        self._conn.insert("embeddings", data_to_insert, column_names=column_names)
+        self._get_conn().insert("embeddings", data_to_insert, column_names=column_names)
 
         return [x[1] for x in data_to_insert]  # return uuids
 
@@ -233,7 +238,7 @@ class Clickhouse(DB):
             updates.append(update_statement)
 
         update_clauses = ("").join(updates)
-        self._conn.command(f"ALTER TABLE embeddings {update_clauses}", parameters=parameters)
+        self._get_conn().command(f"ALTER TABLE embeddings {update_clauses}", parameters=parameters)
 
     def update(
         self,
@@ -259,7 +264,7 @@ class Clickhouse(DB):
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
     def _get(self, where={}):
-        return self._conn.query(
+        return self._get_conn().query(
             f"""SELECT {db_schema_to_keys()} FROM embeddings {where}"""
         ).result_rows
 
@@ -305,15 +310,15 @@ class Clickhouse(DB):
         where_string = ""
         if collection_uuid is not None:
             where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
+        return self._get_conn().query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
 
     def count(self, collection_name):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid)[0][0]
 
     def _delete(self, where_str=None):
-        deleted_uuids = self._conn.query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
-        self._conn.command(
+        deleted_uuids = self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
+        self._get_conn().command(
             f"""
             DELETE FROM
                 embeddings
@@ -341,7 +346,7 @@ class Clickhouse(DB):
         return deleted_uuids
 
     def get_by_ids(self, ids: list):
-        return self._conn.query(
+        return self._get_conn().query(
             f"""
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         """
@@ -391,13 +396,14 @@ class Clickhouse(DB):
         return self._idx.has_index(collection_uuid)
 
     def reset(self):
-        self._conn.command("DROP TABLE collections")
-        self._conn.command("DROP TABLE embeddings")
-        self._create_table_collections()
-        self._create_table_embeddings()
+        conn = self._get_conn()
+        conn.command("DROP TABLE collections")
+        conn.command("DROP TABLE embeddings")
+        self._create_table_collections(conn)
+        self._create_table_embeddings(conn)
 
         self._idx.reset()
         self._idx = Hnswlib(self._settings)
 
     def raw_sql(self, sql):
-        return self._conn.query(sql).result_rows
+        return self._get_conn().query(sql).result_rows
