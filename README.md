@@ -41,7 +41,7 @@ collection.add(
 )
 results = collection.query(
     query_embeddings=[1.5, 2.9, 3.4],
-    n_results=3
+    n_results=2
 )
 ```
 
