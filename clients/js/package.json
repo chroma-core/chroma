@@ -1,0 +1,18 @@
+{
+  "name": "chromadb",
+  "version": "1.0.1",
+  "description": "A JavaScript interface for the Chromadb",
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.5.2"
+  },
+  "dependencies": {
+    "axios": "^1.3.3"
+  },
+  "scripts": {
+    "genapi-bash": "openapi-generator-cli generate -i <(curl -s 'http://localhost:8000/openapi.json') -g typescript-axios -o generated -p withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useSingleRequestParameter=true",
+    "genapi-zsh": "mkfifo openapi.json; (curl -s 'http://localhost:8000/openapi.json' > openapi.json &) && openapi-generator-cli generate -i openapi.json -g typescript-axios -o generated --additional-properties 'withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useSingleRequestParameter=true,withNodeImports=true,npmName=chromadb'; rm openapi.json"
+  }
+}
