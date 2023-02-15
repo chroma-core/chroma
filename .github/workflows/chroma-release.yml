@@ -40,12 +40,20 @@ jobs:
     - name: Get Docker Tag
       id: tag
       run: echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
-    - name: Build and push Docker image
+    - name: Build and push prerelease Docker image
+      if: "!startsWith(github.ref, 'refs/tags/')"
       uses: docker/build-push-action@v3.2.0
       with:
         context: .
         push: true
         tags: ${{ steps.tag.outputs.tag_name}}
+    - name: Build and push release Docker image
+      if: "startsWith(github.ref, 'refs/tags/')"
+      uses: docker/build-push-action@v3.2.0
+      with:
+        context: .
+        push: true
+        tags: "${{ steps.tag.outputs.tag_name }},${{ env.IMAGE_NAME }}:latest"
     - name: Get Release Version
       id: version
       run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
