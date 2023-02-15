@@ -379,6 +379,10 @@ class Clickhouse(DB):
         self, where, embeddings, n_results, collection_name=None, collection_uuid=None
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
 
+        # Either the collection name or the collection uuid must be provided
+        if collection_name == None and collection_uuid == None:
+            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+
         idx_metadata = self._idx.get_metadata()
         # Check query embeddings dimensionality
         if idx_metadata["dimensionality"] != len(embeddings[0]):
