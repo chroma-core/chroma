@@ -21,6 +21,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {"metadata": "String"},
 ]
 
+
 def db_array_schema_to_clickhouse_schema(table_schema):
     return_str = ""
     for element in table_schema:
@@ -69,7 +70,8 @@ class Clickhouse(DB):
         conn.command(
             f"""CREATE TABLE IF NOT EXISTS collections (
             {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
-        ) ENGINE = MergeTree() ORDER BY uuid""")
+        ) ENGINE = MergeTree() ORDER BY uuid"""
+        )
 
     def _create_table_embeddings(self, conn):
         conn.command(
@@ -93,10 +95,13 @@ class Clickhouse(DB):
         return res.result_rows[0][0]
 
     def _create_where_clause(self, collection_uuid, ids=None, where={}, where_document={}):
-        where_clauses= [self._format_where(key, value) for key, value in where.items()]
+        where_clauses = []
+        self._format_where(where, where_clauses)
         if len(where_document) > 0:
-            where_clauses.append(self._format_where_document(where_document))
-        
+            where_document_clauses = []
+            self._format_where_document(where_document, where_document_clauses)
+            where_clauses.extend(where_document_clauses)
+
         if ids is not None:
             where_clauses.append(f" id IN {tuple(ids)}")
 
@@ -114,11 +119,15 @@ class Clickhouse(DB):
             metadata = {}
 
         # poor man's unique constraint
-        checkname = self._get_conn().query(
-            f"""
+        checkname = (
+            self._get_conn()
+            .query(
+                f"""
             SELECT * FROM collections WHERE name = '{name}'
         """
-        ).result_rows
+            )
+            .result_rows
+        )
 
         if len(checkname) > 0:
             raise Exception("Collection already exists with that name")
@@ -127,15 +136,21 @@ class Clickhouse(DB):
         data_to_insert = []
         data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
 
-        self._get_conn().insert("collections", data_to_insert, column_names=["uuid", "name", "metadata"])
+        self._get_conn().insert(
+            "collections", data_to_insert, column_names=["uuid", "name", "metadata"]
+        )
         return collection_uuid
 
     def get_collection(self, name):
-        return self._get_conn().query(
-            f"""
+        return (
+            self._get_conn()
+            .query(
+                f"""
          SELECT * FROM collections WHERE name = '{name}'
          """
-        ).result_rows
+            )
+            .result_rows
+        )
 
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._get_conn().query(f"""SELECT * FROM collections""").result_rows
@@ -185,7 +200,14 @@ class Clickhouse(DB):
         data_to_insert = []
         for i in range(len(embedding)):
             data_to_insert.append(
-                [collection_uuid, uuid.uuid4(), embedding[i], json.dumps(metadata[i]), documents[i], ids[i]]
+                [
+                    collection_uuid,
+                    uuid.uuid4(),
+                    embedding[i],
+                    json.dumps(metadata[i]),
+                    documents[i],
+                    ids[i],
+                ]
             )
 
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
@@ -253,46 +275,71 @@ class Clickhouse(DB):
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
     def _get(self, where={}):
-        res = self._get_conn().query(
-            f"""SELECT {db_schema_to_keys()} FROM embeddings {where}"""
-        ).result_rows
+        res = (
+            self._get_conn()
+            .query(f"""SELECT {db_schema_to_keys()} FROM embeddings {where}""")
+            .result_rows
+        )
         # json.load the metadata
         return [[*x[:5], json.loads(x[5])] for x in res]
 
-    def _format_where(self, key, value):
-        # Shortcut for $eq
-        if type(value) == str:
-            return f" JSONExtractString(metadata,'{key}') = '{value}'"
-        elif type(value) == int:
-            return f" JSONExtractInt(metadata,'{key}') = {value}"
-        elif type(value) == float:
-            return f" JSONExtractFloat(metadata,'{key}') = {value}"
-        # Operator expression
-        elif type(value) == dict:
-            operator, operand = list(value.items())[0]
-            if operator == "$gt":
-                return f" JSONExtractFloat(metadata,'{key}') > {operand}"
-            elif operator == "$lt":
-                return f" JSONExtractFloat(metadata,'{key}') < {operand}"
-            elif operator == "$gte":
-                return f" JSONExtractFloat(metadata,'{key}') >= {operand}"
-            elif operator == "$lte":
-                return f" JSONExtractFloat(metadata,'{key}') <= {operand}"
-            elif operator == "$ne":
-                if type(operand) == str:
-                    return f" JSONExtractString(metadata,'{key}') != '{operand}'"
-                return f" JSONExtractFloat(metadata,'{key}') != {operand}"
-            elif operator == "$eq":
-                if type(operand) == str:
-                    return f" JSONExtractString(metadata,'{key}') = '{operand}'"
-                return f" JSONExtractFloat(metadata,'{key}') = {operand}"
-            else:
-                raise ValueError(f"Operator {operator} not supported")
-    
-    def _format_where_document(self, where_document):
+    def _format_where(self, where, result):
+        for key, value in where.items():
+            # Shortcut for $eq
+            if type(value) == str:
+                result.append(f" JSONExtractString(metadata,'{key}') = '{value}'")
+            elif type(value) == int:
+                result.append(f" JSONExtractInt(metadata,'{key}') = {value}")
+            elif type(value) == float:
+                result.append(f" JSONExtractFloat(metadata,'{key}') = {value}")
+            # Operator expression
+            elif type(value) == dict:
+                operator, operand = list(value.items())[0]
+                if operator == "$gt":
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') > {operand}")
+                elif operator == "$lt":
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') < {operand}")
+                elif operator == "$gte":
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') >= {operand}")
+                elif operator == "$lte":
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') <= {operand}")
+                elif operator == "$ne":
+                    if type(operand) == str:
+                        return result.append(f" JSONExtractString(metadata,'{key}') != '{operand}'")
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') != {operand}")
+                elif operator == "$eq":
+                    if type(operand) == str:
+                        return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
+                    return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
+                else:
+                    raise ValueError(f"Operator {operator} not supported")
+            elif type(value) == list:
+                all_subresults = []
+                for subwhere in value:
+                    subresults = []
+                    self._format_where(subwhere, subresults)
+                    all_subresults.append(subresults[0])
+                if key == "$or":
+                    result.append(f"({' OR '.join(all_subresults)})")
+                elif key == "$and":
+                    result.append(f"({' AND '.join(all_subresults)})")
+                else:
+                    raise ValueError(f"Operator {key} not supported with a list of where clauses")
+
+    def _format_where_document(self, where_document, results):
         operator = list(where_document.keys())[0]
         if operator == "$contains":
-            return f"position(document, '{where_document[operator]}') > 0"
+            results.append(f"position(document, '{where_document[operator]}') > 0")
+        elif operator == "$and" or operator == "$or":
+            all_subresults = []
+            for subwhere in where_document[operator]:
+                subresults = []
+                self._format_where_document(subwhere, subresults)
+                all_subresults.append(subresults[0])
+            if operator == "$or":
+                results.append(f"({' OR '.join(all_subresults)})")
+            if operator == "$and":
+                results.append(f"({' AND '.join(all_subresults)})")
         else:
             raise ValueError(f"Operator {operator} not supported")
 
@@ -315,7 +362,9 @@ class Clickhouse(DB):
 
         s3 = time.time()
 
-        where = self._create_where_clause(collection_uuid, ids=ids, where=where, where_document=where_document)
+        where = self._create_where_clause(
+            collection_uuid, ids=ids, where=where, where_document=where_document
+        )
 
         if sort is not None:
             where += f" ORDER BY {sort}"
@@ -343,7 +392,9 @@ class Clickhouse(DB):
         return self._count(collection_uuid=collection_uuid)[0][0]
 
     def _delete(self, where_str=None):
-        deleted_uuids = self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
+        deleted_uuids = (
+            self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
+        )
         self._get_conn().command(
             f"""
             DELETE FROM
@@ -353,7 +404,9 @@ class Clickhouse(DB):
         )
         return [res[0] for res in deleted_uuids] if len(deleted_uuids) > 0 else []
 
-    def delete(self, where={}, collection_name=None, collection_uuid=None, ids=None, where_document={}):
+    def delete(
+        self, where={}, collection_name=None, collection_uuid=None, ids=None, where_document={}
+    ):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
@@ -361,7 +414,9 @@ class Clickhouse(DB):
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         s3 = time.time()
-        where_str = self._create_where_clause(collection_uuid, ids=ids, where=where, where_document=where_document)
+        where_str = self._create_where_clause(
+            collection_uuid, ids=ids, where=where, where_document=where_document
+        )
 
         deleted_uuids = self._delete(where_str)
 
@@ -372,27 +427,33 @@ class Clickhouse(DB):
         return deleted_uuids
 
     def get_by_ids(self, ids: list):
-        return self._get_conn().query(
-            f"""
+        return (
+            self._get_conn()
+            .query(
+                f"""
         SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         """
-        ).result_rows
+            )
+            .result_rows
+        )
 
     def get_nearest_neighbors(
-        self, 
-        where: Where, 
+        self,
+        where: Where,
         where_document: WhereDocument,
         embeddings: Embeddings,
         n_results: int,
-        collection_name=None, 
-        collection_uuid=None
+        collection_name=None,
+        collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         if len(where) != 0 or len(where_document) != 0:
-            results = self.get(collection_uuid=collection_uuid, where=where, where_document=where_document)
+            results = self.get(
+                collection_uuid=collection_uuid, where=where, where_document=where_document
+            )
 
             if len(results) > 0:
                 ids = [x[1] for x in results]
