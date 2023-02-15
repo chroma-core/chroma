@@ -17,9 +17,11 @@ T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
 WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
+WhereDocumentOperator = Literal["$contains"]
 OperatorExpression = Dict[WhereOperator, Union[str, int, float]]
-Where = Dict[str,  Union[str, int, float, OperatorExpression]]
 
+Where = Dict[str,  Union[str, int, float, OperatorExpression]]
+WhereDocument = Dict[WhereDocumentOperator, str]
 
 class GetResult(TypedDict):
     ids: List[ID]
@@ -105,3 +107,16 @@ def validate_where(where: Where) -> Where:
                 if not isinstance(operand, (str, int, float)):
                     raise ValueError(f"Where operand value {operand} must be a string, int, or float")
     return where
+
+def validate_where_document(where_document: WhereDocument) -> WhereDocument:
+    """Validates where_document to ensure it is a dictionary of WhereDocumentOperator to strings"""
+    if not isinstance(where_document, dict):
+        raise ValueError("Where document must be a dictionary")
+    if len(where_document) != 1:
+        raise ValueError("Where document must have exactly one operator")
+    for operator, operand in where_document.items():
+        if operator not in ["$contains"]:
+            raise ValueError(f"Where document operator must be $contains")
+        if not isinstance(operand, str):
+            raise ValueError(f"Where document operand value {operand} must be a string")
+    return where_document

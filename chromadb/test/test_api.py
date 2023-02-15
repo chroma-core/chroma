@@ -1,6 +1,7 @@
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
+from chromadb.errors import NoDatapointsException
 import chromadb.server.fastapi
 import pytest
 import time
@@ -516,7 +517,7 @@ def test_where_validation_query(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_where_validation")
     with pytest.raises(ValueError) as e:
-        collection.get(where={"value": {"nested": "5"}})
+        collection.query(query_embeddings=[0,0,0], where={"value": {"nested": "5"}})
     assert "Where" in str(e.value)
 
 
@@ -603,6 +604,84 @@ def test_where_valid_operators(api_fixture, request):
     
     with pytest.raises(ValueError) as e:
         collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_document_valid_operators(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_where_valid_operators")
+    collection.add(**operator_records)
+    with pytest.raises(ValueError) as e:
+        collection.get(where_document={"$lt": {"$nested": 2}})
+    assert "Where document" in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        collection.query(query_embeddings=[0,0,0], where_document={"$contains": 2})
+    assert "Where document" in str(e.value)
+    
+    with pytest.raises(ValueError) as e:
+        collection.get(where_document={"$contains": []})
+    assert "Where document" in str(e.value)
+
+contains_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "documents": ["this is doc1 and it's great!", "doc2 is also great!"],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2, "float_value": 2.002, "string_value": "two"}]
+}
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_where_document(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_get_where_document")
+    collection.add(**contains_records)
+
+    items = collection.get(where_document={"$contains": "doc1"})
+    assert len(items["metadatas"]) == 1
+
+    items = collection.get(where_document={"$contains": "great"})
+    assert len(items["metadatas"]) == 2
+
+    items = collection.get(where_document={"$contains": "bad"})
+    assert len(items["metadatas"]) == 0
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_where_document(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_query_where_document")
+    collection.add(**contains_records)
+
+    items = collection.query(query_embeddings=[0,0,0], where_document={"$contains": "doc1"}, n_results=1)
+    assert len(items["metadatas"][0]) == 1
+
+    items = collection.query(query_embeddings=[0,0,0], where_document={"$contains": "great"}, n_results=2)
+    assert len(items["metadatas"][0]) == 2
+
+    with pytest.raises(NoDatapointsException) as e:
+        items = collection.query(query_embeddings=[0,0,0], where_document={"$contains": "bad"}, n_results=1)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_delete_where_document(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_delete_where_document")
+    collection.add(**contains_records)
+
+    collection.delete(where_document={"$contains": "doc1"})
+    assert collection.count() == 1
+
+    collection.delete(where_document={"$contains": "bad"})
+    assert collection.count() == 1
+
+    collection.delete(where_document={"$contains": "great"})
+    assert collection.count() == 0
 
 # endregion 
 

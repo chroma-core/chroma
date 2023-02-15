@@ -53,6 +53,7 @@ class DB(ABC):
         sort=None,
         limit=None,
         offset=None,
+        where_document={},
     ):
         pass
 

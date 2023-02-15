@@ -153,7 +153,7 @@ class DuckDB(Clickhouse):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
-    def _filter_metadata(self, key, value):
+    def _format_where(self, key, value):
         # Shortcut for $eq
         if type(value) == str:
             return f" json_extract_string(metadata,'$.{key}') = '{value}'"
@@ -182,6 +182,13 @@ class DuckDB(Clickhouse):
                 return f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {operand}"
             else:
                 raise ValueError(f"Operator {operator} not supported")
+    
+    def _format_where_document(self, where_document):
+        operator = list(where_document.keys())[0]
+        if operator == "$contains":
+            return f"position('{where_document[operator]}' in document) > 0"
+        else:
+            raise ValueError(f"Operator {operator} not supported")
 
     def _get(self, where):
         val = self._conn.execute(

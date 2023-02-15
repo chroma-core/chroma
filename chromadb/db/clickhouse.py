@@ -1,4 +1,4 @@
-from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.errors import NoDatapointsException
@@ -7,7 +7,7 @@ import time
 import os
 import itertools
 import json
-from typing import Optional, Sequence, List, Tuple
+from typing import Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
@@ -92,22 +92,18 @@ class Clickhouse(DB):
         )
         return res.result_rows[0][0]
 
-    def _create_where_clause(self, collection_uuid, ids=None, where={}):
-        where = " AND ".join([self._filter_metadata(key, value) for key, value in where.items()])
-
+    def _create_where_clause(self, collection_uuid, ids=None, where={}, where_document={}):
+        where_clauses= [self._format_where(key, value) for key, value in where.items()]
+        if len(where_document) > 0:
+            where_clauses.append(self._format_where_document(where_document))
+        
         if ids is not None:
-            # Check if where was created
-            if len(where) > 6:  # NIT: hacky
-                where += " AND "
+            where_clauses.append(f" id IN {tuple(ids)}")
 
-            where += f" id IN {tuple(ids)}"
-
+        where_clauses.append(f"collection_uuid = '{collection_uuid}'")
+        # We know that where_clauses is not empty, so force typechecker
+        where = " AND ".join(cast(list[str], where_clauses))
         where = f"WHERE {where}"
-
-        if len(where) > 6:  # NIT: hacky
-            where += " AND "
-
-        where += f"collection_uuid = '{collection_uuid}'"
         return where
 
     #
@@ -263,7 +259,7 @@ class Clickhouse(DB):
         # json.load the metadata
         return [[*x[:5], json.loads(x[5])] for x in res]
 
-    def _filter_metadata(self, key, value):
+    def _format_where(self, key, value):
         # Shortcut for $eq
         if type(value) == str:
             return f" JSONExtractString(metadata,'{key}') = '{value}'"
@@ -292,6 +288,13 @@ class Clickhouse(DB):
                 return f" JSONExtractFloat(metadata,'{key}') = {operand}"
             else:
                 raise ValueError(f"Operator {operator} not supported")
+    
+    def _format_where_document(self, where_document):
+        operator = list(where_document.keys())[0]
+        if operator == "$contains":
+            return f"position(document, '{where_document[operator]}') > 0"
+        else:
+            raise ValueError(f"Operator {operator} not supported")
 
     def get(
         self,
@@ -302,6 +305,7 @@ class Clickhouse(DB):
         sort=None,
         limit=None,
         offset=None,
+        where_document={},
     ):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
@@ -311,7 +315,7 @@ class Clickhouse(DB):
 
         s3 = time.time()
 
-        where = self._create_where_clause(collection_uuid, ids=ids, where=where)
+        where = self._create_where_clause(collection_uuid, ids=ids, where=where, where_document=where_document)
 
         if sort is not None:
             where += f" ORDER BY {sort}"
@@ -349,7 +353,7 @@ class Clickhouse(DB):
         )
         return [res[0] for res in deleted_uuids] if len(deleted_uuids) > 0 else []
 
-    def delete(self, where={}, collection_name=None, collection_uuid=None, ids=None):
+    def delete(self, where={}, collection_name=None, collection_uuid=None, ids=None, where_document={}):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
@@ -357,7 +361,7 @@ class Clickhouse(DB):
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         s3 = time.time()
-        where_str = self._create_where_clause(collection_uuid, ids=ids, where=where)
+        where_str = self._create_where_clause(collection_uuid, ids=ids, where=where, where_document=where_document)
 
         deleted_uuids = self._delete(where_str)
 
@@ -375,14 +379,20 @@ class Clickhouse(DB):
         ).result_rows
 
     def get_nearest_neighbors(
-        self, where, embeddings, n_results, collection_name=None, collection_uuid=None
+        self, 
+        where: Where, 
+        where_document: WhereDocument,
+        embeddings: Embeddings,
+        n_results: int,
+        collection_name=None, 
+        collection_uuid=None
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        if not len(where) == 0:
-            results = self.get(collection_uuid=collection_uuid, where=where)
+        if len(where) != 0 or len(where_document) != 0:
+            results = self.get(collection_uuid=collection_uuid, where=where, where_document=where_document)
 
             if len(results) > 0:
                 ids = [x[1] for x in results]
