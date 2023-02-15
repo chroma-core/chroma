@@ -6,7 +6,8 @@ IDs = List[ID]
 Embedding = List[float]
 Embeddings = List[Embedding]
 
-Metadata = Dict[str, Union[str , int , float]]
+
+Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
 Document = str
@@ -18,7 +19,7 @@ OneOrMany = Union[T, List[T]]
 
 WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
 OperatorExpression = Dict[WhereOperator, Union[str, int, float]]
-Where = Dict[str, Union[str , int , float , OperatorExpression]]
+Where = Dict[str,  Union[str, int, float, OperatorExpression]]
 
 
 class GetResult(TypedDict):
