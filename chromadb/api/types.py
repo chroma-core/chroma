@@ -165,6 +165,9 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
                 )
             for where_document_expression in operand:
                 validate_where_document(where_document_expression)
+        # Value is a $contains operator
         elif not isinstance(operand, str):
-            raise ValueError(f"Where document operand value {operand} must be a string")
+            raise ValueError(
+                f"Where document operand value {operand} must be a string for operator $contains"
+            )
     return where_document
