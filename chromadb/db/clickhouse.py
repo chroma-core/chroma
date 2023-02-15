@@ -109,7 +109,6 @@ class Clickhouse(DB):
         # We know that where_clauses is not empty, so force typechecker
         where = " AND ".join(cast(list[str], where_clauses))
         where = f"WHERE {where}"
-        print(where)
         return where
 
     #
