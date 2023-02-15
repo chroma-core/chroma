@@ -845,5 +845,18 @@ def test_where_document_logical_operators(api_fixture, request):
     )
     assert len(items["metadatas"]) == 2
 
+    items = collection.get(
+        where_document={
+            "$or": [
+                {"$contains": "first"},
+                {"$contains": "second"},
+            ]
+        },
+        where={
+            "int_value": {"$ne": 2},
+        },
+    )
+    assert len(items["metadatas"]) == 1
+
 
 # endregion
