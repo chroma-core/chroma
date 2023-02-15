@@ -27,6 +27,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         self._client = openai.Embedding
         self._model_name = model_name
     def __call__(self, texts: Documents) -> Embeddings:
+        # replace newlines, which can negatively affect performance.
+        texts = [t.replace("\n", " ") for t in texts]
         # Call the OpenAI Embedding API in parallel for each document
         return [result["embedding"] for result in self._client.create(
             input=texts,
