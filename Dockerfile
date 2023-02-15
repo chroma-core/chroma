@@ -9,7 +9,7 @@ COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-COPY ./ /
+COPY ./ /chroma
 
 EXPOSE 8000
 
