@@ -816,6 +816,17 @@ def test_where_logical_operators(api_fixture, request):
     )
     assert len(items["metadatas"]) == 2
 
+    items = collection.get(
+        where={
+            "$or": [
+                {"$and": [{"int_value": {"$eq": 3}}, {"string_value": {"$eq": "three"}}]},
+                {"$and": [{"int_value": {"$eq": 4}}, {"string_value": {"$eq": "four"}}]},
+            ],
+            "$and": [{"is": "doc"}, {"string_value": "four"}],
+        }
+    )
+    assert len(items["metadatas"]) == 1
+
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_where_document_logical_operators(api_fixture, request):
