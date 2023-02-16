@@ -18,7 +18,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {"embedding": "Array(Float64)"},
     {"document": "Nullable(String)"},
     {"id": "Nullable(String)"},
-    {"metadata": "String"},
+    {"metadata": "Nullable(String)"},
 ]
 
 
@@ -280,7 +280,7 @@ class Clickhouse(DB):
             .result_rows
         )
         # json.load the metadata
-        return [[*x[:5], json.loads(x[5])] for x in res]
+        return [[*x[:5], json.loads(x[5]) if x[5] else None] for x in res]
 
     def _format_where(self, where, result):
         for key, value in where.items():

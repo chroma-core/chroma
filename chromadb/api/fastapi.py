@@ -149,11 +149,7 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            body = resp.json()
-            if body:
-                raise(Exception(body["detail"]))
-            else:
-                raise e
+            raise(Exception(resp.text))
                        
         return True
 
@@ -198,12 +194,8 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            body = resp.json()
-            if body:
-                raise(Exception(body["detail"]))
-            else:
-                raise e
-
+            raise(Exception(resp.text))
+        
         body = resp.json()
         return body
 
@@ -228,5 +220,8 @@ class FastAPI(API):
     def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise(Exception(resp.text))
         return resp.json()
