@@ -1,13 +1,9 @@
 from typing import Callable, Dict, Optional
 from chromadb.api import API
 from chromadb.api.types import (
-    ID,
-    Document,
     Documents,
-    Embedding,
     Embeddings,
     IDs,
-    Metadata,
     Metadatas,
 )
 from chromadb.errors import NoDatapointsException
@@ -149,7 +145,15 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            body = resp.json()
+            if body:
+                raise(Exception(body["detail"]))
+            else:
+                raise e
+                       
         return True
 
     def _update(
@@ -177,7 +181,7 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        resp.raise_for_status()
         return True
 
     def _query(self, collection_name, query_embeddings, n_results=10, where={}):
@@ -190,16 +194,17 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status()
-
-        val = resp.json()
-        if "error" in val:
-            if val["error"] == "no data points":
-                raise NoDatapointsException("No datapoints found for the supplied filter")
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            body = resp.json()
+            if body:
+                raise(Exception(body["detail"]))
             else:
-                raise Exception(val["error"])
+                raise e
 
-        return val
+        body = resp.json()
+        return body
 
     def reset(self):
         """Resets the database"""

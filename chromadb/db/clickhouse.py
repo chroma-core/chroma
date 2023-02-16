@@ -1,7 +1,7 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
-from chromadb.errors import NoDatapointsException
+from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
 import uuid
 import time
 import os
@@ -391,13 +391,13 @@ class Clickhouse(DB):
         idx_metadata = self._idx.get_metadata()
         # Check query embeddings dimensionality
         if idx_metadata["dimensionality"] != len(embeddings[0]):
-            raise ValueError(
+            raise InvalidDimensionException(
                 f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
             )
         
         # Check number of requested results
         if n_results > idx_metadata["elements"]:
-            raise ValueError(
+            raise NotEnoughElementsException(
                 f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
             )
 
@@ -410,7 +410,7 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException("No datapoints found for the supplied filter")
+                raise NoDatapointsException(f"No datapoints found for the supplied filter {json.dumps(where)}")
         else:
             ids = None
         uuids, distances = self._idx.get_nearest_neighbors(

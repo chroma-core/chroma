@@ -9,7 +9,7 @@ import hnswlib
 import numpy as np
 from chromadb.db.index import Index
 from chromadb.logger import logger
-from chromadb.errors import NoIndexException
+from chromadb.errors import NoIndexException, InvalidDimensionException
 
 
 class Hnswlib(Index):
@@ -67,7 +67,7 @@ class Hnswlib(Index):
             idx_dimension = self.get_metadata()["dimensionality"]
             # Check dimensionality
             if idx_dimension != len(embeddings[0]):
-                raise ValueError(
+                raise InvalidDimensionException(
                     f"Dimensionality of new embeddings ({len(embeddings[0])}) does not match index dimensionality ({idx_dimension})"
                 )
 
