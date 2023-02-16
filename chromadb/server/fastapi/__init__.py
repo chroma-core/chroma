@@ -131,6 +131,7 @@ class FastAPI(chromadb.server.Server):
             collection_name=collection_name,
             ids=get.ids,
             where=get.where,
+            where_document=get.where_document,
             sort=get.sort,
             limit=get.limit,
             offset=get.offset,
@@ -138,7 +139,7 @@ class FastAPI(chromadb.server.Server):
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):
         return self._api._delete(
-            where=delete.where, ids=delete.ids, collection_name=collection_name
+            where=delete.where, ids=delete.ids, collection_name=collection_name, where_document=delete.where_document,
         )
 
     def count(self, collection_name: str):
@@ -152,6 +153,7 @@ class FastAPI(chromadb.server.Server):
             nnresult = self._api._query(
                 collection_name=collection_name,
                 where=query.where,
+                where_document=query.where_document,
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
             )

@@ -131,10 +131,14 @@ class LocalAPI(API):
         offset=None,
         page=None,
         page_size=None,
+        where_document=None
     ):
 
         if where is None:
             where = {}
+        
+        if where_document is None:
+            where_document = {}
 
         if page and page_size:
             offset = (page - 1) * page_size
@@ -148,15 +152,16 @@ class LocalAPI(API):
                 sort=sort,
                 limit=limit,
                 offset=offset,
+                where_document=where_document,
             )
         )
 
-    def _delete(self, collection_name, ids=None, where=None):
+    def _delete(self, collection_name, ids=None, where=None, where_document=None):
 
         if where is None:
             where = {}
 
-        deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids)
+        deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids, where_document=where_document)
         return deleted_uuids
 
     def _count(self, collection_name):
@@ -167,10 +172,11 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
             where=where,
+            where_document=where_document,
             embeddings=query_embeddings,
             n_results=n_results,
         )

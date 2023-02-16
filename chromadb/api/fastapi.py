@@ -90,6 +90,7 @@ class FastAPI(API):
         offset=None,
         page=None,
         page_size=None,
+        where_document={},
     ):
         """Gets embeddings from the database"""
         if page and page_size:
@@ -99,19 +100,19 @@ class FastAPI(API):
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/get",
             data=json.dumps(
-                {"ids": ids, "where": where, "sort": sort, "limit": limit, "offset": offset}
+                {"ids": ids, "where": where, "sort": sort, "limit": limit, "offset": offset, "where_document": where_document}
             ),
         )
 
         resp.raise_for_status()
         return resp.json()
 
-    def _delete(self, collection_name, ids=None, where={}):
+    def _delete(self, collection_name, ids=None, where={}, where_document={}):
         """Deletes embeddings from the database"""
 
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/delete",
-            data=json.dumps({"where": where, "ids": ids}),
+            data=json.dumps({"where": where, "ids": ids, "where_document": where_document}),
         )
 
         resp.raise_for_status()
@@ -184,13 +185,13 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/query",
             data=json.dumps(
-                {"query_embeddings": query_embeddings, "n_results": n_results, "where": where}
+                {"query_embeddings": query_embeddings, "n_results": n_results, "where": where, "where_document": where_document}
             ),
         )
 

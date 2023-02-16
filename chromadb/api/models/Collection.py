@@ -12,9 +12,11 @@ from chromadb.api.types import (
     QueryResult,
     ID,
     OneOrMany,
+    WhereDocument,
     maybe_cast_one_to_many,
     validate_metadatas,
     validate_where,
+    validate_where_document,
 )
 
 if TYPE_CHECKING:
@@ -103,6 +105,7 @@ class Collection(BaseModel):
         where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -114,8 +117,9 @@ class Collection(BaseModel):
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
         """
         where = validate_where(where) if where else None
+        where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
-        return self._client._get(self.name, ids, where, None, limit, offset)
+        return self._client._get(self.name, ids, where, None, limit, offset, where_document=where_document)
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -131,6 +135,7 @@ class Collection(BaseModel):
         query_texts: Optional[OneOrMany[Document]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -141,6 +146,7 @@ class Collection(BaseModel):
             where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
         """
         where = validate_where(where) if where else None
+        where_document = validate_where_document(where_document) if where_document else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
 
@@ -161,12 +167,16 @@ class Collection(BaseModel):
 
         if where is None:
             where = {}
+        
+        if where_document is None:
+            where_document = {}
 
         return self._client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
+            where_document=where_document,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
@@ -231,7 +241,7 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None):
+    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None, where_document: Optional[WhereDocument] = None):
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
@@ -239,7 +249,8 @@ class Collection(BaseModel):
             where:  A dict of key, value string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
         """
         where = validate_where(where) if where else None
-        return self._client._delete(self.name, ids, where)
+        where_document = validate_where_document(where_document) if where_document else None
+        return self._client._delete(self.name, ids, where, where_document)
 
     def create_index(self):
         self._client.create_index(self.name)
