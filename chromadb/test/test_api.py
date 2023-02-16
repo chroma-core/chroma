@@ -233,11 +233,8 @@ def test_delete(api_fixture, request):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    # generic delete on collection not working yet
-    # assert collection.delete() == []
-    # assert collection.count() == 2
-    # assert collection.delete()
-    # assert collection.count() == 0
+    collection.delete()
+    assert collection.count() == 0
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)

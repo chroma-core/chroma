@@ -152,12 +152,12 @@ class LocalAPI(API):
         offset=None,
         page=None,
         page_size=None,
-        where_document=None
+        where_document=None,
     ):
 
         if where is None:
             where = {}
-        
+
         if where_document is None:
             where_document = {}
 
@@ -182,7 +182,12 @@ class LocalAPI(API):
         if where is None:
             where = {}
 
-        deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids, where_document=where_document)
+        if where_document is None:
+            where_document = {}
+
+        deleted_uuids = self._db.delete(
+            collection_name=collection_name, where=where, ids=ids, where_document=where_document
+        )
         return deleted_uuids
 
     def _count(self, collection_name):
