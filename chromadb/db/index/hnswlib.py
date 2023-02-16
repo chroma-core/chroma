@@ -1,30 +1,29 @@
 import os
 import pickle
 import time
+from typing import Optional
 import uuid
+from chromadb.api.types import IndexMetadata
 
 import hnswlib
 import numpy as np
 from chromadb.db.index import Index
 from chromadb.logger import logger
-from chromadb.errors import NoIndexException
+from chromadb.errors import NoIndexException, InvalidDimensionException
 
 
 class Hnswlib(Index):
 
     _collection_uuid = None
     _index = None
-    _index_metadata = {
-        "dimensionality": None,
-        "elements": None,
-        "time_created": None,
-    }
+    _index_metadata: Optional[IndexMetadata] = None
 
     _id_to_uuid = {}
     _uuid_to_id = {}
 
     def __init__(self, settings):
         self._save_folder = settings.persist_directory + "/index"
+
 
     def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
 
@@ -50,6 +49,11 @@ class Hnswlib(Index):
             "time_created": time.time(),
         }
         self._save()
+    
+    def get_metadata(self) -> IndexMetadata:
+        if self._index_metadata is None:
+            raise NoIndexException("Index is not initialized")
+        return self._index_metadata
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
         if self._collection_uuid != collection_uuid:
@@ -59,6 +63,13 @@ class Hnswlib(Index):
             self.run(collection_uuid, uuids, embeddings)
 
         elif self._index is not None:
+            
+            idx_dimension = self.get_metadata()["dimensionality"]
+            # Check dimensionality
+            if idx_dimension != len(embeddings[0]):
+                raise InvalidDimensionException(
+                    f"Dimensionality of new embeddings ({len(embeddings[0])}) does not match index dimensionality ({idx_dimension})"
+                )
 
             current_elements = self._index_metadata["elements"]
             new_elements = len(uuids)

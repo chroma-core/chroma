@@ -1,9 +1,9 @@
 import fastapi
 from fastapi.responses import JSONResponse
-from fastapi import status
+from fastapi import HTTPException, status
 import chromadb
 import chromadb.server
-from chromadb.errors import NoDatapointsException
+from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CountEmbedding,
@@ -104,14 +104,18 @@ class FastAPI(chromadb.server.Server):
         return self._api.delete_collection(collection_name)
 
     def add(self, collection_name: str, add: AddEmbedding):
-        return self._api._add(
-            collection_name=collection_name,
-            embeddings=add.embeddings,
-            metadatas=add.metadatas,
-            documents=add.documents,
-            ids=add.ids,
-            increment_index=add.increment_index,
-        )
+        try:
+            result = self._api._add(
+                collection_name=collection_name,
+                embeddings=add.embeddings,
+                metadatas=add.metadatas,
+                documents=add.documents,
+                ids=add.ids,
+                increment_index=add.increment_index,
+            )
+        except InvalidDimensionException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return result
 
     def update(self, collection_name: str, add: UpdateEmbedding):
         return self._api._update(
@@ -154,8 +158,12 @@ class FastAPI(chromadb.server.Server):
                 n_results=query.n_results,
             )
             return nnresult
-        except NoDatapointsException:
-            return {"error": "no data points"}
+        except NoDatapointsException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except InvalidDimensionException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except NotEnoughElementsException as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     def raw_sql(self, raw_sql: RawSql):
         return self._api.raw_sql(raw_sql.raw_sql)
