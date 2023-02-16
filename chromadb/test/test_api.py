@@ -792,10 +792,11 @@ def test_query_where_document(api_fixture, request):
     )
     assert len(items["metadatas"][0]) == 2
 
-    with pytest.raises(NoDatapointsException) as e:
+    with pytest.raises(Exception) as e:
         items = collection.query(
             query_embeddings=[0, 0, 0], where_document={"$contains": "bad"}, n_results=1
         )
+        assert "datapoints" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)

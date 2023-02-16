@@ -229,7 +229,7 @@ class DuckDB(Clickhouse):
             val[i][0] = uuid.UUID(val[i][0])
             val[i][1] = uuid.UUID(val[i][1])
             # json.loads metadata
-            val[i][5] = json.loads(val[i][5])
+            val[i][5] = json.loads(val[i][5]) if val[i][5] else None
 
         return val
 

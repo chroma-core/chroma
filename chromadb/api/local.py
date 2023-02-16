@@ -198,7 +198,7 @@ class LocalAPI(API):
                 embeddings.append(entry[2])
                 documents.append(entry[3])
                 ids.append(entry[4])
-                metadatas.append(json.loads(entry[5]))
+                metadatas.append(json.loads(entry[5]) if entry[5] else None)
 
             query_result["embeddings"].append(embeddings)
             query_result["documents"].append(documents)
