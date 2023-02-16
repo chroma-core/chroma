@@ -59,7 +59,7 @@ def maybe_cast_one_to_many(
         if isinstance(target, str) and target != None:
             return [target]  # type: ignore
         # One Embedding
-        if isinstance(target[0], float):
+        if isinstance(target[0], (int, float)):
             return [target]  # type: ignore
     # One Metadata dict
     if isinstance(target, dict):
