@@ -129,7 +129,7 @@ class Clickhouse(DB):
                 print(f"collection with name {name} already exists, returning existing collection")
                 return self.get_collection(name)
             else:
-                raise Exception(f"collection with name {name} already exists")
+                raise ValueError(f"collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []
