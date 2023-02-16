@@ -140,9 +140,6 @@ class LocalAPI(API):
         if where_document is None:
             where_document = {}
 
-        if where_document is None:
-            where_document = {}
-
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size

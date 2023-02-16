@@ -195,6 +195,7 @@ class Clickhouse(DB):
     #
     #  ITEM METHODS
     #
+
     def add(self, collection_uuid, embeddings, metadatas, documents, ids):
 
         data_to_insert = [
@@ -208,7 +209,6 @@ class Clickhouse(DB):
             ]
             for i, embedding in enumerate(embeddings)
         ]
-
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
         self._get_conn().insert("embeddings", data_to_insert, column_names=column_names)
 

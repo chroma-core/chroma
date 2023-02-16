@@ -657,6 +657,7 @@ def test_where_valid_operators(api_fixture, request):
             }
         )
 
+
 # TODO: Define the dimensionality of these embeddingds in terms of the default record        
 bad_dimensionality_records = {
     "embeddings": [[1.1, 2.3, 3.2,4.5], [1.2, 2.24, 3.2, 4.5]],
@@ -707,6 +708,7 @@ def test_number_of_elements_validation_query(api_fixture, request):
     with pytest.raises(Exception) as e:
         collection.query(**bad_number_of_results_query)
     assert "number of elements" in str(e.value)
+
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_query_document_valid_operators(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
@@ -754,7 +756,6 @@ contains_records = {
         {"int_value": 2, "float_value": 2.002, "string_value": "two"},
     ],
 }
-
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_where_document(api_fixture, request):
