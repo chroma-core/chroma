@@ -734,7 +734,7 @@ def test_query_where_document(api_fixture, request):
     collection.add(**contains_records)
 
     items = collection.query(
-        query_embeddings=[0, 0, 0], where_document={"$contains": "doc1"}, n_results=1
+        query_embeddings=[1, 0, 0], where_document={"$contains": "doc1"}, n_results=1
     )
     assert len(items["metadatas"][0]) == 1
 

@@ -119,7 +119,9 @@ class Collection(BaseModel):
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
-        return self._client._get(self.name, ids, where, None, limit, offset, where_document=where_document)
+        return self._client._get(
+            self.name, ids, where, None, limit, offset, where_document=where_document
+        )
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -167,7 +169,7 @@ class Collection(BaseModel):
 
         if where is None:
             where = {}
-        
+
         if where_document is None:
             where_document = {}
 
@@ -241,7 +243,12 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None, where_document: Optional[WhereDocument] = None):
+    def delete(
+        self,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
