@@ -131,12 +131,12 @@ class LocalAPI(API):
         offset=None,
         page=None,
         page_size=None,
-        where_document=None
+        where_document=None,
     ):
 
         if where is None:
             where = {}
-        
+
         if where_document is None:
             where_document = {}
 
