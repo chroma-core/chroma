@@ -91,7 +91,11 @@ class LocalAPI(API):
 
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
-            collection_uuid, embeddings=embeddings, metadatas=metadatas, documents=documents, ids=ids
+            collection_uuid,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            ids=ids,
         )
 
         if increment_index:
@@ -136,9 +140,6 @@ class LocalAPI(API):
 
         if where is None:
             where = {}
-
-        if where_document is None:
-            where_document = {}
 
         if where_document is None:
             where_document = {}

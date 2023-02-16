@@ -1,7 +1,11 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
-from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
+from chromadb.errors import (
+    NoDatapointsException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 import uuid
 import time
 import os
@@ -199,12 +203,12 @@ class Clickhouse(DB):
 
         data_to_insert = [
             [
-                collection_uuid, 
-                uuid.uuid4(), 
-                embedding, 
-                json.dumps(metadatas[i]) if metadatas else None, 
-                documents[i] if documents else None, 
-                ids[i]
+                collection_uuid,
+                uuid.uuid4(),
+                embedding,
+                json.dumps(metadatas[i]) if metadatas else None,
+                documents[i] if documents else None,
+                ids[i],
             ]
             for i, embedding in enumerate(embeddings)
         ]
@@ -456,7 +460,7 @@ class Clickhouse(DB):
             raise InvalidDimensionException(
                 f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
             )
-        
+
         # Check number of requested results
         if n_results > idx_metadata["elements"]:
             raise NotEnoughElementsException(
@@ -474,7 +478,9 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException(f"No datapoints found for the supplied filter {json.dumps(where)}")
+                raise NoDatapointsException(
+                    f"No datapoints found for the supplied filter {json.dumps(where)}"
+                )
         else:
             ids = None
         uuids, distances = self._idx.get_nearest_neighbors(
