@@ -200,10 +200,19 @@ def test_get_nearest_neighbors(api_fixture, request):
     collection.add(**batch_records)
     # assert api.create_index(collection_name="testspace") # default is auto now
 
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={})
-
+    nn = collection.query(query_embeddings=[1.1, 2.3, 3.2], n_results=1, where={})
     for key in nn.keys():
         assert len(nn[key]) == 1
+
+    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={})
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]], n_results=1, where={}
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 2
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
