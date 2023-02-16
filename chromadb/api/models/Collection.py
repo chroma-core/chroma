@@ -112,9 +112,10 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -149,7 +150,12 @@ class Collection(BaseModel):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
-            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
+            include_embeddings: Whether to include the embeddings in the results. Sets embeddings to None if True. Optional.
+            include_documents: Whether to include the documents in the results. Sets documents to None if True. Optional.
+            include_metadatas: Whether to include the metadatas in the results. Sets metadata to None if True. Optional.
+            include_distances: Whether to include the distances in the results. Sets distances to None if True. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -261,7 +267,9 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to delete
-            where:  A dict of key, value string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: Where type. A dict of string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
