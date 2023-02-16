@@ -287,7 +287,7 @@ class DuckDB(Clickhouse):
         ).fetchall()[0]
         return [uuid.UUID(x[0]) for x in uuids_deleted]
 
-    def get_by_ids(self, ids=list):
+    def get_by_ids(self, ids: list, columns: Optional[list] = None):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
             raise Exception("ids must be a list")
@@ -296,10 +296,11 @@ class DuckDB(Clickhouse):
             # create an empty pandas dataframe
             return pd.DataFrame()
 
+        select_columns = db_schema_to_keys() if columns is None else ", ".join(columns)
         return self._conn.execute(
             f"""
             SELECT
-                {db_schema_to_keys()}
+                {select_columns}
             FROM
                 embeddings
             WHERE

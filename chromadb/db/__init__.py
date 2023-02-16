@@ -74,7 +74,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids):
+    def get_by_ids(self, uuids, columns=None):
         pass
 
     @abstractmethod

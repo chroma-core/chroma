@@ -23,6 +23,10 @@ class QueryEmbedding(BaseModel):
     where_document: dict = {}
     query_embeddings: list
     n_results: int = 10
+    include_embeddings: bool = True
+    include_documents: bool = True
+    include_metadatas: bool = True
+    include_distances: bool = True
 
 
 class ProcessEmbedding(BaseModel):

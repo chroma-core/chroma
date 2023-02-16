@@ -1,4 +1,4 @@
-from typing import Literal, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
 
 ID = str
 IDs = List[ID]
@@ -38,10 +38,10 @@ class GetResult(TypedDict):
 
 class QueryResult(TypedDict):
     ids: List[IDs]
-    embeddings: List[List[Embedding]]
-    documents: List[List[Document]]
-    metadatas: List[List[Metadata]]
-    distances: List[List[float]]
+    embeddings: Optional[List[List[Embedding]]]
+    documents: Optional[List[List[Document]]]
+    metadatas: Optional[List[List[Metadata]]]
+    distances: Optional[List[List[float]]]
 
 
 class EmbeddingFunction(Protocol):

@@ -181,7 +181,13 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _delete(self, collection_name: str, ids: Optional[IDs], where: Optional[Where] = {}, where_document: Optional[WhereDocument] = {}):
+    def _delete(
+        self,
+        collection_name: str,
+        ids: Optional[IDs],
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+    ):
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
@@ -198,6 +204,10 @@ class API(ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
+        include_embeddings: bool = True,
+        include_documents: bool = True,
+        include_metadatas: bool = True,
+        include_distances: bool = True,
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.

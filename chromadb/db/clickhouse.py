@@ -426,12 +426,13 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids: list):
+    def get_by_ids(self, ids: list, columns: Optional[list] = None):
+        select_columns = db_schema_to_keys() if columns is None else ",".join(columns)
         return (
             self._get_conn()
             .query(
                 f"""
-        SELECT {db_schema_to_keys()} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
+        SELECT {select_columns} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         """
             )
             .result_rows

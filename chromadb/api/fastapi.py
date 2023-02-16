@@ -104,7 +104,14 @@ class FastAPI(API):
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/get",
             data=json.dumps(
-                {"ids": ids, "where": where, "sort": sort, "limit": limit, "offset": offset, "where_document": where_document}
+                {
+                    "ids": ids,
+                    "where": where,
+                    "sort": sort,
+                    "limit": limit,
+                    "offset": offset,
+                    "where_document": where_document,
+                }
             ),
         )
 
@@ -181,13 +188,33 @@ class FastAPI(API):
         resp.raise_for_status
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
+    def _query(
+        self,
+        collection_name,
+        query_embeddings,
+        n_results=10,
+        where={},
+        where_document={},
+        include_embeddings: bool = True,
+        include_documents: bool = True,
+        include_metadatas: bool = True,
+        include_distances: bool = True,
+    ):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/query",
             data=json.dumps(
-                {"query_embeddings": query_embeddings, "n_results": n_results, "where": where, "where_document": where_document}
+                {
+                    "query_embeddings": query_embeddings,
+                    "n_results": n_results,
+                    "where": where,
+                    "where_document": where_document,
+                    "include_embeddings": include_embeddings,
+                    "include_documents": include_documents,
+                    "include_metadatas": include_metadatas,
+                    "include_distances": include_distances,
+                }
             ),
         )
 

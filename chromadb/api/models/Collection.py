@@ -119,7 +119,9 @@ class Collection(BaseModel):
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
-        return self._client._get(self.name, ids, where, None, limit, offset, where_document=where_document)
+        return self._client._get(
+            self.name, ids, where, None, limit, offset, where_document=where_document
+        )
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -136,6 +138,10 @@ class Collection(BaseModel):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        include_embeddings: bool = True,
+        include_documents: bool = True,
+        include_metadatas: bool = True,
+        include_distances: bool = True,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -167,7 +173,7 @@ class Collection(BaseModel):
 
         if where is None:
             where = {}
-        
+
         if where_document is None:
             where_document = {}
 
@@ -177,6 +183,10 @@ class Collection(BaseModel):
             n_results=n_results,
             where=where,
             where_document=where_document,
+            include_embeddings=include_embeddings,
+            include_documents=include_documents,
+            include_metadatas=include_metadatas,
+            include_distances=include_distances,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
@@ -241,7 +251,12 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None, where_document: Optional[WhereDocument] = None):
+    def delete(
+        self,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
