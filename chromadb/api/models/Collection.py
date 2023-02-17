@@ -259,7 +259,6 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: Where type. A dict of string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
         """
