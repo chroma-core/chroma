@@ -1,13 +1,9 @@
 from typing import Callable, Dict, Optional
 from chromadb.api import API
 from chromadb.api.types import (
-    ID,
-    Document,
     Documents,
-    Embedding,
     Embeddings,
     IDs,
-    Metadata,
     Metadatas,
 )
 from chromadb.errors import NoDatapointsException
@@ -157,7 +153,11 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise(Exception(resp.text))
+                       
         return True
 
     def _update(
@@ -185,7 +185,7 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        resp.raise_for_status()
         return True
 
     def _query(
@@ -218,16 +218,13 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status()
-
-        val = resp.json()
-        if "error" in val:
-            if val["error"] == "no data points":
-                raise NoDatapointsException("No datapoints found for the supplied filter")
-            else:
-                raise Exception(val["error"])
-
-        return val
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise(Exception(resp.text))
+        
+        body = resp.json()
+        return body
 
     def reset(self):
         """Resets the database"""
@@ -250,5 +247,8 @@ class FastAPI(API):
     def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise(Exception(resp.text))
         return resp.json()

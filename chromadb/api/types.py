@@ -3,8 +3,10 @@ from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol
 ID = str
 IDs = List[ID]
 
-Embedding = List[float]
+Number = Union[int, float]
+Embedding = List[Number]
 Embeddings = List[Embedding]
+
 
 Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
@@ -16,6 +18,7 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
+Includes = List[Literal["documents", "embeddings", "metadatas", "distances"]]
 
 # Grammar for where expressions
 LiteralValue = Union[str, int, float]
@@ -42,6 +45,12 @@ class QueryResult(TypedDict):
     documents: Optional[List[List[Document]]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+
+
+class IndexMetadata(TypedDict):
+    dimensionality: int
+    elements: int
+    time_created: float
 
 
 class EmbeddingFunction(Protocol):

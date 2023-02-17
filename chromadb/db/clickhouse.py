@@ -1,7 +1,7 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
-from chromadb.errors import NoDatapointsException
+from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
 import uuid
 import time
 import os
@@ -18,7 +18,7 @@ EMBEDDING_TABLE_SCHEMA = [
     {"embedding": "Array(Float64)"},
     {"document": "Nullable(String)"},
     {"id": "Nullable(String)"},
-    {"metadata": "String"},
+    {"metadata": "Nullable(String)"},
 ]
 
 
@@ -195,21 +195,20 @@ class Clickhouse(DB):
     #
     #  ITEM METHODS
     #
-    def add(self, collection_uuid, embedding, metadata, documents, ids):
 
-        data_to_insert = []
-        for i in range(len(embedding)):
-            data_to_insert.append(
-                [
-                    collection_uuid,
-                    uuid.uuid4(),
-                    embedding[i],
-                    json.dumps(metadata[i]),
-                    documents[i],
-                    ids[i],
-                ]
-            )
+    def add(self, collection_uuid, embeddings, metadatas, documents, ids):
 
+        data_to_insert = [
+            [
+                collection_uuid, 
+                uuid.uuid4(), 
+                embedding, 
+                json.dumps(metadatas[i]) if metadatas else None, 
+                documents[i] if documents else None, 
+                ids[i]
+            ]
+            for i, embedding in enumerate(embeddings)
+        ]
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
         self._get_conn().insert("embeddings", data_to_insert, column_names=column_names)
 
@@ -281,7 +280,7 @@ class Clickhouse(DB):
             .result_rows
         )
         # json.load the metadata
-        return [[*x[:5], json.loads(x[5])] for x in res]
+        return [[*x[:5], json.loads(x[5]) if x[5] else None] for x in res]
 
     def _format_where(self, where, result):
         for key, value in where.items():
@@ -448,6 +447,23 @@ class Clickhouse(DB):
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
 
+        # Either the collection name or the collection uuid must be provided
+        if collection_name == None and collection_uuid == None:
+            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+
+        idx_metadata = self._idx.get_metadata()
+        # Check query embeddings dimensionality
+        if idx_metadata["dimensionality"] != len(embeddings[0]):
+            raise InvalidDimensionException(
+                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
+            )
+        
+        # Check number of requested results
+        if n_results > idx_metadata["elements"]:
+            raise NotEnoughElementsException(
+                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
+            )
+
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
@@ -459,7 +475,7 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException("No datapoints found for the supplied filter")
+                raise NoDatapointsException(f"No datapoints found for the supplied filter {json.dumps(where)}")
         else:
             ids = None
         uuids, distances = self._idx.get_nearest_neighbors(

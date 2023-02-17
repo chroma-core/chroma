@@ -9,8 +9,9 @@ COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
+COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 COPY ./ /chroma
 
 EXPOSE 8000
 
-CMD ["uvicorn", "chromadb.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]
+CMD ["/docker_entrypoint.sh"]
