@@ -1,5 +1,5 @@
 // import env.ts
-import chromaClient from "chromajs"
+import chromaClient from "chromadb"
 
 window.onload = async () => {
   const chroma = chromaClient("http://localhost:8000");

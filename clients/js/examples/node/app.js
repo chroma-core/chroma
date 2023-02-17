@@ -1,5 +1,5 @@
 var express = require('express');
-var chroma = require('chromajs');
+var chroma = require('chromadb');
 
 var app = express();
 app.get('/', async (req, res) => {
