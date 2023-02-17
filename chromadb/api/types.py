@@ -18,7 +18,7 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-Includes = List[Literal["documents", "embeddings", "metadatas", "distances"]]
+Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
 
 # Grammar for where expressions
 LiteralValue = Union[str, int, float]

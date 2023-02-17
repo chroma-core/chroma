@@ -3,7 +3,11 @@ from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 import chromadb
 import chromadb.server
-from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
+from chromadb.errors import (
+    NoDatapointsException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CountEmbedding,
@@ -159,10 +163,7 @@ class FastAPI(chromadb.server.Server):
                 where_document=query.where_document,
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
-                include_embeddings=query.include_embeddings,
-                include_metadatas=query.include_metadatas,
-                include_documents=query.include_documents,
-                include_distances=query.include_distances,
+                include=query.include,
             )
             return nnresult
         except NoDatapointsException as e:

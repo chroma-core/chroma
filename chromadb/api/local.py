@@ -3,7 +3,7 @@ import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
 from chromadb.db import DB
-from chromadb.api.types import Embedding, GetResult, IDs, QueryResult
+from chromadb.api.types import Embedding, GetResult, IDs, Include, QueryResult
 from chromadb.api.models.Collection import Collection
 
 import re
@@ -188,10 +188,7 @@ class LocalAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include_embeddings: bool = True,
-        include_documents: bool = True,
-        include_metadatas: bool = True,
-        include_distances: bool = True,
+        include: Include = ["embeddings", "documents", "metadatas", "distances"],
     ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
@@ -200,6 +197,11 @@ class LocalAPI(API):
             embeddings=query_embeddings,
             n_results=n_results,
         )
+
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+        include_distances = "distances" in include
 
         columns = []
         column_index = {}

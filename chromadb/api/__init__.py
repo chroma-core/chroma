@@ -8,6 +8,7 @@ from chromadb.api.types import (
     Documents,
     Embeddings,
     IDs,
+    Include,
     Metadatas,
     Where,
     QueryResult,
@@ -204,10 +205,7 @@ class API(ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include_embeddings: bool = True,
-        include_documents: bool = True,
-        include_metadatas: bool = True,
-        include_distances: bool = True,
+        include: Optional[Include] = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.

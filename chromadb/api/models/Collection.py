@@ -3,6 +3,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
     Embedding,
+    Include,
     Metadata,
     Document,
     Where,
@@ -139,10 +140,7 @@ class Collection(BaseModel):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include_embeddings: bool = True,
-        include_documents: bool = True,
-        include_metadatas: bool = True,
-        include_distances: bool = True,
+        include: Optional[Include] = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -152,10 +150,7 @@ class Collection(BaseModel):
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
             where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
-            include_embeddings: Whether to include the embeddings in the results. Sets embeddings to None if True. Optional.
-            include_documents: Whether to include the documents in the results. Sets documents to None if True. Optional.
-            include_metadatas: Whether to include the metadatas in the results. Sets metadata to None if True. Optional.
-            include_distances: Whether to include the distances in the results. Sets distances to None if True. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Defaults to all. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -189,10 +184,7 @@ class Collection(BaseModel):
             n_results=n_results,
             where=where,
             where_document=where_document,
-            include_embeddings=include_embeddings,
-            include_documents=include_documents,
-            include_metadatas=include_metadatas,
-            include_distances=include_distances,
+            include=include,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):

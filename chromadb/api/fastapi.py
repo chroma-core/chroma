@@ -4,6 +4,7 @@ from chromadb.api.types import (
     Documents,
     Embeddings,
     IDs,
+    Include,
     Metadatas,
 )
 from chromadb.errors import NoDatapointsException
@@ -156,8 +157,8 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
-                       
+            raise (Exception(resp.text))
+
         return True
 
     def _update(
@@ -195,10 +196,7 @@ class FastAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include_embeddings: bool = True,
-        include_documents: bool = True,
-        include_metadatas: bool = True,
-        include_distances: bool = True,
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ):
         """Gets the nearest neighbors of a single embedding"""
 
@@ -210,10 +208,7 @@ class FastAPI(API):
                     "n_results": n_results,
                     "where": where,
                     "where_document": where_document,
-                    "include_embeddings": include_embeddings,
-                    "include_documents": include_documents,
-                    "include_metadatas": include_metadatas,
-                    "include_distances": include_distances,
+                    "include": include,
                 }
             ),
         )
@@ -221,8 +216,8 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
-        
+            raise (Exception(resp.text))
+
         body = resp.json()
         return body
 
@@ -250,5 +245,5 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
+            raise (Exception(resp.text))
         return resp.json()
