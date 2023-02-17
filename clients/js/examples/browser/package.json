@@ -1,7 +1,7 @@
 {
-  "name": "chromadb",
+  "name": "example-browser",
   "version": "1.0.1",
-  "description": "A JavaScript interface for the Chromadb",
+  "description": "example app",
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",

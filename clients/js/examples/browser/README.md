@@ -1,3 +1,4 @@
 ## Demo in browser 
 
-`node app.js`
+1. `yarn dev` 
+2. visit `localhost:3000`

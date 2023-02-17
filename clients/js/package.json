@@ -1,7 +1,7 @@
 {
   "name": "chromajs",
   "version": "1.0.1",
-  "description": "A JavaScript interface for the Chromadb",
+  "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",
@@ -25,6 +25,6 @@
     "build:main": "tsc -p tsconfig.json",
     "build:module": "tsc -p tsconfig.module.json",
     "genapi-bash": "openapi-generator-cli generate -i <(curl -s 'http://localhost:8000/openapi.json') -g typescript-axios -o src/generated -p withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useSingleRequestParameter=true",
-    "genapi-zsh": "mkfifo openapi.json; (curl -s 'http://localhost:8000/openapi.json' > openapi.json &) && openapi-generator-cli generate -i openapi.json -g typescript-axios -o src/generated --additional-properties 'withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useSingleRequestParameter=true,withNodeImports=true,npmName=chromadb'; rm openapi.json"
+    "genapi-zsh": "mkfifo openapi.json; (curl -s 'http://localhost:8000/openapi.json' > openapi.json &) && openapi-generator-cli generate -i openapi.json -g typescript-axios -o src/generated --additional-properties 'withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useSingleRequestParameter=true,withNodeImports=true,npmName=chromajs'; rm openapi.json"
   }
 }

@@ -52,16 +52,14 @@ export class Collection {
   }
 
   public async query(
-    n_results: number = 10,
     query_embeddings: number[], 
-    query_texts?: string[],
+    n_results: number = 10,
     where?: object,
     ) {
     const response = await this.api.getNearestNeighbors({
       collectionName: this.name,
       queryEmbedding: { 
         query_embeddings,
-        query_texts,
         where,
         n_results,
       },
@@ -69,15 +67,22 @@ export class Collection {
     return response.data;
   }
 
-  public async peek() {
+  public async peek(limit: number = 10) {
     return await this.api.get({
       collectionName: this.name,
-      getEmbedding: { limit: 10 },
+      getEmbedding: { limit: limit },
     });
   }
 
   public async createIndex() {
     return await this.api.createIndex({ collectionName: this.name });
+  }
+
+  public async delete(ids?: string[], where?: object) {
+    return await this.api._delete({ 
+      collectionName: this.name,
+      deleteEmbedding: { ids: ids, where: where },
+    });
   }
 
   // public async modify(new_name: string) {
@@ -87,6 +92,13 @@ export class Collection {
   //   });
   //   this.name = new_name;
   //   return this
+  // }
+
+  // public async deleteEmbeddings(ids: string[]) {
+  //   return await this.api.deleteEmbeddings({
+  //     collectionName: this.name,
+  //     deleteEmbedding: { ids },
+  //   });
   // }
 
 }
