@@ -1,6 +1,15 @@
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
 
+// generate a type interface for the class ChromaClient
+export type ChromaClientT = {
+  reset: () => Promise<any>;
+  createCollection: (name: string, metadata?: object) => Promise<any>;
+  listCollections: () => Promise<any>;
+  getCollection: (name: string) => Promise<any>;
+  deleteCollection: (name: string) => Promise<any>;
+};
+
 export class Collection {
   private name: string;
   private api: DefaultApi;
