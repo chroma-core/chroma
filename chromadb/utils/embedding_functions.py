@@ -54,9 +54,6 @@ class CohereEmbeddingFunction(EmbeddingFunction):
         self._model_name = model_name
 
     def __call__(self, texts: Documents) -> Embeddings:
-        # replace newlines, which can negatively affect performance.
-        texts = [t.replace("\n", " ") for t in texts]
-
         # Call Cohere Embedding API for each document.
         return [
             embeddings for embeddings in self._client.embed(texts=texts, model=self._model_name)
