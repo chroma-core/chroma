@@ -1,11 +1,10 @@
 ## Description of changes
 
 *Summarize the changes made by this PR.* 
-
-- Improvements & Bug fixes
-      - 
-- New functionality
-      - 
+ - Improvements & Bug fixes
+	 - ...
+ - New functionality
+	 - ...
 
 ## Test plan
 *How are these changes tested?*
