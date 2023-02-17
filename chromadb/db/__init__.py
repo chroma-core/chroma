@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import List, Sequence, Optional, Tuple
+from uuid import UUID
 
+from chromadb.api.types import Embeddings, Documents, IDs, Metadatas
 
 class DB(ABC):
     @abstractmethod
@@ -32,17 +34,19 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def add(
-        self,
-        collection_name: str,
-        embedding,
-        input_uri,
-        dataset=None,
-        custom_quality_score=None,
-        metadata=None,
-    ):
+    def add(self, 
+            collection_uuid: str, 
+            embeddings: Embeddings, 
+            metadatas: Optional[Metadatas], 
+            documents: Optional[Documents], 
+            ids: List[UUID]
+    ) -> List[UUID]:
         pass
 
+    @abstractmethod
+    def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
+        pass
+    
     @abstractmethod
     def get(
         self,
@@ -70,7 +74,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_nearest_neighbors(self, where, embedding, n_results):
+    def get_nearest_neighbors(self, collection_name, where, embeddings, n_results) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod

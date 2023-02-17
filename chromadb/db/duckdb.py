@@ -120,20 +120,19 @@ class DuckDB(Clickhouse):
     #  ITEM METHODS
     #
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
-    def add(self, collection_uuid, embedding, metadata, documents, ids):
+    def add(self, collection_uuid, embeddings, metadatas, documents, ids):
 
-        data_to_insert = []
-        for i in range(len(embedding)):
-            data_to_insert.append(
-                [
-                    collection_uuid,
-                    str(uuid.uuid4()),
-                    embedding[i],
-                    json.dumps(metadata[i]),
-                    documents[i],
-                    ids[i],
-                ]
-            )
+        data_to_insert = [
+            [
+                collection_uuid, 
+                str(uuid.uuid4()), 
+                embedding, 
+                json.dumps(metadatas[i]) if metadatas else None, 
+                documents[i] if documents else None, 
+                ids[i]
+            ]
+            for i, embedding in enumerate(embeddings)
+        ]
 
         insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
 
@@ -230,7 +229,7 @@ class DuckDB(Clickhouse):
             val[i][0] = uuid.UUID(val[i][0])
             val[i][1] = uuid.UUID(val[i][1])
             # json.loads metadata
-            val[i][5] = json.loads(val[i][5])
+            val[i][5] = json.loads(val[i][5]) if val[i][5] else None
 
         return val
 

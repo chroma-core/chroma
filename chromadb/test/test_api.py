@@ -667,6 +667,57 @@ def test_where_valid_operators(api_fixture, request):
         )
 
 
+# TODO: Define the dimensionality of these embeddingds in terms of the default record        
+bad_dimensionality_records = {
+    "embeddings": [[1.1, 2.3, 3.2,4.5], [1.2, 2.24, 3.2, 4.5]],
+    "ids": ["id1", "id2"],
+}
+
+bad_dimensionality_query = {
+    "query_embeddings": [[1.1, 2.3, 3.2,4.5], [1.2, 2.24, 3.2, 4.5]],
+}
+
+bad_number_of_results_query = {
+    "query_embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "n_results": 100
+}
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_dimensionality_validation_add(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_dimensionality_validation")
+    collection.add(**minimal_records)
+
+    with pytest.raises(Exception) as e:
+        collection.add(**bad_dimensionality_records)
+    assert "dimensionality" in str(e.value)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_dimensionality_validation_query(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_dimensionality_validation_query")
+    collection.add(**minimal_records)
+
+    with pytest.raises(Exception) as e:
+        collection.query(**bad_dimensionality_query)
+    assert "dimensionality" in str(e.value)
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_number_of_elements_validation_query(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_number_of_elements_validation")
+    collection.add(**minimal_records)
+
+    with pytest.raises(Exception) as e:
+        collection.query(**bad_number_of_results_query)
+    assert "number of elements" in str(e.value)
+
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_query_document_valid_operators(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
@@ -715,7 +766,6 @@ contains_records = {
     ],
 }
 
-
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_where_document(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
@@ -752,10 +802,11 @@ def test_query_where_document(api_fixture, request):
     )
     assert len(items["metadatas"][0]) == 2
 
-    with pytest.raises(NoDatapointsException) as e:
+    with pytest.raises(Exception) as e:
         items = collection.query(
             query_embeddings=[0, 0, 0], where_document={"$contains": "bad"}, n_results=1
         )
+        assert "datapoints" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)

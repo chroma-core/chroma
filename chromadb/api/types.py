@@ -1,10 +1,13 @@
+import numbers
 from typing import Literal, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
 
 ID = str
 IDs = List[ID]
 
-Embedding = List[float]
+Number = Union[int, float]
+Embedding = List[Number]
 Embeddings = List[Embedding]
+
 
 Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
@@ -43,6 +46,10 @@ class QueryResult(TypedDict):
     metadatas: List[List[Metadata]]
     distances: List[List[float]]
 
+class IndexMetadata(TypedDict):
+    dimensionality: int
+    elements: int
+    time_created: float
 
 class EmbeddingFunction(Protocol):
     def __call__(self, texts: Documents) -> Embeddings:
