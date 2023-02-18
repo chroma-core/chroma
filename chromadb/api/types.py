@@ -47,6 +47,7 @@ class QueryResult(TypedDict):
     distances: Optional[List[List[float]]]
 
 
+
 class IndexMetadata(TypedDict):
     dimensionality: int
     elements: int

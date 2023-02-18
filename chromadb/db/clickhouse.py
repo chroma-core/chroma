@@ -1,7 +1,11 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
-from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
+from chromadb.errors import (
+    NoDatapointsException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 import uuid
 import time
 import os
@@ -41,7 +45,6 @@ def db_schema_to_keys():
 
 
 class Clickhouse(DB):
-
     #
     #  INIT METHODS
     #
@@ -197,15 +200,14 @@ class Clickhouse(DB):
     #
 
     def add(self, collection_uuid, embeddings, metadatas, documents, ids):
-
         data_to_insert = [
             [
-                collection_uuid, 
-                uuid.uuid4(), 
-                embedding, 
-                json.dumps(metadatas[i]) if metadatas else None, 
-                documents[i] if documents else None, 
-                ids[i]
+                collection_uuid,
+                uuid.uuid4(),
+                embedding,
+                json.dumps(metadatas[i]) if metadatas else None,
+                documents[i] if documents else None,
+                ids[i],
             ]
             for i, embedding in enumerate(embeddings)
         ]
@@ -222,7 +224,6 @@ class Clickhouse(DB):
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
     ):
-
         updates = []
         parameters = {}
         for i in range(len(ids)):
@@ -258,7 +259,6 @@ class Clickhouse(DB):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ):
-
         # Verify all IDs exist
         existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
         if len(existing_items) != len(ids):
@@ -446,7 +446,6 @@ class Clickhouse(DB):
         collection_name=None,
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
-
         # Either the collection name or the collection uuid must be provided
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
@@ -457,7 +456,7 @@ class Clickhouse(DB):
             raise InvalidDimensionException(
                 f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
             )
-        
+
         # Check number of requested results
         if n_results > idx_metadata["elements"]:
             raise NotEnoughElementsException(
@@ -475,7 +474,9 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException(f"No datapoints found for the supplied filter {json.dumps(where)}")
+                raise NoDatapointsException(
+                    f"No datapoints found for the supplied filter {json.dumps(where)}"
+                )
         else:
             ids = None
         uuids, distances = self._idx.get_nearest_neighbors(

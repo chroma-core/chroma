@@ -8,6 +8,7 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
+
 # mimics s3 bucket requirements for naming
 def is_valid_index_name(index_name):
     if len(index_name) < 3 or len(index_name) > 63:
@@ -88,7 +89,6 @@ class LocalAPI(API):
         documents=None,
         increment_index=True,
     ):
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,
@@ -137,7 +137,6 @@ class LocalAPI(API):
         page_size=None,
         where_document=None,
     ):
-
         if where is None:
             where = {}
 
@@ -161,7 +160,6 @@ class LocalAPI(API):
         )
 
     def _delete(self, collection_name, ids=None, where=None, where_document=None):
-
         if where is None:
             where = {}
 
@@ -174,7 +172,6 @@ class LocalAPI(API):
         return deleted_uuids
 
     def _count(self, collection_name):
-
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
@@ -261,11 +258,9 @@ class LocalAPI(API):
         return query_result
 
     def raw_sql(self, raw_sql):
-
         return self._db.raw_sql(raw_sql)
 
     def create_index(self, collection_name):
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True
