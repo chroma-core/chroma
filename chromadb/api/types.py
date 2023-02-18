@@ -34,9 +34,9 @@ WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
 
 class GetResult(TypedDict):
     ids: List[ID]
-    embeddings: List[Embedding]
-    documents: List[Document]
-    metadatas: List[Metadata]
+    embeddings: Optional[List[Embedding]]
+    documents: Optional[List[Document]]
+    metadatas: Optional[List[Metadata]]
 
 
 class QueryResult(TypedDict):
@@ -45,7 +45,6 @@ class QueryResult(TypedDict):
     documents: Optional[List[List[Document]]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
-
 
 
 class IndexMetadata(TypedDict):

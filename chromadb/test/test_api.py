@@ -974,3 +974,28 @@ def test_query_include(api_fixture, request):
     assert items["distances"] == None
     assert items["ids"][0][0] == "id1"
     assert items["ids"][0][1] == "id2"
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_include(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_get_include")
+    collection.add(**records)
+
+    items = collection.get(include=["metadatas", "documents"])
+    assert items["embeddings"] == None
+    assert items["ids"][0] == "id1"
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["documents"][0] == "this document is first"
+
+    items = collection.get(include=["embeddings", "documents"])
+    assert items["metadatas"] == None
+    assert items["ids"][0] == "id1"
+
+    items = collection.get(include=[])
+    assert items["documents"] == None
+    assert items["metadatas"] == None
+    assert items["embeddings"] == None
+    assert items["ids"][0] == "id1"

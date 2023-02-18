@@ -107,6 +107,7 @@ class Collection(BaseModel):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -122,7 +123,14 @@ class Collection(BaseModel):
         where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
         return self._client._get(
-            self.name, ids, where, None, limit, offset, where_document=where_document
+            self.name,
+            ids,
+            where,
+            None,
+            limit,
+            offset,
+            where_document=where_document,
+            include=include,
         )
 
     def peek(self, limit: int = 10) -> GetResult:
@@ -140,7 +148,7 @@ class Collection(BaseModel):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Optional[Include] = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 

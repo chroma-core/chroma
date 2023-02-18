@@ -273,10 +273,11 @@ class Clickhouse(DB):
             self._idx.delete_from_index(collection_uuid, update_uuids)
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
-    def _get(self, where={}):
+    def _get(self, where={}, columns: Optional[list] = None):
+        select_columns = db_schema_to_keys() if columns is None else ",".join(columns)
         res = (
             self._get_conn()
-            .query(f"""SELECT {db_schema_to_keys()} FROM embeddings {where}""")
+            .query(f"""SELECT {select_columns} FROM embeddings {where}""")
             .result_rows
         )
         # json.load the metadata

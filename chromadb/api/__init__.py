@@ -162,6 +162,7 @@ class API(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
@@ -204,7 +205,7 @@ class API(ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Optional[Include] = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.

@@ -136,6 +136,7 @@ class LocalAPI(API):
         page=None,
         page_size=None,
         where_document=None,
+        include: Include = ["embeddings", "documents", "metadatas", "distances"],
     ):
         if where is None:
             where = {}
@@ -147,17 +148,39 @@ class LocalAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db_result_to_get_result(
-            self._db.get(
-                collection_name=collection_name,
-                ids=ids,
-                where=where,
-                sort=sort,
-                limit=limit,
-                offset=offset,
-                where_document=where_document,
-            )
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+
+        column_index = self._include_to_column_index(include)
+
+        db_result = self._db.get(
+            collection_name=collection_name,
+            ids=ids,
+            where=where,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            columns=include,
         )
+
+        get_result = GetResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+        )
+
+        for entry in db_result:
+            if include_embeddings:
+                cast(List, get_result["embeddings"]).append(entry[column_index["embeddings"]])
+            if include_documents:
+                cast(List, get_result["documents"]).append(entry[column_index["documents"]])
+            if include_metadatas:
+                cast(List, get_result["metadatas"]).append(entry[column_index["metadatas"]])
+            get_result["ids"].append(entry[column_index["metadatas"]])
+        return get_result
 
     def _delete(self, collection_name, ids=None, where=None, where_document=None):
         if where is None:
@@ -177,6 +200,24 @@ class LocalAPI(API):
     def reset(self):
         self._db.reset()
         return True
+
+    def _include_to_column_index(self, include: Include):
+        column_index = {}
+        i = 0
+        if "embeddings" in include:
+            column_index["embedding"] = i
+            i += 1
+        if "documents" in include:
+            column_index["document"] = i
+            i += 1
+        if "metadatas" in include:
+            column_index["metadata"] = i
+            i += 1
+        if "distances" in include:
+            column_index["distance"] = i
+            i += 1
+        column_index["id"] = i
+        return column_index
 
     def _query(
         self,
@@ -200,23 +241,7 @@ class LocalAPI(API):
         include_metadatas = "metadatas" in include
         include_distances = "distances" in include
 
-        columns = []
-        column_index = {}
-        i = 0
-        if include_embeddings:
-            columns.append("embedding")
-            column_index["embedding"] = i
-            i += 1
-        if include_documents:
-            columns.append("document")
-            column_index["document"] = i
-            i += 1
-        if include_metadatas:
-            columns.append("metadata")
-            column_index["metadata"] = i
-            i += 1
-        columns.append("id")
-        column_index["id"] = i
+        column_index = self._include_to_column_index(include)
 
         query_result = QueryResult(
             ids=[],
@@ -225,12 +250,13 @@ class LocalAPI(API):
             metadatas=[] if include_metadatas else None,
             distances=[] if include_distances else None,
         )
+
         for i in range(len(uuids)):
             embeddings = []
             documents = []
             ids = []
             metadatas = []
-            db_result = self._db.get_by_ids(uuids[i], columns=columns)
+            db_result = self._db.get_by_ids(uuids[i], columns=include)
 
             for entry in db_result:
                 if include_embeddings:
