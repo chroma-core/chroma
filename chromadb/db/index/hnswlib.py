@@ -136,6 +136,10 @@ class Hnswlib(Index):
 
         logger.debug("Index saved to {self._save_folder}/index.bin")
 
+    def load_if_not_loaded(self, collection_uuid):
+        if self._collection_uuid != collection_uuid:
+            self._load(collection_uuid)
+
     def _load(self, collection_uuid):
         # if we are calling load, we clearly need a different index than the one we have
         self._index = None

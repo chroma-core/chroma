@@ -92,6 +92,37 @@ if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
     test_apis.append(fastapi_integration_api)
 
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_persist_index_loading(api_fixture, request):
+
+    # this as a script will work/fail with the introduced change, but I cant get the test to pass/fail
+    # import chromadb
+    # from chromadb.config import Settings
+
+    # client = chromadb.Client(Settings(persist_directory="persist-folder", chroma_db_impl="duckdb+parquet"))
+    # client.reset()
+    # collection = client.create_collection('test')
+    # collection.add(ids="id1", documents="hello")
+
+    # client.persist()
+    # del client
+
+    # client2 = chromadb.Client(Settings(persist_directory="persist-folder", chroma_db_impl="duckdb+parquet"))
+    # collection = client2.get_collection('test')
+    # print("query", collection.query(query_texts="hello", n_results=1))
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection('test')
+    collection.add(ids="id1", documents="hello")
+
+    api.persist()
+    del api
+
+    api2 = request.getfixturevalue(api_fixture.__name__)
+    collection = api2.get_collection('test')
+    collection.query(query_texts="hello", n_results=1) 
+
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):

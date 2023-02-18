@@ -445,6 +445,12 @@ class Clickhouse(DB):
         collection_name=None,
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
+        
+        if collection_name is not None:
+            collection_uuid = self.get_collection_uuid_from_name(collection_name)
+
+        self._idx.load_if_not_loaded(collection_uuid)
+
         # Either the collection name or the collection uuid must be provided
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
@@ -461,9 +467,6 @@ class Clickhouse(DB):
             raise NotEnoughElementsException(
                 f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
             )
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
