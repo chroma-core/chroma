@@ -92,6 +92,9 @@ if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
     test_apis.append(fastapi_integration_api)
 
+if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
+    print("Including integration tests only")
+    test_apis = [fastapi_integration_api]
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):
