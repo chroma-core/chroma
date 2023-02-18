@@ -50,6 +50,8 @@ class Hnswlib(Index):
             "time_created": time.time(),
         }
         self._save()
+        
+        print("\n\n\ncreating index\n\n\n")
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
         if self._collection_uuid != collection_uuid:
