@@ -162,7 +162,6 @@ class API(ABC):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
     ) -> GetResult:
-
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
 
@@ -181,7 +180,13 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _delete(self, collection_name: str, ids: Optional[IDs], where: Optional[Where] = {}, where_document: Optional[WhereDocument] = {}):
+    def _delete(
+        self,
+        collection_name: str,
+        ids: Optional[IDs],
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+    ):
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 

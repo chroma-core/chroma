@@ -4,6 +4,7 @@ from uuid import UUID
 
 from chromadb.api.types import Embeddings, Documents, IDs, Metadatas
 
+
 class DB(ABC):
     @abstractmethod
     def __init__(self):
@@ -34,19 +35,20 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def add(self, 
-            collection_uuid: str, 
-            embeddings: Embeddings, 
-            metadatas: Optional[Metadatas], 
-            documents: Optional[Documents], 
-            ids: List[UUID]
+    def add(
+        self,
+        collection_uuid: str,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        ids: List[UUID],
     ) -> List[UUID]:
         pass
 
     @abstractmethod
     def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
         pass
-    
+
     @abstractmethod
     def get(
         self,
@@ -74,7 +76,9 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_nearest_neighbors(self, collection_name, where, embeddings, n_results) -> Tuple[List[List[UUID]], List[List[float]]]:
+    def get_nearest_neighbors(
+        self, collection_name, where, embeddings, n_results
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod

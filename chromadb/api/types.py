@@ -46,10 +46,12 @@ class QueryResult(TypedDict):
     metadatas: List[List[Metadata]]
     distances: List[List[float]]
 
+
 class IndexMetadata(TypedDict):
     dimensionality: int
     elements: int
     time_created: float
+
 
 class EmbeddingFunction(Protocol):
     def __call__(self, texts: Documents) -> Embeddings:

@@ -13,7 +13,6 @@ from chromadb.errors import NoIndexException, InvalidDimensionException
 
 
 class Hnswlib(Index):
-
     _collection_uuid = None
     _index = None
     _index_metadata: Optional[IndexMetadata] = None
@@ -24,9 +23,7 @@ class Hnswlib(Index):
     def __init__(self, settings):
         self._save_folder = settings.persist_directory + "/index"
 
-
     def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
-
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         for uuid, i in zip(uuids, range(len(uuids))):
@@ -49,7 +46,7 @@ class Hnswlib(Index):
             "time_created": time.time(),
         }
         self._save()
-    
+
     def get_metadata(self) -> IndexMetadata:
         if self._index_metadata is None:
             raise NoIndexException("Index is not initialized")
@@ -63,7 +60,6 @@ class Hnswlib(Index):
             self.run(collection_uuid, uuids, embeddings)
 
         elif self._index is not None:
-            
             idx_dimension = self.get_metadata()["dimensionality"]
             # Check dimensionality
             if idx_dimension != len(embeddings[0]):
@@ -122,7 +118,6 @@ class Hnswlib(Index):
         self._save()
 
     def _save(self):
-
         # create the directory if it doesn't exist
         if not os.path.exists(f"{self._save_folder}"):
             os.makedirs(f"{self._save_folder}")
@@ -168,7 +163,6 @@ class Hnswlib(Index):
         return os.path.isfile(f"{self._save_folder}/index_{collection_uuid}.bin")
 
     def get_nearest_neighbors(self, collection_uuid, query, k, uuids=None):
-
         if self._collection_uuid != collection_uuid:
             self._load(collection_uuid)
 

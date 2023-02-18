@@ -100,7 +100,14 @@ class FastAPI(API):
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/get",
             data=json.dumps(
-                {"ids": ids, "where": where, "sort": sort, "limit": limit, "offset": offset, "where_document": where_document}
+                {
+                    "ids": ids,
+                    "where": where,
+                    "sort": sort,
+                    "limit": limit,
+                    "offset": offset,
+                    "where_document": where_document,
+                }
             ),
         )
 
@@ -149,8 +156,8 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
-                       
+            raise (Exception(resp.text))
+
         return True
 
     def _update(
@@ -187,15 +194,20 @@ class FastAPI(API):
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/query",
             data=json.dumps(
-                {"query_embeddings": query_embeddings, "n_results": n_results, "where": where, "where_document": where_document}
+                {
+                    "query_embeddings": query_embeddings,
+                    "n_results": n_results,
+                    "where": where,
+                    "where_document": where_document,
+                }
             ),
         )
 
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
-        
+            raise (Exception(resp.text))
+
         body = resp.json()
         return body
 
@@ -223,5 +235,5 @@ class FastAPI(API):
         try:
             resp.raise_for_status()
         except requests.HTTPError as e:
-            raise(Exception(resp.text))
+            raise (Exception(resp.text))
         return resp.json()

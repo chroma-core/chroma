@@ -38,7 +38,6 @@ def clickhouse_to_duckdb_schema(table_schema):
 # because it's logically a subtype. Factoring out the common behavior
 # to a third superclass they both extend would be preferable.
 class DuckDB(Clickhouse):
-
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
         self._conn = duckdb.connect()
@@ -121,15 +120,14 @@ class DuckDB(Clickhouse):
     #
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
     def add(self, collection_uuid, embeddings, metadatas, documents, ids):
-
         data_to_insert = [
             [
-                collection_uuid, 
-                str(uuid.uuid4()), 
-                embedding, 
-                json.dumps(metadatas[i]) if metadatas else None, 
-                documents[i] if documents else None, 
-                ids[i]
+                collection_uuid,
+                str(uuid.uuid4()),
+                embedding,
+                json.dumps(metadatas[i]) if metadatas else None,
+                documents[i] if documents else None,
+                ids[i],
             ]
             for i, embedding in enumerate(embeddings)
         ]
@@ -241,7 +239,6 @@ class DuckDB(Clickhouse):
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
     ):
-
         update_data = []
         for i in range(len(ids)):
             data = []
@@ -330,7 +327,6 @@ class DuckDB(Clickhouse):
 
 
 class PersistentDuckDB(DuckDB):
-
     _save_folder = None
 
     def __init__(self, settings):

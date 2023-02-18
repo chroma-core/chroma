@@ -3,7 +3,11 @@ from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 import chromadb
 import chromadb.server
-from chromadb.errors import NoDatapointsException, InvalidDimensionException, NotEnoughElementsException
+from chromadb.errors import (
+    NoDatapointsException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CountEmbedding,
@@ -93,7 +97,6 @@ class FastAPI(chromadb.server.Server):
         return self._api.get_collection(collection_name)
 
     def update_collection(self, collection_name, collection: UpdateCollection):
-
         return self._api.modify(
             current_name=collection_name,
             new_name=collection.new_name,
@@ -139,7 +142,10 @@ class FastAPI(chromadb.server.Server):
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):
         return self._api._delete(
-            where=delete.where, ids=delete.ids, collection_name=collection_name, where_document=delete.where_document,
+            where=delete.where,
+            ids=delete.ids,
+            collection_name=collection_name,
+            where_document=delete.where_document,
         )
 
     def count(self, collection_name: str):

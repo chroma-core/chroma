@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Union, Any
 
+
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
     embeddings: list
