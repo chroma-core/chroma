@@ -70,6 +70,14 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+    - name: Login to AWS
+      uses: aws-actions/configure-aws-credentials@v1-node16
+      with:
+        role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
+        aws-region: us-east-1
+    - name: Generate CloudFormation template
+      id: generate-cf
+      run: "pip install boto3 && python bin/generate_cloudformation.py"
     - name: Release Tagged Version
       uses: ncipollo/release-action@v1.11.1
       if: "startsWith(github.ref, 'refs/tags/')"
