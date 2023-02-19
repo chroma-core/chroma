@@ -35,6 +35,16 @@ def local_persist_api():
         )
     )
 
+@pytest.fixture
+def local_persist_api_cache_bust():
+    return chromadb.Client(
+        Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=tempfile.gettempdir() + "/test_server",
+        )
+    )
+
 
 @pytest.fixture
 def fastapi_integration_api():
@@ -92,26 +102,10 @@ if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
     test_apis.append(fastapi_integration_api)
 
+
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading(api_fixture, request):
-
-    # this as a script will work/fail with the introduced change, but I cant get the test to pass/fail
-    # import chromadb
-    # from chromadb.config import Settings
-
-    # client = chromadb.Client(Settings(persist_directory="persist-folder", chroma_db_impl="duckdb+parquet"))
-    # client.reset()
-    # collection = client.create_collection('test')
-    # collection.add(ids="id1", documents="hello")
-
-    # client.persist()
-    # del client
-
-    # client2 = chromadb.Client(Settings(persist_directory="persist-folder", chroma_db_impl="duckdb+parquet"))
-    # collection = client2.get_collection('test')
-    # print("query", collection.query(query_texts="hello", n_results=1))
-
-    api = request.getfixturevalue(api_fixture.__name__)
+    api = request.getfixturevalue("local_persist_api")
     api.reset()
     collection = api.create_collection('test')
     collection.add(ids="id1", documents="hello")
@@ -119,7 +113,7 @@ def test_persist_index_loading(api_fixture, request):
     api.persist()
     del api
 
-    api2 = request.getfixturevalue(api_fixture.__name__)
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection('test')
     collection.query(query_texts="hello", n_results=1) 
 
