@@ -3,7 +3,7 @@ var chroma = require('chromadb');
 
 var app = express();
 app.get('/', async (req, res) => {
-  const cc = chroma.chromaClient("http://localhost:8000");
+  const cc = new chroma.ChromaClient("http://localhost:8000");
   await cc.reset()
 
   const collection = await cc.createCollection("test-from-js");

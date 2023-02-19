@@ -1,8 +1,8 @@
 // import env.ts
-import chromaClient from "chromadb"
+import {ChromaClient} from "chromadb"
 
 window.onload = async () => {
-  const chroma = chromaClient("http://localhost:8000");
+  const chroma = new ChromaClient("http://localhost:8000");
   await chroma.reset()
 
   const collection = await chroma.createCollection("test-from-js");
