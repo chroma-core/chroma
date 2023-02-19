@@ -120,6 +120,10 @@ cf = {
             }
         }
     },
+    "Outputs": {"ServerIp": {
+        "Description": "IP address of the Chroma server",
+        "Value": {"Fn::GetAtt": ["ChromaInstance", "PublicIp"]}
+    }},
     "Mappings": {"Region2AMI": {}}
 }
 
