@@ -145,3 +145,4 @@ json.dump(cf, open('/tmp/chroma.cf.json', 'w'), indent=4)
 # upload to S3
 s3 = boto3.client('s3', region_name='us-east-1')
 s3.upload_file('/tmp/chroma.cf.json', 'public.trychroma.com', f'cloudformation/{version}/chroma.cf.json')
+s3.upload_file('/tmp/chroma.cf.json', 'public.trychroma.com', f'cloudformation/latest/chroma.cf.json')
