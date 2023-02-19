@@ -450,18 +450,18 @@ class Clickhouse(DB):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
-        idx_metadata = self._idx.get_metadata()
-        # Check query embeddings dimensionality
-        if idx_metadata["dimensionality"] != len(embeddings[0]):
-            raise InvalidDimensionException(
-                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
-            )
+        # idx_metadata = self._idx.get_metadata()
+        # # Check query embeddings dimensionality
+        # if idx_metadata["dimensionality"] != len(embeddings[0]):
+        #     raise InvalidDimensionException(
+        #         f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
+        #     )
         
-        # Check number of requested results
-        if n_results > idx_metadata["elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
-            )
+        # # Check number of requested results
+        # if n_results > idx_metadata["elements"]:
+        #     raise NotEnoughElementsException(
+        #         f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
+        #     )
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
