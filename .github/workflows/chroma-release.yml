@@ -14,13 +14,13 @@ env:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      deployments: write
-      packages: write
-      pull-requests: read
-      statuses: write
+    permissions: write-all
+#      id-token: write
+#      contents: read
+#      deployments: write
+#      packages: write
+#      pull-requests: read
+#      statuses: write
     steps:
     - name: Checkout
       uses: actions/checkout@v3
