@@ -11,9 +11,9 @@ export class Collection {
   }
 
   public async add(
-    ids: string,
-    embeddings: number[], // this should be optional
-    metadatas?: object,
+    ids: string | Array<any>,
+    embeddings: Array<any>,
+    metadatas?: Array<any> | object,
     documents?: string | Array<any>,
     increment_index: boolean = true,
   ) {

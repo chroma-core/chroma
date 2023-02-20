@@ -1,25 +1,33 @@
 // import env.ts
-import {ChromaClient} from "chromadb"
+import { ChromaClient } from "chromadb"
 
 window.onload = async () => {
   const chroma = new ChromaClient("http://localhost:8000");
   await chroma.reset()
 
   const collection = await chroma.createCollection("test-from-js");
-  
-  for (let i = 0; i < 20; i++) {
-    await collection.add(
-      "test-id-" + i.toString(),
-      [1, 2, 3, 4, 5],
-      { "test": "test" }
-    )
+
+  // first generate some data
+  var ids: string[] = [];
+  var embeddings: Array<any> = []
+  var metadata: Array<any> = []
+  for (let i = 0; i < 100; i++) {
+    ids.push("test-id-" + i.toString());
+    embeddings.push([1, 2, 3, 4, 5]);
+    metadata.push({ "test": "test" });
   }
+
+  await collection.add(
+    ids,
+    embeddings,
+    metadata
+  )
 
   let count = await collection.count();
   console.log("count", count);
 
   const queryData = await collection.query([1, 2, 3, 4, 5], 5, { "test": "test" });
-  
+
   console.log("queryData", queryData);
 
   await collection.delete()
