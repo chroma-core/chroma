@@ -1,6 +1,24 @@
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
 
+// a function to convert a non-Array object to an Array
+function toArray<T>(obj: T | Array<T>): Array<T> {
+  if (Array.isArray(obj)) {
+    return obj;
+  } else {
+    return [obj];
+  }
+}
+
+// a function to convert an array to array of arrays
+function toArrayOfArrays<T>(obj: Array<Array<T>> | Array<T>): Array<Array<T>> {
+  if (Array.isArray(obj[0])) {
+    return obj as Array<Array<T>>;
+  } else {
+    return [obj] as Array<Array<T>>;
+  }
+}
+
 export class Collection {
   private name: string;
   private api: DefaultApi;
@@ -17,13 +35,41 @@ export class Collection {
     documents?: string | Array<any>,
     increment_index: boolean = true,
   ) {
+
+    const idsArray = toArray(ids);
+    const embeddingsArray = toArrayOfArrays(embeddings);
+
+    let metadatasArray;
+    if (metadatas === undefined) {
+      metadatasArray = undefined
+    } else {
+      metadatasArray = toArray(metadatas);
+    }
+
+    let documentsArray;
+    if (metadatas === undefined) {
+      documentsArray = undefined
+    } else {
+      documentsArray = toArray(metadatas);
+    }
+
+    if (
+      idsArray.length !== embeddingsArray.length ||
+      ((metadatasArray !== undefined) && idsArray.length !== metadatasArray.length) ||
+      ((documentsArray !== undefined) && idsArray.length !== documentsArray.length)
+    ) {
+      throw new Error(
+        "ids, embeddings, metadatas, and documents must all be the same length",
+      );
+    }
+
     return await this.api.add({
       collectionName: this.name,
       addEmbedding: {
-        ids,
-        embeddings,
-        documents,
-        metadatas,
+        ids: idsArray,
+        embeddings: embeddingsArray,
+        documents: documentsArray,
+        metadatas: metadatasArray,
         increment_index: increment_index,
       },
     });
@@ -40,10 +86,12 @@ export class Collection {
     limit?: number,
     offset?: number,
   ) {
+    const idsArray = toArray(ids);
+
     return await this.api.get({
       collectionName: this.name,
       getEmbedding: {
-        ids,
+        ids: idsArray,
         where,
         limit,
         offset,
@@ -56,10 +104,12 @@ export class Collection {
     n_results: number = 10,
     where?: object,
   ) {
+    const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+
     const response = await this.api.getNearestNeighbors({
       collectionName: this.name,
       queryEmbedding: {
-        query_embeddings,
+        query_embeddings: query_embeddingsArray,
         where,
         n_results,
       },
