@@ -89,50 +89,7 @@ class LocalAPI(API):
         documents=None,
         increment_index=True,
     ):
-<<<<<<< Updated upstream
-=======
 
-        number_of_embeddings = len(embeddings)
-
-        # fill in empty objects if not provided
-        if metadatas is None:
-            if isinstance(embeddings[0], list):
-                metadatas = [{} for _ in range(number_of_embeddings)]
-            else:
-                metadatas = {}
-
-        if ids is None:
-            if isinstance(embeddings[0], list):
-                ids = [None for _ in range(number_of_embeddings)]
-            else:
-                ids = None
-
-        if documents is None:
-            if isinstance(embeddings[0], list):
-                documents = [None for _ in range(number_of_embeddings)]
-            else:
-                documents = None
-
-        # convert all metadatas values to strings : TODO: handle this better
-        # this is currently here because clickhouse-driver does not support json
-        if isinstance(embeddings[0], list):
-            for m in metadatas:
-                if m is None:
-                    continue
-                for k, v in m.items():
-                    m[k] = str(v)
-        else:
-            for k, v in metadatas.items():
-                metadatas[k] = str(v)
-
-        # convert to array for downstream processing
-        if not isinstance(embeddings[0], list):
-            embeddings = [embeddings]
-            metadatas = [metadatas]
-            documents = [documents]
-            ids = [ids]
-
->>>>>>> Stashed changes
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,
