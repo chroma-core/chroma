@@ -2,7 +2,6 @@ from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
-
     environment: str = ""
 
     chroma_db_impl: str = "duckdb"
@@ -21,5 +20,5 @@ class Settings(BaseSettings):
         return getattr(self, item)
 
     class Config:
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
+        env_file = ".env"
+        env_file_encoding = "utf-8"

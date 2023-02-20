@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Union, Any
 
+
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
     embeddings: list
@@ -20,6 +21,7 @@ class UpdateEmbedding(BaseModel):
 
 class QueryEmbedding(BaseModel):
     where: dict = {}
+    where_document: dict = {}
     query_embeddings: list
     n_results: int = 10
 
@@ -33,6 +35,7 @@ class ProcessEmbedding(BaseModel):
 class GetEmbedding(BaseModel):
     ids: list = None
     where: dict = None
+    where_document: dict = None
     sort: str = None
     limit: int = None
     offset: int = None
@@ -53,6 +56,7 @@ class SpaceKeyInput(BaseModel):
 class DeleteEmbedding(BaseModel):
     ids: list = None
     where: dict = None
+    where_document: dict = None
 
 
 class CreateCollection(BaseModel):

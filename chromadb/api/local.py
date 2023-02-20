@@ -8,6 +8,7 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
+
 # mimics s3 bucket requirements for naming
 def is_valid_index_name(index_name):
     if len(index_name) < 3 or len(index_name) > 63:
@@ -88,48 +89,13 @@ class LocalAPI(API):
         documents=None,
         increment_index=True,
     ):
-
-        number_of_embeddings = len(embeddings)
-
-        # fill in empty objects if not provided
-        if metadatas is None:
-            if isinstance(embeddings[0], list):
-                metadatas = [{} for _ in range(number_of_embeddings)]
-            else:
-                metadatas = {}
-
-        if ids is None:
-            if isinstance(embeddings[0], list):
-                ids = [None for _ in range(number_of_embeddings)]
-            else:
-                ids = None
-
-        if documents is None:
-            if isinstance(embeddings[0], list):
-                documents = [None for _ in range(number_of_embeddings)]
-            else:
-                documents = None
-
-        # convert all metadatas values to strings : TODO: handle this better
-        # this is currently here because clickhouse-driver does not support json
-        if isinstance(embeddings[0], list):
-            for m in metadatas:
-                for k, v in m.items():
-                    m[k] = str(v)
-        else:
-            for k, v in metadatas.items():
-                metadatas[k] = str(v)
-
-        # convert to array for downstream processing
-        if not isinstance(embeddings[0], list):
-            embeddings = [embeddings]
-            metadatas = [metadatas]
-            documents = [documents]
-            ids = [ids]
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
-            collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids
+            collection_uuid,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            ids=ids,
         )
 
         if increment_index:
@@ -156,7 +122,7 @@ class LocalAPI(API):
             query_result["embeddings"].append(entry[2])
             query_result["documents"].append(entry[3])
             query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(json.loads(entry[5]))
+            query_result["metadatas"].append(entry[5])
         return query_result
 
     def _get(
@@ -169,10 +135,13 @@ class LocalAPI(API):
         offset=None,
         page=None,
         page_size=None,
+        where_document=None,
     ):
-
         if where is None:
             where = {}
+
+        if where_document is None:
+            where_document = {}
 
         if page and page_size:
             offset = (page - 1) * page_size
@@ -186,29 +155,34 @@ class LocalAPI(API):
                 sort=sort,
                 limit=limit,
                 offset=offset,
+                where_document=where_document,
             )
         )
 
-    def _delete(self, collection_name, ids=None, where=None):
-
+    def _delete(self, collection_name, ids=None, where=None, where_document=None):
         if where is None:
             where = {}
 
-        deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids)
+        if where_document is None:
+            where_document = {}
+
+        deleted_uuids = self._db.delete(
+            collection_name=collection_name, where=where, ids=ids, where_document=where_document
+        )
         return deleted_uuids
 
     def _count(self, collection_name):
-
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
         self._db.reset()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
             where=where,
+            where_document=where_document,
             embeddings=query_embeddings,
             n_results=n_results,
         )
@@ -225,7 +199,7 @@ class LocalAPI(API):
                 embeddings.append(entry[2])
                 documents.append(entry[3])
                 ids.append(entry[4])
-                metadatas.append(json.loads(entry[5]))
+                metadatas.append(json.loads(entry[5]) if entry[5] else None)
 
             query_result["embeddings"].append(embeddings)
             query_result["documents"].append(documents)
@@ -236,11 +210,9 @@ class LocalAPI(API):
         return query_result
 
     def raw_sql(self, raw_sql):
-
         return self._db.raw_sql(raw_sql)
 
     def create_index(self, collection_name):
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True

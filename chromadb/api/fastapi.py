@@ -1,13 +1,9 @@
 from typing import Callable, Dict, Optional
 from chromadb.api import API
 from chromadb.api.types import (
-    ID,
-    Document,
     Documents,
-    Embedding,
     Embeddings,
     IDs,
-    Metadata,
     Metadatas,
 )
 from chromadb.errors import NoDatapointsException
@@ -94,6 +90,7 @@ class FastAPI(API):
         offset=None,
         page=None,
         page_size=None,
+        where_document={},
     ):
         """Gets embeddings from the database"""
         if page and page_size:
@@ -103,19 +100,26 @@ class FastAPI(API):
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/get",
             data=json.dumps(
-                {"ids": ids, "where": where, "sort": sort, "limit": limit, "offset": offset}
+                {
+                    "ids": ids,
+                    "where": where,
+                    "sort": sort,
+                    "limit": limit,
+                    "offset": offset,
+                    "where_document": where_document,
+                }
             ),
         )
 
         resp.raise_for_status()
         return resp.json()
 
-    def _delete(self, collection_name, ids=None, where={}):
+    def _delete(self, collection_name, ids=None, where={}, where_document={}):
         """Deletes embeddings from the database"""
 
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/delete",
-            data=json.dumps({"where": where, "ids": ids}),
+            data=json.dumps({"where": where, "ids": ids, "where_document": where_document}),
         )
 
         resp.raise_for_status()
@@ -149,7 +153,11 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise (Exception(resp.text))
+
         return True
 
     def _update(
@@ -177,29 +185,31 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status
+        resp.raise_for_status()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
             self._api_url + "/collections/" + collection_name + "/query",
             data=json.dumps(
-                {"query_embeddings": query_embeddings, "n_results": n_results, "where": where}
+                {
+                    "query_embeddings": query_embeddings,
+                    "n_results": n_results,
+                    "where": where,
+                    "where_document": where_document,
+                }
             ),
         )
 
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise (Exception(resp.text))
 
-        val = resp.json()
-        if "error" in val:
-            if val["error"] == "no data points":
-                raise NoDatapointsException("No datapoints found for the supplied filter")
-            else:
-                raise Exception(val["error"])
-
-        return val
+        body = resp.json()
+        return body
 
     def reset(self):
         """Resets the database"""
@@ -222,5 +232,8 @@ class FastAPI(API):
     def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise (Exception(resp.text))
         return resp.json()

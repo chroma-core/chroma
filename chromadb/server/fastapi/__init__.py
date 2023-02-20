@@ -1,12 +1,18 @@
 import fastapi
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from fastapi import status
+from fastapi import HTTPException, status
+
 import chromadb
 import chromadb.server
-from chromadb.errors import NoDatapointsException
+from chromadb.errors import (
+    NoDatapointsException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CountEmbedding,
@@ -112,7 +118,6 @@ class FastAPI(chromadb.server.Server):
         return self._api.get_collection(collection_name)
 
     def update_collection(self, collection_name, collection: UpdateCollection):
-
         return self._api.modify(
             current_name=collection_name,
             new_name=collection.new_name,
@@ -123,14 +128,18 @@ class FastAPI(chromadb.server.Server):
         return self._api.delete_collection(collection_name)
 
     def add(self, collection_name: str, add: AddEmbedding):
-        return self._api._add(
-            collection_name=collection_name,
-            embeddings=add.embeddings,
-            metadatas=add.metadatas,
-            documents=add.documents,
-            ids=add.ids,
-            increment_index=add.increment_index,
-        )
+        try:
+            result = self._api._add(
+                collection_name=collection_name,
+                embeddings=add.embeddings,
+                metadatas=add.metadatas,
+                documents=add.documents,
+                ids=add.ids,
+                increment_index=add.increment_index,
+            )
+        except InvalidDimensionException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return result
 
     def update(self, collection_name: str, add: UpdateEmbedding):
         return self._api._update(
@@ -146,6 +155,7 @@ class FastAPI(chromadb.server.Server):
             collection_name=collection_name,
             ids=get.ids,
             where=get.where,
+            where_document=get.where_document,
             sort=get.sort,
             limit=get.limit,
             offset=get.offset,
@@ -153,7 +163,10 @@ class FastAPI(chromadb.server.Server):
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):
         return self._api._delete(
-            where=delete.where, ids=delete.ids, collection_name=collection_name
+            where=delete.where,
+            ids=delete.ids,
+            collection_name=collection_name,
+            where_document=delete.where_document,
         )
 
     def count(self, collection_name: str):
@@ -167,12 +180,17 @@ class FastAPI(chromadb.server.Server):
             nnresult = self._api._query(
                 collection_name=collection_name,
                 where=query.where,
+                where_document=query.where_document,
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
             )
             return nnresult
-        except NoDatapointsException:
-            return {"error": "no data points"}
+        except NoDatapointsException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except InvalidDimensionException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except NotEnoughElementsException as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     def raw_sql(self, raw_sql: RawSql):
         return self._api.raw_sql(raw_sql.raw_sql)

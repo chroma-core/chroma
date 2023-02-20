@@ -31,8 +31,6 @@ def clickhouse_to_duckdb_schema(table_schema):
             item[list(item.keys())[0]] = "STRING"
         if "FLOAT64" in item[list(item.keys())[0]]:
             item[list(item.keys())[0]] = "DOUBLE"
-        # NIT: here we need to turn metadata into JSON for duckdb
-
     return table_schema
 
 
@@ -40,7 +38,6 @@ def clickhouse_to_duckdb_schema(table_schema):
 # because it's logically a subtype. Factoring out the common behavior
 # to a third superclass they both extend would be preferable.
 class DuckDB(Clickhouse):
-
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
         self._conn = duckdb.connect()
@@ -122,22 +119,18 @@ class DuckDB(Clickhouse):
     #  ITEM METHODS
     #
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
-    def add(self, collection_uuid, embedding, metadata=None, documents=None, ids=None):
-
-        metadata = [json.dumps(x) if not isinstance(x, str) else x for x in metadata]
-
-        data_to_insert = []
-        for i in range(len(embedding)):
-            data_to_insert.append(
-                [
-                    collection_uuid,
-                    str(uuid.uuid4()),
-                    embedding[i],
-                    metadata[i],
-                    documents[i],
-                    ids[i],
-                ]
-            )
+    def add(self, collection_uuid, embeddings, metadatas, documents, ids):
+        data_to_insert = [
+            [
+                collection_uuid,
+                str(uuid.uuid4()),
+                embedding,
+                json.dumps(metadatas[i]) if metadatas else None,
+                documents[i] if documents else None,
+                ids[i],
+            ]
+            for i, embedding in enumerate(embeddings)
+        ]
 
         insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
 
@@ -157,8 +150,73 @@ class DuckDB(Clickhouse):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
 
-    def _filter_metadata(self, key, value):
-        return f" json_extract_string(metadata,'$.{key}') = '{value}'"
+    def _format_where(self, where, result):
+        for key, value in where.items():
+            # Shortcut for $eq
+            if type(value) == str:
+                result.append(f" json_extract_string(metadata,'$.{key}') = '{value}'")
+            if type(value) == int:
+                result.append(f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}")
+            if type(value) == float:
+                result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}")
+            # Operator expression
+            elif type(value) == dict:
+                operator, operand = list(value.items())[0]
+                if operator == "$gt":
+                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) > {operand}")
+                elif operator == "$lt":
+                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) < {operand}")
+                elif operator == "$gte":
+                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) >= {operand}")
+                elif operator == "$lte":
+                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) <= {operand}")
+                elif operator == "$ne":
+                    if type(operand) == str:
+                        return result.append(
+                            f" json_extract_string(metadata,'$.{key}') != '{operand}'"
+                        )
+                    return result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) != {operand}"
+                    )
+                elif operator == "$eq":
+                    if type(operand) == str:
+                        return result.append(
+                            f" json_extract_string(metadata,'$.{key}') = '{operand}'"
+                        )
+                    return result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {operand}"
+                    )
+                else:
+                    raise ValueError(f"Operator {operator} not supported")
+            elif type(value) == list:
+                all_subresults = []
+                for subwhere in value:
+                    subresults = []
+                    self._format_where(subwhere, subresults)
+                    all_subresults.append(subresults[0])
+                if key == "$or":
+                    result.append(f"({' OR '.join(all_subresults)})")
+                elif key == "$and":
+                    result.append(f"({' AND '.join(all_subresults)})")
+                else:
+                    raise ValueError(f"Operator {key} not supported with a list of where clauses")
+
+    def _format_where_document(self, where_document, results):
+        operator = list(where_document.keys())[0]
+        if operator == "$contains":
+            results.append(f"position('{where_document[operator]}' in document) > 0")
+        elif operator == "$and" or operator == "$or":
+            all_subresults = []
+            for subwhere in where_document[operator]:
+                subresults = []
+                self._format_where_document(subwhere, subresults)
+                all_subresults.append(subresults[0])
+            if operator == "$or":
+                results.append(f"({' OR '.join(all_subresults)})")
+            if operator == "$and":
+                results.append(f"({' AND '.join(all_subresults)})")
+        else:
+            raise ValueError(f"Operator {operator} not supported")
 
     def _get(self, where):
         val = self._conn.execute(
@@ -168,6 +226,8 @@ class DuckDB(Clickhouse):
             val[i] = list(val[i])
             val[i][0] = uuid.UUID(val[i][0])
             val[i][1] = uuid.UUID(val[i][1])
+            # json.loads metadata
+            val[i][5] = json.loads(val[i][5]) if val[i][5] else None
 
         return val
 
@@ -179,7 +239,6 @@ class DuckDB(Clickhouse):
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
     ):
-
         update_data = []
         for i in range(len(ids)):
             data = []
@@ -262,11 +321,12 @@ class DuckDB(Clickhouse):
         self._idx.reset()
 
     def persist(self):
-        raise NotImplementedError("chroma_db_impl='duckdb+parquet' to get persistence functionality")
+        raise NotImplementedError(
+            "chroma_db_impl='duckdb+parquet' to get persistence functionality"
+        )
 
 
 class PersistentDuckDB(DuckDB):
-
     _save_folder = None
 
     def __init__(self, settings):
@@ -304,9 +364,11 @@ class PersistentDuckDB(DuckDB):
                 (SELECT * FROM embeddings)
             TO '{self._save_folder}/chroma-embeddings.parquet'
                 (FORMAT PARQUET);
-        """)
+        """
+        )
 
-        self._conn.execute(f"""
+        self._conn.execute(
+            f"""
             COPY
                 (SELECT * FROM collections)
             TO '{self._save_folder}/chroma-collections.parquet'
