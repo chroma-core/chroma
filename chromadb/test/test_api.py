@@ -35,6 +35,7 @@ def local_persist_api():
         )
     )
 
+# https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
     return chromadb.Client(
@@ -115,7 +116,10 @@ def test_persist_index_loading(api_fixture, request):
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection('test')
-    collection.query(query_texts="hello", n_results=1) 
+
+    nn = collection.query(query_texts="hello", n_results=1)
+    for key in nn.keys():
+        assert len(nn[key]) == 1
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])

@@ -446,14 +446,14 @@ class Clickhouse(DB):
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
         
+        # Either the collection name or the collection uuid must be provided
+        if collection_name == None and collection_uuid == None:
+            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+        
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         self._idx.load_if_not_loaded(collection_uuid)
-
-        # Either the collection name or the collection uuid must be provided
-        if collection_name == None and collection_uuid == None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
         idx_metadata = self._idx.get_metadata()
         # Check query embeddings dimensionality
