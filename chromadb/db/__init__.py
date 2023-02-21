@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Sequence, Optional, Tuple
+from typing import Dict, List, Sequence, Optional, Tuple
 from uuid import UUID
 
 from chromadb.api.types import Embeddings, Documents, IDs, Metadatas
@@ -11,11 +11,11 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name: str, metadata: Optional[Dict] = None):
         pass
 
     @abstractmethod
-    def get_collection(self, collection_uuid):
+    def get_collection(self, name: str) -> str:
         pass
 
     @abstractmethod
@@ -27,7 +27,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def delete_collection(self, collection_uuid):
+    def delete_collection(self, name: str):
         pass
 
     @abstractmethod
@@ -61,6 +61,17 @@ class DB(ABC):
         offset=None,
         where_document={},
         columns=None,
+    ):
+        pass
+
+    @abstractmethod
+    def update(
+        self,
+        collection_uuid: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
     ):
         pass
 

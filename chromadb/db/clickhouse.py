@@ -11,7 +11,7 @@ import time
 import os
 import itertools
 import json
-from typing import Optional, Sequence, List, Tuple, cast
+from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
@@ -114,7 +114,7 @@ class Clickhouse(DB):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name: str, metadata: Optional[Dict] = None):
         if metadata is None:
             metadata = {}
 
@@ -141,7 +141,7 @@ class Clickhouse(DB):
         )
         return collection_uuid
 
-    def get_collection(self, name):
+    def get_collection(self, name: str):
         return (
             self._get_conn()
             .query(
@@ -175,7 +175,7 @@ class Clickhouse(DB):
          """
         )
 
-    def delete_collection(self, name):
+    def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._get_conn().command(
             f"""
@@ -190,7 +190,6 @@ class Clickhouse(DB):
         )
 
         self._idx.delete_index(collection_uuid)
-        return True
 
     #
     #  ITEM METHODS

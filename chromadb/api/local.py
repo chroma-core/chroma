@@ -52,7 +52,7 @@ class LocalAPI(API):
         self._db.get_collection(name)
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
-    def _get_collection_db(self, name: str) -> int:
+    def _get_collection_db(self, name: str) -> str:
         return self._db.get_collection(name)
 
     def list_collections(self) -> Sequence[Collection]:
@@ -75,7 +75,7 @@ class LocalAPI(API):
 
         self._db.update_collection(current_name, new_name, new_metadata)
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         return self._db.delete_collection(name)
 
     #

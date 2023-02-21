@@ -8,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import Optional, Sequence
+from typing import Dict, Optional, Sequence
 import pandas as pd
 import json
 import duckdb
@@ -76,7 +76,7 @@ class DuckDB(Clickhouse):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name: str, metadata: Optional[Dict] = None):
         if metadata is None:
             metadata = {}
 
@@ -89,20 +89,19 @@ class DuckDB(Clickhouse):
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
 
-    def get_collection(self, name):
+    def get_collection(self, name: str):
         return self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).df()
 
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
 
-    def delete_collection(self, name):
+    def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._conn.execute(
             f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
         )
         self._idx.delete_index(collection_uuid)
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
-        return True
 
     def update_collection(self, current_name, new_name, new_metadata):
         if new_name is None:

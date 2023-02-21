@@ -70,11 +70,10 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         """Deletes a collection"""
         resp = requests.delete(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return resp.json()
 
     def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""

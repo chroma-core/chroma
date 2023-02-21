@@ -69,6 +69,18 @@ class API(ABC):
         pass
 
     @abstractmethod
+    def delete_collection(
+        self,
+        name: str,
+    ):
+        """Deletes a collection from the database
+
+        Args:
+            name (str): The name of the collection to delete
+        """
+        pass
+
+    @abstractmethod
     def get_collection(
         self,
         name: Optional[str] = None,
