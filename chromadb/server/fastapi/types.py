@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Union, Any
-
+from chromadb.api.types import Include
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
@@ -24,6 +24,7 @@ class QueryEmbedding(BaseModel):
     where_document: dict = {}
     query_embeddings: list
     n_results: int = 10
+    include: Include = ["embeddings", "metadatas", "documents", "distances"]
 
 
 class ProcessEmbedding(BaseModel):

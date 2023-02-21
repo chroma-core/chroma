@@ -3,6 +3,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
     Embedding,
+    Include,
     Metadata,
     Document,
     Where,
@@ -112,9 +113,10 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -138,6 +140,7 @@ class Collection(BaseModel):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        include: Optional[Include] = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -145,7 +148,9 @@ class Collection(BaseModel):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
-            where: A dict of key, value string:string/int/float pairs to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Defaults to all. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -179,6 +184,7 @@ class Collection(BaseModel):
             n_results=n_results,
             where=where,
             where_document=where_document,
+            include=include,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
@@ -253,7 +259,8 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to delete
-            where:  A dict of key, value string:string/int/float pairs to filter deletions by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None

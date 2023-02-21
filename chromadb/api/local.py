@@ -1,9 +1,9 @@
 import json
 import time
-from typing import Dict, Optional, Sequence, Callable
+from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
 from chromadb.db import DB
-from chromadb.api.types import GetResult, IDs, QueryResult
+from chromadb.api.types import Embedding, GetResult, IDs, Include, QueryResult
 from chromadb.api.models.Collection import Collection
 
 import re
@@ -178,7 +178,15 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
+    def _query(
+        self,
+        collection_name,
+        query_embeddings,
+        n_results=10,
+        where={},
+        where_document={},
+        include: Include = ["embeddings", "documents", "metadatas", "distances"],
+    ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
             where=where,
@@ -187,25 +195,65 @@ class LocalAPI(API):
             n_results=n_results,
         )
 
-        query_result = QueryResult(embeddings=[], documents=[], ids=[], metadatas=[], distances=[])
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+        include_distances = "distances" in include
+
+        columns = []
+        column_index = {}
+        i = 0
+        if include_embeddings:
+            columns.append("embedding")
+            column_index["embedding"] = i
+            i += 1
+        if include_documents:
+            columns.append("document")
+            column_index["document"] = i
+            i += 1
+        if include_metadatas:
+            columns.append("metadata")
+            column_index["metadata"] = i
+            i += 1
+        columns.append("id")
+        column_index["id"] = i
+
+        query_result = QueryResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+            distances=[] if include_distances else None,
+        )
         for i in range(len(uuids)):
             embeddings = []
             documents = []
             ids = []
             metadatas = []
-            db_result = self._db.get_by_ids(uuids[i])
+            db_result = self._db.get_by_ids(uuids[i], columns=columns)
 
             for entry in db_result:
-                embeddings.append(entry[2])
-                documents.append(entry[3])
-                ids.append(entry[4])
-                metadatas.append(json.loads(entry[5]) if entry[5] else None)
+                if include_embeddings:
+                    embeddings.append(entry[column_index["embedding"]])
+                if include_documents:
+                    documents.append(entry[column_index["document"]])
+                if include_metadatas:
+                    metadatas.append(
+                        json.loads(entry[column_index["metadata"]])
+                        if entry[column_index["metadata"]]
+                        else None
+                    )
+                ids.append(entry[column_index["id"]])
 
-            query_result["embeddings"].append(embeddings)
-            query_result["documents"].append(documents)
+            if include_embeddings:
+                cast(List, query_result["embeddings"]).append(embeddings)
+            if include_documents:
+                cast(List, query_result["documents"]).append(documents)
+            if include_metadatas:
+                cast(List, query_result["metadatas"]).append(metadatas)
+            if include_distances:
+                cast(List, query_result["distances"]).append(distances[i].tolist())
             query_result["ids"].append(ids)
-            query_result["metadatas"].append(metadatas)
-            query_result["distances"].append(distances[i].tolist())
 
         return query_result
 

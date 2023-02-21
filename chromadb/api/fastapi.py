@@ -4,6 +4,7 @@ from chromadb.api.types import (
     Documents,
     Embeddings,
     IDs,
+    Include,
     Metadatas,
 )
 from chromadb.errors import NoDatapointsException
@@ -188,7 +189,15 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}, where_document={}):
+    def _query(
+        self,
+        collection_name,
+        query_embeddings,
+        n_results=10,
+        where={},
+        where_document={},
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+    ):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
@@ -199,6 +208,7 @@ class FastAPI(API):
                     "n_results": n_results,
                     "where": where,
                     "where_document": where_document,
+                    "include": include,
                 }
             ),
         )

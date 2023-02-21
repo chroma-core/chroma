@@ -965,3 +965,44 @@ def test_where_document_logical_operators(api_fixture, request):
 
 
 # endregion
+
+records = {
+    "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2}],
+    "documents": ["this document is first", "this document is second"],
+}
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_include(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_query_include")
+    collection.add(**records)
+
+    items = collection.query(
+        query_embeddings=[0, 0, 0], include=["metadatas", "documents", "distances"], n_results=1
+    )
+    assert items["embeddings"] == None
+    assert items["ids"][0][0] == "id1"
+    assert items["metadatas"][0][0]["int_value"] == 1
+
+    items = collection.query(
+        query_embeddings=[0, 0, 0], include=["embeddings", "documents", "distances"], n_results=1
+    )
+    assert items["metadatas"] == None
+    assert items["ids"][0][0] == "id1"
+
+    items = collection.query(
+        query_embeddings=[[0, 0, 0], [1, 2, 1.2]],
+        include=[],
+        n_results=2,
+    )
+    assert items["documents"] == None
+    assert items["metadatas"] == None
+    assert items["embeddings"] == None
+    assert items["distances"] == None
+    assert items["ids"][0][0] == "id1"
+    assert items["ids"][0][1] == "id2"

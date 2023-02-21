@@ -77,12 +77,12 @@ class DB(ABC):
 
     @abstractmethod
     def get_nearest_neighbors(
-        self, collection_name, where, embeddings, n_results
+        self, collection_name, where, embeddings, n_results, where_document
     ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids):
+    def get_by_ids(self, uuids, columns=None):
         pass
 
     @abstractmethod
