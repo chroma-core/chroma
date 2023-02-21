@@ -34,7 +34,7 @@ def db_array_schema_to_clickhouse_schema(table_schema):
     return return_str
 
 
-def db_schema_to_keys() -> list[str]:
+def db_schema_to_keys() -> List[str]:
     keys = []
     for element in EMBEDDING_TABLE_SCHEMA:
         keys.append(list(element.keys())[0])
