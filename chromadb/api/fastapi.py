@@ -51,11 +51,15 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
-    def get_collection(self, name: str) -> Collection:
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[Callable] = None,
+    ) -> Collection:
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return Collection(client=self, name=name)
+        return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
         """Updates a collection"""
