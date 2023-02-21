@@ -180,3 +180,17 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
                 f"Where document operand value {operand} must be a string for operator $contains"
             )
     return where_document
+
+
+def validate_include(include: Include, allow_distances: bool) -> Include:
+    """Validates include to ensure it is a list of strings. Since get does not allow distances, allow_distances is used
+    to control if distances is allowed"""
+
+    if not isinstance(include, list):
+        raise ValueError("Include must be a list")
+    for item in include:
+        if not isinstance(item, str):
+            raise ValueError(f"Include item {item} must be a string")
+        if item not in ["embeddings", "documents", "metadatas"] + ["distances"] * allow_distances:
+            raise ValueError(f"Include item {item} value not within allowed values")
+    return include

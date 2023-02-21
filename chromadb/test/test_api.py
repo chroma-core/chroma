@@ -38,11 +38,7 @@ def local_persist_api():
 
 @pytest.fixture
 def fastapi_integration_api():
-    return chromadb.Client(
-        Settings(
-            chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"
-        )
-    )  # configured by environment variables
+    return chromadb.Client()  # configured by environment variables
 
 
 def _build_fastapi_api():
@@ -90,7 +86,7 @@ def fastapi_server():
     proc.kill()
 
 
-test_apis = [local_api, fastapi_api, fastapi_integration_api]
+test_apis = [local_api, fastapi_api]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
@@ -988,7 +984,7 @@ def test_get_include(api_fixture, request):
     collection = api.create_collection("test_get_include")
     collection.add(**records)
 
-    items = collection.get(include=["metadatas", "documents"])
+    items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
     assert items["embeddings"] == None
     assert items["ids"][0] == "id1"
     assert items["metadatas"][0]["int_value"] == 1
@@ -997,9 +993,18 @@ def test_get_include(api_fixture, request):
     items = collection.get(include=["embeddings", "documents"])
     assert items["metadatas"] == None
     assert items["ids"][0] == "id1"
+    assert items["embeddings"][1][0] == 1.2
 
     items = collection.get(include=[])
     assert items["documents"] == None
     assert items["metadatas"] == None
     assert items["embeddings"] == None
     assert items["ids"][0] == "id1"
+
+    with pytest.raises(ValueError) as e:
+        items = collection.get(include=["metadatas", "undefined"])
+    assert "Include" in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        items = collection.get(include=None)
+    assert "Include" in str(e.value)

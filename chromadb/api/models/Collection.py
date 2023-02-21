@@ -15,6 +15,7 @@ from chromadb.api.types import (
     OneOrMany,
     WhereDocument,
     maybe_cast_one_to_many,
+    validate_include,
     validate_metadatas,
     validate_where,
     validate_where_document,
@@ -123,6 +124,7 @@ class Collection(BaseModel):
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
+        include = validate_include(include, allow_distances=False)
         return self._client._get(
             self.name,
             ids,
@@ -165,6 +167,7 @@ class Collection(BaseModel):
         where_document = validate_where_document(where_document) if where_document else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
+        include = validate_include(include, allow_distances=True)
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
         if (query_embeddings is None and query_texts is None) or (
