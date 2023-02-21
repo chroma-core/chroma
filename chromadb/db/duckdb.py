@@ -8,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 import pandas as pd
 import json
 import duckdb
@@ -218,7 +218,7 @@ class DuckDB(Clickhouse):
         else:
             raise ValueError(f"Operator {operator} not supported")
 
-    def _get(self, where, columns: Optional[list] = None):
+    def _get(self, where, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
         val = self._conn.execute(
             f"""SELECT {",".join(select_columns)} FROM embeddings {where}"""
@@ -295,7 +295,7 @@ class DuckDB(Clickhouse):
         ).fetchall()[0]
         return [uuid.UUID(x[0]) for x in uuids_deleted]
 
-    def get_by_ids(self, ids: list, columns: Optional[list] = None):
+    def get_by_ids(self, ids: List, columns: Optional[List] = None):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
             raise Exception("ids must be a list")
