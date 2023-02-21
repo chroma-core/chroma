@@ -34,7 +34,7 @@ def db_array_schema_to_clickhouse_schema(table_schema):
     return return_str
 
 
-def db_schema_to_keys() -> list[str]:
+def db_schema_to_keys() -> List[str]:
     keys = []
     for element in EMBEDDING_TABLE_SCHEMA:
         keys.append(list(element.keys())[0])
@@ -270,7 +270,7 @@ class Clickhouse(DB):
             self._idx.delete_from_index(collection_uuid, update_uuids)
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
-    def _get(self, where={}, columns: Optional[list] = None):
+    def _get(self, where={}, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
         val = (
             self._get_conn()
@@ -432,7 +432,7 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids: list, columns: Optional[list] = None):
+    def get_by_ids(self, ids: list, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
         return (
             self._get_conn()
