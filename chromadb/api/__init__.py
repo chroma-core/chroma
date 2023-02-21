@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Union, Sequence, Optional, TypedDict, List, Dict
+from typing import Callable, Union, Sequence, Optional, TypedDict, List, Dict
 from uuid import UUID
 import pandas as pd
 from chromadb.api.models.Collection import Collection
@@ -52,14 +52,15 @@ class API(ABC):
     @abstractmethod
     def create_collection(
         self,
-        name: str,
         metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
 
         Returns:
             dict: the created collection
@@ -71,13 +72,13 @@ class API(ABC):
     def get_collection(
         self,
         name: Optional[str] = None,
-        uuid: Optional[UUID] = None,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
         Args:
             name (Optional[str]): The name of the collection to get. Defaults to None.
-            the uuid (Optional[UUID]): The uuid of the collection to get. Defaults to None.
+            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
 
         Returns:
             dict: the requested collection

@@ -47,9 +47,10 @@ class LocalAPI(API):
     def get_collection(
         self,
         name: str,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         self._db.get_collection(name)
-        return Collection(client=self, name=name)
+        return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def _get_collection_db(self, name: str) -> int:
         return self._db.get_collection(name)
