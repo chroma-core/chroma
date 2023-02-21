@@ -116,15 +116,6 @@ class LocalAPI(API):
 
         return True
 
-    def _db_result_to_get_result(self, db_result) -> GetResult:
-        query_result = GetResult(embeddings=[], documents=[], ids=[], metadatas=[])
-        for entry in db_result:
-            query_result["embeddings"].append(entry[2])
-            query_result["documents"].append(entry[3])
-            query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(entry[5])
-        return query_result
-
     def _get(
         self,
         collection_name,
@@ -232,7 +223,6 @@ class LocalAPI(API):
             metadatas=[] if include_metadatas else None,
             distances=[] if include_distances else None,
         )
-
         for i in range(len(uuids)):
             embeddings = []
             documents = []

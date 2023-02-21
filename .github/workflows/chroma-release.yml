@@ -14,6 +14,13 @@ env:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    permissions: write-all
+#      id-token: write
+#      contents: read
+#      deployments: write
+#      packages: write
+#      pull-requests: read
+#      statuses: write
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -70,6 +77,15 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+    - name: Login to AWS
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
+        aws-region: us-east-1
+    - name: Generate CloudFormation template
+      id: generate-cf
+      if: "startsWith(github.ref, 'refs/tags/')"
+      run: "pip install boto3 && python bin/generate_cloudformation.py"
     - name: Release Tagged Version
       uses: ncipollo/release-action@v1.11.1
       if: "startsWith(github.ref, 'refs/tags/')"
