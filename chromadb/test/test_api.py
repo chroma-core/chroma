@@ -35,6 +35,7 @@ def local_persist_api():
         )
     )
 
+
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
@@ -107,18 +108,19 @@ if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
     print("Including integration tests only")
     test_apis = [fastapi_integration_api]
 
+
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection('test')
+    collection = api.create_collection("test")
     collection.add(ids="id1", documents="hello")
 
     api.persist()
     del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection('test')
+    collection = api2.get_collection("test")
 
     nn = collection.query(query_texts="hello", n_results=1)
     for key in nn.keys():
@@ -1006,3 +1008,37 @@ def test_query_include(api_fixture, request):
     assert items["distances"] == None
     assert items["ids"][0][0] == "id1"
     assert items["ids"][0][1] == "id2"
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_include(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_get_include")
+    collection.add(**records)
+
+    items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
+    assert items["embeddings"] == None
+    assert items["ids"][0] == "id1"
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["documents"][0] == "this document is first"
+
+    items = collection.get(include=["embeddings", "documents"])
+    assert items["metadatas"] == None
+    assert items["ids"][0] == "id1"
+    assert items["embeddings"][1][0] == 1.2
+
+    items = collection.get(include=[])
+    assert items["documents"] == None
+    assert items["metadatas"] == None
+    assert items["embeddings"] == None
+    assert items["ids"][0] == "id1"
+
+    with pytest.raises(ValueError) as e:
+        items = collection.get(include=["metadatas", "undefined"])
+    assert "Include" in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        items = collection.get(include=None)
+    assert "Include" in str(e.value)

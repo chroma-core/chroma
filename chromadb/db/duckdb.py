@@ -218,16 +218,28 @@ class DuckDB(Clickhouse):
         else:
             raise ValueError(f"Operator {operator} not supported")
 
-    def _get(self, where):
+    def _get(self, where, columns: Optional[list] = None):
+        select_columns = db_schema_to_keys() if columns is None else columns
         val = self._conn.execute(
-            f"""SELECT {db_schema_to_keys()} FROM embeddings {where}"""
+            f"""SELECT {",".join(select_columns)} FROM embeddings {where}"""
         ).fetchall()
         for i in range(len(val)):
             val[i] = list(val[i])
-            val[i][0] = uuid.UUID(val[i][0])
-            val[i][1] = uuid.UUID(val[i][1])
-            # json.loads metadata
-            val[i][5] = json.loads(val[i][5]) if val[i][5] else None
+            if "collection_uuid" in select_columns:
+                collection_uuid_column_index = select_columns.index("collection_uuid")
+                val[i][collection_uuid_column_index] = uuid.UUID(
+                    val[i][collection_uuid_column_index]
+                )
+            if "uuid" in select_columns:
+                uuid_column_index = select_columns.index("uuid")
+                val[i][uuid_column_index] = uuid.UUID(val[i][uuid_column_index])
+            if "metadata" in select_columns:
+                metadata_column_index = select_columns.index("metadata")
+                val[i][metadata_column_index] = (
+                    json.loads(val[i][metadata_column_index])
+                    if val[i][metadata_column_index]
+                    else None
+                )
 
         return val
 
@@ -292,11 +304,11 @@ class DuckDB(Clickhouse):
             # create an empty pandas dataframe
             return pd.DataFrame()
 
-        select_columns = db_schema_to_keys() if columns is None else ", ".join(columns)
+        select_columns = db_schema_to_keys() if columns is None else columns
         return self._conn.execute(
             f"""
             SELECT
-                {select_columns}
+                {",".join(select_columns)}
             FROM
                 embeddings
             WHERE

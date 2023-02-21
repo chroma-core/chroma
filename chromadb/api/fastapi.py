@@ -92,6 +92,7 @@ class FastAPI(API):
         page=None,
         page_size=None,
         where_document={},
+        include: Include = ["embeddings", "metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
         if page and page_size:
@@ -108,6 +109,7 @@ class FastAPI(API):
                     "limit": limit,
                     "offset": offset,
                     "where_document": where_document,
+                    "include": include,
                 }
             ),
         )
