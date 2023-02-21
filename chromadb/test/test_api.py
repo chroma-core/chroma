@@ -128,6 +128,25 @@ def test_persist_index_loading(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_persist_index_loading_embedding_function(api_fixture, request):
+    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+    collection = api.create_collection("test", embedding_function=embedding_function)
+    collection.add(ids="id1", documents="hello")
+
+    api.persist()
+    del api
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = api2.get_collection("test", embedding_function=embedding_function)
+
+    nn = collection.query(query_texts="hello", n_results=1)
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
