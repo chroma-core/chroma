@@ -1,28 +1,28 @@
 from pydantic import BaseModel
-from typing import Union, Any
+from typing import List, Union, Any
 from chromadb.api.types import Include
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
-    embeddings: list
-    metadatas: Union[list, dict] = None
-    documents: Union[str, list] = None
-    ids: Union[str, list] = None
+    embeddings: List
+    metadatas: Union[List, dict] = None
+    documents: Union[str, List] = None
+    ids: Union[str, List] = None
     increment_index: bool = True
 
 
 class UpdateEmbedding(BaseModel):
-    embeddings: list = None
-    metadatas: Union[list, dict] = None
-    documents: Union[str, list] = None
-    ids: Union[str, list] = None
+    embeddings: List = None
+    metadatas: Union[List, dict] = None
+    documents: Union[str, List] = None
+    ids: Union[str, List] = None
     increment_index: bool = True
 
 
 class QueryEmbedding(BaseModel):
     where: dict = {}
     where_document: dict = {}
-    query_embeddings: list
+    query_embeddings: List
     n_results: int = 10
     include: Include = ["embeddings", "metadatas", "documents", "distances"]
 
@@ -34,7 +34,7 @@ class ProcessEmbedding(BaseModel):
 
 
 class GetEmbedding(BaseModel):
-    ids: list = None
+    ids: List = None
     where: dict = None
     where_document: dict = None
     sort: str = None
@@ -56,7 +56,7 @@ class SpaceKeyInput(BaseModel):
 
 
 class DeleteEmbedding(BaseModel):
-    ids: list = None
+    ids: List = None
     where: dict = None
     where_document: dict = None
 
