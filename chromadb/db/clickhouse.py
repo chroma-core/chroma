@@ -110,7 +110,7 @@ class Clickhouse(DB):
 
         where_clauses.append(f"collection_uuid = '{collection_uuid}'")
         # We know that where_clauses is not empty, so force typechecker
-        where = " AND ".join(cast(list[str], where_clauses))
+        where = " AND ".join(cast(List[str], where_clauses))
         where = f"WHERE {where}"
         return where
 
