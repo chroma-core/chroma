@@ -15,7 +15,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_collection(self, name: str) -> str:
+    def get_collection(self, name: str):
         pass
 
     @abstractmethod

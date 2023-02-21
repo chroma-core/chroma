@@ -89,7 +89,7 @@ class DuckDB(Clickhouse):
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
 
-    def get_collection(self, name: str):
+    def get_collection(self, name: str) -> pd.DataFrame:
         return self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).df()
 
     def list_collections(self) -> Sequence[Sequence[str]]:

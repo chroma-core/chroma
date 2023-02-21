@@ -166,7 +166,7 @@ class Clickhouse(DB):
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0]
+            new_metadata = self.get_collection(current_name)[0][2]
 
         return self._get_conn().command(
             f"""
@@ -174,10 +174,9 @@ class Clickhouse(DB):
          ALTER TABLE 
             collections 
          UPDATE
-            metadata = {new_metadata}, 
+            metadata = '{json.dumps(new_metadata)}', 
             name = '{new_name}'
          WHERE 
-
             name = '{current_name}'
          """
         )
