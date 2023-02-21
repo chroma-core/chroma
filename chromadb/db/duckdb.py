@@ -223,18 +223,18 @@ class DuckDB(Clickhouse):
         val = self._conn.execute(
             f"""SELECT {",".join(select_columns)} FROM embeddings {where}"""
         ).fetchall()
-        collection_uuid_column_index = select_columns.index("collection_uuid")
-        uuid_column_index = select_columns.index("uuid")
-        metadata_column_index = select_columns.index("metadata")
         for i in range(len(val)):
             val[i] = list(val[i])
             if "collection_uuid" in select_columns:
+                collection_uuid_column_index = select_columns.index("collection_uuid")
                 val[i][collection_uuid_column_index] = uuid.UUID(
                     val[i][collection_uuid_column_index]
                 )
             if "uuid" in select_columns:
+                uuid_column_index = select_columns.index("uuid")
                 val[i][uuid_column_index] = uuid.UUID(val[i][uuid_column_index])
             if "metadata" in select_columns:
+                metadata_column_index = select_columns.index("metadata")
                 val[i][metadata_column_index] = (
                     json.loads(val[i][metadata_column_index])
                     if val[i][metadata_column_index]
@@ -304,11 +304,11 @@ class DuckDB(Clickhouse):
             # create an empty pandas dataframe
             return pd.DataFrame()
 
-        select_columns = db_schema_to_keys() if columns is None else ", ".join(columns)
+        select_columns = db_schema_to_keys() if columns is None else columns
         return self._conn.execute(
             f"""
             SELECT
-                {select_columns}
+                {",".join(select_columns)}
             FROM
                 embeddings
             WHERE

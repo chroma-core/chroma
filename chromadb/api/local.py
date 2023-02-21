@@ -136,7 +136,7 @@ class LocalAPI(API):
         page=None,
         page_size=None,
         where_document=None,
-        include: Include = ["embeddings", "documents", "metadatas", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents"],
     ):
         if where is None:
             where = {}
@@ -152,7 +152,9 @@ class LocalAPI(API):
         include_documents = "documents" in include
         include_metadatas = "metadatas" in include
 
-        column_index = self._include_to_column_index(include)
+        # Remove plural from include since db columns are singular
+        db_columns = [column[:-1] for column in include] + ["id"]
+        column_index = {column_name: index for index, column_name in enumerate(db_columns)}
 
         db_result = self._db.get(
             collection_name=collection_name,
@@ -162,7 +164,7 @@ class LocalAPI(API):
             limit=limit,
             offset=offset,
             where_document=where_document,
-            columns=include,
+            columns=db_columns,
         )
 
         get_result = GetResult(
@@ -174,12 +176,12 @@ class LocalAPI(API):
 
         for entry in db_result:
             if include_embeddings:
-                cast(List, get_result["embeddings"]).append(entry[column_index["embeddings"]])
+                cast(List, get_result["embeddings"]).append(entry[column_index["embedding"]])
             if include_documents:
-                cast(List, get_result["documents"]).append(entry[column_index["documents"]])
+                cast(List, get_result["documents"]).append(entry[column_index["document"]])
             if include_metadatas:
-                cast(List, get_result["metadatas"]).append(entry[column_index["metadatas"]])
-            get_result["ids"].append(entry[column_index["metadatas"]])
+                cast(List, get_result["metadatas"]).append(entry[column_index["metadata"]])
+            get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
     def _delete(self, collection_name, ids=None, where=None, where_document=None):
@@ -200,24 +202,6 @@ class LocalAPI(API):
     def reset(self):
         self._db.reset()
         return True
-
-    def _include_to_column_index(self, include: Include):
-        column_index = {}
-        i = 0
-        if "embeddings" in include:
-            column_index["embedding"] = i
-            i += 1
-        if "documents" in include:
-            column_index["document"] = i
-            i += 1
-        if "metadatas" in include:
-            column_index["metadata"] = i
-            i += 1
-        if "distances" in include:
-            column_index["distance"] = i
-            i += 1
-        column_index["id"] = i
-        return column_index
 
     def _query(
         self,
@@ -241,8 +225,6 @@ class LocalAPI(API):
         include_metadatas = "metadatas" in include
         include_distances = "distances" in include
 
-        column_index = self._include_to_column_index(include)
-
         query_result = QueryResult(
             ids=[],
             embeddings=[] if include_embeddings else None,
@@ -256,7 +238,10 @@ class LocalAPI(API):
             documents = []
             ids = []
             metadatas = []
-            db_result = self._db.get_by_ids(uuids[i], columns=include)
+            # Remove plural from include since db columns are singular
+            db_columns = [column[:-1] for column in include if column != "distances"] + ["id"]
+            column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+            db_result = self._db.get_by_ids(uuids[i], columns=db_columns)
 
             for entry in db_result:
                 if include_embeddings:

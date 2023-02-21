@@ -107,7 +107,7 @@ class Collection(BaseModel):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -118,6 +118,7 @@ class Collection(BaseModel):
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents". Ids are always included. Defaults to all. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -158,7 +159,7 @@ class Collection(BaseModel):
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
             where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
-            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Defaults to all. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to all. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None

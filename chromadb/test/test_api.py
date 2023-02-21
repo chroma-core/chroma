@@ -38,7 +38,11 @@ def local_persist_api():
 
 @pytest.fixture
 def fastapi_integration_api():
-    return chromadb.Client()  # configured by environment variables
+    return chromadb.Client(
+        Settings(
+            chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"
+        )
+    )  # configured by environment variables
 
 
 def _build_fastapi_api():
@@ -86,7 +90,7 @@ def fastapi_server():
     proc.kill()
 
 
-test_apis = [local_api, fastapi_api]
+test_apis = [local_api, fastapi_api, fastapi_integration_api]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
