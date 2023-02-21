@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Sequence, Optional, Tuple
 from uuid import UUID
 
-from chromadb.api.types import Embeddings, Documents, IDs, Metadatas
+from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
 
 
 class DB(ABC):
@@ -61,7 +61,7 @@ class DB(ABC):
         offset=None,
         where_document={},
         columns=None,
-    ):
+    ) -> Sequence:
         pass
 
     @abstractmethod
@@ -80,7 +80,14 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def delete(self, ids, where):
+    def delete(
+        self,
+        where: Where = {},
+        collection_name: Optional[str] = None,
+        collection_uuid: Optional[str] = None,
+        ids: Optional[IDs] = None,
+        where_document: WhereDocument = {},
+    ):
         pass
 
     @abstractmethod
@@ -94,7 +101,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids, columns=None):
+    def get_by_ids(self, uuids, columns=None) -> Sequence:
         pass
 
     @abstractmethod

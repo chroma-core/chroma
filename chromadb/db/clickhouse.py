@@ -410,7 +410,12 @@ class Clickhouse(DB):
         return [res[0] for res in deleted_uuids] if len(deleted_uuids) > 0 else []
 
     def delete(
-        self, where={}, collection_name=None, collection_uuid=None, ids=None, where_document={}
+        self,
+        where: Where = {},
+        collection_name: Optional[str] = None,
+        collection_uuid: Optional[str] = None,
+        ids: Optional[IDs] = None,
+        where_document: WhereDocument = {},
     ):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
@@ -425,8 +430,6 @@ class Clickhouse(DB):
 
         deleted_uuids = self._delete(where_str)
 
-        # if len(where) == 1:
-        #     self._idx.delete(collection_uuid)
         self._idx.delete_from_index(collection_uuid, deleted_uuids)
 
         return deleted_uuids
