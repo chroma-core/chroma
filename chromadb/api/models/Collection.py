@@ -3,6 +3,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
     Embedding,
+    Include,
     Metadata,
     Document,
     Where,
@@ -12,7 +13,12 @@ from chromadb.api.types import (
     QueryResult,
     ID,
     OneOrMany,
+    WhereDocument,
     maybe_cast_one_to_many,
+    validate_include,
+    validate_metadatas,
+    validate_where,
+    validate_where_document,
 )
 
 if TYPE_CHECKING:
@@ -66,7 +72,7 @@ class Collection(BaseModel):
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Check that one of embeddings or documents is provided
@@ -101,18 +107,34 @@ class Collection(BaseModel):
         where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents". Ids are always included. Defaults to all. Optional.
         """
+        where = validate_where(where) if where else None
+        where_document = validate_where_document(where_document) if where_document else None
         ids = maybe_cast_one_to_many(ids) if ids else None
-        return self._client._get(self.name, ids, where, None, limit, offset)
+        include = validate_include(include, allow_distances=False)
+        return self._client._get(
+            self.name,
+            ids,
+            where,
+            None,
+            limit,
+            offset,
+            where_document=where_document,
+            include=include,
+        )
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -128,6 +150,8 @@ class Collection(BaseModel):
         query_texts: Optional[OneOrMany[Document]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -135,11 +159,15 @@ class Collection(BaseModel):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
-            where: A dict of key, value string pairs to filter results by. E.g. {"color" : "red"}. Optional.
+            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
+            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to all. Optional.
         """
-
+        where = validate_where(where) if where else None
+        where_document = validate_where_document(where_document) if where_document else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
+        include = validate_include(include, allow_distances=True)
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
         if (query_embeddings is None and query_texts is None) or (
@@ -159,11 +187,16 @@ class Collection(BaseModel):
         if where is None:
             where = {}
 
+        if where_document is None:
+            where_document = {}
+
         return self._client._query(
             collection_name=self.name,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
+            where_document=where_document,
+            include=include,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
@@ -195,7 +228,7 @@ class Collection(BaseModel):
 
         ids = maybe_cast_one_to_many(ids)
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = maybe_cast_one_to_many(metadatas) if metadatas else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Must update one of embeddings, metadatas, or documents
@@ -228,14 +261,22 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
-    def delete(self, ids: Optional[IDs] = None, where: Optional[Where] = None):
+    def delete(
+        self,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A dict of key, value string pairs to filter deletions by. E.g. {"color" : "red"}. Optional.
+            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
         """
-        return self._client._delete(self.name, ids, where)
+        where = validate_where(where) if where else None
+        where_document = validate_where_document(where_document) if where_document else None
+        return self._client._delete(self.name, ids, where, where_document)
 
     def create_index(self):
         self._client.create_index(self.name)

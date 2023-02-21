@@ -1,12 +1,13 @@
 import json
 import time
-from typing import Dict, Optional, Sequence, Callable
+from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
 from chromadb.db import DB
-from chromadb.api.types import GetResult, IDs, QueryResult
+from chromadb.api.types import Embedding, GetResult, IDs, Include, QueryResult
 from chromadb.api.models.Collection import Collection
 
 import re
+
 
 # mimics s3 bucket requirements for naming
 def is_valid_index_name(index_name):
@@ -55,9 +56,10 @@ class LocalAPI(API):
     def get_collection(
         self,
         name: str,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         self._db.get_collection(name)
-        return Collection(client=self, name=name)
+        return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def _get_collection_db(self, name: str) -> int:
         return self._db.get_collection(name)
@@ -97,48 +99,13 @@ class LocalAPI(API):
         documents=None,
         increment_index=True,
     ):
-
-        number_of_embeddings = len(embeddings)
-
-        # fill in empty objects if not provided
-        if metadatas is None:
-            if isinstance(embeddings[0], list):
-                metadatas = [{} for _ in range(number_of_embeddings)]
-            else:
-                metadatas = {}
-
-        if ids is None:
-            if isinstance(embeddings[0], list):
-                ids = [None for _ in range(number_of_embeddings)]
-            else:
-                ids = None
-
-        if documents is None:
-            if isinstance(embeddings[0], list):
-                documents = [None for _ in range(number_of_embeddings)]
-            else:
-                documents = None
-
-        # convert all metadatas values to strings : TODO: handle this better
-        # this is currently here because clickhouse-driver does not support json
-        if isinstance(embeddings[0], list):
-            for m in metadatas:
-                for k, v in m.items():
-                    m[k] = str(v)
-        else:
-            for k, v in metadatas.items():
-                metadatas[k] = str(v)
-
-        # convert to array for downstream processing
-        if not isinstance(embeddings[0], list):
-            embeddings = [embeddings]
-            metadatas = [metadatas]
-            documents = [documents]
-            ids = [ids]
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
-            collection_uuid, embedding=embeddings, metadata=metadatas, documents=documents, ids=ids
+            collection_uuid,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            ids=ids,
         )
 
         if increment_index:
@@ -159,15 +126,6 @@ class LocalAPI(API):
 
         return True
 
-    def _db_result_to_get_result(self, db_result) -> GetResult:
-        query_result = GetResult(embeddings=[], documents=[], ids=[], metadatas=[])
-        for entry in db_result:
-            query_result["embeddings"].append(entry[2])
-            query_result["documents"].append(entry[3])
-            query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(json.loads(entry[5]))
-        return query_result
-
     def _get(
         self,
         collection_name,
@@ -178,78 +136,142 @@ class LocalAPI(API):
         offset=None,
         page=None,
         page_size=None,
+        where_document=None,
+        include: Include = ["embeddings", "metadatas", "documents"],
     ):
-
         if where is None:
             where = {}
+
+        if where_document is None:
+            where_document = {}
 
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db_result_to_get_result(
-            self._db.get(
-                collection_name=collection_name,
-                ids=ids,
-                where=where,
-                sort=sort,
-                limit=limit,
-                offset=offset,
-            )
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+
+        # Remove plural from include since db columns are singular
+        db_columns = [column[:-1] for column in include] + ["id"]
+        column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+
+        db_result = self._db.get(
+            collection_name=collection_name,
+            ids=ids,
+            where=where,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            columns=db_columns,
         )
 
-    def _delete(self, collection_name, ids=None, where=None):
+        get_result = GetResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+        )
 
+        for entry in db_result:
+            if include_embeddings:
+                cast(List, get_result["embeddings"]).append(entry[column_index["embedding"]])
+            if include_documents:
+                cast(List, get_result["documents"]).append(entry[column_index["document"]])
+            if include_metadatas:
+                cast(List, get_result["metadatas"]).append(entry[column_index["metadata"]])
+            get_result["ids"].append(entry[column_index["id"]])
+        return get_result
+
+    def _delete(self, collection_name, ids=None, where=None, where_document=None):
         if where is None:
             where = {}
 
-        deleted_uuids = self._db.delete(collection_name=collection_name, where=where, ids=ids)
+        if where_document is None:
+            where_document = {}
+
+        deleted_uuids = self._db.delete(
+            collection_name=collection_name, where=where, ids=ids, where_document=where_document
+        )
         return deleted_uuids
 
     def _count(self, collection_name):
-
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
         self._db.reset()
         return True
 
-    def _query(self, collection_name, query_embeddings, n_results=10, where={}):
+    def _query(
+        self,
+        collection_name,
+        query_embeddings,
+        n_results=10,
+        where={},
+        where_document={},
+        include: Include = ["embeddings", "documents", "metadatas", "distances"],
+    ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
             where=where,
+            where_document=where_document,
             embeddings=query_embeddings,
             n_results=n_results,
         )
 
-        query_result = QueryResult(embeddings=[], documents=[], ids=[], metadatas=[], distances=[])
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+        include_distances = "distances" in include
+
+        query_result = QueryResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+            distances=[] if include_distances else None,
+        )
         for i in range(len(uuids)):
             embeddings = []
             documents = []
             ids = []
             metadatas = []
-            db_result = self._db.get_by_ids(uuids[i])
+            # Remove plural from include since db columns are singular
+            db_columns = [column[:-1] for column in include if column != "distances"] + ["id"]
+            column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+            db_result = self._db.get_by_ids(uuids[i], columns=db_columns)
 
             for entry in db_result:
-                embeddings.append(entry[2])
-                documents.append(entry[3])
-                ids.append(entry[4])
-                metadatas.append(json.loads(entry[5]))
+                if include_embeddings:
+                    embeddings.append(entry[column_index["embedding"]])
+                if include_documents:
+                    documents.append(entry[column_index["document"]])
+                if include_metadatas:
+                    metadatas.append(
+                        json.loads(entry[column_index["metadata"]])
+                        if entry[column_index["metadata"]]
+                        else None
+                    )
+                ids.append(entry[column_index["id"]])
 
-            query_result["embeddings"].append(embeddings)
-            query_result["documents"].append(documents)
+            if include_embeddings:
+                cast(List, query_result["embeddings"]).append(embeddings)
+            if include_documents:
+                cast(List, query_result["documents"]).append(documents)
+            if include_metadatas:
+                cast(List, query_result["metadatas"]).append(metadatas)
+            if include_distances:
+                cast(List, query_result["distances"]).append(distances[i].tolist())
             query_result["ids"].append(ids)
-            query_result["metadatas"].append(metadatas)
-            query_result["distances"].append(distances[i].tolist())
 
         return query_result
 
     def raw_sql(self, raw_sql):
-
         return self._db.raw_sql(raw_sql)
 
     def create_index(self, collection_name):
-
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True

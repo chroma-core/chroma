@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Union, Sequence, Optional, TypedDict, List, Dict
+from typing import Callable, Union, Sequence, Optional, TypedDict, List, Dict
 from uuid import UUID
 import pandas as pd
 from chromadb.api.models.Collection import Collection
@@ -8,10 +8,12 @@ from chromadb.api.types import (
     Documents,
     Embeddings,
     IDs,
+    Include,
     Metadatas,
     Where,
     QueryResult,
     GetResult,
+    WhereDocument,
 )
 import json
 
@@ -50,15 +52,18 @@ class API(ABC):
     @abstractmethod
     def create_collection(
         self,
-        name: str,
         metadata: Optional[Dict] = None,
         get_or_create: bool = False,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+            get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
+            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
+
         Returns:
             dict: the created collection
 
@@ -66,11 +71,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[Dict] = None
-    ) -> Collection:
+    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
         """Calls create_collection with get_or_create=True
 
         Args:
@@ -81,18 +82,18 @@ class API(ABC):
 
         """
         pass
-    
+
     @abstractmethod
     def get_collection(
         self,
         name: Optional[str] = None,
-        uuid: Optional[UUID] = None,
+        embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
         Args:
             name (Optional[str]): The name of the collection to get. Defaults to None.
-            the uuid (Optional[UUID]): The uuid of the collection to get. Defaults to None.
+            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
 
         Returns:
             dict: the requested collection
@@ -176,8 +177,9 @@ class API(ABC):
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
-
         """Gets embeddings from the database. Supports filtering, sorting, and pagination.
         ⚠️ This method should not be used directly.
 
@@ -196,7 +198,13 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _delete(self, collection_name: str, ids: Optional[IDs], where: Optional[Where] = {}):
+    def _delete(
+        self,
+        collection_name: str,
+        ids: Optional[IDs],
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+    ):
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
@@ -212,6 +220,8 @@ class API(ABC):
         query_embeddings: Embeddings,
         n_results: int = 10,
         where: Where = {},
+        where_document: WhereDocument = {},
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.

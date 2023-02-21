@@ -143,7 +143,7 @@ assert len(client.list_collections()) == 0
 
 # Test embedding function
 collection = client.create_collection(
-    name="test", embedding_fn=SentenceTransformerEmbeddingFunction()
+    name="test", embedding_function=SentenceTransformerEmbeddingFunction()
 )
 
 # Add docs without embeddings (call emb function)
@@ -180,7 +180,7 @@ assert collection.count() == 9
 
 ### TEST UPDATE ###
 collection = client.create_collection(
-    "test_update", embedding_fn=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
+    "test_update", embedding_function=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
 )
 assert collection.count() == 0
 
@@ -279,6 +279,35 @@ print(
     ),
 )
 
+
+# Try to add embeddings of the wrong dimension.
+# This should fail and not add any embeddings
+# TODO: Currently only works locally since the exception is raised on the database side
+try:
+     collection.add(
+        embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
+        metadatas=[
+            {"uri": "img1.png", "style": "style1"},
+            {"uri": "img2.png", "style": "style1"},
+            {"uri": "img3.png", "style": "style1"},
+            {"uri": "img4.png", "style": "style1"},
+        ],
+        documents=["doc1", "doc2", "doc3", "doc4"],
+        ids=["id1", "id2", "id3", "id4"],
+    )
+except Exception as e:
+    print("Exception", e)
+
+# Try to query for more neighbors than exist
+# This should fail and not add any embeddings
+# TODO: Currently only works localy since the exception is raised on the database side
+try:
+    collection.query(
+        query_texts=["doc1", "doc2"],
+        n_results=100,
+    )
+except Exception as e:
+    print("Exception", e)
 
 # collection.upsert( # always succeeds
 #     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],

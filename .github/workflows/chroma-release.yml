@@ -14,6 +14,13 @@ env:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    permissions: write-all
+#      id-token: write
+#      contents: read
+#      deployments: write
+#      packages: write
+#      pull-requests: read
+#      statuses: write
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -40,18 +47,45 @@ jobs:
     - name: Get Docker Tag
       id: tag
       run: echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
-    - name: Build and push Docker image
+    - name: Build and push prerelease Docker image
+      if: "!startsWith(github.ref, 'refs/tags/')"
       uses: docker/build-push-action@v3.2.0
       with:
         context: .
         push: true
         tags: ${{ steps.tag.outputs.tag_name}}
+    - name: Build and push release Docker image
+      if: "startsWith(github.ref, 'refs/tags/')"
+      uses: docker/build-push-action@v3.2.0
+      with:
+        context: .
+        push: true
+        tags: "${{ steps.tag.outputs.tag_name }},${{ env.IMAGE_NAME }}:latest"
     - name: Get Release Version
       id: version
       run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
     - name: Get current date
       id: builddate
       run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
+    - name: Publish to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+    - name: Login to AWS
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
+        aws-region: us-east-1
+    - name: Generate CloudFormation template
+      id: generate-cf
+      if: "startsWith(github.ref, 'refs/tags/')"
+      run: "pip install boto3 && python bin/generate_cloudformation.py"
     - name: Release Tagged Version
       uses: ncipollo/release-action@v1.11.1
       if: "startsWith(github.ref, 'refs/tags/')"
