@@ -116,15 +116,6 @@ class LocalAPI(API):
 
         return True
 
-    def _db_result_to_get_result(self, db_result) -> GetResult:
-        query_result = GetResult(embeddings=[], documents=[], ids=[], metadatas=[])
-        for entry in db_result:
-            query_result["embeddings"].append(entry[2])
-            query_result["documents"].append(entry[3])
-            query_result["ids"].append(entry[4])
-            query_result["metadatas"].append(entry[5])
-        return query_result
-
     def _get(
         self,
         collection_name,
@@ -136,6 +127,7 @@ class LocalAPI(API):
         page=None,
         page_size=None,
         where_document=None,
+        include: Include = ["embeddings", "metadatas", "documents"],
     ):
         if where is None:
             where = {}
@@ -147,17 +139,41 @@ class LocalAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        return self._db_result_to_get_result(
-            self._db.get(
-                collection_name=collection_name,
-                ids=ids,
-                where=where,
-                sort=sort,
-                limit=limit,
-                offset=offset,
-                where_document=where_document,
-            )
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+
+        # Remove plural from include since db columns are singular
+        db_columns = [column[:-1] for column in include] + ["id"]
+        column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+
+        db_result = self._db.get(
+            collection_name=collection_name,
+            ids=ids,
+            where=where,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            columns=db_columns,
         )
+
+        get_result = GetResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+        )
+
+        for entry in db_result:
+            if include_embeddings:
+                cast(List, get_result["embeddings"]).append(entry[column_index["embedding"]])
+            if include_documents:
+                cast(List, get_result["documents"]).append(entry[column_index["document"]])
+            if include_metadatas:
+                cast(List, get_result["metadatas"]).append(entry[column_index["metadata"]])
+            get_result["ids"].append(entry[column_index["id"]])
+        return get_result
 
     def _delete(self, collection_name, ids=None, where=None, where_document=None):
         if where is None:
@@ -200,24 +216,6 @@ class LocalAPI(API):
         include_metadatas = "metadatas" in include
         include_distances = "distances" in include
 
-        columns = []
-        column_index = {}
-        i = 0
-        if include_embeddings:
-            columns.append("embedding")
-            column_index["embedding"] = i
-            i += 1
-        if include_documents:
-            columns.append("document")
-            column_index["document"] = i
-            i += 1
-        if include_metadatas:
-            columns.append("metadata")
-            column_index["metadata"] = i
-            i += 1
-        columns.append("id")
-        column_index["id"] = i
-
         query_result = QueryResult(
             ids=[],
             embeddings=[] if include_embeddings else None,
@@ -230,7 +228,10 @@ class LocalAPI(API):
             documents = []
             ids = []
             metadatas = []
-            db_result = self._db.get_by_ids(uuids[i], columns=columns)
+            # Remove plural from include since db columns are singular
+            db_columns = [column[:-1] for column in include if column != "distances"] + ["id"]
+            column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+            db_result = self._db.get_by_ids(uuids[i], columns=db_columns)
 
             for entry in db_result:
                 if include_embeddings:

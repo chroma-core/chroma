@@ -138,6 +138,7 @@ class FastAPI(chromadb.server.Server):
             sort=get.sort,
             limit=get.limit,
             offset=get.offset,
+            include=get.include,
         )
 
     def delete(self, collection_name: str, delete: DeleteEmbedding):

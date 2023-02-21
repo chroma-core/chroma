@@ -34,14 +34,11 @@ def db_array_schema_to_clickhouse_schema(table_schema):
     return return_str
 
 
-def db_schema_to_keys():
-    return_str = ""
+def db_schema_to_keys() -> list[str]:
+    keys = []
     for element in EMBEDDING_TABLE_SCHEMA:
-        if element == EMBEDDING_TABLE_SCHEMA[-1]:
-            return_str += f"{list(element.keys())[0]}"
-        else:
-            return_str += f"{list(element.keys())[0]}, "
-    return return_str
+        keys.append(list(element.keys())[0])
+    return keys
 
 
 class Clickhouse(DB):
@@ -273,14 +270,23 @@ class Clickhouse(DB):
             self._idx.delete_from_index(collection_uuid, update_uuids)
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
-    def _get(self, where={}):
-        res = (
+    def _get(self, where={}, columns: Optional[list] = None):
+        select_columns = db_schema_to_keys() if columns is None else columns
+        val = (
             self._get_conn()
-            .query(f"""SELECT {db_schema_to_keys()} FROM embeddings {where}""")
+            .query(f"""SELECT {",".join(select_columns)} FROM embeddings {where}""")
             .result_rows
         )
-        # json.load the metadata
-        return [[*x[:5], json.loads(x[5]) if x[5] else None] for x in res]
+        for i in range(len(val)):
+            # We know val has index abilities, so cast it for typechecker
+            val = cast(list, val)
+            val[i] = list(val[i])
+            # json.load the metadata
+            if "metadata" in select_columns:
+                metadata_column_index = select_columns.index("metadata")
+                db_metadata = val[i][metadata_column_index]
+                val[i][metadata_column_index] = json.loads(db_metadata) if db_metadata else None
+        return val
 
     def _format_where(self, where, result):
         for key, value in where.items():
@@ -352,6 +358,7 @@ class Clickhouse(DB):
         limit=None,
         offset=None,
         where_document={},
+        columns: Optional[List] = None,
     ):
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
@@ -376,7 +383,7 @@ class Clickhouse(DB):
         if offset is not None or isinstance(offset, int):
             where += f" OFFSET {offset}"
 
-        val = self._get(where=where)
+        val = self._get(where=where, columns=columns)
 
         return val
 
@@ -426,12 +433,12 @@ class Clickhouse(DB):
         return deleted_uuids
 
     def get_by_ids(self, ids: list, columns: Optional[list] = None):
-        select_columns = db_schema_to_keys() if columns is None else ",".join(columns)
+        select_columns = db_schema_to_keys() if columns is None else columns
         return (
             self._get_conn()
             .query(
                 f"""
-        SELECT {select_columns} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
+        SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
         """
             )
             .result_rows
@@ -446,11 +453,11 @@ class Clickhouse(DB):
         collection_name=None,
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
-        
+
         # Either the collection name or the collection uuid must be provided
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
-        
+
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 

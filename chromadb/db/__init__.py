@@ -60,6 +60,7 @@ class DB(ABC):
         limit=None,
         offset=None,
         where_document={},
+        columns=None,
     ):
         pass
 

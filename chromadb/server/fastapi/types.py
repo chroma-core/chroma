@@ -40,6 +40,7 @@ class GetEmbedding(BaseModel):
     sort: str = None
     limit: int = None
     offset: int = None
+    include: Include = ["embeddings", "metadatas", "documents"]
 
 
 class CountEmbedding(BaseModel):
