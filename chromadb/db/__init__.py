@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Sequence, Optional, Tuple
 from uuid import UUID
-
+import numpy.typing as npt
 from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
 
 
@@ -23,7 +23,9 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def update_collection(self, collection_uuid, name=None, metadata=None):
+    def update_collection(
+        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+    ):
         pass
 
     @abstractmethod
@@ -52,15 +54,15 @@ class DB(ABC):
     @abstractmethod
     def get(
         self,
-        where={},
-        collection_name=None,
-        collection_uuid=None,
-        ids=None,
-        sort=None,
-        limit=None,
-        offset=None,
-        where_document={},
-        columns=None,
+        where: Where = {},
+        collection_name: Optional[str] = None,
+        collection_uuid: Optional[str] = None,
+        ids: Optional[IDs] = None,
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: WhereDocument = {},
+        columns: Optional[List[str]] = None,
     ) -> Sequence:
         pass
 
@@ -76,7 +78,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def count(self, collection_name=None):
+    def count(self, collection_name: str):
         pass
 
     @abstractmethod
@@ -97,7 +99,7 @@ class DB(ABC):
     @abstractmethod
     def get_nearest_neighbors(
         self, collection_name, where, embeddings, n_results, where_document
-    ) -> Tuple[List[List[UUID]], List[List[float]]]:
+    ) -> Tuple[List[List[UUID]], npt.NDArray]:
         pass
 
     @abstractmethod
@@ -109,9 +111,13 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def create_index(self, collection_name):
+    def create_index(self, collection_uuid: str):
         pass
 
     @abstractmethod
     def has_index(self, collection_name):
+        pass
+
+    @abstractmethod
+    def persist(self):
         pass

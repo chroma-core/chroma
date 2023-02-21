@@ -8,11 +8,11 @@ from chromadb.errors import (
 )
 import uuid
 import time
-import os
-import itertools
+import numpy.typing as npt
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
+from clickhouse_connect.driver.client import Client
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
 
@@ -34,7 +34,7 @@ def db_array_schema_to_clickhouse_schema(table_schema):
     return return_str
 
 
-def db_schema_to_keys() -> list[str]:
+def db_schema_to_keys() -> List[str]:
     keys = []
     for element in EMBEDDING_TABLE_SCHEMA:
         keys.append(list(element.keys())[0])
@@ -61,10 +61,10 @@ class Clickhouse(DB):
         self._create_table_collections(self._conn)
         self._create_table_embeddings(self._conn)
 
-    def _get_conn(self):
+    def _get_conn(self) -> Client:
         if self._conn is None:
             self._init_conn()
-        return self._conn
+        return self._conn  # type: ignore because we know it's not None
 
     def _create_table_collections(self, conn):
         conn.command(
@@ -86,7 +86,7 @@ class Clickhouse(DB):
     def persist(self):
         raise NotImplementedError("Clickhouse is a persistent database, this method is not needed")
 
-    def get_collection_uuid_from_name(self, name):
+    def get_collection_uuid_from_name(self, name: str) -> str:
         res = self._get_conn().query(
             f"""
             SELECT uuid FROM collections WHERE name = '{name}'
@@ -94,8 +94,14 @@ class Clickhouse(DB):
         )
         return res.result_rows[0][0]
 
-    def _create_where_clause(self, collection_uuid, ids=None, where={}, where_document={}):
-        where_clauses = []
+    def _create_where_clause(
+        self,
+        collection_uuid: str,
+        ids: Optional[List[str]] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
+    ):
+        where_clauses: List[str] = []
         self._format_where(where, where_clauses)
         if len(where_document) > 0:
             where_document_clauses = []
@@ -106,10 +112,9 @@ class Clickhouse(DB):
             where_clauses.append(f" id IN {tuple(ids)}")
 
         where_clauses.append(f"collection_uuid = '{collection_uuid}'")
-        # We know that where_clauses is not empty, so force typechecker
-        where = " AND ".join(cast(List[str], where_clauses))
-        where = f"WHERE {where}"
-        return where
+        where_str = " AND ".join(where_clauses)
+        where_str = f"WHERE {where_str}"
+        return where_str
 
     #
     #  COLLECTION METHODS
@@ -155,7 +160,9 @@ class Clickhouse(DB):
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._get_conn().query(f"""SELECT * FROM collections""").result_rows
 
-    def update_collection(self, current_name, new_name, new_metadata):
+    def update_collection(
+        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+    ):
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
@@ -269,7 +276,7 @@ class Clickhouse(DB):
             self._idx.delete_from_index(collection_uuid, update_uuids)
             self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
 
-    def _get(self, where={}, columns: Optional[list] = None):
+    def _get(self, where={}, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
         val = (
             self._get_conn()
@@ -349,16 +356,16 @@ class Clickhouse(DB):
 
     def get(
         self,
-        where={},
-        collection_name=None,
-        collection_uuid=None,
-        ids=None,
-        sort=None,
-        limit=None,
-        offset=None,
-        where_document={},
-        columns: Optional[List] = None,
-    ):
+        where: Where = {},
+        collection_name: Optional[str] = None,
+        collection_uuid: Optional[str] = None,
+        ids: Optional[IDs] = None,
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: WhereDocument = {},
+        columns: Optional[List[str]] = None,
+    ) -> Sequence:
         if collection_name == None and collection_uuid == None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
@@ -367,36 +374,38 @@ class Clickhouse(DB):
 
         s3 = time.time()
 
-        where = self._create_where_clause(
-            collection_uuid, ids=ids, where=where, where_document=where_document
+        where_str = self._create_where_clause(
+            # collection_uuid must be defined at this point, cast it for typechecker
+            cast(str, collection_uuid),
+            ids=ids,
+            where=where,
+            where_document=where_document,
         )
 
         if sort is not None:
-            where += f" ORDER BY {sort}"
+            where_str += f" ORDER BY {sort}"
         else:
-            where += f" ORDER BY collection_uuid"  # stable ordering
+            where_str += f" ORDER BY collection_uuid"  # stable ordering
 
         if limit is not None or isinstance(limit, int):
-            where += f" LIMIT {limit}"
+            where_str += f" LIMIT {limit}"
 
         if offset is not None or isinstance(offset, int):
-            where += f" OFFSET {offset}"
+            where_str += f" OFFSET {offset}"
 
-        val = self._get(where=where, columns=columns)
+        val = self._get(where=where_str, columns=columns)
 
         return val
 
-    def _count(self, collection_uuid):
-        where_string = ""
-        if collection_uuid is not None:
-            where_string = f"WHERE collection_uuid = '{collection_uuid}'"
+    def _count(self, collection_uuid: str):
+        where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return self._get_conn().query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
 
-    def count(self, collection_name):
+    def count(self, collection_name: str):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid)[0][0]
 
-    def _delete(self, where_str=None):
+    def _delete(self, where_str: Optional[str] = None):
         deleted_uuids = (
             self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
         )
@@ -425,7 +434,11 @@ class Clickhouse(DB):
 
         s3 = time.time()
         where_str = self._create_where_clause(
-            collection_uuid, ids=ids, where=where, where_document=where_document
+            # collection_uuid must be defined at this point, cast it for typechecker
+            cast(str, collection_uuid),
+            ids=ids,
+            where=where,
+            where_document=where_document,
         )
 
         deleted_uuids = self._delete(where_str)
@@ -434,7 +447,7 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids: list, columns: Optional[list] = None):
+    def get_by_ids(self, ids: list, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
         return (
             self._get_conn()
@@ -454,7 +467,7 @@ class Clickhouse(DB):
         n_results: int,
         collection_name=None,
         collection_uuid=None,
-    ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
+    ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
 
         # Either the collection name or the collection uuid must be provided
         if collection_name == None and collection_uuid == None:
@@ -497,7 +510,7 @@ class Clickhouse(DB):
 
         return uuids, distances
 
-    def create_index(self, collection_uuid) -> None:
+    def create_index(self, collection_uuid: str):
         """Create an index for a collection_uuid and optionally scoped to a dataset.
         Args:
             collection_uuid (str): The collection_uuid to create an index for

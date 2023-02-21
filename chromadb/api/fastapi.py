@@ -6,6 +6,8 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
+    Where,
+    WhereDocument,
 )
 from chromadb.errors import NoDatapointsException
 import pandas as pd
@@ -61,7 +63,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
-    def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
+    def _modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
@@ -86,15 +88,15 @@ class FastAPI(API):
 
     def _get(
         self,
-        collection_name,
-        ids=None,
-        where={},
-        sort=None,
-        limit=None,
-        offset=None,
-        page=None,
-        page_size=None,
-        where_document={},
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
