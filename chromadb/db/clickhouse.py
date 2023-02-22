@@ -57,7 +57,7 @@ class Clickhouse(DB):
         self._conn = clickhouse_connect.get_client(
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
-        self._conn.query(f"""SET allow_experimental_lightweight_delete = true;""")
+        self._conn.query(f"""SET allow_experimental_lightweight_delete = 1;""")
         self._conn.query(
             f"""SET mutations_sync = 1;"""
         )  # https://clickhouse.com/docs/en/operations/settings/settings/#mutations_sync
