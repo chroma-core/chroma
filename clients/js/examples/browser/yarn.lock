@@ -829,10 +829,10 @@ chalk@^4.1.0:
     ansi-styles "^4.1.0"
     supports-color "^7.1.0"
 
-chromadb@1.1.8:
-  version "1.1.8"
-  resolved "https://registry.yarnpkg.com/chromadb/-/chromadb-1.1.8.tgz#0788f45023bf64b3a3b4b6a40fc1bc369e5c5277"
-  integrity sha512-ZFVEzPjZiikQHcnrwo/qD0FPUWG7cT4Nib6hUQ13M7jgrzyJXTVX1eMUcsbUMydhDJXYPg1HPggnrBJUACuHzg==
+chromadb@1.2.1:
+  version "1.2.1"
+  resolved "https://registry.yarnpkg.com/chromadb/-/chromadb-1.2.1.tgz#3883dd20f0b85967341e491ccdd58d1930e5da67"
+  integrity sha512-QGW8H+w72fIS49W5N4RyYNlLLXZIL6Q9mI+zddaDfEr4Dn5FtTTtvkUPef4y34w5qtNp8MMArXwyhzWQhUKleQ==
   dependencies:
     axios "^0.26.0"
 
