@@ -33,10 +33,10 @@ class IndexDensityDistribution:
         # Compute the mean distances from neighbors for each embedding
         mean_dists = np.mean(dists, axis=1)
 
-        # Compute the cumulative density histogram for mean distances, with 100 bins
+        # Compute the cumulative density histogram for mean distances, with n_bins bins
         hist, bin_edges = np.histogram(mean_dists, bins=n_bins, density=True)
-        self._percentiles = np.cumsum(hist)
         self._bin_edges = bin_edges
+        self._cdf = np.cumsum(hist * np.diff(bin_edges))
         self._estimator_neighborhood = estimator_neighborhood
     
     def evaluate_query(self, query_dists: List[List[float]]) -> List[float]:
@@ -49,7 +49,10 @@ class IndexDensityDistribution:
         mean_dists = np.mean(np_dists, axis=1)
 
         # For each query distance, determine which bin it falls into
+        # TODO: This could be linearly interpolated to get a more accurate (?) cdf.
         bin_idx = np.digitize(mean_dists, self._bin_edges) - 1
-        # Lookup the percentiles
-        percentiles = self._percentiles[bin_idx]
+
+        # Convert bin indices to percentiles
+        percentiles = 1 - self._cdf[bin_idx]
+
         return percentiles.tolist()
