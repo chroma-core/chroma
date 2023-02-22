@@ -13,8 +13,8 @@ app.get('/', async (req, res) => {
   const cc = new chroma.ChromaClient("http://localhost:8000");
   await cc.reset()
 
-  // const openAIembedder = new chroma.OpenAIEmbeddingFunction("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")
-  const cohereAIEmbedder = new chroma.CohereEmbeddingFunction("qfkXT0oX9HPUh2ep1GJvYC57j6Z3yPbnn5zzwaHL")
+  // const openAIembedder = new chroma.OpenAIEmbeddingFunction("key")
+  const cohereAIEmbedder = new chroma.CohereEmbeddingFunction("key")
 
   const collection = await cc.createCollection("test-from-js", undefined, cohereAIEmbedder);
 

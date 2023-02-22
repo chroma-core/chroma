@@ -19,42 +19,133 @@ function toArrayOfArrays<T>(obj: Array<Array<T>> | Array<T>): Array<Array<T>> {
   }
 }
 
-export class Collection {
-  private name: string;
-  private api: DefaultApi;
+class EmbeddingFunction { }
 
-  constructor(name: string, api: DefaultApi) {
+let OpenAIApi: any;
+
+export class OpenAIEmbeddingFunction {
+  private api_key: string;
+  private org_id: string;
+  private model: string;
+
+  constructor(openai_api_key: string, openai_model: string, openai_organization_id: string) {
+    try {
+      // eslint-disable-next-line global-require,import/no-extraneous-dependencies
+      OpenAIApi = require("openai");
+    } catch {
+      throw new Error(
+        "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
+      );
+    }
+    this.api_key = openai_api_key;
+    this.org_id = openai_organization_id || "";
+    this.model = openai_model || "text-embedding-ada-002";
+  }
+
+  public async generate(texts: string[]) {
+    const configuration = new OpenAIApi.Configuration({
+      organization: this.org_id,
+      apiKey: this.api_key,
+    });
+    const openai = new OpenAIApi.OpenAIApi(configuration);
+    const embeddings = [];
+    const response = await openai.createEmbedding({
+      model: "text-embedding-ada-002",
+      input: texts,
+    });
+    const data = response.data['data'];
+    for (let i = 0; i < data.length; i += 1) {
+      embeddings.push(data[i]['embedding']);
+    }
+    return embeddings;
+  }
+}
+
+let CohereAiApi: any;
+
+export class CohereEmbeddingFunction {
+  private api_key: string;
+
+  constructor(cohere_api_key: string) {
+    try {
+      // eslint-disable-next-line global-require,import/no-extraneous-dependencies
+      CohereAiApi = require("cohere-ai");
+    } catch {
+      throw new Error(
+        "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`",
+      );
+    }
+    this.api_key = cohere_api_key;
+  }
+
+  public async generate(texts: string[]) {
+    const cohere = CohereAiApi.init(this.api_key);
+    const embeddings = [];
+    const response = await CohereAiApi.embed({
+      texts: texts,
+    });
+    return response.body.embeddings;
+  }
+}
+
+type CallableFunction = {
+  new(): CallableFunction;
+  generate(texts: string[]): number[][];
+};
+
+export class Collection {
+  public name: string;
+  private api: DefaultApi;
+  public embeddingFunction: CallableFunction | undefined;
+
+  constructor(name: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
     this.name = name;
     this.api = api;
+    if (embeddingFunction !== undefined)
+      this.embeddingFunction = embeddingFunction;
   }
 
   public async add(
-    ids: string | Array<any>,
-    embeddings: Array<any>,
-    metadatas?: Array<any> | object,
-    documents?: string | Array<any>,
+    ids: string | string[],
+    embeddings: number[] | number[][],
+    metadatas?: object | object[],
+    documents?: string | string[],
     increment_index: boolean = true,
   ) {
+    if ((embeddings === undefined) && (documents === undefined)) {
+      throw new Error(
+        "embeddings and documents cannot both be undefined",
+      );
+    } else if ((embeddings === undefined) && (documents !== undefined)) {
+      const documentsArray = toArray(documents);
+      if (this.embeddingFunction !== undefined) {
+        embeddings = await this.embeddingFunction.generate(documentsArray)
+      } else {
+        throw new Error(
+          "embeddingFunction is undefined. Please configure an embedding function",
+        );
+      }
+    }
 
     const idsArray = toArray(ids);
     const embeddingsArray = toArrayOfArrays(embeddings);
 
-    let metadatasArray;
+    let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
       metadatasArray = undefined
     } else {
       metadatasArray = toArray(metadatas);
     }
 
-    let documentsArray;
-    if (metadatas === undefined) {
+    let documentsArray: (string | undefined)[] | undefined;
+    if (documents === undefined) {
       documentsArray = undefined
     } else {
-      documentsArray = toArray(metadatas);
+      documentsArray = toArray(documents);
     }
 
     if (
-      idsArray.length !== embeddingsArray.length ||
+      ((embeddingsArray !== undefined) && idsArray.length !== embeddingsArray.length) ||
       ((metadatasArray !== undefined) && idsArray.length !== metadatasArray.length) ||
       ((documentsArray !== undefined) && idsArray.length !== documentsArray.length)
     ) {
@@ -63,7 +154,7 @@ export class Collection {
       );
     }
 
-    return await this.api.add({
+    const response = await this.api.add({
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
@@ -72,7 +163,13 @@ export class Collection {
         metadatas: metadatasArray,
         increment_index: increment_index,
       },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
     });
+
+    return response
   }
 
   public async count() {
@@ -86,9 +183,10 @@ export class Collection {
     limit?: number,
     offset?: number,
   ) {
-    const idsArray = toArray(ids);
+    let idsArray = undefined
+    if (ids !== undefined) idsArray = toArray(ids);
 
-    return await this.api.get({
+    var resp = await this.api.get({
       collectionName: this.name,
       getEmbedding: {
         ids: idsArray,
@@ -96,32 +194,61 @@ export class Collection {
         limit,
         offset,
       },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
     });
+
+    return resp
+
   }
 
   public async query(
-    query_embeddings: number[],
+    query_embeddings: number[] | number[][],
     n_results: number = 10,
     where?: object,
+    query_text?: string | string[],
   ) {
-    const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+    if ((query_embeddings === undefined) && (query_text === undefined)) {
+      throw new Error(
+        "query_embeddings and query_text cannot both be undefined",
+      );
+    } else if ((query_embeddings === undefined) && (query_text !== undefined)) {
+      const query_texts = toArray(query_text);
+      if (this.embeddingFunction !== undefined) {
+        query_embeddings = await this.embeddingFunction.generate(query_texts)
+      } else {
+        throw new Error(
+          "embeddingFunction is undefined. Please configure an embedding function",
+        );
+      }
 
-    const response = await this.api.getNearestNeighbors({
-      collectionName: this.name,
-      queryEmbedding: {
-        query_embeddings: query_embeddingsArray,
-        where,
-        n_results,
-      },
-    });
-    return response.data;
+      const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+
+      const response = await this.api.getNearestNeighbors({
+        collectionName: this.name,
+        queryEmbedding: {
+          query_embeddings: query_embeddingsArray,
+          where,
+          n_results,
+        },
+      }).then(function (response) {
+        return response.data;
+      }).catch(function ({ response }) {
+        return response.data;
+      });
+
+      return response;
+    }
   }
 
   public async peek(limit: number = 10) {
-    return await this.api.get({
+    const response = await this.api.get({
       collectionName: this.name,
       getEmbedding: { limit: limit },
     });
+    return response.data;
   }
 
   public async createIndex() {
@@ -129,10 +256,16 @@ export class Collection {
   }
 
   public async delete(ids?: string[], where?: object) {
-    return await this.api._delete({
+    var response = await this.api._delete({
       collectionName: this.name,
       deleteEmbedding: { ids: ids, where: where },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
     });
+
+    return response
   }
 
 }
@@ -140,7 +273,8 @@ export class Collection {
 export class ChromaClient {
   private api: DefaultApi;
 
-  constructor(basePath: string) {
+  constructor(basePath?: string) {
+    if (basePath === undefined) basePath = "http://localhost:8000";
     const apiConfig: Configuration = new Configuration({
       basePath,
     });
@@ -151,11 +285,20 @@ export class ChromaClient {
     return await this.api.reset();
   }
 
-  public async createCollection(name: string, metadata?: object) {
+  public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
     const newCollection = await this.api.createCollection({
       createCollection: { name, metadata },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
     });
-    return new Collection(name, this.api);
+
+    if (newCollection.error) {
+      throw new Error(newCollection.error);
+    }
+
+    return new Collection(name, this.api, embeddingFunction);
   }
 
   public async listCollections() {
@@ -163,12 +306,18 @@ export class ChromaClient {
     return response.data;
   }
 
-  public async getCollection(name: string) {
-    return new Collection(name, this.api);
+  public async getCollection(name: string, embeddingFunction?: CallableFunction) {
+    return new Collection(name, this.api, embeddingFunction);
   }
 
   public async deleteCollection(name: string) {
-    return await this.api.deleteCollection({ collectionName: name });
+    const response = await this.api.deleteCollection({ collectionName: name }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return response
   }
 
 }
