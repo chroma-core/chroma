@@ -1,14 +1,17 @@
-from typing import List
+from typing import List, TYPE_CHECKING
 from chromadb.logger import logger
-from chromadb.api.models.Collection import Collection
 
 try:
     import numpy as np
 except ImportError:
     raise ImportError("You need to install numpy to use density estimation. pip install numpy")
 
+# Prevent a circular dependency. 
+if TYPE_CHECKING:
+    from chromadb.experimental.ExperimentalCollection import ExperimentalCollection
+
 class IndexDensityDistribution:
-    def __init__(self, collection: Collection, estimator_neighborhood: int = 10, n_bins: int = 100):
+    def __init__(self, collection: 'ExperimentalCollection', estimator_neighborhood: int = 10, n_bins: int = 100):
         logger.info(f"Creating density estimator for collection {collection.name}. This may take some time...")
         collection_count = collection.count()
         if collection_count <= estimator_neighborhood:
