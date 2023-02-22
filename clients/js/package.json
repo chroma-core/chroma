@@ -7,8 +7,14 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.5.2",
+    "@types/jest": "^29.4.0",
+    "jest": "^29.4.3",
     "npm-run-all": "^4.1.5",
-    "rimraf": "^3.0.2"
+    "rimraf": "^3.0.2",
+    "ts-jest": "^29.0.5",
+    "ts-node": "^10.9.1",
+    "tsd": "^0.24.1",
+    "typescript": "^4.5.5"
   },
   "dependencies": {
     "axios": "^0.26.0"
@@ -20,6 +26,13 @@
     "dist"
   ],
   "scripts": {
+    "test": "run-s db:clean db:run test:runfull db:clean",
+    "test:set-port": "cross-env URL=localhost:8001",
+    "test:run": "jest --runInBand",
+    "test:runfull": "PORT=8001 jest --runInBand",
+    "test:update": "run-s db:clean db:run && jest --runInBand --updateSnapshot && run-s db:clean",
+    "db:clean": "cd ../.. && docker-compose -f docker-compose-js-tests.yml down --volumes",
+    "db:run": "cd ../.. && docker-compose -f docker-compose-js-tests.yml up --detach && sleep 5",
     "clean": "rimraf dist",
     "build": "run-s clean build:*",
     "build:main": "tsc -p tsconfig.json",
