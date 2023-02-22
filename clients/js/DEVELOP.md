@@ -11,6 +11,10 @@ This readme is helpful for local dev.
 2. `yarn genapi-zsh` if you have zsh
 3. Examples are in the `examples` folder. There is one for the browser and one for node. Run them with `yarn dev`, eg `cd examples/browser && yarn dev`
 
+### Running test
+`yarn test` will launch a test docker backend. 
+`yarn test:run` will run against the docker backend you have running. But CAUTION, it will delete data.
+
 ### Pushing to npm
 The goal of the design is that this will be added to our github action releases so that the JS API is always up to date and pinned against the python backend API. 
 
