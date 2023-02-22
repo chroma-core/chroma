@@ -53,6 +53,7 @@ class API(ABC):
     def create_collection(
         self,
         metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Creates a new collection in the database
@@ -60,8 +61,22 @@ class API(ABC):
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+            get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
             embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
 
+        Returns:
+            dict: the created collection
+
+        """
+        pass
+
+    @abstractmethod
+    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+        """Calls create_collection with get_or_create=True
+
+        Args:
+            name (str): The name of the collection to create. The name must be unique.
+            metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
         Returns:
             dict: the created collection
 

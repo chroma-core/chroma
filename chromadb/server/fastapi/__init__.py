@@ -91,7 +91,7 @@ class FastAPI(chromadb.server.Server):
         return self._api.list_collections()
 
     def create_collection(self, collection: CreateCollection):
-        return self._api.create_collection(name=collection.name, metadata=collection.metadata)
+        return self._api.create_collection(name=collection.name, metadata=collection.metadata, get_or_create=collection.get_or_create)
 
     def get_collection(self, collection_name: str):
         return self._api.get_collection(collection_name)
