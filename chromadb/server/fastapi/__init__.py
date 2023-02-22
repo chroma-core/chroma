@@ -54,7 +54,6 @@ class FastAPI(chromadb.server.Server):
         self._app = fastapi.FastAPI(debug=True)
         self._api = chromadb.Client(settings)
 
-        # self._app.add_middleware(catch_exceptions_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
             CORSMiddleware,
