@@ -223,24 +223,24 @@ export class Collection {
           "embeddingFunction is undefined. Please configure an embedding function",
         );
       }
-
-      const query_embeddingsArray = toArrayOfArrays(query_embeddings);
-
-      const response = await this.api.getNearestNeighbors({
-        collectionName: this.name,
-        queryEmbedding: {
-          query_embeddings: query_embeddingsArray,
-          where,
-          n_results,
-        },
-      }).then(function (response) {
-        return response.data;
-      }).catch(function ({ response }) {
-        return response.data;
-      });
-
-      return response;
     }
+
+    const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+
+    const response = await this.api.getNearestNeighbors({
+      collectionName: this.name,
+      queryEmbedding: {
+        query_embeddings: query_embeddingsArray,
+        where,
+        n_results,
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return response;
   }
 
   public async peek(limit: number = 10) {
