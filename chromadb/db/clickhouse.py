@@ -114,23 +114,19 @@ class Clickhouse(DB):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None):
+    def create_collection(self, name, metadata=None, get_or_create=False):
         if metadata is None:
             metadata = {}
 
         # poor man's unique constraint
-        checkname = (
-            self._get_conn()
-            .query(
-                f"""
-            SELECT * FROM collections WHERE name = '{name}'
-        """
-            )
-            .result_rows
-        )
+        dupe_check = self.get_collection(name)
 
-        if len(checkname) > 0:
-            raise Exception("Collection already exists with that name")
+        if len(dupe_check) > 0:
+            if get_or_create:
+                print(f"collection with name {name} already exists, returning existing collection")
+                return dupe_check
+            else:
+                raise Exception(f"collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = []

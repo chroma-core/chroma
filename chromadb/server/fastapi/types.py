@@ -64,6 +64,7 @@ class DeleteEmbedding(BaseModel):
 class CreateCollection(BaseModel):
     name: str
     metadata: dict = None
+    get_or_create: bool = False
 
 
 class UpdateCollection(BaseModel):
