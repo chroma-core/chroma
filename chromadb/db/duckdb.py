@@ -88,7 +88,6 @@ class DuckDB(Clickhouse):
                 return dupe_check
             else:
                 raise Exception(f"collection with name {name} already exists")
-            
 
         return self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
@@ -310,8 +309,10 @@ class DuckDB(Clickhouse):
             # create an empty pandas dataframe
             return pd.DataFrame()
 
+        columns = columns + ["uuid"] if columns else ["uuid"]
+
         select_columns = db_schema_to_keys() if columns is None else columns
-        return self._conn.execute(
+        response = self._conn.execute(
             f"""
             SELECT
                 {",".join(select_columns)}
@@ -321,6 +322,11 @@ class DuckDB(Clickhouse):
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
         """
         ).fetchall()
+
+        # sort db results by the order of the uuids
+        response = sorted(response, key=lambda obj: ids.index(uuid.UUID(obj[len(columns) - 1])))
+
+        return response
 
     def raw_sql(self, sql):
         return self._conn.execute(sql).df()
