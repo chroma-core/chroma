@@ -83,7 +83,11 @@ class FastAPI(API):
         return resp.json()
 
     def _peek(self, collection_name, limit=10):
-        return self._get(collection_name, limit=limit)
+        return self._get(
+            collection_name,
+            limit=limit,
+            include=["embeddings", "documents", "metadatas"],
+        )
 
     def _get(
         self,
@@ -96,7 +100,7 @@ class FastAPI(API):
         page=None,
         page_size=None,
         where_document={},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
         if page and page_size:
@@ -202,7 +206,7 @@ class FastAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],
     ):
         """Gets the nearest neighbors of a single embedding"""
 

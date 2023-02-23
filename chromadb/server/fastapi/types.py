@@ -24,7 +24,7 @@ class QueryEmbedding(BaseModel):
     where_document: dict = {}
     query_embeddings: List
     n_results: int = 10
-    include: Include = ["embeddings", "metadatas", "documents", "distances"]
+    include: Include = ["metadatas", "documents", "distances"]
 
 
 class ProcessEmbedding(BaseModel):
@@ -40,7 +40,7 @@ class GetEmbedding(BaseModel):
     sort: str = None
     limit: int = None
     offset: int = None
-    include: Include = ["embeddings", "metadatas", "documents"]
+    include: Include = ["metadatas", "documents"]
 
 
 class CountEmbedding(BaseModel):

@@ -202,7 +202,7 @@ class LocalAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include: Include = ["embeddings", "documents", "metadatas", "distances"],
+        include: Include = ["documents", "metadatas", "distances"],
     ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
@@ -268,7 +268,11 @@ class LocalAPI(API):
         return True
 
     def _peek(self, collection_name, n=10):
-        return self._get(collection_name=collection_name, limit=n)
+        return self._get(
+            collection_name=collection_name,
+            limit=n,
+            include=["embeddings", "documents", "metadatas"],
+        )
 
     def persist(self):
         self._db.persist()
