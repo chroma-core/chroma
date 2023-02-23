@@ -1118,3 +1118,4 @@ def test_query_order(api_fixture, request):
     )
 
     assert items["documents"][0][0] == "this document is second"
+    assert items["documents"][0][1] == "this document is first"
