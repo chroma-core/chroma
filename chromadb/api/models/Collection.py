@@ -42,6 +42,9 @@ class Collection(BaseModel):
         else:
             import chromadb.utils.embedding_functions as ef
 
+            print(
+                "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
+            )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
 
         super().__init__(name=name)
