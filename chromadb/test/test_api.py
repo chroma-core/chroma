@@ -439,6 +439,10 @@ def test_add_a_collection(api_fixture, request):
     collection = api.get_collection("testspace")
     assert collection.name == "testspace"
 
+    # get collection should throw an error if collection does not exist
+    with pytest.raises(Exception) as e:
+        collection = api.get_collection("testspace2")
+
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_list_collections(api_fixture, request):
