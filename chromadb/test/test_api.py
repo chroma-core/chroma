@@ -168,7 +168,11 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_or_create_collection("test", embedding_function=embedding_function)
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
