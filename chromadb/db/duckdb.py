@@ -8,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Dict
 import pandas as pd
 import json
 import duckdb
@@ -76,7 +76,9 @@ class DuckDB(Clickhouse):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None, get_or_create=False):
+    def create_collection(
+        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+    ):
         if metadata is None:
             metadata = {}
 
@@ -94,22 +96,23 @@ class DuckDB(Clickhouse):
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
 
-    def get_collection(self, name):
+    def get_collection(self, name: str) -> pd.DataFrame:
         return self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).df()
 
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
 
-    def delete_collection(self, name):
+    def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._conn.execute(
             f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
         )
         self._idx.delete_index(collection_uuid)
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
-        return True
 
-    def update_collection(self, current_name, new_name, new_metadata):
+    def update_collection(
+        self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
+    ):
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
@@ -287,7 +290,7 @@ class DuckDB(Clickhouse):
         """
         self._conn.executemany(update_statement, update_data)
 
-    def _delete(self, where_str):
+    def _delete(self, where_str: Optional[str] = None):
         uuids_deleted = self._conn.execute(
             f"""SELECT uuid FROM embeddings {where_str}"""
         ).fetchall()
