@@ -1,4 +1,5 @@
 import json
+import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API

@@ -429,8 +429,9 @@ class Clickhouse(DB):
         return deleted_uuids
 
     def get_by_ids(self, ids: list, columns: Optional[List] = None):
+        columns = columns + ["uuid"] if columns else ["uuid"]
         select_columns = db_schema_to_keys() if columns is None else columns
-        return (
+        response = (
             self._get_conn()
             .query(
                 f"""
@@ -439,6 +440,11 @@ class Clickhouse(DB):
             )
             .result_rows
         )
+
+        # sort db results by the order of the uuids
+        response = sorted(response, key=lambda obj: ids.index(obj[len(columns) - 1]))
+
+        return response
 
     def get_nearest_neighbors(
         self,
