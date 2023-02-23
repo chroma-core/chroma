@@ -1,4 +1,5 @@
 import json
+import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
@@ -239,9 +240,16 @@ class LocalAPI(API):
             ids = []
             metadatas = []
             # Remove plural from include since db columns are singular
-            db_columns = [column[:-1] for column in include if column != "distances"] + ["id"]
+            db_columns = (
+                [column[:-1] for column in include if column != "distances"] + ["id"] + ["uuid"]
+            )
             column_index = {column_name: index for index, column_name in enumerate(db_columns)}
             db_result = self._db.get_by_ids(uuids[i], columns=db_columns)
+
+            # sort db results by the order of the uuids
+            db_result = sorted(
+                db_result, key=lambda obj: uuids[i].index(uuid.UUID(obj[column_index["uuid"]]))
+            )
 
             for entry in db_result:
                 if include_embeddings:
