@@ -76,13 +76,20 @@ class DuckDB(Clickhouse):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name: str, metadata: Optional[Dict] = None):
+    def create_collection(
+        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+    ):
         if metadata is None:
             metadata = {}
 
         # poor man's unique constraint
-        if not self.get_collection(name).empty:
-            raise Exception(f"collection with name {name} already exists")
+        dupe_check = self.get_collection(name)
+        if not dupe_check.empty:
+            if get_or_create == True:
+                print(f"collection with name {name} already exists, returning existing collection")
+                return dupe_check
+            else:
+                raise Exception(f"collection with name {name} already exists")
 
         return self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",

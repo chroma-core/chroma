@@ -11,7 +11,12 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def create_collection(self, name: str, metadata: Optional[Dict] = None):
+    def create_collection(
+        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+    ):
+        pass
+
+    def get_or_create_collection(self, name, metadata=None):
         pass
 
     @abstractmethod
