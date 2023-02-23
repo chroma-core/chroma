@@ -20,7 +20,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def get_collection(self, name: str):
+    def get_collection(self, name: str) -> Sequence:
         pass
 
     @abstractmethod

@@ -84,7 +84,7 @@ class DuckDB(Clickhouse):
 
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
-        if not dupe_check.empty:
+        if len(dupe_check) > 0:
             if get_or_create == True:
                 print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
@@ -96,8 +96,10 @@ class DuckDB(Clickhouse):
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
 
-    def get_collection(self, name: str) -> pd.DataFrame:
-        return self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).df()
+    def get_collection(self, name: str) -> Sequence:
+        return self._conn.execute(
+            f"""SELECT * FROM collections WHERE name = ?""", [name]
+        ).fetchall()
 
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
@@ -116,7 +118,7 @@ class DuckDB(Clickhouse):
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = self.get_collection(current_name).metadata[0]
+            new_metadata = self.get_collection(current_name)[0][2]
 
         self._conn.execute(
             f"""UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
