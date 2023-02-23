@@ -49,7 +49,7 @@ class LocalAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
-        get_or_create: bool = False
+        get_or_create: bool = False,
     ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
@@ -70,7 +70,9 @@ class LocalAPI(API):
         name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        self._db.get_collection(name)
+        res = self._db.get_collection(name)
+        if len(res) == 0:
+            raise ValueError("Collection not found: %s" % name)
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def list_collections(self) -> Sequence[Collection]:
