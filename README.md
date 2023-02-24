@@ -10,6 +10,10 @@ __Chroma is the open-source embedding database__. Chroma makes it easy to build 
 - [💡 Colab Example](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 - [🏠 Homepage](https://www.trychroma.com/)
 
+Language Support
+- `python` - `pip install chromadb`
+- `javascript/typescript` - `npm install --save chromadb`
+
 ## ChatGPT for ______
 
 For example, the `"Chat your data"` use case:
@@ -20,7 +24,7 @@ For example, the `"Chat your data"` use case:
 
 ## Features
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
-- __Integrations__: `🦜️🔗 LangChain` and more soon
+- __Integrations__: `🦜️🔗 LangChain` (python and js), `🦙 gpt-index/LlamaIndex` and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
 - __Free__: Apache 2.0 Licensed
