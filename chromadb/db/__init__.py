@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Sequence, Optional, Tuple
-from uuid import UUID
 import numpy.typing as npt
 from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
 
@@ -48,12 +47,12 @@ class DB(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
-        ids: List[UUID],
-    ) -> List[UUID]:
+        ids: List[str],
+    ) -> List[str]:
         pass
 
     @abstractmethod
-    def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
+    def add_incremental(self, collection_uuid: str, ids: List[str], embeddings: Embeddings):
         pass
 
     @abstractmethod
@@ -104,11 +103,11 @@ class DB(ABC):
     @abstractmethod
     def get_nearest_neighbors(
         self, collection_name, where, embeddings, n_results, where_document
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[str]], npt.NDArray]:
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids, columns=None) -> Sequence:
+    def get_by_ids(self, uuids: List[str], columns: Optional[List[str]] = None) -> Sequence:
         pass
 
     @abstractmethod
@@ -120,7 +119,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def has_index(self, collection_name):
+    def has_index(self, collection_name: str):
         pass
 
     @abstractmethod

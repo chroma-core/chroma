@@ -1,9 +1,9 @@
 import os
 import pickle
 import time
-from typing import Optional
+from typing import Optional, List, Dict
 import uuid
-from chromadb.api.types import IndexMetadata
+from chromadb.api.types import IndexMetadata, Embeddings
 
 import hnswlib
 import numpy as np
@@ -17,18 +17,26 @@ class Hnswlib(Index):
     _index = None
     _index_metadata: Optional[IndexMetadata] = None
 
-    _id_to_uuid = {}
-    _uuid_to_id = {}
+    _id_to_uuid: Dict[int, str] = {}
+    _uuid_to_id: Dict[str, int] = {}
 
     def __init__(self, settings):
         self._save_folder = settings.persist_directory + "/index"
 
-    def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
+    def run(
+        self,
+        collection_uuid: str,
+        uuids: List[str],
+        embeddings: Embeddings,
+        space="l2",
+        ef=10,
+        num_threads=4,
+    ):
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         for uuid, i in zip(uuids, range(len(uuids))):
             self._id_to_uuid[i] = uuid
-            self._uuid_to_id[uuid.hex] = i
+            self._uuid_to_id[uuid] = i
 
         index = hnswlib.Index(
             space=space, dim=dimensionality
@@ -76,7 +84,7 @@ class Hnswlib(Index):
             for uuid, i in zip(uuids, range(len(uuids))):
                 offset = current_elements + i
                 self._id_to_uuid[offset] = uuid
-                self._uuid_to_id[uuid.hex] = offset
+                self._uuid_to_id[uuid] = offset
 
             # add the new elements to the index
             self._index.add_items(
@@ -111,9 +119,9 @@ class Hnswlib(Index):
 
         if self._index is not None:
             for uuid in uuids:
-                self._index.mark_deleted(self._uuid_to_id[uuid.hex])
-                del self._id_to_uuid[self._uuid_to_id[uuid.hex]]
-                del self._uuid_to_id[uuid.hex]
+                self._index.mark_deleted(self._uuid_to_id[uuid])
+                del self._id_to_uuid[self._uuid_to_id[uuid]]
+                del self._uuid_to_id[uuid]
 
         self._save()
 
@@ -140,7 +148,7 @@ class Hnswlib(Index):
         if self._collection_uuid != collection_uuid:
             self._load(collection_uuid)
 
-    def _load(self, collection_uuid):
+    def _load(self, collection_uuid: str):
         # if we are calling load, we clearly need a different index than the one we have
         self._index = None
 
@@ -177,7 +185,7 @@ class Hnswlib(Index):
         # get ids from uuids as a set, if they are available
         ids = {}
         if uuids is not None:
-            ids = {self._uuid_to_id[uuid.hex] for uuid in uuids}
+            ids = {self._uuid_to_id[uuid] for uuid in uuids}
             if len(ids) < k:
                 k = len(ids)
 

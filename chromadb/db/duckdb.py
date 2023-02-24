@@ -1,4 +1,5 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
+from chromadb.config import Settings
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
@@ -39,7 +40,7 @@ def clickhouse_to_duckdb_schema(table_schema):
 # to a third superclass they both extend would be preferable.
 class DuckDB(Clickhouse):
     # duckdb has a different way of connecting to the database
-    def __init__(self, settings):
+    def __init__(self, settings: Settings):
         self._conn = duckdb.connect()
         self._create_table_collections()
         self._create_table_embeddings()
@@ -68,7 +69,7 @@ class DuckDB(Clickhouse):
     #
     #  UTILITY METHODS
     #
-    def get_collection_uuid_from_name(self, name):
+    def get_collection_uuid_from_name(self, name) -> str:
         return self._conn.execute(
             f"""SELECT uuid FROM collections WHERE name = ?""", [name]
         ).fetchall()[0][0]
@@ -150,7 +151,7 @@ class DuckDB(Clickhouse):
             data_to_insert,
         )
 
-        return [uuid.UUID(x[1]) for x in data_to_insert]  # return uuids
+        return [x[1] for x in data_to_insert]  # return uuids
 
     def _count(self, collection_uuid):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
@@ -235,14 +236,6 @@ class DuckDB(Clickhouse):
         ).fetchall()
         for i in range(len(val)):
             val[i] = list(val[i])
-            if "collection_uuid" in select_columns:
-                collection_uuid_column_index = select_columns.index("collection_uuid")
-                val[i][collection_uuid_column_index] = uuid.UUID(
-                    val[i][collection_uuid_column_index]
-                )
-            if "uuid" in select_columns:
-                uuid_column_index = select_columns.index("uuid")
-                val[i][uuid_column_index] = uuid.UUID(val[i][uuid_column_index])
             if "metadata" in select_columns:
                 metadata_column_index = select_columns.index("metadata")
                 val[i][metadata_column_index] = (
@@ -303,9 +296,9 @@ class DuckDB(Clickhouse):
         {where_str}
         """
         ).fetchall()[0]
-        return [uuid.UUID(x[0]) for x in uuids_deleted]
+        return [x[0] for x in uuids_deleted]
 
-    def get_by_ids(self, ids: List, columns: Optional[List] = None):
+    def get_by_ids(self, ids: List[str], columns: Optional[List[str]] = None):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
             raise Exception("ids must be a list")
@@ -324,12 +317,12 @@ class DuckDB(Clickhouse):
             FROM
                 embeddings
             WHERE
-                uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
+                uuid IN ({','.join([f"'{x}'" for x in ids])})
         """
         ).fetchall()
 
         # sort db results by the order of the uuids
-        response = sorted(response, key=lambda obj: ids.index(uuid.UUID(obj[len(columns) - 1])))
+        response = sorted(response, key=lambda obj: ids.index(obj[len(columns) - 1]))
 
         return response
 
@@ -357,9 +350,7 @@ class DuckDB(Clickhouse):
 
 
 class PersistentDuckDB(DuckDB):
-    _save_folder = None
-
-    def __init__(self, settings):
+    def __init__(self, settings: Settings):
         super().__init__(settings=settings)
 
         if settings.persist_directory == ".chroma":
@@ -370,7 +361,7 @@ class PersistentDuckDB(DuckDB):
         self._save_folder = settings.persist_directory
         self.load()
 
-    def set_save_folder(self, path):
+    def set_save_folder(self, path: str):
         self._save_folder = path
 
     def get_save_folder(self):

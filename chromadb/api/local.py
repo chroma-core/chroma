@@ -103,7 +103,7 @@ class LocalAPI(API):
     #
     def _add(
         self,
-        ids,
+        ids: List[str],
         collection_name: str,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,

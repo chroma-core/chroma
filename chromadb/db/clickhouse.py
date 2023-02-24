@@ -1,4 +1,5 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
+from chromadb.config import Settings
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.errors import (
@@ -14,11 +15,11 @@ from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 
-COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
+COLLECTION_TABLE_SCHEMA = [{"uuid": "String"}, {"name": "String"}, {"metadata": "String"}]
 
 EMBEDDING_TABLE_SCHEMA = [
-    {"collection_uuid": "UUID"},
-    {"uuid": "UUID"},
+    {"collection_uuid": "String"},
+    {"uuid": "String"},
     {"embedding": "Array(Float64)"},
     {"document": "Nullable(String)"},
     {"id": "Nullable(String)"},
@@ -45,7 +46,7 @@ class Clickhouse(DB):
     #
     #  INIT METHODS
     #
-    def __init__(self, settings):
+    def __init__(self, settings: Settings):
         self._conn = None
         self._idx = Hnswlib(settings)
         self._settings = settings
@@ -135,7 +136,7 @@ class Clickhouse(DB):
             else:
                 raise Exception(f"collection with name {name} already exists")
 
-        collection_uuid = uuid.uuid4()
+        collection_uuid = str(uuid.uuid4())
         data_to_insert = []
         data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
 
@@ -203,7 +204,7 @@ class Clickhouse(DB):
         data_to_insert = [
             [
                 collection_uuid,
-                uuid.uuid4(),
+                str(uuid.uuid4()),
                 embedding,
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
@@ -444,14 +445,14 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids: list, columns: Optional[List] = None):
+    def get_by_ids(self, ids: List[str], columns: Optional[List[str]] = None):
         columns = columns + ["uuid"] if columns else ["uuid"]
         select_columns = db_schema_to_keys() if columns is None else columns
         response = (
             self._get_conn()
             .query(
                 f"""
-        SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
+        SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({ids})
         """
             )
             .result_rows
@@ -470,7 +471,7 @@ class Clickhouse(DB):
         n_results: int,
         collection_name=None,
         collection_uuid=None,
-    ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[str]], npt.NDArray]:
 
         # Either the collection name or the collection uuid must be provided
         if collection_name == None and collection_uuid == None:
@@ -528,7 +529,7 @@ class Clickhouse(DB):
 
         self._idx.run(collection_uuid, uuids, embeddings)
 
-    def add_incremental(self, collection_uuid, uuids, embeddings):
+    def add_incremental(self, collection_uuid: str, uuids, embeddings):
         self._idx.add_incremental(collection_uuid, uuids, embeddings)
 
     def has_index(self, collection_uuid: str):
@@ -544,5 +545,5 @@ class Clickhouse(DB):
         self._idx.reset()
         self._idx = Hnswlib(self._settings)
 
-    def raw_sql(self, sql):
+    def raw_sql(self, sql: str):
         return self._get_conn().query(sql).result_rows
