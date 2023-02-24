@@ -284,7 +284,7 @@ print(
 # This should fail and not add any embeddings
 # TODO: Currently only works locally since the exception is raised on the database side
 try:
-     collection.add(
+    collection.add(
         embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
         metadatas=[
             {"uri": "img1.png", "style": "style1"},
