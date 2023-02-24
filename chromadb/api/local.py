@@ -110,6 +110,7 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
+
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,

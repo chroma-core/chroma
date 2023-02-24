@@ -1,6 +1,11 @@
 import fastapi
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
+
 import chromadb
 import chromadb.server
 from chromadb.errors import (
@@ -21,6 +26,26 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+def use_route_names_as_operation_ids(app: FastAPI) -> None:
+    """
+    Simplify operation IDs so that generated API clients have simpler function
+    names.
+    Should be called only after all routes have been added.
+    """
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+
+
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
 class FastAPI(chromadb.server.Server):
@@ -29,7 +54,16 @@ class FastAPI(chromadb.server.Server):
         self._app = fastapi.FastAPI(debug=True)
         self._api = chromadb.Client(settings)
 
+        self._app.middleware("http")(catch_exceptions_middleware)
+        self._app.add_middleware(
+            CORSMiddleware,
+            allow_headers=["*"],
+            allow_origins=["http://localhost:3000"],
+            allow_methods=["*"],
+        )
+
         self.router = fastapi.APIRouter()
+
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
@@ -77,6 +111,8 @@ class FastAPI(chromadb.server.Server):
         )
 
         self._app.include_router(self.router)
+
+        use_route_names_as_operation_ids(self._app)
 
     def app(self):
         return self._app

@@ -1,0 +1,20 @@
+{
+  "name": "example-node",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node app.js",
+    "start": "node app.js",
+    "rebuild": "cd ../.. && yarn && yarn build && cd examples/node && rm -rf node_modules && yarn && yarn dev"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chromadb": "file:../..",
+    "cohere-ai": "^5.0.2",
+    "express": "^4.18.2",
+    "openai": "^3.1.0"
+  }
+}
