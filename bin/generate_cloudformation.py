@@ -3,6 +3,7 @@ import json
 import subprocess
 import os
 
+
 def b64text(txt):
     """Generate Base 64 encoded CF json for a multiline string, subbing in values where appropriate"""
     lines = []
@@ -13,8 +14,9 @@ def b64text(txt):
             lines.append(line)
     return {"Fn::Base64": {"Fn::Join": ["", lines]}}
 
+
 path = os.path.dirname(os.path.realpath(__file__))
-version = subprocess.check_output(f'{path}/version').decode('ascii').strip()
+version = subprocess.check_output(f"{path}/version").decode("ascii").strip()
 
 with open(f"{path}/templates/docker-compose.yml") as f:
     docker_compose_file = str(f.read())
@@ -71,23 +73,19 @@ cf = {
             "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance",
             "Type": "String",
             "ConstraintDescription": "If present, must be the name of an existing EC2 KeyPair.",
-            "Default": ""
+            "Default": "",
         },
         "InstanceType": {
             "Description": "EC2 instance type",
             "Type": "String",
-            "Default": "t3.small"
+            "Default": "t3.small",
         },
-        "Region": {
-            "Description": "AWS Region",
-            "Type": "String",
-            "Default": "us-east-1"
-        },
+        "Region": {"Description": "AWS Region", "Type": "String", "Default": "us-east-1"},
         "ChromaVersion": {
             "Description": "Chroma version to install",
             "Type": "String",
-            "Default": version
-        }
+            "Default": version,
+        },
     },
     "Conditions": {
         "HasKeyName": {"Fn::Not": [{"Fn::Equals": [{"Ref": "KeyName"}, ""]}]},
@@ -101,12 +99,14 @@ cf = {
                 "UserData": b64text(userdata),
                 "SecurityGroupIds": [{"Ref": "ChromaInstanceSecurityGroup"}],
                 "KeyName": {"Fn::If": ["HasKeyName", {"Ref": "KeyName"}, {"Ref": "AWS::NoValue"}]},
-                "BlockDeviceMappings": [{
-                    "DeviceName":  {"Fn::FindInMap": ["Region2AMI", {"Ref": "Region"}, "RootDeviceName"]},
-                    "Ebs": {
-                        "VolumeSize": 24
-                     }
-                }]
+                "BlockDeviceMappings": [
+                    {
+                        "DeviceName": {
+                            "Fn::FindInMap": ["Region2AMI", {"Ref": "Region"}, "RootDeviceName"]
+                        },
+                        "Ebs": {"VolumeSize": 24},
+                    }
+                ],
             },
         },
         "ChromaInstanceSecurityGroup": {
@@ -115,38 +115,51 @@ cf = {
                 "GroupDescription": "Chroma Instance Security Group",
                 "SecurityGroupIngress": [
                     {"IpProtocol": "tcp", "FromPort": "22", "ToPort": "22", "CidrIp": "0.0.0.0/0"},
-                    {"IpProtocol": "tcp", "FromPort": "8000", "ToPort": "8000", "CidrIp": "0.0.0.0/0"}
-                ]
-            }
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "8000",
+                        "ToPort": "8000",
+                        "CidrIp": "0.0.0.0/0",
+                    },
+                ],
+            },
+        },
+    },
+    "Outputs": {
+        "ServerIp": {
+            "Description": "IP address of the Chroma server",
+            "Value": {"Fn::GetAtt": ["ChromaInstance", "PublicIp"]},
         }
     },
-    "Outputs": {"ServerIp": {
-        "Description": "IP address of the Chroma server",
-        "Value": {"Fn::GetAtt": ["ChromaInstance", "PublicIp"]}
-    }},
-    "Mappings": {"Region2AMI": {}}
+    "Mappings": {"Region2AMI": {}},
 }
 
 # Populate the Region2AMI mappings
-regions = boto3.client('ec2', region_name='us-east-1').describe_regions()['Regions']
+regions = boto3.client("ec2", region_name="us-east-1").describe_regions()["Regions"]
 for region in regions:
-    region_name = region['RegionName']
-    ami_result = boto3.client('ec2', region_name=region_name).describe_images(
-        Owners=['137112412989'],
-        Filters=[{'Name': 'name', 'Values': ['amzn2-ami-kernel-5.10-hvm-*-x86_64-gp2']},
-                 {'Name': 'root-device-type', 'Values': ['ebs']},
-                 {'Name': 'virtualization-type', 'Values': ['hvm']}])
-    img = ami_result['Images'][0]
-    ami_id = img['ImageId']
-    root_device_name = img['BlockDeviceMappings'][0]['DeviceName']
-    cf['Mappings']['Region2AMI'][region_name] = {"AMI": ami_id,
-                                                 "RootDeviceName": root_device_name}
+    region_name = region["RegionName"]
+    ami_result = boto3.client("ec2", region_name=region_name).describe_images(
+        Owners=["137112412989"],
+        Filters=[
+            {"Name": "name", "Values": ["amzn2-ami-kernel-5.10-hvm-*-x86_64-gp2"]},
+            {"Name": "root-device-type", "Values": ["ebs"]},
+            {"Name": "virtualization-type", "Values": ["hvm"]},
+        ],
+    )
+    img = ami_result["Images"][0]
+    ami_id = img["ImageId"]
+    root_device_name = img["BlockDeviceMappings"][0]["DeviceName"]
+    cf["Mappings"]["Region2AMI"][region_name] = {"AMI": ami_id, "RootDeviceName": root_device_name}
 
 
 # Write the CF json to a file
-json.dump(cf, open('/tmp/chroma.cf.json', 'w'), indent=4)
+json.dump(cf, open("/tmp/chroma.cf.json", "w"), indent=4)
 
 # upload to S3
-s3 = boto3.client('s3', region_name='us-east-1')
-s3.upload_file('/tmp/chroma.cf.json', 'public.trychroma.com', f'cloudformation/{version}/chroma.cf.json')
-s3.upload_file('/tmp/chroma.cf.json', 'public.trychroma.com', f'cloudformation/latest/chroma.cf.json')
+s3 = boto3.client("s3", region_name="us-east-1")
+s3.upload_file(
+    "/tmp/chroma.cf.json", "public.trychroma.com", f"cloudformation/{version}/chroma.cf.json"
+)
+s3.upload_file(
+    "/tmp/chroma.cf.json", "public.trychroma.com", f"cloudformation/latest/chroma.cf.json"
+)
