@@ -125,9 +125,10 @@ export class Collection {
         );
       }
     }
+    if (embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
 
     const idsArray = toArray(ids);
-    const embeddingsArray = toArrayOfArrays(embeddings);
+    const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
 
     let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
@@ -223,8 +224,9 @@ export class Collection {
         );
       }
     }
+    if (query_embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
 
-    const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+    const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
     const response = await this.api.getNearestNeighbors({
       collectionName: this.name,

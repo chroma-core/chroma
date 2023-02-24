@@ -34,6 +34,12 @@ export interface GetEmbedding {
     'where'?: object;
     /**
      * 
+     * @type {object}
+     * @memberof GetEmbedding
+     */
+    'where_document'?: object;
+    /**
+     * 
      * @type {string}
      * @memberof GetEmbedding
      */
@@ -50,5 +56,23 @@ export interface GetEmbedding {
      * @memberof GetEmbedding
      */
     'offset'?: number;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof GetEmbedding
+     */
+    'include'?: Array<GetEmbeddingIncludeEnum>;
 }
+
+/**
+    * @export
+    * @enum {string}
+    */
+export enum GetEmbeddingIncludeEnum {
+    Documents = 'documents',
+    Embeddings = 'embeddings',
+    Metadatas = 'metadatas',
+    Distances = 'distances'
+}
+
 
