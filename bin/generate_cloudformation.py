@@ -80,7 +80,6 @@ cf = {
             "Type": "String",
             "Default": "t3.small",
         },
-        "Region": {"Description": "AWS Region", "Type": "String", "Default": "us-east-1"},
         "ChromaVersion": {
             "Description": "Chroma version to install",
             "Type": "String",
@@ -94,7 +93,7 @@ cf = {
         "ChromaInstance": {
             "Type": "AWS::EC2::Instance",
             "Properties": {
-                "ImageId": {"Fn::FindInMap": ["Region2AMI", {"Ref": "Region"}, "AMI"]},
+                "ImageId": {"Fn::FindInMap": ["Region2AMI", {"Ref": "AWS::Region"}, "AMI"]},
                 "InstanceType": {"Ref": "InstanceType"},
                 "UserData": b64text(userdata),
                 "SecurityGroupIds": [{"Ref": "ChromaInstanceSecurityGroup"}],
@@ -102,7 +101,7 @@ cf = {
                 "BlockDeviceMappings": [
                     {
                         "DeviceName": {
-                            "Fn::FindInMap": ["Region2AMI", {"Ref": "Region"}, "RootDeviceName"]
+                            "Fn::FindInMap": ["Region2AMI", {"Ref": "AWS::Region"}, "RootDeviceName"]
                         },
                         "Ebs": {"VolumeSize": 24},
                     }
