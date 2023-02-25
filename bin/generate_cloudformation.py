@@ -2,7 +2,7 @@ import boto3
 import json
 import subprocess
 import os
-
+import re
 
 def b64text(txt):
     """Generate Base 64 encoded CF json for a multiline string, subbing in values where appropriate"""
@@ -159,6 +159,13 @@ s3 = boto3.client("s3", region_name="us-east-1")
 s3.upload_file(
     "/tmp/chroma.cf.json", "public.trychroma.com", f"cloudformation/{version}/chroma.cf.json"
 )
-s3.upload_file(
-    "/tmp/chroma.cf.json", "public.trychroma.com", f"cloudformation/latest/chroma.cf.json"
-)
+
+# Upload to s3 under /latest version only if this is a release
+pattern = re.compile(r"^\d+\.\d+\.\d+$")
+if pattern.match(version):
+    s3.upload_file(
+        "/tmp/chroma.cf.json", "public.trychroma.com", "cloudformation/latest/chroma.cf.json"
+    )
+else:
+    print(f"Version {version} is not a 3-part semver, not uploading to /latest")
+
