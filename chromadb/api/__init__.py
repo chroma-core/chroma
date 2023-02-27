@@ -71,6 +71,17 @@ class API(ABC):
         pass
 
     @abstractmethod
+    def delete_collection(
+        self,
+        name: str,
+    ):
+        """Deletes a collection from the database
+
+        Args:
+            name (str): The name of the collection to delete
+        """
+
+    @abstractmethod
     def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
         """Calls create_collection with get_or_create=True
 
@@ -107,6 +118,13 @@ class API(ABC):
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
+        """Modify a collection in the database - can update the name and/or metadata
+
+        Args:
+            current_name (str): The name of the collection to modify
+            new_name (Optional[str], optional): The new name of the collection. Defaults to None.
+            new_metadata (Optional[Dict], optional): The new metadata to associate with the collection. Defaults to None.
+        """
         pass
 
     @abstractmethod
@@ -150,14 +168,14 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_name: Optional[str] = None) -> int:
+    def _count(self, collection_name: str) -> int:
         """Returns the number of embeddings in the database
 
         Args:
-            collection_name (Optional[str], optional): The model space to count the embeddings in. If None (default), returns the total count of all embeddings.
+            collection_name (str): The model space to count the embeddings in.
 
         Returns:
-            int: The number of embeddings in the database
+            int: The number of embeddings in the collection
 
         """
         pass

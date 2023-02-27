@@ -6,6 +6,8 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
+    Where,
+    WhereDocument,
 )
 from chromadb.errors import NoDatapointsException
 import pandas as pd
@@ -47,7 +49,8 @@ class FastAPI(API):
     ) -> Collection:
         """Creates a collection"""
         resp = requests.post(
-            self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create})
+            self._api_url + "/collections",
+            data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
         )
         resp.raise_for_status()
         return Collection(client=self, name=name, embedding_function=embedding_function)
@@ -69,10 +72,10 @@ class FastAPI(API):
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Get a collection, or return it if it exists"""
-        
+
         return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
-    def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
+    def _modify(self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
@@ -81,11 +84,10 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         """Deletes a collection"""
         resp = requests.delete(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return resp.json()
 
     def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""
@@ -102,15 +104,15 @@ class FastAPI(API):
 
     def _get(
         self,
-        collection_name,
-        ids=None,
-        where={},
-        sort=None,
-        limit=None,
-        offset=None,
-        page=None,
-        page_size=None,
-        where_document={},
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
     ):
         """Gets embeddings from the database"""

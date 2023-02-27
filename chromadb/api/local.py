@@ -1,9 +1,21 @@
 import json
+import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
 from chromadb.db import DB
-from chromadb.api.types import Embedding, GetResult, IDs, Include, QueryResult
+from chromadb.api.types import (
+    Documents,
+    Embedding,
+    Embeddings,
+    GetResult,
+    IDs,
+    Include,
+    Metadatas,
+    QueryResult,
+    Where,
+    WhereDocument,
+)
 from chromadb.api.models.Collection import Collection
 
 import re
@@ -37,7 +49,7 @@ class LocalAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
-        get_or_create: bool = False
+        get_or_create: bool = False,
     ) -> Collection:
         if not is_valid_index_name(name):
             raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
@@ -58,11 +70,10 @@ class LocalAPI(API):
         name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        self._db.get_collection(name)
+        res = self._db.get_collection(name)
+        if len(res) == 0:
+            raise ValueError("Collection not found: %s" % name)
         return Collection(client=self, name=name, embedding_function=embedding_function)
-
-    def _get_collection_db(self, name: str) -> int:
-        return self._db.get_collection(name)
 
     def list_collections(self) -> Sequence[Collection]:
         collections = []
@@ -71,7 +82,7 @@ class LocalAPI(API):
             collections.append(Collection(client=self, name=db_collection[1]))
         return collections
 
-    def modify(
+    def _modify(
         self,
         current_name: str,
         new_name: Optional[str] = None,
@@ -84,7 +95,7 @@ class LocalAPI(API):
 
         self._db.update_collection(current_name, new_name, new_metadata)
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         return self._db.delete_collection(name)
 
     #
@@ -94,11 +105,12 @@ class LocalAPI(API):
         self,
         ids,
         collection_name: str,
-        embeddings,
-        metadatas=None,
-        documents=None,
-        increment_index=True,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
     ):
+
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,
@@ -117,9 +129,9 @@ class LocalAPI(API):
         self,
         collection_name: str,
         ids: IDs,
-        embeddings=None,
-        metadatas=None,
-        documents=None,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
     ):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
@@ -128,15 +140,15 @@ class LocalAPI(API):
 
     def _get(
         self,
-        collection_name,
-        ids=None,
-        where=None,
-        sort=None,
-        limit=None,
-        offset=None,
-        page=None,
-        page_size=None,
-        where_document=None,
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ):
         if where is None:
@@ -271,7 +283,7 @@ class LocalAPI(API):
     def raw_sql(self, raw_sql):
         return self._db.raw_sql(raw_sql)
 
-    def create_index(self, collection_name):
+    def create_index(self, collection_name: str):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True

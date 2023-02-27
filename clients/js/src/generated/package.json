@@ -1,0 +1,27 @@
+{
+  "name": "chromadb",
+  "version": "0.1.0",
+  "description": "OpenAPI client for chromadb",
+  "author": "OpenAPI-Generator Contributors",
+  "keywords": [
+    "axios",
+    "typescript",
+    "openapi-client",
+    "openapi-generator",
+    "chromadb"
+  ],
+  "license": "Unlicense",
+  "main": "./dist/index.js",
+  "typings": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --outDir dist/",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "axios": "^0.21.4"
+  },
+  "devDependencies": {
+    "@types/node": "^12.11.5",
+    "typescript": "^3.6.4"
+  }
+}

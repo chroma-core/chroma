@@ -8,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Dict
 import pandas as pd
 import json
 import duckdb
@@ -76,45 +76,49 @@ class DuckDB(Clickhouse):
     #
     #  COLLECTION METHODS
     #
-    def create_collection(self, name, metadata=None, get_or_create=False):
+    def create_collection(
+        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+    ):
         if metadata is None:
             metadata = {}
 
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
-        if not dupe_check.empty:
+        if len(dupe_check) > 0:
             if get_or_create == True:
                 print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
                 raise Exception(f"collection with name {name} already exists")
-            
 
         return self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
 
-    def get_collection(self, name):
-        return self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).df()
+    def get_collection(self, name: str) -> Sequence:
+        return self._conn.execute(
+            f"""SELECT * FROM collections WHERE name = ?""", [name]
+        ).fetchall()
 
     def list_collections(self) -> Sequence[Sequence[str]]:
         return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
 
-    def delete_collection(self, name):
+    def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._conn.execute(
             f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
         )
         self._idx.delete_index(collection_uuid)
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
-        return True
 
-    def update_collection(self, current_name, new_name, new_metadata):
+    def update_collection(
+        self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
+    ):
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = self.get_collection(current_name).metadata[0]
+            new_metadata = self.get_collection(current_name)[0][2]
 
         self._conn.execute(
             f"""UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
@@ -288,7 +292,7 @@ class DuckDB(Clickhouse):
         """
         self._conn.executemany(update_statement, update_data)
 
-    def _delete(self, where_str):
+    def _delete(self, where_str: Optional[str] = None):
         uuids_deleted = self._conn.execute(
             f"""SELECT uuid FROM embeddings {where_str}"""
         ).fetchall()
@@ -310,8 +314,10 @@ class DuckDB(Clickhouse):
             # create an empty pandas dataframe
             return pd.DataFrame()
 
+        columns = columns + ["uuid"] if columns else ["uuid"]
+
         select_columns = db_schema_to_keys() if columns is None else columns
-        return self._conn.execute(
+        response = self._conn.execute(
             f"""
             SELECT
                 {",".join(select_columns)}
@@ -321,6 +327,11 @@ class DuckDB(Clickhouse):
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
         """
         ).fetchall()
+
+        # sort db results by the order of the uuids
+        response = sorted(response, key=lambda obj: ids.index(uuid.UUID(obj[len(columns) - 1])))
+
+        return response
 
     def raw_sql(self, sql):
         return self._conn.execute(sql).df()

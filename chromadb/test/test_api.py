@@ -472,6 +472,10 @@ def test_add_a_collection(api_fixture, request):
     collection = api.get_collection("testspace")
     assert collection.name == "testspace"
 
+    # get collection should throw an error if collection does not exist
+    with pytest.raises(Exception) as e:
+        collection = api.get_collection("testspace2")
+
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_list_collections(api_fixture, request):
@@ -1133,3 +1137,22 @@ def test_get_include(api_fixture, request):
     with pytest.raises(ValueError) as e:
         items = collection.get(include=None)
     assert "Include" in str(e.value)
+
+
+# make sure query results are returned in the right order
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_order(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_query_order")
+    collection.add(**records)
+
+    items = collection.query(
+        query_embeddings=[1.2, 2.24, 3.2],
+        include=["metadatas", "documents", "distances"],
+        n_results=2,
+    )
+
+    assert items["documents"][0][0] == "this document is second"
+    assert items["documents"][0][1] == "this document is first"
