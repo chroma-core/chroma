@@ -122,7 +122,11 @@ def test_persist_index_loading(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -141,7 +145,11 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test", embedding_function=embedding_function)
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -160,7 +168,11 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_or_create_collection("test", embedding_function=embedding_function)
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -264,7 +276,7 @@ def test_get_from_db(api_fixture, request):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    records = collection.get()
+    records = collection.get(include=["embeddings", "documents", "metadatas"])
     for key in records.keys():
         assert len(records[key]) == 2
 
@@ -292,16 +304,29 @@ def test_get_nearest_neighbors(api_fixture, request):
     collection.add(**batch_records)
     # assert api.create_index(collection_name="testspace") # default is auto now
 
-    nn = collection.query(query_embeddings=[1.1, 2.3, 3.2], n_results=1, where={})
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={})
+    nn = collection.query(
+        query_embeddings=[1.1, 2.3, 3.2],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
     nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]], n_results=1, where={}
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
     )
     for key in nn.keys():
         assert len(nn[key]) == 2
@@ -392,7 +417,11 @@ def test_increment_index_on(api_fixture, request):
 
     # increment index
     # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -408,7 +437,11 @@ def test_increment_index_off(api_fixture, request):
 
     # incremental index
     collection.create_index()
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
