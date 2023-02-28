@@ -77,6 +77,16 @@ def maybe_cast_one_to_many(
     return target  # type: ignore
 
 
+def validate_ids(ids: IDs) -> IDs:
+    """Validates ids to ensure it is a list of strings"""
+    if not isinstance(ids, list):
+        raise ValueError("IDs must be a list")
+    for id in ids:
+        if not isinstance(id, str):
+            raise ValueError(f"ID {id} must be a string")
+    return ids
+
+
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
     if not isinstance(metadata, dict):

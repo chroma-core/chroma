@@ -1156,3 +1156,26 @@ def test_query_order(api_fixture, request):
 
     assert items["documents"][0][0] == "this document is second"
     assert items["documents"][0][1] == "this document is first"
+
+
+# test to make sure add, get, delete error on invalid id input
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_invalid_id(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_invalid_id")
+    # Add with non-string id
+    with pytest.raises(ValueError) as e:
+        collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
+    assert "ID" in str(e.value)
+
+    # Get with non-list id
+    with pytest.raises(ValueError) as e:
+        collection.get(ids=1)
+    assert "ID" in str(e.value)
+
+    # Delete with malformed ids
+    with pytest.raises(ValueError) as e:
+        collection.delete(ids=["valid", 0])
+    assert "ID" in str(e.value)
