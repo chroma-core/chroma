@@ -21,6 +21,13 @@ version = subprocess.check_output(f"{path}/version").decode("ascii").strip()
 with open(f"{path}/templates/docker-compose.yml") as f:
     docker_compose_file = str(f.read())
 
+with open(f"{path}/../config/backup_disk.xml") as f:
+    backup_disk_config = str(f.read())
+
+with open(f"{path}/../config/chroma_users.xml") as f:
+    chroma_users_config = str(f.read())
+
+
 cloud_config_script = f"""
 #cloud-config
 cloud_final_modules:
@@ -39,6 +46,16 @@ systemctl start docker
 
 cat << EOF > /home/ec2-user/docker-compose.yml
 {docker_compose_file}
+EOF
+
+mkdir /home/ec2-user/config
+
+cat << EOF > /home/ec2-user/config/backup_disk.xml
+{backup_disk_config}
+EOF
+
+cat << EOF > /home/ec2-user/config/chroma_users.xml
+{chroma_users_config}
 EOF
 
 docker-compose -f /home/ec2-user/docker-compose.yml up -d
