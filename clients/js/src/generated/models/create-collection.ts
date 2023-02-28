@@ -32,5 +32,11 @@ export interface CreateCollection {
      * @memberof CreateCollection
      */
     'metadata'?: object;
+    /**
+     * 
+     * @type {boolean}
+     * @memberof CreateCollection
+     */
+    'get_or_create'?: boolean;
 }
 

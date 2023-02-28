@@ -28,6 +28,12 @@ export interface QueryEmbedding {
     'where'?: object;
     /**
      * 
+     * @type {object}
+     * @memberof QueryEmbedding
+     */
+    'where_document'?: object;
+    /**
+     * 
      * @type {Array<any>}
      * @memberof QueryEmbedding
      */
@@ -38,5 +44,23 @@ export interface QueryEmbedding {
      * @memberof QueryEmbedding
      */
     'n_results'?: number;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof QueryEmbedding
+     */
+    'include'?: Array<QueryEmbeddingIncludeEnum>;
 }
+
+/**
+    * @export
+    * @enum {string}
+    */
+export enum QueryEmbeddingIncludeEnum {
+    Documents = 'documents',
+    Embeddings = 'embeddings',
+    Metadatas = 'metadatas',
+    Distances = 'distances'
+}
+
 

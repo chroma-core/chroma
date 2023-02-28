@@ -1,7 +1,8 @@
 import { expect, test } from '@jest/globals';
 import { ChromaClient } from '../src/index'
 
-const URL = 'http://localhost:' + process.env.PORT || '8000'
+const PORT = process.env.PORT || '8000'
+const URL = 'http://localhost:' + PORT
 const chroma = new ChromaClient(URL)
 console.log('using URL: ' + URL)
 

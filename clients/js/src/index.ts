@@ -28,7 +28,7 @@ export class OpenAIEmbeddingFunction {
   private org_id: string;
   private model: string;
 
-  constructor(openai_api_key: string, openai_model: string, openai_organization_id: string) {
+  constructor(openai_api_key: string, openai_model?: string, openai_organization_id?: string) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       OpenAIApi = require("openai");
@@ -42,7 +42,7 @@ export class OpenAIEmbeddingFunction {
     this.model = openai_model || "text-embedding-ada-002";
   }
 
-  public async generate(texts: string[]) {
+  public async generate(texts: string[]): Promise<number[][]> {
     const configuration = new OpenAIApi.Configuration({
       organization: this.org_id,
       apiKey: this.api_key,
@@ -89,8 +89,7 @@ export class CohereEmbeddingFunction {
 }
 
 type CallableFunction = {
-  new(): CallableFunction;
-  generate(texts: string[]): number[][];
+  generate(texts: string[]): Promise<number[][]>;
 };
 
 export class Collection {
@@ -107,7 +106,7 @@ export class Collection {
 
   public async add(
     ids: string | string[],
-    embeddings: number[] | number[][],
+    embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
     increment_index: boolean = true,
@@ -126,9 +125,10 @@ export class Collection {
         );
       }
     }
+    if (embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
 
     const idsArray = toArray(ids);
-    const embeddingsArray = toArrayOfArrays(embeddings);
+    const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
 
     let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
@@ -205,7 +205,7 @@ export class Collection {
   }
 
   public async query(
-    query_embeddings: number[] | number[][],
+    query_embeddings: number[] | number[][] | undefined,
     n_results: number = 10,
     where?: object,
     query_text?: string | string[],
@@ -224,8 +224,9 @@ export class Collection {
         );
       }
     }
+    if (query_embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
 
-    const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+    const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
     const response = await this.api.getNearestNeighbors({
       collectionName: this.name,

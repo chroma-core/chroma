@@ -32,5 +32,11 @@ export interface DeleteEmbedding {
      * @memberof DeleteEmbedding
      */
     'where'?: object;
+    /**
+     * 
+     * @type {object}
+     * @memberof DeleteEmbedding
+     */
+    'where_document'?: object;
 }
 
