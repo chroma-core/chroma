@@ -15,6 +15,7 @@ from chromadb.api.types import (
     OneOrMany,
     WhereDocument,
     maybe_cast_one_to_many,
+    validate_ids,
     validate_include,
     validate_metadatas,
     validate_where,
@@ -73,7 +74,7 @@ class Collection(BaseModel):
             ids: The ids to associate with the embeddings. Optional.
         """
 
-        ids = maybe_cast_one_to_many(ids)
+        ids = validate_ids(maybe_cast_one_to_many(ids))
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
         metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
@@ -126,7 +127,7 @@ class Collection(BaseModel):
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
-        ids = maybe_cast_one_to_many(ids) if ids else None
+        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
             self.name,
@@ -229,7 +230,7 @@ class Collection(BaseModel):
             documents: The documents to associate with the embeddings. Optional.
         """
 
-        ids = maybe_cast_one_to_many(ids)
+        ids = validate_ids(maybe_cast_one_to_many(ids))
         embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
         metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
         documents = maybe_cast_one_to_many(documents) if documents else None
@@ -277,6 +278,7 @@ class Collection(BaseModel):
             where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
         """
+        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
         return self._client._delete(self.name, ids, where, where_document)
