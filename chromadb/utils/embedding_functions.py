@@ -39,7 +39,21 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 engine=self._model_name,
             )["data"]
         ]
+        
 
+class HuggingFaceEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name: str = "paraphrase-MiniLM-L6-v2"):
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            raise ValueError(
+                "The sentence-transformers python package is not installed. Please install it with `pip install sentence-transformers`"
+            )
+
+        self._client = SentenceTransformer(model_name)
+        
+    def __call__(self, texts: Documents) -> Embeddings:
+        return [embedding.tolist() for embedding in self._client.encode(texts)]
 
 class CohereEmbeddingFunction(EmbeddingFunction):
     def __init__(self, api_key: str, model_name: str = "large"):
