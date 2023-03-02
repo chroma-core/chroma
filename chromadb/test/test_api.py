@@ -12,7 +12,7 @@ from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
 from chromadb.api.models import Collection
-
+from chromadb.utils.embedding_functions import HuggingFaceEmbeddingFunction
 
 @pytest.fixture
 def local_api():
@@ -176,7 +176,22 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     for key in nn.keys():
         assert len(nn[key]) == 1
 
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_embedding_function(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    
+    collection = api.get_or_create_collection("embedding-fn-test", embedding_function=HuggingFaceEmbeddingFunction())
+    collection.add(ids="id1", documents="hello")
 
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+    
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
