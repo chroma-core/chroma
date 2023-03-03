@@ -80,29 +80,29 @@ def maybe_cast_one_to_many(
 def validate_ids(ids: IDs) -> IDs:
     """Validates ids to ensure it is a list of strings"""
     if not isinstance(ids, list):
-        raise ValueError("IDs must be a list")
+        raise ValueError(f"Expected IDs to be a list, got {ids}")
     for id in ids:
         if not isinstance(id, str):
-            raise ValueError(f"ID {id} must be a string")
+            raise ValueError(f"Expected ID to be a str, got {id}")
     return ids
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
     if not isinstance(metadata, dict):
-        raise ValueError("Metadata must be a dictionary")
+        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
-            raise ValueError(f"Metadata key {key} must be a string")
+            raise ValueError(f"Expected metadata key to be a str, got {key}")
         if not isinstance(value, (str, int, float)):
-            raise ValueError(f"Metadata value {value} must be a string, int, or float")
+            raise ValueError(f"Expected metadata value to be a str, int, or float, got {value}")
     return metadata
 
 
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, or floats"""
     if not isinstance(metadatas, list):
-        raise ValueError("Metadatas must be a list")
+        raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
     for metadata in metadatas:
         validate_metadata(metadata)
     return metadatas
@@ -114,22 +114,22 @@ def validate_where(where: Where) -> Where:
     or in the case of $and and $or, a list of where expressions
     """
     if not isinstance(where, dict):
-        raise ValueError("Where must be a dictionary")
+        raise ValueError(f"Expected where to be a dict, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
-            raise ValueError(f"Where key {key} must be a string")
+            raise ValueError(f"Expected where key to be a str, got {key}")
         if key != "$and" and key != "$or" and not isinstance(value, (str, int, float, dict)):
             raise ValueError(
-                f"Where value {value} must be a string, int, or float, or operator expression"
+                f"Expected where value to be a str, int, float, or operator expression, got {value}"
             )
         if key == "$and" or key == "$or":
             if not isinstance(value, list):
                 raise ValueError(
-                    f"Where value {value} for $and or $or must be a list of where expressions"
+                    f"Expected where value for $and or $or to be a list of where expressions, got {value}"
                 )
             if len(value) <= 1:
                 raise ValueError(
-                    f"Where value {value} for $and or $or must have at least two where expressions"
+                    f"Expected where value for $and or $or to be a list with at least two where expressions, got {value}"
                 )
             for where_expression in value:
                 validate_where(where_expression)
@@ -138,7 +138,7 @@ def validate_where(where: Where) -> Where:
             # Ensure there is only one operator
             if len(value) != 1:
                 raise ValueError(
-                    f"Where operator expression {value} must have exactly one operator"
+                    f"Expected operator expression to have exactly one operator, got {value}"
                 )
 
             for operator, operand in value.items():
@@ -146,17 +146,17 @@ def validate_where(where: Where) -> Where:
                 if operator in ["$gt", "$gte", "$lt", "$lte"]:
                     if not isinstance(operand, (int, float)):
                         raise ValueError(
-                            f"Where operand value {operand} must be an int or float for operator {operator}"
+                            f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
                         )
 
                 if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]:
                     raise ValueError(
-                        f"Where operator must be one of $gt, $gte, $lt, $lte, $ne", "$eq"
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, got {operator}"
                     )
 
                 if not isinstance(operand, (str, int, float)):
                     raise ValueError(
-                        f"Where operand value {operand} must be a string, int, or float"
+                        f"Expected where operand value to be a str, int, or float, got {operand}"
                     )
     return where
 
@@ -167,27 +167,27 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     a list of where_document expressions
     """
     if not isinstance(where_document, dict):
-        raise ValueError("Where document must be a dictionary")
+        raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
     if len(where_document) != 1:
-        raise ValueError("Where document must have exactly one operator")
+        raise ValueError(f"Epected where document to have exactly one operator, got {where_document}")
     for operator, operand in where_document.items():
         if operator not in ["$contains", "$and", "$or"]:
-            raise ValueError(f"Where document operator must be $contains, $and, or $or")
+            raise ValueError(f"Expected where document operator to be one of $contains, $and, $or, got {operator}")
         if operator == "$and" or operator == "$or":
             if not isinstance(operand, list):
                 raise ValueError(
-                    f"Where document value {operand} for $and or $or must be a list of where document expressions"
+                    f"Expected document value for $and or $or to be a list of where document expressions, got {operand}"
                 )
             if len(operand) <= 1:
                 raise ValueError(
-                    f"Where document value {operand} for $and or $or must have at least two where document expressions"
+                    f"Expected document value for $and or $or to be a list with at least two where document expressions, got {operand}"
                 )
             for where_document_expression in operand:
                 validate_where_document(where_document_expression)
         # Value is a $contains operator
         elif not isinstance(operand, str):
             raise ValueError(
-                f"Where document operand value {operand} must be a string for operator $contains"
+                f"Expected where document operand value for operator $contains to be a str, got {operand}"
             )
     return where_document
 
@@ -197,10 +197,13 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     to control if distances is allowed"""
 
     if not isinstance(include, list):
-        raise ValueError("Include must be a list")
+        raise ValueError(f"Epected include to be a list, got {include}")
     for item in include:
         if not isinstance(item, str):
-            raise ValueError(f"Include item {item} must be a string")
-        if item not in ["embeddings", "documents", "metadatas"] + ["distances"] * allow_distances:
-            raise ValueError(f"Include item {item} value not within allowed values")
+            raise ValueError(f"Expected include item to be a str, got {item}")
+        allowed_values = ["embeddings", "documents", "metadatas"]
+        if allow_distances:
+            allowed_values.append("distances")
+        if item not in allowed_values:
+            raise ValueError(f"Expected include item to be one of {', '.join(allowed_values)}, got {item}")
     return include

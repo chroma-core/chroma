@@ -126,7 +126,7 @@ class Clickhouse(DB):
                 print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
-                raise Exception(f"collection with name {name} already exists")
+                raise ValueError(f"Collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
@@ -164,12 +164,12 @@ class Clickhouse(DB):
         return self._get_conn().command(
             f"""
 
-         ALTER TABLE 
-            collections 
+         ALTER TABLE
+            collections
          UPDATE
-            metadata = '{json.dumps(new_metadata)}', 
+            metadata = '{json.dumps(new_metadata)}',
             name = '{new_name}'
-         WHERE 
+         WHERE
             name = '{current_name}'
          """
         )
@@ -235,10 +235,10 @@ class Clickhouse(DB):
                 parameters[f"d{i}"] = documents[i]
 
             update_statement = f"""
-            UPDATE 
+            UPDATE
                 {",".join(update_fields)}
             WHERE
-                id = {{i{i}:String}} AND 
+                id = {{i{i}:String}} AND
                 collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
             """
             updates.append(update_statement)
@@ -257,7 +257,7 @@ class Clickhouse(DB):
         # Verify all IDs exist
         existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
         if len(existing_items) != len(ids):
-            raise ValueError("Some of the supplied ids for update were not found")
+            raise ValueError(f"Could not find {len(ids) - len(existing_items)} items for update")
 
         # Update the db
         self._update(collection_uuid, ids, embeddings, metadatas, documents)
@@ -315,7 +315,7 @@ class Clickhouse(DB):
                         return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                     return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                 else:
-                    raise ValueError(f"Operator {operator} not supported")
+                    raise ValueError(f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}")
             elif type(value) == list:
                 all_subresults = []
                 for subwhere in value:
@@ -327,7 +327,7 @@ class Clickhouse(DB):
                 elif key == "$and":
                     result.append(f"({' AND '.join(all_subresults)})")
                 else:
-                    raise ValueError(f"Operator {key} not supported with a list of where clauses")
+                    raise ValueError(f"Expected one of $or, $and, got {key}")
 
     def _format_where_document(self, where_document, results):
         operator = list(where_document.keys())[0]
@@ -344,7 +344,7 @@ class Clickhouse(DB):
             if operator == "$and":
                 results.append(f"({' AND '.join(all_subresults)})")
         else:
-            raise ValueError(f"Operator {operator} not supported")
+            raise ValueError(f"Epected one of $contains, $and, $or, got {operator}")
 
     def get(
         self,

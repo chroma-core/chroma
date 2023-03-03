@@ -7,7 +7,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
             from sentence_transformers import SentenceTransformer
         except ImportError:
             raise ValueError(
-                "sentence_transformers is not installed. Please install it with `pip install sentence_transformers`"
+                "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
         self._model = SentenceTransformer(model_name)
 
