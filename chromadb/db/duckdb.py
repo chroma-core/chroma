@@ -364,7 +364,7 @@ class PersistentDuckDB(DuckDB):
 
         if settings.persist_directory == ".chroma":
             raise ValueError(
-                "You cannot use chroma's cache directory .chroms/, please set a different directory"
+                "You cannot use chroma's cache directory .chroma/, please set a different directory"
             )
 
         self._save_folder = settings.persist_directory
