@@ -42,7 +42,7 @@ def get_db(settings=__settings):
 
         return chromadb.db.duckdb.DuckDB(settings)
     else:
-        raise Exception(f"Unknown value '{setting} for chroma_db_impl")
+        raise ValueError(f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}")
 
 
 def Client(settings=__settings):
@@ -67,4 +67,4 @@ def Client(settings=__settings):
 
         return chromadb.api.local.LocalAPI(settings, get_db(settings))
     else:
-        raise Exception(f"Unknown value '{setting} for chroma_api_impl")
+        raise ValueError(f"Expected chroma_api_impl to be one of rest, local, got {setting}")
