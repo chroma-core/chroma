@@ -4,12 +4,15 @@ import time
 from typing import Optional
 import uuid
 from chromadb.api.types import IndexMetadata
+import logging
 
 import hnswlib
 import numpy as np
 from chromadb.db.index import Index
-from chromadb.logger import logger
 from chromadb.errors import NoIndexException, InvalidDimensionException
+
+
+logger = logging.getLogger("Chroma")
 
 
 class Hnswlib(Index):
