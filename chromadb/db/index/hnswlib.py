@@ -134,7 +134,7 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._collection_uuid}.pkl", "wb") as f:
             pickle.dump(self._index_metadata, f, pickle.HIGHEST_PROTOCOL)
 
-        logger.debug("Index saved to {self._save_folder}/index.bin")
+        logger.debug(f"Index saved to {self._save_folder}/index.bin")
 
     def load_if_not_loaded(self, collection_uuid):
         if self._collection_uuid != collection_uuid:
