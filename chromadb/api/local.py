@@ -1,12 +1,10 @@
 import json
-import uuid
 import time
-from typing import Dict, List, Optional, Sequence, Callable, Type, cast
+from typing import Dict, List, Optional, Sequence, Callable, cast
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
     Documents,
-    Embedding,
     Embeddings,
     GetResult,
     IDs,

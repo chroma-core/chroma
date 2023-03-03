@@ -1,5 +1,4 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
-from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
     Clickhouse,
@@ -13,8 +12,6 @@ import pandas as pd
 import json
 import duckdb
 import uuid
-import time
-import itertools
 
 
 def clickhouse_to_duckdb_schema(table_schema):
@@ -282,12 +279,12 @@ class DuckDB(Clickhouse):
             update_fields.append(f"document = ?")
 
         update_statement = f"""
-        UPDATE 
+        UPDATE
             embeddings
         SET
             {", ".join(update_fields)}
         WHERE
-            id = ? AND 
+            id = ? AND
             collection_uuid = '{collection_uuid}';
         """
         self._conn.executemany(update_statement, update_data)

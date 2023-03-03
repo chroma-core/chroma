@@ -1,5 +1,4 @@
 import chromadb.config
-import logging
 
 
 __settings = chromadb.config.Settings()

@@ -1,17 +1,14 @@
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
-from chromadb.errors import NoDatapointsException
 import chromadb.server.fastapi
 import pytest
 import time
 import tempfile
-import copy
 import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
-from chromadb.api.models import Collection
 
 
 @pytest.fixture

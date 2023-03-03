@@ -1,5 +1,5 @@
 import fastapi
-from fastapi import FastAPI
+from fastapi import FastAPI as _FastAPI
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,22 +15,18 @@ from chromadb.errors import (
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
-    CountEmbedding,
     DeleteEmbedding,
     GetEmbedding,
-    ProcessEmbedding,
     QueryEmbedding,
     RawSql,  # Results,
-    SpaceKeyInput,
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
 )
 from starlette.requests import Request
-from starlette.responses import Response
 
 
-def use_route_names_as_operation_ids(app: FastAPI) -> None:
+def use_route_names_as_operation_ids(app: _FastAPI) -> None:
     """
     Simplify operation IDs so that generated API clients have simpler function
     names.

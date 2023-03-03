@@ -9,7 +9,6 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
-from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
 import json
