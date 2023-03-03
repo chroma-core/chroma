@@ -22,16 +22,22 @@ import re
 
 
 # mimics s3 bucket requirements for naming
-def is_valid_index_name(index_name):
+def check_index_name(index_name):
+    msg = ("Expected collection name that "
+           "(1) contains 3-63 characters, "
+           "(2) starts and ends with an alphanumeric character, "
+           "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+           "(4) contains no two consecutive periods (..) and "
+           "(5) is not a valid IPv4 address, "
+           f"got {index_name}")
     if len(index_name) < 3 or len(index_name) > 63:
-        return False
+        raise ValueError(msg)
     if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
-        return False
+        raise ValueError(msg)
     if ".." in index_name:
-        return False
+        raise ValueError(msg)
     if re.match("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$", index_name):
-        return False
-    return True
+        raise ValueError(msg)
 
 
 class LocalAPI(API):
@@ -51,8 +57,7 @@ class LocalAPI(API):
         embedding_function: Optional[Callable] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        if not is_valid_index_name(name):
-            raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
+        check_index_name(name)
 
         self._db.create_collection(name, metadata, get_or_create)
         return Collection(client=self, name=name, embedding_function=embedding_function)
@@ -72,7 +77,7 @@ class LocalAPI(API):
     ) -> Collection:
         res = self._db.get_collection(name)
         if len(res) == 0:
-            raise ValueError("Collection not found: %s" % name)
+            raise ValueError(f"Collection {name} does not exist")
         return Collection(client=self, name=name, embedding_function=embedding_function)
 
     def list_collections(self) -> Sequence[Collection]:
@@ -88,10 +93,8 @@ class LocalAPI(API):
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
-        # NIT: make sure we have a valid name like we do in create
         if new_name is not None:
-            if not is_valid_index_name(new_name):
-                raise ValueError("Invalid index name: %s" % new_name)
+            check_index_name(new_name)
 
         self._db.update_collection(current_name, new_name, new_metadata)
 
