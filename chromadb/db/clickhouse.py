@@ -7,7 +7,6 @@ from chromadb.errors import (
     NotEnoughElementsException,
 )
 import uuid
-import time
 import numpy.typing as npt
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
@@ -165,12 +164,12 @@ class Clickhouse(DB):
         return self._get_conn().command(
             f"""
 
-         ALTER TABLE 
-            collections 
+         ALTER TABLE
+            collections
          UPDATE
-            metadata = '{json.dumps(new_metadata)}', 
+            metadata = '{json.dumps(new_metadata)}',
             name = '{new_name}'
-         WHERE 
+         WHERE
             name = '{current_name}'
          """
         )
@@ -236,10 +235,10 @@ class Clickhouse(DB):
                 parameters[f"d{i}"] = documents[i]
 
             update_statement = f"""
-            UPDATE 
+            UPDATE
                 {",".join(update_fields)}
             WHERE
-                id = {{i{i}:String}} AND 
+                id = {{i{i}:String}} AND
                 collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
             """
             updates.append(update_statement)
@@ -365,8 +364,6 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        s3 = time.time()
-
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
             cast(str, collection_uuid),
@@ -425,7 +422,6 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        s3 = time.time()
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
             cast(str, collection_uuid),

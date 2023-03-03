@@ -179,7 +179,7 @@ class FastAPI(API):
 
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
 
         return True
@@ -238,7 +238,7 @@ class FastAPI(API):
 
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
 
         body = resp.json()
@@ -267,6 +267,6 @@ class FastAPI(API):
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
         return resp.json()
