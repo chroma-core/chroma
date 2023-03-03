@@ -78,10 +78,7 @@ class DuckDB(Clickhouse):
     #
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ):
-        if metadata is None:
-            metadata = {}
-
+    ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
         if len(dupe_check) > 0:
@@ -91,18 +88,20 @@ class DuckDB(Clickhouse):
             else:
                 raise ValueError(f"Collection with name {name} already exists")
 
-        return self._conn.execute(
+        self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
             [str(uuid.uuid4()), name, json.dumps(metadata)],
         )
+        return [[str(uuid.uuid4()), name, metadata]]
 
     def get_collection(self, name: str) -> Sequence:
-        return self._conn.execute(
-            f"""SELECT * FROM collections WHERE name = ?""", [name]
-        ).fetchall()
+        res = self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
+        # json.loads the metadata
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
-    def list_collections(self) -> Sequence[Sequence[str]]:
-        return self._conn.execute(f"""SELECT * FROM collections""").fetchall()
+    def list_collections(self) -> Sequence:
+        res = self._conn.execute(f"""SELECT * FROM collections""").fetchall()
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)

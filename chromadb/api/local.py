@@ -59,8 +59,10 @@ class LocalAPI(API):
     ) -> Collection:
         check_index_name(name)
 
-        self._db.create_collection(name, metadata, get_or_create)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        res = self._db.create_collection(name, metadata, get_or_create)
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
 
     def get_or_create_collection(
         self,
@@ -78,13 +80,17 @@ class LocalAPI(API):
         res = self._db.get_collection(name)
         if len(res) == 0:
             raise ValueError(f"Collection {name} does not exist")
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
 
     def list_collections(self) -> Sequence[Collection]:
         collections = []
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
-            collections.append(Collection(client=self, name=db_collection[1]))
+            collections.append(
+                Collection(client=self, name=db_collection[1], metadata=db_collection[2])
+            )
         return collections
 
     def _modify(

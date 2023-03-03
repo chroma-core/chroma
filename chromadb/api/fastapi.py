@@ -53,7 +53,13 @@ class FastAPI(API):
             data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
         )
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
     def get_collection(
         self,
@@ -63,7 +69,13 @@ class FastAPI(API):
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
     def get_or_create_collection(
         self,
@@ -79,7 +91,7 @@ class FastAPI(API):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
-            data=json.dumps({"metadata": new_metadata, "name": new_name}),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
         resp.raise_for_status()
         return resp.json()

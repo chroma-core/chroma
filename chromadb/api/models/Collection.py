@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, cast, List
+from typing import TYPE_CHECKING, Optional, cast, List, Dict
 from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 class Collection(BaseModel):
     name: str
+    metadata: Optional[Dict] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -36,7 +37,9 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
+        metadata: Optional[Dict] = None,
     ):
+
         self._client = client
         if embedding_function is not None:
             self._embedding_function = embedding_function
@@ -47,8 +50,7 @@ class Collection(BaseModel):
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-
-        super().__init__(name=name)
+        super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):
         return f"Collection(name={self.name})"
@@ -213,6 +215,8 @@ class Collection(BaseModel):
         self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
+        if metadata:
+            self.metadata = metadata
 
     def update(
         self,
