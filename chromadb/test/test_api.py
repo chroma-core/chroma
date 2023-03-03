@@ -633,9 +633,8 @@ def test_metadata_validation_add(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='metadata'):
         collection.add(**bad_metadata_records)
-    assert "Metadata" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -645,9 +644,8 @@ def test_metadata_validation_update(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='metadata'):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
-    assert "Metadata" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -656,9 +654,8 @@ def test_where_validation_get(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where'):
         collection.get(where={"value": {"nested": "5"}})
-    assert "Where" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -667,9 +664,8 @@ def test_where_validation_query(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where'):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
-    assert "Where" in str(e.value)
 
 
 operator_records = {
@@ -858,17 +854,14 @@ def test_query_document_valid_operators(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.get(where_document={"$lt": {"$nested": 2}})
-    assert "Where document" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
-    assert "Where document" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.get(where_document={"$contains": []})
-    assert "Where document" in str(e.value)
 
     # Test invalid $and, $or
     with pytest.raises(ValueError) as e:
@@ -1130,13 +1123,11 @@ def test_get_include(api_fixture, request):
     assert items["embeddings"] == None
     assert items["ids"][0] == "id1"
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='include'):
         items = collection.get(include=["metadatas", "undefined"])
-    assert "Include" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='include'):
         items = collection.get(include=None)
-    assert "Include" in str(e.value)
 
 
 # make sure query results are returned in the right order
