@@ -89,7 +89,7 @@ class DuckDB(Clickhouse):
                 print(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
-                raise Exception(f"collection with name {name} already exists")
+                raise ValueError(f"Collection with name {name} already exists")
 
         return self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
@@ -282,12 +282,12 @@ class DuckDB(Clickhouse):
             update_fields.append(f"document = ?")
 
         update_statement = f"""
-        UPDATE 
+        UPDATE
             embeddings
         SET
             {", ".join(update_fields)}
         WHERE
-            id = ? AND 
+            id = ? AND
             collection_uuid = '{collection_uuid}';
         """
         self._conn.executemany(update_statement, update_data)
@@ -308,7 +308,7 @@ class DuckDB(Clickhouse):
     def get_by_ids(self, ids: List, columns: Optional[List] = None):
         # select from duckdb table where ids are in the list
         if not isinstance(ids, list):
-            raise Exception("ids must be a list")
+            raise TypeError(f"Expected ids to be a list, got {ids}")
 
         if not ids:
             # create an empty pandas dataframe
@@ -352,7 +352,7 @@ class DuckDB(Clickhouse):
 
     def persist(self):
         raise NotImplementedError(
-            "chroma_db_impl='duckdb+parquet' to get persistence functionality"
+            "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
         )
 
 
@@ -363,8 +363,8 @@ class PersistentDuckDB(DuckDB):
         super().__init__(settings=settings)
 
         if settings.persist_directory == ".chroma":
-            raise Exception(
-                "You cannot use chroma's cache directory, please set a different directory"
+            raise ValueError(
+                "You cannot use chroma's cache directory .chroms/, please set a different directory"
             )
 
         self._save_folder = settings.persist_directory
