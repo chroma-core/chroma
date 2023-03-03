@@ -52,6 +52,7 @@ class API(ABC):
     @abstractmethod
     def create_collection(
         self,
+        name: str,
         metadata: Optional[Dict] = None,
         get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,

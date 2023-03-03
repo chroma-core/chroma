@@ -45,6 +45,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as e:
+        print("ERROR: ", e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 

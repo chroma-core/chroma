@@ -13,10 +13,7 @@ class DB(ABC):
     @abstractmethod
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ):
-        pass
-
-    def get_or_create_collection(self, name, metadata=None):
+    ) -> Sequence:
         pass
 
     @abstractmethod
@@ -24,7 +21,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Sequence[str]]:
+    def list_collections(self) -> Sequence:
         pass
 
     @abstractmethod

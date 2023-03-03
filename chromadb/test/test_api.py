@@ -1,4 +1,5 @@
 import chromadb
+from chromadb.api import API
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 from chromadb.errors import NoDatapointsException
@@ -407,6 +408,58 @@ def test_modify(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_cru(api_fixture, request):
+    api: API = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    metadata_a = {"a": 1, "b": 2}
+    # Test create metatdata
+    collection = api.create_collection("testspace", metadata=metadata_a)
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 1
+    assert collection.metadata["b"] == 2
+
+    # Test get metatdata
+    collection = api.get_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 1
+    assert collection.metadata["b"] == 2
+
+    # Test modify metatdata
+    collection.modify(metadata={"a": 2, "c": 3})
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+    assert "b" not in collection.metadata
+
+    # Test get after modify metatdata
+    collection = api.get_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+    assert "b" not in collection.metadata
+
+    # Test name exists get_or_create_metadata
+    collection = api.get_or_create_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+
+    # Test name exists create metadata
+    collection = api.get_or_create_collection("testspace2")
+    assert collection.metadata is None
+
+    # Test list collections
+    collections = api.list_collections()
+    for collection in collections:
+        if collection.name == "testspace":
+            assert collection.metadata is not None
+            assert collection.metadata["a"] == 2
+            assert collection.metadata["c"] == 3
+        elif collection.name == "testspace2":
+            assert collection.metadata is None
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_increment_index_on(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
@@ -557,6 +610,7 @@ def test_metadata_add_query_int_float(api_fixture, request):
     collection.add(**metadata_records)
 
     items: QueryResult = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    assert items["metadatas"] is not None
     assert items["metadatas"][0][0]["int_value"] == 1
     assert items["metadatas"][0][0]["float_value"] == 1.001
     assert type(items["metadatas"][0][0]["int_value"]) == int

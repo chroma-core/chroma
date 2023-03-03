@@ -117,10 +117,7 @@ class Clickhouse(DB):
     #
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ):
-        if metadata is None:
-            metadata = {}
-
+    ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
 
@@ -132,16 +129,15 @@ class Clickhouse(DB):
                 raise Exception(f"collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
-        data_to_insert = []
-        data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
+        data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
 
         self._get_conn().insert(
             "collections", data_to_insert, column_names=["uuid", "name", "metadata"]
         )
-        return collection_uuid
+        return [[collection_uuid, name, metadata]]
 
     def get_collection(self, name: str):
-        return (
+        res = (
             self._get_conn()
             .query(
                 f"""
@@ -150,9 +146,12 @@ class Clickhouse(DB):
             )
             .result_rows
         )
+        # json.loads the metadata
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
-    def list_collections(self) -> Sequence[Sequence[str]]:
-        return self._get_conn().query(f"""SELECT * FROM collections""").result_rows
+    def list_collections(self) -> Sequence:
+        res = self._get_conn().query(f"""SELECT * FROM collections""").result_rows
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
         self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
