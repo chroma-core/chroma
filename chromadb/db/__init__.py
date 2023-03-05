@@ -100,7 +100,12 @@ class DB(ABC):
 
     @abstractmethod
     def get_nearest_neighbors(
-        self, collection_name, where, embeddings, n_results, where_document
+        self,
+        collection_name: str,
+        where: Where,
+        embeddings: Embeddings,
+        n_results: int,
+        where_document: WhereDocument,
     ) -> Tuple[List[List[UUID]], npt.NDArray]:
         pass
 
