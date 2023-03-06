@@ -21,6 +21,7 @@ class Hnswlib(Index):
     _uuid_to_id = {}
 
     def __init__(self, settings):
+        settings.validate('persist_directory')
         self._save_folder = settings.persist_directory + "/index"
 
     def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):

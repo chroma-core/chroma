@@ -2,6 +2,7 @@ import json
 import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
+import chromadb.config
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -41,8 +42,8 @@ def check_index_name(index_name):
 
 
 class LocalAPI(API):
-    def __init__(self, settings, db: DB):
-        self._db = db
+    def __init__(self, settings):
+        self._db = chromadb.config.get_component(settings, 'chroma_db_impl')
 
     def heartbeat(self):
         return int(1000 * time.time_ns())

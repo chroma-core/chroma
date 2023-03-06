@@ -9,11 +9,13 @@ import chromadb.config
 
 class GetDBTest(unittest.TestCase):
     @patch("chromadb.db.duckdb.DuckDB", autospec=True)
+    @patch.dict(chromadb.config._impls, {}, clear=True)
     def test_default_db(self, mock):
         db = chromadb.get_db(chromadb.config.Settings(persist_directory="./foo"))
         assert mock.called
 
     @patch("chromadb.db.duckdb.PersistentDuckDB", autospec=True)
+    @patch.dict(chromadb.config._impls, {}, clear=True)
     def test_persistent_duckdb(self, mock):
         db = chromadb.get_db(
             chromadb.config.Settings(chroma_db_impl="duckdb+parquet", persist_directory="./foo")
@@ -21,6 +23,7 @@ class GetDBTest(unittest.TestCase):
         assert mock.called
 
     @patch("chromadb.db.clickhouse.Clickhouse", autospec=True)
+    @patch.dict(chromadb.config._impls, {}, clear=True)
     def test_clickhouse(self, mock):
         db = chromadb.get_db(
             chromadb.config.Settings(
@@ -34,16 +37,17 @@ class GetDBTest(unittest.TestCase):
 
 
 class GetAPITest(unittest.TestCase):
-    @patch("chromadb.db.duckdb.DuckDB", autospec=True)
     @patch("chromadb.api.local.LocalAPI", autospec=True)
+    @patch.dict(chromadb.config._impls, {}, clear=True)
     @patch.dict(os.environ, {}, clear=True)
-    def test_local(self, mock_api, mock_db):
+    def test_local(self, mock_api):
         api = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
         assert mock_api.called
-        assert mock_db.called
+
 
     @patch("chromadb.api.fastapi.FastAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
+    @patch.dict(chromadb.config._impls, {}, clear=True)
     def test_fastapi(self, mock):
         api = chromadb.Client(
             chromadb.config.Settings(
