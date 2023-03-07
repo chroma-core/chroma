@@ -2,7 +2,7 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"): # If you have a beefier machine, try "gtr-t5-large".
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
