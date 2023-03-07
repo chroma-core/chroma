@@ -2,6 +2,8 @@ from pydantic import BaseSettings, Field
 import importlib
 import logging
 
+logger = logging.getLogger(__name__)
+
 _legacy_config_values = {'duckdb': 'chromadb.db.duckdb.DuckDB',
                          'duckdb+parquet': 'chromadb.db.duckdb.PersistentDuckDB',
                          'clickhouse': 'chromadb.db.clickhouse.Clickhouse',
@@ -52,11 +54,10 @@ def get_component(settings, key):
     fqn = settings[key]
 
     if fqn not in _impls:
-        print("constructing:", fqn)
         module_name, class_name = fqn.rsplit(".", 1)
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
         _impls[fqn] = cls(settings)
 
-    logging.debug(f"Using {fqn} for {key}")
+    logger.info(f"Using {fqn} for {key}")
     return _impls[fqn]
