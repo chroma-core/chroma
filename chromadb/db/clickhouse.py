@@ -14,6 +14,9 @@ from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
+import logging
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
 
@@ -125,7 +128,7 @@ class Clickhouse(DB):
 
         if len(dupe_check) > 0:
             if get_or_create:
-                print(f"collection with name {name} already exists, returning existing collection")
+                logger.info(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")

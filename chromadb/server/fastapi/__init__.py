@@ -28,7 +28,9 @@ from chromadb.server.fastapi.types import (
 )
 from starlette.requests import Request
 from starlette.responses import Response
+import logging
 
+logger = logging.getLogger(__name__)
 
 def use_route_names_as_operation_ids(app: FastAPI) -> None:
     """
@@ -45,7 +47,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as e:
-        print("ERROR: ", e)
+        logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
