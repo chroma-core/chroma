@@ -1,6 +1,8 @@
 import chromadb.config
 import logging
 
+logger = logging.getLogger(__name__)
+
 __settings = chromadb.config.Settings()
 
 def configure(**kwargs):
@@ -15,5 +17,4 @@ def get_db(settings=__settings):
 def Client(settings=__settings):
     """Return a chroma.API instance based on the provided or environmental
     settings, optionally overriding the DB instance."""
-
     return chromadb.config.get_component(settings, "chroma_api_impl")

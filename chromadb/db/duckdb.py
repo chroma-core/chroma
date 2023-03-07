@@ -15,7 +15,9 @@ import duckdb
 import uuid
 import time
 import itertools
+import logging
 
+logger = logging.getLogger(__name__)
 
 def clickhouse_to_duckdb_schema(table_schema):
     for item in table_schema:
@@ -83,7 +85,7 @@ class DuckDB(Clickhouse):
         dupe_check = self.get_collection(name)
         if len(dupe_check) > 0:
             if get_or_create == True:
-                print(f"collection with name {name} already exists, returning existing collection")
+                logger.info(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
@@ -346,7 +348,7 @@ class DuckDB(Clickhouse):
         self._idx = Hnswlib(self._settings)
 
     def __del__(self):
-        print("Exiting: Cleaning up .chroma directory")
+        logger.info("Exiting: Cleaning up .chroma directory")
         self._idx.reset()
 
     def persist(self):
@@ -380,7 +382,7 @@ class PersistentDuckDB(DuckDB):
         """
         Persist the database to disk
         """
-        print("Persisting DB to disk, putting it in the save folder", self._save_folder)
+        logger.info("Persisting DB to disk, putting it in the save folder", self._save_folder)
         if self._conn is None:
             return
 
@@ -414,26 +416,26 @@ class PersistentDuckDB(DuckDB):
 
         # load in the embeddings
         if not os.path.exists(f"{self._save_folder}/chroma-embeddings.parquet"):
-            print(f"No existing DB found in {self._save_folder}, skipping load")
+            logger.info(f"No existing DB found in {self._save_folder}, skipping load")
         else:
             path = self._save_folder + "/chroma-embeddings.parquet"
             self._conn.execute(f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');")
-            print(
+            logger.info(
                 f"""loaded in {self._conn.query(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
             )
 
         # load in the collections
         if not os.path.exists(f"{self._save_folder}/chroma-collections.parquet"):
-            print(f"No existing DB found in {self._save_folder}, skipping load")
+            logger.info(f"No existing DB found in {self._save_folder}, skipping load")
         else:
             path = self._save_folder + "/chroma-collections.parquet"
             self._conn.execute(f"INSERT INTO collections SELECT * FROM read_parquet('{path}');")
-            print(
+            logger.info(
                 f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections"""
             )
 
     def __del__(self):
-        print("PersistentDuckDB del, about to run persist")
+        logger.info("PersistentDuckDB del, about to run persist")
         self.persist()
 
     def reset(self):
