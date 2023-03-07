@@ -1,5 +1,4 @@
 import json
-from uuid import UUID
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
@@ -112,7 +111,7 @@ class LocalAPI(API):
     #
     def _add(
         self,
-        ids: List[UUID],
+        ids: List[str],
         collection_name: str,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
@@ -208,7 +207,7 @@ class LocalAPI(API):
 
     def _delete(
         self,
-        collection_name: Optional[str],
+        collection_name: str,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,

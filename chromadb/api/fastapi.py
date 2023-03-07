@@ -1,5 +1,4 @@
 from typing import Callable, Dict, Optional
-from uuid import UUID
 from chromadb.api import API
 from chromadb.api.types import (
     Documents,
@@ -153,7 +152,7 @@ class FastAPI(API):
 
     def _delete(
         self,
-        collection_name: Optional[str],
+        collection_name: str,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -170,7 +169,7 @@ class FastAPI(API):
 
     def _add(
         self,
-        ids: List[UUID],
+        ids: List[str],
         collection_name: str,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
