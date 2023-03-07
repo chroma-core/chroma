@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: chroma
+    plan: Starter
+    region: oregon
+    env: docker
+    dockerfilePath: ./Dockerfile
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 60 # optional if targetCPUPercent is set
+      targetCPUPercent: 60 # optional if targetMemory is set
+    envVars:
+      - key: CHROMA_DB_IMPL
+        value: clickhouse
+      - key: CLICKHOUSE_HOST
+        value: clickhouse
+      - key: CLICKHOUSE_PORT
+        value: 8123
+  - type: pserv
+    name: clickhouse
+    plan: Starter
+    region: oregon
+    env: docker
+    dockerfilePath: ./clickhouse/Dockerfile
+    autoDeploy: false
+    disk:
+      name: data
+      mountPath: /var/lib/clickhouse
+      sizeGB: 10
