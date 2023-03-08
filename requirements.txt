@@ -6,4 +6,5 @@ duckdb==0.5.1
 hnswlib==0.7.0
 clickhouse-connect==0.5.7
 pydantic==1.9.0
-sentence-transformers==2.2.2 
+sentence-transformers==2.2.2
+pulsar-client==3.0.0

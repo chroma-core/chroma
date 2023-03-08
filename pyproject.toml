@@ -25,6 +25,7 @@ dependencies = [
   'fastapi >= 0.85.1',
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.21.6',
+  'pulsar-client >= 3.0.0'
 ]
 
 [tool.black]
