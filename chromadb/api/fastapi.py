@@ -13,7 +13,7 @@ from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
 import json
-from typing import Sequence
+from typing import List, Sequence
 from chromadb.api.models.Collection import Collection
 
 
@@ -23,7 +23,7 @@ class FastAPI(API):
             f"http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
         )
 
-    def heartbeat(self):
+    def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
         resp = requests.get(self._api_url)
         resp.raise_for_status()
@@ -107,7 +107,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def _peek(self, collection_name, limit=10):
+    def _peek(self, collection_name: str, limit: int = 10):
         return self._get(
             collection_name,
             limit=limit,
@@ -118,13 +118,13 @@ class FastAPI(API):
         self,
         collection_name: str,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Where = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: WhereDocument = {},
         include: Include = ["metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
@@ -150,7 +150,13 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json()
 
-    def _delete(self, collection_name, ids=None, where={}, where_document={}):
+    def _delete(
+        self,
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         """Deletes embeddings from the database"""
 
         resp = requests.post(
@@ -163,12 +169,12 @@ class FastAPI(API):
 
     def _add(
         self,
-        ids,
-        collection_name,
-        embeddings,
-        metadatas=None,
-        documents=None,
-        increment_index=True,
+        ids: List[str],
+        collection_name: str,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
     ):
         """
         Adds a batch of embeddings to the database
@@ -226,11 +232,11 @@ class FastAPI(API):
 
     def _query(
         self,
-        collection_name,
-        query_embeddings,
-        n_results=10,
-        where={},
-        where_document={},
+        collection_name: str,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["metadatas", "documents", "distances"],
     ):
         """Gets the nearest neighbors of a single embedding"""
@@ -268,7 +274,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return resp.json
 
-    def raw_sql(self, sql):
+    def raw_sql(self, sql) -> pd.DataFrame:
         """Runs a raw SQL query against the database"""
         resp = requests.post(self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql}))
         resp.raise_for_status()

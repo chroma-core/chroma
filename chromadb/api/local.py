@@ -1,5 +1,4 @@
 import json
-import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
@@ -22,7 +21,7 @@ import re
 
 
 # mimics s3 bucket requirements for naming
-def check_index_name(index_name):
+def check_index_name(index_name: str):
     msg = ("Expected collection name that "
            "(1) contains 3-63 characters, "
            "(2) starts and ends with an alphanumeric character, "
@@ -112,13 +111,13 @@ class LocalAPI(API):
     #
     def _add(
         self,
-        ids,
+        ids: List[str],
         collection_name: str,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
+    ) -> bool:
 
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
@@ -141,7 +140,7 @@ class LocalAPI(API):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> bool:
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
 
@@ -151,15 +150,15 @@ class LocalAPI(API):
         self,
         collection_name: str,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Where = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents"],
-    ):
+    ) -> GetResult:
         if where is None:
             where = {}
 
@@ -206,7 +205,13 @@ class LocalAPI(API):
             get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
-    def _delete(self, collection_name, ids=None, where=None, where_document=None):
+    def _delete(
+        self,
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         if where is None:
             where = {}
 
@@ -218,7 +223,7 @@ class LocalAPI(API):
         )
         return deleted_uuids
 
-    def _count(self, collection_name):
+    def _count(self, collection_name: str):
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
@@ -227,11 +232,11 @@ class LocalAPI(API):
 
     def _query(
         self,
-        collection_name,
-        query_embeddings,
-        n_results=10,
-        where={},
-        where_document={},
+        collection_name: str,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ):
         uuids, distances = self._db.get_nearest_neighbors(
@@ -292,18 +297,18 @@ class LocalAPI(API):
     def raw_sql(self, raw_sql):
         return self._db.raw_sql(raw_sql)
 
-    def create_index(self, collection_name: str):
+    def create_index(self, collection_name: str) -> bool:
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
-    def _peek(self, collection_name, n=10):
+    def _peek(self, collection_name: str, n: int = 10) -> GetResult:
         return self._get(
             collection_name=collection_name,
             limit=n,
             include=["embeddings", "documents", "metadatas"],
         )
 
-    def persist(self):
+    def persist(self) -> bool:
         self._db.persist()
         return True
