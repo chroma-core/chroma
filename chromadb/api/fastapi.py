@@ -118,13 +118,13 @@ class FastAPI(API):
         self,
         collection_name: str,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Where = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: WhereDocument = {},
         include: Include = ["metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
@@ -235,8 +235,8 @@ class FastAPI(API):
         collection_name: str,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["metadatas", "documents", "distances"],
     ):
         """Gets the nearest neighbors of a single embedding"""
