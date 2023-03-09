@@ -13,6 +13,10 @@ import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
+from clickhouse_connect import common
+import logging
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
 
@@ -51,6 +55,7 @@ class Clickhouse(DB):
         self._settings = settings
 
     def _init_conn(self):
+        common.set_setting("autogenerate_session_id", False)
         self._conn = clickhouse_connect.get_client(
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
@@ -123,7 +128,7 @@ class Clickhouse(DB):
 
         if len(dupe_check) > 0:
             if get_or_create:
-                print(f"collection with name {name} already exists, returning existing collection")
+                logger.info(f"collection with name {name} already exists, returning existing collection")
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
@@ -315,7 +320,9 @@ class Clickhouse(DB):
                         return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                     return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                 else:
-                    raise ValueError(f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}")
+                    raise ValueError(
+                        f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}"
+                    )
             elif type(value) == list:
                 all_subresults = []
                 for subwhere in value:

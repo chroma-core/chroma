@@ -21,6 +21,9 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from chromadb.api import API
@@ -46,7 +49,8 @@ class Collection(BaseModel):
         else:
             import chromadb.utils.embedding_functions as ef
 
-            print(
+
+            logger.warning(
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
