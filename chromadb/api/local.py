@@ -1,9 +1,11 @@
 import json
-import uuid
+import re
 import time
-from typing import Dict, List, Optional, Sequence, Callable, Type, cast
+import uuid
+from typing import Callable, Dict, List, Optional, Sequence, Type, cast
+
 from chromadb.api import API
-from chromadb.db import DB
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
     Embedding,
@@ -16,9 +18,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
-from chromadb.api.models.Collection import Collection
-
-import re
+from chromadb.db import DB
 
 
 # mimics s3 bucket requirements for naming

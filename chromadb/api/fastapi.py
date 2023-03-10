@@ -1,20 +1,13 @@
-from typing import Callable, Dict, Optional
-from chromadb.api import API
-from chromadb.api.types import (
-    Documents,
-    Embeddings,
-    IDs,
-    Include,
-    Metadatas,
-    Where,
-    WhereDocument,
-)
-from chromadb.errors import NoDatapointsException
+import json
+from typing import Callable, Dict, Optional, Sequence
+
 import pandas as pd
 import requests
-import json
-from typing import Sequence
+
+from chromadb.api import API
 from chromadb.api.models.Collection import Collection
+from chromadb.api.types import Documents, Embeddings, IDs, Include, Metadatas, Where, WhereDocument
+from chromadb.errors import NoDatapointsException
 
 
 class FastAPI(API):

@@ -1,6 +1,9 @@
+from typing import Any, List, Union
+
 from pydantic import BaseModel
-from typing import List, Union, Any
+
 from chromadb.api.types import Include
+
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):

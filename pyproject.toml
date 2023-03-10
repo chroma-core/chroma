@@ -32,6 +32,11 @@ line-length = 100
 required-version = "22.10.0" # Black will refuse to run if it's not this version.
 target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_glob = "^(chromadb)"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 

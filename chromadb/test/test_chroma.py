@@ -1,7 +1,8 @@
-import pytest
-import unittest
 import os
+import unittest
 from unittest.mock import patch
+
+import pytest
 
 import chromadb
 import chromadb.config

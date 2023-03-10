@@ -1,21 +1,23 @@
+import json
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Sequence, Optional, TypedDict, List, Dict
+from typing import Callable, Dict, List, Optional, Sequence, TypedDict, Union
 from uuid import UUID
+
 import pandas as pd
+
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     ID,
     Documents,
     Embeddings,
+    GetResult,
     IDs,
     Include,
     Metadatas,
-    Where,
     QueryResult,
-    GetResult,
+    Where,
     WhereDocument,
 )
-import json
 
 
 class API(ABC):

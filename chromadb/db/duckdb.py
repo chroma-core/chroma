@@ -1,21 +1,23 @@
+import itertools
+import json
+import logging
+import time
+import uuid
+from typing import Dict, List, Optional, Sequence
+
+import duckdb
+import pandas as pd
+
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
+    COLLECTION_TABLE_SCHEMA,
+    EMBEDDING_TABLE_SCHEMA,
     Clickhouse,
     db_array_schema_to_clickhouse_schema,
-    EMBEDDING_TABLE_SCHEMA,
     db_schema_to_keys,
-    COLLECTION_TABLE_SCHEMA,
 )
-from typing import List, Optional, Sequence, Dict
-import pandas as pd
-import json
-import duckdb
-import uuid
-import time
-import itertools
-import logging
+from chromadb.db.index.hnswlib import Hnswlib
 
 logger = logging.getLogger(__name__)
 
@@ -443,8 +445,8 @@ class PersistentDuckDB(DuckDB):
     def reset(self):
         super().reset()
         # empty the save folder
-        import shutil
         import os
+        import shutil
 
         shutil.rmtree(self._save_folder)
         os.mkdir(self._save_folder)

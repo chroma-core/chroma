@@ -1,20 +1,22 @@
+import json
+import logging
+import time
+import uuid
+from typing import Dict, List, Optional, Sequence, Tuple, cast
+
+import clickhouse_connect
+import numpy.typing as npt
+from clickhouse_connect import common
+from clickhouse_connect.driver.client import Client
+
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.errors import (
-    NoDatapointsException,
     InvalidDimensionException,
+    NoDatapointsException,
     NotEnoughElementsException,
 )
-import uuid
-import time
-import numpy.typing as npt
-import json
-from typing import Dict, Optional, Sequence, List, Tuple, cast
-import clickhouse_connect
-from clickhouse_connect.driver.client import Client
-from clickhouse_connect import common
-import logging
 
 logger = logging.getLogger(__name__)
 

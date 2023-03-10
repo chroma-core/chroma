@@ -1,18 +1,20 @@
-from typing import TYPE_CHECKING, Optional, cast, List, Dict
+import logging
+from typing import TYPE_CHECKING, Dict, List, Optional, cast
+
 from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
-    Embedding,
-    Include,
-    Metadata,
+    ID,
     Document,
-    Where,
-    IDs,
+    Embedding,
     EmbeddingFunction,
     GetResult,
-    QueryResult,
-    ID,
+    IDs,
+    Include,
+    Metadata,
     OneOrMany,
+    QueryResult,
+    Where,
     WhereDocument,
     maybe_cast_one_to_many,
     validate_ids,
@@ -21,7 +23,6 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

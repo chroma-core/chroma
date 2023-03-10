@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from typing import Dict, List, Literal, Optional, Protocol, Sequence, TypedDict, TypeVar, Union
 
 ID = str
 IDs = List[ID]

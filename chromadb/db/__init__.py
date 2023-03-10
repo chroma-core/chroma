@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Sequence, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
+
 import numpy.typing as npt
-from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
+
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 
 
 class DB(ABC):

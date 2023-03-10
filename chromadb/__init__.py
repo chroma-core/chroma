@@ -1,5 +1,6 @@
-import chromadb.config
 import logging
+
+import chromadb.config
 
 logger = logging.getLogger(__name__)
 

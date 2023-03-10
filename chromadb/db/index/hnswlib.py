@@ -1,14 +1,16 @@
+import logging
 import os
 import pickle
 import time
-from typing import Optional
 import uuid
-from chromadb.api.types import IndexMetadata
+from typing import Optional
+
 import hnswlib
 import numpy as np
+
+from chromadb.api.types import IndexMetadata
 from chromadb.db.index import Index
-from chromadb.errors import NoIndexException, InvalidDimensionException
-import logging
+from chromadb.errors import InvalidDimensionException, NoIndexException
 
 logger = logging.getLogger(__name__)
 
