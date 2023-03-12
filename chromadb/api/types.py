@@ -1,4 +1,5 @@
 from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from chromadb.db import Where, WhereDocument
 
 ID = str
 IDs = List[ID]
@@ -19,17 +20,6 @@ T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
 Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
-
-# Grammar for where expressions
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = Dict[Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]]
-
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
 
 
 class GetResult(TypedDict):
