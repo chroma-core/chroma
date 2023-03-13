@@ -4,7 +4,7 @@ import pulsar.schema as schema
 
 class AddEmbedding(schema.Record):
     _avro_namespace_ = 'chromadb.ingest'
-    id = schema.Union([schema.String(), schema.UUID(), schema.Bytes(16)])
+    id = schema.String()
     embedding = schema.Array(schema.Float())
     metadata = schema.Map(schema.String(), schema.String())
     update = schema.Boolean()
@@ -12,7 +12,7 @@ class AddEmbedding(schema.Record):
 
 class DeleteEmbedding(schema.Record):
     _avro_namespace_ = 'chromadb.ingest'
-    id = schema.Union([schema.String(), schema.UUID(), schema.Bytes(16)])
+    id = schema.String()
 
 
 class Message(schema.Record):

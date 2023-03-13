@@ -87,7 +87,7 @@ WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
 
 
 class EmbeddingMetadata(TypedDict):
-    id: UUID
+    id: str
     sequence: int
     metadata: StrDict
 
@@ -110,7 +110,7 @@ class Metadata(ABC):
             where: Where = {},
             where_document: WhereDocument = {},
             max_sequence: int = -1,
-            ids: Optional[Sequence[UUID]] = None,
+            ids: Optional[Sequence[str]] = None,
             sort: Optional[str] = None,
             limit: Optional[int] = None,
             offset: Optional[int] = None) -> Sequence[EmbeddingMetadata]:
