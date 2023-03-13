@@ -27,7 +27,7 @@ class Reader(ABC):
         pass
 
     @abstractmethod
-    def search(self, queries: Sequence[Query]) -> Sequence[IDSeq]:
+    def query(self, queries: Sequence[Query]) -> Sequence[IDSeq]:
         """Given a list of Query embeddings, return the top-k nearest
         neighbors for each query. If ids are provided, filter results
         to include only those IDs."""

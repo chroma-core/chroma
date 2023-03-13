@@ -7,8 +7,6 @@ class AddEmbedding(schema.Record):
     id = schema.Union([schema.String(), schema.UUID(), schema.Bytes(16)])
     embedding = schema.Array(schema.Float())
     metadata = schema.Map(schema.String(), schema.String())
-    object_reference = schema.String()
-    object_inline = schema.Bytes()
     update = schema.Boolean()
 
 

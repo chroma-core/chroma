@@ -17,7 +17,7 @@ class Collection(TypedDict):
 
 class Segment(TypedDict):
     id: UUID
-    python_class: str
+    type: str
     metadata: StrDict
 
 
