@@ -1,0 +1,41 @@
+services:
+#clickhouse
+- type: pserv
+  name: clickhouse
+  env: docker
+  dockerfilePath: ./config/Dockerfile
+  plan: standard
+  autoDeploy: false
+  disk:
+    name: data
+    mountPath: /var/lib/clickhouse
+    sizeGB: 10
+  envVars:
+    - key: ALLOW_EMPTY_PASSWORD
+      value: yes
+    - key: CLICKHOUSE_TCP_PORT
+      value: 9000
+    - key: CLICKHOUSE_HTTP_PORT
+      value: 8123
+
+#server
+- type: web
+  name: chroma
+  env: docker
+  plan: standard
+  autoDeploy: false
+  dockerCommand: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
+  disk:
+    name: index_data
+    mountPath: /index_data
+    sizeGB: 10
+  envVars: 
+    - key: CHROMA_DB_IMPL
+      value: clickhouse
+    - key: CLICKHOUSE_HOST
+      fromService:
+        type: pserv
+        name: clickhouse
+        property: host
+    - key: CLICKHOUSE_PORT
+      value: 8123
