@@ -69,8 +69,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction):
             )
         self.api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
         self._headers = {"Authorization": f"Bearer {hf_token}"}
-        self._model_name = model_name
 
     def __call__(self, texts: Documents) -> Embeddings:
         # Call HuggingFace Embedding API for each document.
-        return requests.post(api_url, headers=headers, json={"inputs": texts, "options":{"wait_for_model":True}}).json()
+        return requests.post(self._api_url, headers=self._headers, json={"inputs": texts, "options":{"wait_for_model":True}}).json()
