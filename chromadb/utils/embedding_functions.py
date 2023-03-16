@@ -58,3 +58,19 @@ class CohereEmbeddingFunction(EmbeddingFunction):
         return [
             embeddings for embeddings in self._client.embed(texts=texts, model=self._model_name)
         ]
+
+class HuggingFaceEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        try:
+            import requests
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
+        self.api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
+        self._headers = {"Authorization": f"Bearer {hf_token}"}
+        self._model_name = model_name
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        # Call HuggingFace Embedding API for each document.
+        return requests.post(api_url, headers=headers, json={"inputs": texts, "options":{"wait_for_model":True}}).json()
