@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     chroma_server_host: str = None
     chroma_server_http_port: str = None
+    chroma_server_ssl_enabled: bool = False
     chroma_server_grpc_port: str = None
 
     def __getitem__(self, item):
