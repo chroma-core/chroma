@@ -1,5 +1,5 @@
 from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
-from chromadb.db import Where, WhereDocument
+from chromadb.segment.metadata import Where, WhereDocument
 
 ID = str
 IDs = List[ID]

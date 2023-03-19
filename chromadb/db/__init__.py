@@ -12,7 +12,7 @@ NameOrID = Union[str, UUID]
 class Collection(TypedDict):
     id: UUID
     name: str
-    metadata: StrDict = None
+    metadata: StrDict
 
 
 class Segment(TypedDict):
@@ -74,63 +74,6 @@ class System(ABC):
         pass
 
 
-# Query Grammar
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = dict[Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, list["Where"]]]
-
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
-
-
-class EmbeddingMetadata(TypedDict):
-    id: str
-    sequence: int
-    metadata: StrDict
-
-
-class Metadata(ABC):
-    """Interface for Chroma's Embedding StrDict storage backend."""
-
-    @abstractmethod
-    def append(self,
-               collection_id: UUID,
-               metadata: Sequence[EmbeddingMetadata]) -> None:
-        """Add embedding metadata to a collection. If embeddings are
-        already in the collection, they will be updated."""
-        pass
-
-
-    @abstractmethod
-    def get(self,
-            collection_id: UUID,
-            where: Where = {},
-            where_document: WhereDocument = {},
-            max_sequence: int = -1,
-            ids: Optional[Sequence[str]] = None,
-            sort: Optional[str] = None,
-            limit: Optional[int] = None,
-            offset: Optional[int] = None) -> Sequence[EmbeddingMetadata]:
-        """Get embedding metadata from a collection. Returns sequence
-        of id, metadata pairs."""
-        pass
-
-
-    @abstractmethod
-    def count(self, collection_id: UUID) -> int:
-        """Get the number of embeddings in a collection."""
-        pass
-
-
-    @abstractmethod
-    def delete(self, collection_id: UUID) -> None:
-        """Soft-delete embeddings from a collection by ID."""
-        pass
-
-
 class DB(ABC):
     """Existing DB interface, retained for backwards compatibility"""
 
@@ -152,4 +95,6 @@ class DB(ABC):
     @abstractmethod
     def reset(self):
         pass
+
+
 
