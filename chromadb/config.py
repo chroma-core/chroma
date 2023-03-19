@@ -1,4 +1,5 @@
 from pydantic import BaseSettings, Field
+from typing import Optional
 import importlib
 import logging
 
@@ -16,14 +17,14 @@ class Settings(BaseSettings):
     chroma_db_impl: str = 'chromadb.db.duckdb.DuckDB'
     chroma_api_impl: str = 'chromadb.api.local.LocalAPI'
 
-    clickhouse_host: str = None
-    clickhouse_port: str = None
+    clickhouse_host: Optional[str] = None
+    clickhouse_port: Optional[str] = None
 
     persist_directory: str = ".chroma"
 
-    chroma_server_host: str = None
-    chroma_server_http_port: str = None
-    chroma_server_grpc_port: str = None
+    chroma_server_host: Optional[str] = None
+    chroma_server_http_port: Optional[str] = None
+    chroma_server_grpc_port: Optional[str] = None
 
     def validate(self, item):
         val = self[item]
