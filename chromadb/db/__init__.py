@@ -2,75 +2,51 @@ from abc import ABC, abstractmethod
 from typing import Optional, TypedDict, Union, Literal
 from uuid import UUID
 from collections.abc import Sequence
-import numpy.typing as npt
+from enum import Enum, auto
 
 
 StrDict = Optional[dict[str, str]]
-NameOrID = Union[str, UUID]
 
+class ScalarType(Enum):
+    FLOAT64 = "float64"
+    FLOAT32 = "float32"
+    FLOAT16 = "float16"
+    INT64 = "int64"
+    INT32 = "int32"
+    INT16 = "int16"
+    INT8 = "int8"
+    
 
-class Collection(TypedDict):
-    id: UUID
+class EmbeddingFunction(TypedDict):
     name: str
+    dimension: int 
+    scalar_type: ScalarType
     metadata: StrDict
 
 
 class Segment(TypedDict):
     id: UUID
     type: str
+    embedding_function: EmbeddingFunction
+    children: Sequence[UUID]
     metadata: StrDict
 
 
 class System(ABC):
-    """Interface for Chroma's System storage backend"""
-
-
-    @abstractmethod
-    def create_collection(self,
-                          name: str,
-                          metadata: StrDict = None,
-                          get_or_create: bool = False) -> Collection:
-       """Create a new collection"""
-       pass
-
+    """Data interface for Chroma's System storage backend"""
 
     @abstractmethod
-    def get_collection(self,
-                       name_or_id: NameOrID) -> Collection:
-        """Get a collection"""
+    def create_segment(self, segment: Segment) -> Segment:
+        """Create a new segment."""
         pass
 
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Collection]:
-        """List all collections"""
-        pass
-
-
-    @abstractmethod
-    def update_collection(self,
-                          name_or_id: NameOrID,
-                          new_name: Optional[str] = None,
-                          new_metadata: StrDict = None) -> Collection:
-        """Update a collection's name and/or metadata"""
-        pass
-
-
-    @abstractmethod
-    def delete_collection(self,  name_or_id: NameOrID) -> None:
-        """Delete a collection by name or id. Returns None on success."""
-        pass
-
-
-    # TODO: This method signature needs more thought put into it, and will likely
-    # need to change or be split into multiple methods as the system grows.
-    @abstractmethod
-    def get_segment(self,
-                    metadata: dict[str, str],
-                    collection_id: Optional[UUID] = None,
-                    create: bool = False) -> Segment:
-        """Obtain a segment that can handle the given embedding
-        metadata. Optionally, create it if it doesn't already exist."""
+    def get_segments(self, 
+                     id: Optional[UUID] = None,
+                     embedding_function: Optional[str] = None,
+                     metadata: StrDict = None) -> Sequence[Segment]:                      
+        """Find segments by id, embedding function, or metadata"""
         pass
 
 
@@ -95,6 +71,4 @@ class DB(ABC):
     @abstractmethod
     def reset(self):
         pass
-
-
 
