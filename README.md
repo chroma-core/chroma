@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    **Chroma - the open-source embedding database**. The fastest way to build Python or JavaScript LLM apps with memory!
+    <b>Chroma - the open-source embedding database</b>. The fastest way to build Python or JavaScript LLM apps with memory!
 </p>
 
 
