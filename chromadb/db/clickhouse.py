@@ -13,6 +13,7 @@ import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
+from clickhouse_connect import common
 import logging
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class Clickhouse(DB):
         settings.validate('clickhouse_port')
 
     def _init_conn(self):
+        common.set_setting("autogenerate_session_id", False)
         self._conn = clickhouse_connect.get_client(
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
@@ -320,7 +322,9 @@ class Clickhouse(DB):
                         return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                     return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                 else:
-                    raise ValueError(f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}")
+                    raise ValueError(
+                        f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}"
+                    )
             elif type(value) == list:
                 all_subresults = []
                 for subwhere in value:

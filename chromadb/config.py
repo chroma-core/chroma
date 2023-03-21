@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     chroma_server_host: Optional[str] = None
     chroma_server_http_port: Optional[str] = None
+    chroma_server_ssl_enabled: bool = False
     chroma_server_grpc_port: Optional[str] = None
 
     def validate(self, item):
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
         if val is None:
             raise ValueError(f"Missing required config value '{item}'")
         return val
+
 
     def __getitem__(self, item):
         val = getattr(self, item)

@@ -2,7 +2,9 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    # If you have a beefier machine, try "gtr-t5-large".
+    # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"): 
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
@@ -58,3 +60,19 @@ class CohereEmbeddingFunction(EmbeddingFunction):
         return [
             embeddings for embeddings in self._client.embed(texts=texts, model=self._model_name)
         ]
+
+class HuggingFaceEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        try:
+            import requests 
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
+        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}" 
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {api_key}"})
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        # Call HuggingFace Embedding API for each document
+        return self._session.post(self._api_url, json={"inputs": texts, "options":{"wait_for_model":True}}).json()

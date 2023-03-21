@@ -42,6 +42,9 @@ def clickhouse_to_duckdb_schema(table_schema):
 class DuckDB(Clickhouse):
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
+
+        logger.warning("Using embedded DuckDB without persistence: data will be transient")
+
         self._conn = duckdb.connect()
         self._create_table_collections()
         self._create_table_embeddings()
