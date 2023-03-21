@@ -7,21 +7,20 @@
     The fastest way to build Python or JavaScript LLM apps with memory!
 </p>
 
-<a href="https://discord.gg/MMeYNTmh3x" target="_blank">
-    <img src="https://img.shields.io/discord/1073293645303795742" alt="Discord">
-</a>
-<a href="https://github.com/chroma-core/chroma/releases" target="_blank">
-    <img src="https://img.shields.io/github/v/release/chroma-core/chroma?color=white" alt="Release">
-</a>
-<a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
-    <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
-</a>
-<a href="https://docs.trychroma.com/" target="_blank">
-    Docs
-</a> | 
-<a href="https://www.trychroma.com/" target="_blank">
-    Homepage
-</a>
+<p align="center">
+  <a href="https://discord.gg/MMeYNTmh3x" target="_blank">
+      <img src="https://img.shields.io/discord/1073293645303795742" alt="Discord">
+  </a> |
+  <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
+      <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
+  </a> | 
+  <a href="https://docs.trychroma.com/" target="_blank">
+      Docs
+  </a> | 
+  <a href="https://www.trychroma.com/" target="_blank">
+      Homepage
+  </a>
+</p>
 
 ```bash
 pip install chromadb # python client
@@ -57,10 +56,10 @@ results = collection.query(
 
 ## Features
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
-- __Integrations__: `🦜️🔗 LangChain` (python and js), `🦙 gpt-index/LlamaIndex` and more soon
+- __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
-- __Free__: Apache 2.0 Licensed
+- __Free & Open Source__: Apache 2.0 Licensed
 
 ## Use case: ChatGPT for ______
 
