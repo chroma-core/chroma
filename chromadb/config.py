@@ -5,20 +5,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_legacy_config_values = {'duckdb': 'chromadb.db.duckdb.DuckDB',
-                         'duckdb+parquet': 'chromadb.db.duckdb.PersistentDuckDB',
-                         'clickhouse': 'chromadb.db.clickhouse.Clickhouse',
-                         'rest': 'chromadb.api.fastapi.FastAPI',
-                         'local': 'chromadb.api.local.LocalAPI'}
+_legacy_config_values = {
+    "duckdb": "chromadb.db.duckdb.DuckDB",
+    "duckdb+parquet": "chromadb.db.duckdb.PersistentDuckDB",
+    "clickhouse": "chromadb.db.clickhouse.Clickhouse",
+    "rest": "chromadb.api.fastapi.FastAPI",
+    "local": "chromadb.api.local.LocalAPI",
+}
+
 
 class Settings(BaseSettings):
     environment: str = ""
 
-    chroma_db_impl: str = 'chromadb.db.duckdb.DuckDB'
-    chroma_api_impl: str = 'chromadb.api.local.LocalAPI'
+    chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
+    chroma_api_impl: str = "chromadb.api.local.LocalAPI"
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
+
+    duckdb_database: Optional[str] = None
 
     persist_directory: str = ".chroma"
 
@@ -47,6 +52,8 @@ class Settings(BaseSettings):
 
 
 _impls = {}
+
+
 def get_component(settings, key):
     """Retrieve a component instance, constructing it if necessary."""
 

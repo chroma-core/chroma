@@ -7,6 +7,7 @@ from enum import Enum, auto
 
 StrDict = Optional[dict[str, str]]
 
+
 class ScalarType(Enum):
     FLOAT64 = "float64"
     FLOAT32 = "float32"
@@ -15,11 +16,11 @@ class ScalarType(Enum):
     INT32 = "int32"
     INT16 = "int16"
     INT8 = "int8"
-    
+
 
 class EmbeddingFunction(TypedDict):
     name: str
-    dimension: int 
+    dimension: int
     scalar_type: ScalarType
     metadata: StrDict
 
@@ -32,7 +33,7 @@ class Segment(TypedDict):
     metadata: StrDict
 
 
-class System(ABC):
+class SysDB(ABC):
     """Data interface for Chroma's System storage backend"""
 
     @abstractmethod
@@ -40,19 +41,19 @@ class System(ABC):
         """Create a new segment."""
         pass
 
-
     @abstractmethod
-    def get_segments(self, 
-                     id: Optional[UUID] = None,
-                     embedding_function: Optional[str] = None,
-                     metadata: StrDict = None) -> Sequence[Segment]:                      
+    def get_segments(
+        self,
+        id: Optional[UUID] = None,
+        embedding_function: Optional[str] = None,
+        metadata: StrDict = None,
+    ) -> Sequence[Segment]:
         """Find segments by id, embedding function, or metadata"""
         pass
 
 
 class DB(ABC):
     """Existing DB interface, retained for backwards compatibility"""
-
 
     # TODO: get rid of this! Ripe for sql injection attacks.
     @abstractmethod
@@ -71,4 +72,3 @@ class DB(ABC):
     @abstractmethod
     def reset(self):
         pass
-
