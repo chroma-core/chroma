@@ -351,7 +351,7 @@ class Clickhouse(DB):
             if operator == "$and":
                 results.append(f"({' AND '.join(all_subresults)})")
         else:
-            raise ValueError(f"Epected one of $contains, $and, $or, got {operator}")
+            raise ValueError(f"Expected one of $contains, $and, $or, got {operator}")
 
     def get(
         self,
