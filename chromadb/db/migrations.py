@@ -3,6 +3,7 @@ from typing import TypedDict, Sequence
 import os
 import re
 import hashlib
+from chromadb.db import SqlDB, TxWrapper
 
 
 class MigrationFile(TypedDict):
@@ -17,6 +18,10 @@ class Migration(MigrationFile):
     sql: str
 
 
+class UnappliedMigrationsError(Exception):
+    pass
+
+
 class InconsistentVersionError(Exception):
     pass
 
@@ -25,27 +30,7 @@ class InconsistentHashError(Exception):
     pass
 
 
-class TxWrapper(ABC):
-    """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.
-    Makes two guarantees that basic DBAPI 2.0 connections do not:
-
-    - __enter__ returns a Cursor object consistently (instead of a Connection like some do)
-    - Always re-raises an exception if one was thrown from the body
-    """
-
-    @abstractmethod
-    def __enter__(self) -> object:
-        pass
-
-    @abstractmethod
-    def __exit__(self, exc_type, exc_value, traceback):
-        pass
-
-
-# TODO: SIMPLIFY, refactor to functions and make MigratableDB a mixin
-
-
-class MigratableDB(ABC):
+class MigratableDB(SqlDB):
     """Simple base class for databases which support basic migrations.
 
     Migrations are SQL files stored in a project-relative directory. All migrations in the
@@ -82,15 +67,25 @@ class MigratableDB(ABC):
         """Apply migration 0, which idempotently creates the migrations table"""
         pass
 
-    def apply_all_migrations(self):
-        """Apply all migrations in the given directories, in ascending order. Throw an exception if any migrations
-        have already been applied, or if the database is inconsistent with the source code."""
+    def validate_migrations(self):
+        """Validate all migrations and throw an exception if there are any unapplied migrations in the source repo."""
         for dir in self.migration_dirs():
             with self.tx() as cur:
                 migrations = source_migrations(dir, self.migration_scope())
-                unapplied_migrations = validate_migrations(cur, migrations)
+                unapplied_migrations = validate(cur, migrations)
+                if len(unapplied_migrations) > 0:
+                    raise UnappliedMigrationsError(
+                        f"Unapplied migrations in {dir}: starting at version {unapplied_migrations[0]['version']}"
+                    )
+
+    def apply_migrations(self):
+        """Validate existing migrations, and apply all new ones."""
+        for dir in self.migration_dirs():
+            with self.tx() as cur:
+                migrations = source_migrations(dir, self.migration_scope())
+                unapplied_migrations = validate(cur, migrations)
                 for migration in unapplied_migrations:
-                    apply_migration(cur, migration)
+                    apply(cur, migration)
 
 
 filename_regex = re.compile(r"(\d+)-(.+)\.(.+)\.sql")
@@ -129,7 +124,7 @@ def source_migrations(dir, scope):
     return [read_migration_file(f) for f in files]
 
 
-def validate_migrations(cur, migrations: Sequence[Migration]) -> Sequence[Migration]:
+def validate(cur, migrations: Sequence[Migration]) -> Sequence[Migration]:
     """Validate that the given migration sequence is consistent with the database. Return all unapplied migrations,
     or an empty list if all migrations have been applied. Throw an exception if the database is inconsistent with
     the source code."""
@@ -152,7 +147,7 @@ def validate_migrations(cur, migrations: Sequence[Migration]) -> Sequence[Migrat
     return migrations[len(rows) :]
 
 
-def apply_migration(cur, migration: Migration):
+def apply(cur, migration: Migration):
     """Apply a single migration"""
 
     cur.execute(migration["sql"])

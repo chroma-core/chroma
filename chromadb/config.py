@@ -1,5 +1,5 @@
-from pydantic import BaseSettings, Field
-from typing import Optional
+from pydantic import BaseSettings
+from typing import Optional, Literal
 import importlib
 import logging
 
@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
 
+    migrations: Literal["none", "validate", "apply"] = "apply"
+
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
 
@@ -37,7 +39,6 @@ class Settings(BaseSettings):
         if val is None:
             raise ValueError(f"Missing required config value '{item}'")
         return val
-
 
     def __getitem__(self, item):
         val = getattr(self, item)
