@@ -64,11 +64,18 @@ class MigratableDB(SqlDB):
 
     @abstractmethod
     def setup_migrations(self):
-        """Apply migration 0, which idempotently creates the migrations table"""
+        """Idempotently creates the migrations table"""
+        pass
+
+    @abstractmethod
+    def migrations_initialized(self):
+        """Return true if the migrations table exists"""
         pass
 
     def validate_migrations(self):
         """Validate all migrations and throw an exception if there are any unapplied migrations in the source repo."""
+        if not self.migrations_initialized():
+            raise UnappliedMigrationsError("Migrations not initialized")
         for dir in self.migration_dirs():
             with self.tx() as cur:
                 migrations = source_migrations(dir, self.migration_scope())
@@ -80,6 +87,7 @@ class MigratableDB(SqlDB):
 
     def apply_migrations(self):
         """Validate existing migrations, and apply all new ones."""
+        self.setup_migrations()
         for dir in self.migration_dirs():
             with self.tx() as cur:
                 migrations = source_migrations(dir, self.migration_scope())

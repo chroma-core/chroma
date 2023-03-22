@@ -1,36 +1,71 @@
+from typing import Protocol, Optional, Iterable, Sequence, Literal, Any
 from abc import ABC, abstractmethod
-from typing import Optional, TypedDict, Union, Literal
+from typing import Optional, TypedDict
 from uuid import UUID
 from collections.abc import Sequence
-from enum import Enum, auto
-
-
-StrDict = Optional[dict[str, str]]
-
-
-class ScalarType(Enum):
-    FLOAT64 = "float64"
-    FLOAT32 = "float32"
-    FLOAT16 = "float16"
-    INT64 = "int64"
-    INT32 = "int32"
-    INT16 = "int16"
-    INT8 = "int8"
-
-
-class EmbeddingFunction(TypedDict):
-    name: str
-    dimension: int
-    scalar_type: ScalarType
-    metadata: StrDict
+from enum import Enum
+import pypika
 
 
 class Segment(TypedDict):
     id: UUID
     type: str
-    embedding_function: EmbeddingFunction
-    children: Sequence[UUID]
-    metadata: StrDict
+    scope: Literal["vector", "metadata"]
+    embedding_function: str
+    metadata: Optional[dict[str, str]]
+
+
+class Cursor(Protocol):
+    def execute(self, sql: str, params: Optional[tuple] = None):
+        ...
+
+    def executemany(self, sql: str, params: Optional[Sequence] = None):
+        ...
+
+    def fetchone(self) -> tuple[Any]:
+        ...
+
+    def fetchall(self) -> Iterable[tuple]:
+        ...
+
+
+class TxWrapper(ABC):
+    """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.
+    Makes two guarantees that basic DBAPI 2.0 connections do not:
+
+    - __enter__ returns a Cursor object consistently (instead of a Connection like some do)
+    - Always re-raises an exception if one was thrown from the body
+    """
+
+    @abstractmethod
+    def __enter__(self) -> Cursor:
+        pass
+
+    @abstractmethod
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+
+class SqlDB(ABC):
+    """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
+
+    @abstractmethod
+    def tx(self) -> TxWrapper:
+        """Return a transaction wrapper"""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def querybuilder() -> type[pypika.Query]:
+        """Return a PyPika Query class of an appropriate subtype for this database implementation"""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def parameter_format() -> str:
+        """Return the appropriate parameter format for this database implementation.
+        Will be called with str.format(i) where i is the numeric index of the parameter."""
+        pass
 
 
 class SysDB(ABC):
@@ -45,10 +80,11 @@ class SysDB(ABC):
     def get_segments(
         self,
         id: Optional[UUID] = None,
+        scope: Optional[str] = None,
         embedding_function: Optional[str] = None,
-        metadata: StrDict = None,
+        metadata: Optional[dict[str, str]] = None,
     ) -> Sequence[Segment]:
-        """Find segments by id, embedding function, or metadata"""
+        """Find segments by id, embedding function, and/or metadata"""
         pass
 
 

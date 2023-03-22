@@ -9,3 +9,4 @@ pydantic==1.9.0
 sentence-transformers==2.2.2
 pulsar-client==3.0.0
 fastavro==1.7.2
+pypika==0.48.9

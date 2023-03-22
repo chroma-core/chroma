@@ -1,12 +1,13 @@
-import chromadb.db.migrations
+import chromadb.db.migrations as migrations
 from chromadb.db.migrations import MigratableDB
 from chromadb.db import Segment, SysDB
 from chromadb.config import Settings
+from chromadb.db.basesqlsysdb import BaseSqlSysDB
+import pypika
 import duckdb
-import os
 
 
-class TxWrapper(chromadb.db.migrations.TxWrapper):
+class TxWrapper(migrations.TxWrapper):
     def __init__(self, conn):
         self._conn = conn.cursor()
 
@@ -22,14 +23,29 @@ class TxWrapper(chromadb.db.migrations.TxWrapper):
             return False
 
 
-class DuckDB2(MigratableDB, SysDB):
+class DuckDB2(MigratableDB, BaseSqlSysDB):
     def __init__(self, settings: Settings):
         settings.validate("duckdb_database")
+        settings.validate("migrations")
         self._conn = duckdb.connect(database=settings.duckdb_database)  # type: ignore
         self._settings = settings
 
+        if settings.migrations == "validate":
+            self.validate_migrations()
+
+        if settings.migrations == "apply":
+            self.apply_migrations()
+
     def tx(self):
         return TxWrapper(self._conn)  # type: ignore
+
+    @staticmethod
+    def querybuilder():
+        return pypika.Query
+
+    @staticmethod
+    def parameter_format() -> str:
+        return "?"
 
     @staticmethod
     def migration_dirs():
@@ -52,8 +68,10 @@ class DuckDB2(MigratableDB, SysDB):
                 """
             )
 
-    def create_segment(self, segment):
-        raise NotImplementedError()
-
-    def get_segments(self, id, embedding_function, metadata):
-        raise NotImplementedError()
+    def migrations_initialized(self):
+        with self.tx() as cur:
+            try:
+                cur.execute("SHOW TABLE migrations")
+                return True
+            except duckdb.CatalogException:
+                return False

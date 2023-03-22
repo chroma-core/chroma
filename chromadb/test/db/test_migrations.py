@@ -7,7 +7,7 @@ import copy
 
 @pytest.fixture
 def duckdb_db():
-    return chromadb.db.duckdb2.DuckDB2(Settings(duckdb_database=":memory:"))
+    return chromadb.db.duckdb2.DuckDB2(Settings(duckdb_database=":memory:", migrations="none"))
 
 
 test_dbs = [duckdb_db]
