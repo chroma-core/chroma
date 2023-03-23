@@ -15,7 +15,7 @@ def test_value_params_default():
     )
     sql, values = qt.build(value_based)
     assert sql == original.get_sql()
-    assert values == [42, 43]
+    assert values == (42, 43)
 
 
 def test_value_params_numeric():
@@ -31,4 +31,4 @@ def test_value_params_numeric():
     )
     sql, values = qt.build(value_based, formatstr=":{}")
     assert sql == original.get_sql()
-    assert values == [42, 43]
+    assert values == (42, 43)
