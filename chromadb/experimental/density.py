@@ -53,6 +53,6 @@ class IndexDensityDistribution:
         bin_idx = np.digitize(mean_dists, self._bin_edges) - 1
 
         # Convert bin indices to percentiles
-        percentiles = 1 - self._cdf[bin_idx]
+        percentiles = 1 - self._cdf[bin_idx - 1]
 
         return percentiles.tolist()
