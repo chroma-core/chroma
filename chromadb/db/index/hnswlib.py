@@ -23,7 +23,8 @@ class Hnswlib(Index):
     def __init__(self, settings):
         self._save_folder = settings.persist_directory + "/index"
 
-    def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
+    def run(self, collection_uuid, uuids, embeddings, space="ip", ef=10, num_threads=4):
+        print(space)
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         for uuid, i in zip(uuids, range(len(uuids))):
