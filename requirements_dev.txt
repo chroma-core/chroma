@@ -2,4 +2,4 @@ build
 pytest
 setuptools_scm
 httpx
-black
+black==22.10.0 # match what's in pyproject.toml

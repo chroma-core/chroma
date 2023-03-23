@@ -6,6 +6,8 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
+    Where,
+    WhereDocument,
 )
 from chromadb.errors import NoDatapointsException
 import pandas as pd
@@ -17,9 +19,8 @@ from chromadb.api.models.Collection import Collection
 
 class FastAPI(API):
     def __init__(self, settings):
-        self._api_url = (
-            f"http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
-        )
+        url_prefix = "https" if settings.chroma_server_ssl_enabled else "http"
+        self._api_url = f"{url_prefix}://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
 
     def heartbeat(self):
         """Returns the current server time in nanoseconds to check if the server is alive"""
@@ -43,13 +44,21 @@ class FastAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
         resp = requests.post(
-            self._api_url + "/collections", data=json.dumps({"name": name, "metadata": metadata})
+            self._api_url + "/collections",
+            data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
         )
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
     def get_collection(
         self,
@@ -59,22 +68,37 @@ class FastAPI(API):
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
-    def modify(self, current_name, new_name: str, new_metadata: Optional[Dict] = None) -> int:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
+    ) -> Collection:
+        """Get a collection, or return it if it exists"""
+
+        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
+
+    def _modify(self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
-            data=json.dumps({"metadata": new_metadata, "name": new_name}),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
         resp.raise_for_status()
         return resp.json()
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         """Deletes a collection"""
         resp = requests.delete(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return resp.json()
 
     def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""
@@ -83,20 +107,24 @@ class FastAPI(API):
         return resp.json()
 
     def _peek(self, collection_name, limit=10):
-        return self._get(collection_name, limit=limit)
+        return self._get(
+            collection_name,
+            limit=limit,
+            include=["embeddings", "documents", "metadatas"],
+        )
 
     def _get(
         self,
-        collection_name,
-        ids=None,
-        where={},
-        sort=None,
-        limit=None,
-        offset=None,
-        page=None,
-        page_size=None,
-        where_document={},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["metadatas", "documents"],
     ):
         """Gets embeddings from the database"""
         if page and page_size:
@@ -202,7 +230,7 @@ class FastAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],
     ):
         """Gets the nearest neighbors of a single embedding"""
 

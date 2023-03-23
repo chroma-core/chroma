@@ -53,6 +53,7 @@ class API(ABC):
     def create_collection(
         self,
         metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Creates a new collection in the database
@@ -60,8 +61,33 @@ class API(ABC):
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+            get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
             embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
 
+        Returns:
+            dict: the created collection
+
+        """
+        pass
+
+    @abstractmethod
+    def delete_collection(
+        self,
+        name: str,
+    ):
+        """Deletes a collection from the database
+
+        Args:
+            name (str): The name of the collection to delete
+        """
+
+    @abstractmethod
+    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+        """Calls create_collection with get_or_create=True
+
+        Args:
+            name (str): The name of the collection to create. The name must be unique.
+            metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
         Returns:
             dict: the created collection
 
@@ -92,6 +118,13 @@ class API(ABC):
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
+        """Modify a collection in the database - can update the name and/or metadata
+
+        Args:
+            current_name (str): The name of the collection to modify
+            new_name (Optional[str], optional): The new name of the collection. Defaults to None.
+            new_metadata (Optional[Dict], optional): The new metadata to associate with the collection. Defaults to None.
+        """
         pass
 
     @abstractmethod
@@ -135,14 +168,14 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_name: Optional[str] = None) -> int:
+    def _count(self, collection_name: str) -> int:
         """Returns the number of embeddings in the database
 
         Args:
-            collection_name (Optional[str], optional): The model space to count the embeddings in. If None (default), returns the total count of all embeddings.
+            collection_name (str): The model space to count the embeddings in.
 
         Returns:
-            int: The number of embeddings in the database
+            int: The number of embeddings in the collection
 
         """
         pass

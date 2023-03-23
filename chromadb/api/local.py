@@ -1,25 +1,43 @@
 import json
+import uuid
 import time
 from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 from chromadb.api import API
 from chromadb.db import DB
-from chromadb.api.types import Embedding, GetResult, IDs, Include, QueryResult
+from chromadb.api.types import (
+    Documents,
+    Embedding,
+    Embeddings,
+    GetResult,
+    IDs,
+    Include,
+    Metadatas,
+    QueryResult,
+    Where,
+    WhereDocument,
+)
 from chromadb.api.models.Collection import Collection
 
 import re
 
 
 # mimics s3 bucket requirements for naming
-def is_valid_index_name(index_name):
+def check_index_name(index_name):
+    msg = ("Expected collection name that "
+           "(1) contains 3-63 characters, "
+           "(2) starts and ends with an alphanumeric character, "
+           "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+           "(4) contains no two consecutive periods (..) and "
+           "(5) is not a valid IPv4 address, "
+           f"got {index_name}")
     if len(index_name) < 3 or len(index_name) > 63:
-        return False
+        raise ValueError(msg)
     if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
-        return False
+        raise ValueError(msg)
     if ".." in index_name:
-        return False
+        raise ValueError(msg)
     if re.match("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$", index_name):
-        return False
-    return True
+        raise ValueError(msg)
 
 
 class LocalAPI(API):
@@ -37,45 +55,56 @@ class LocalAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        get_or_create: bool = False,
     ) -> Collection:
-        if not is_valid_index_name(name):
-            raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
+        check_index_name(name)
 
-        self._db.create_collection(name, metadata)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        res = self._db.create_collection(name, metadata, get_or_create)
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
+
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
+    ) -> Collection:
+        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
     def get_collection(
         self,
         name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        self._db.get_collection(name)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
-
-    def _get_collection_db(self, name: str) -> int:
-        return self._db.get_collection(name)
+        res = self._db.get_collection(name)
+        if len(res) == 0:
+            raise ValueError(f"Collection {name} does not exist")
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
 
     def list_collections(self) -> Sequence[Collection]:
         collections = []
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
-            collections.append(Collection(client=self, name=db_collection[1]))
+            collections.append(
+                Collection(client=self, name=db_collection[1], metadata=db_collection[2])
+            )
         return collections
 
-    def modify(
+    def _modify(
         self,
         current_name: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
-        # NIT: make sure we have a valid name like we do in create
         if new_name is not None:
-            if not is_valid_index_name(new_name):
-                raise ValueError("Invalid index name: %s" % new_name)
+            check_index_name(new_name)
 
         self._db.update_collection(current_name, new_name, new_metadata)
 
-    def delete_collection(self, name: str) -> int:
+    def delete_collection(self, name: str):
         return self._db.delete_collection(name)
 
     #
@@ -85,11 +114,12 @@ class LocalAPI(API):
         self,
         ids,
         collection_name: str,
-        embeddings,
-        metadatas=None,
-        documents=None,
-        increment_index=True,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
     ):
+
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,
@@ -108,9 +138,9 @@ class LocalAPI(API):
         self,
         collection_name: str,
         ids: IDs,
-        embeddings=None,
-        metadatas=None,
-        documents=None,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
     ):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
@@ -119,15 +149,15 @@ class LocalAPI(API):
 
     def _get(
         self,
-        collection_name,
-        ids=None,
-        where=None,
-        sort=None,
-        limit=None,
-        offset=None,
-        page=None,
-        page_size=None,
-        where_document=None,
+        collection_name: str,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ):
         if where is None:
@@ -202,7 +232,7 @@ class LocalAPI(API):
         n_results=10,
         where={},
         where_document={},
-        include: Include = ["embeddings", "documents", "metadatas", "distances"],
+        include: Include = ["documents", "metadatas", "distances"],
     ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
@@ -262,13 +292,17 @@ class LocalAPI(API):
     def raw_sql(self, raw_sql):
         return self._db.raw_sql(raw_sql)
 
-    def create_index(self, collection_name):
+    def create_index(self, collection_name: str):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
     def _peek(self, collection_name, n=10):
-        return self._get(collection_name=collection_name, limit=n)
+        return self._get(
+            collection_name=collection_name,
+            limit=n,
+            include=["embeddings", "documents", "metadatas"],
+        )
 
     def persist(self):
         self._db.persist()

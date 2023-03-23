@@ -1,4 +1,5 @@
 import chromadb
+from chromadb.api import API
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 from chromadb.errors import NoDatapointsException
@@ -122,7 +123,11 @@ def test_persist_index_loading(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -141,7 +146,34 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test", embedding_function=embedding_function)
 
-    nn = collection.query(query_texts="hello", n_results=1)
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_persist_index_get_or_create_embedding_function(api_fixture, request):
+    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+    collection = api.get_or_create_collection("test", embedding_function=embedding_function)
+    collection.add(ids="id1", documents="hello")
+
+    api.persist()
+    del api
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = api2.get_or_create_collection("test", embedding_function=embedding_function)
+
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -199,6 +231,26 @@ def test_add(api_fixture, request):
     assert collection.count() == 2
 
 
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_or_create(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    collection.add(**batch_records)
+
+    assert collection.count() == 2
+
+    with pytest.raises(Exception):
+        collection = api.create_collection("testspace")
+
+    collection = api.get_or_create_collection("testspace")
+
+    assert collection.count() == 2
+
+
 minimal_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["https://example.com", "https://example.com"],
@@ -225,7 +277,7 @@ def test_get_from_db(api_fixture, request):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    records = collection.get()
+    records = collection.get(include=["embeddings", "documents", "metadatas"])
     for key in records.keys():
         assert len(records[key]) == 2
 
@@ -253,16 +305,29 @@ def test_get_nearest_neighbors(api_fixture, request):
     collection.add(**batch_records)
     # assert api.create_index(collection_name="testspace") # default is auto now
 
-    nn = collection.query(query_embeddings=[1.1, 2.3, 3.2], n_results=1, where={})
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={})
+    nn = collection.query(
+        query_embeddings=[1.1, 2.3, 3.2],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
     nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]], n_results=1, where={}
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 1
+
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]],
+        n_results=1,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
     )
     for key in nn.keys():
         assert len(nn[key]) == 2
@@ -343,6 +408,58 @@ def test_modify(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
+def test_metadata_cru(api_fixture, request):
+    api: API = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    metadata_a = {"a": 1, "b": 2}
+    # Test create metatdata
+    collection = api.create_collection("testspace", metadata=metadata_a)
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 1
+    assert collection.metadata["b"] == 2
+
+    # Test get metatdata
+    collection = api.get_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 1
+    assert collection.metadata["b"] == 2
+
+    # Test modify metatdata
+    collection.modify(metadata={"a": 2, "c": 3})
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+    assert "b" not in collection.metadata
+
+    # Test get after modify metatdata
+    collection = api.get_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+    assert "b" not in collection.metadata
+
+    # Test name exists get_or_create_metadata
+    collection = api.get_or_create_collection("testspace")
+    assert collection.metadata is not None
+    assert collection.metadata["a"] == 2
+    assert collection.metadata["c"] == 3
+
+    # Test name exists create metadata
+    collection = api.get_or_create_collection("testspace2")
+    assert collection.metadata is None
+
+    # Test list collections
+    collections = api.list_collections()
+    for collection in collections:
+        if collection.name == "testspace":
+            assert collection.metadata is not None
+            assert collection.metadata["a"] == 2
+            assert collection.metadata["c"] == 3
+        elif collection.name == "testspace2":
+            assert collection.metadata is None
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_increment_index_on(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
@@ -353,7 +470,11 @@ def test_increment_index_on(api_fixture, request):
 
     # increment index
     # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -369,7 +490,11 @@ def test_increment_index_off(api_fixture, request):
 
     # incremental index
     collection.create_index()
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
     for key in nn.keys():
         assert len(nn[key]) == 1
 
@@ -399,6 +524,10 @@ def test_add_a_collection(api_fixture, request):
     # get collection does not throw an error
     collection = api.get_collection("testspace")
     assert collection.name == "testspace"
+
+    # get collection should throw an error if collection does not exist
+    with pytest.raises(Exception) as e:
+        collection = api.get_collection("testspace2")
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -481,6 +610,7 @@ def test_metadata_add_query_int_float(api_fixture, request):
     collection.add(**metadata_records)
 
     items: QueryResult = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    assert items["metadatas"] is not None
     assert items["metadatas"][0][0]["int_value"] == 1
     assert items["metadatas"][0][0]["float_value"] == 1.001
     assert type(items["metadatas"][0][0]["int_value"]) == int
@@ -557,9 +687,8 @@ def test_metadata_validation_add(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='metadata'):
         collection.add(**bad_metadata_records)
-    assert "Metadata" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -569,9 +698,8 @@ def test_metadata_validation_update(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='metadata'):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
-    assert "Metadata" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -580,9 +708,8 @@ def test_where_validation_get(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where'):
         collection.get(where={"value": {"nested": "5"}})
-    assert "Where" in str(e.value)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -591,9 +718,8 @@ def test_where_validation_query(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where'):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
-    assert "Where" in str(e.value)
 
 
 operator_records = {
@@ -782,17 +908,14 @@ def test_query_document_valid_operators(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.get(where_document={"$lt": {"$nested": 2}})
-    assert "Where document" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
-    assert "Where document" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='where document'):
         collection.get(where_document={"$contains": []})
-    assert "Where document" in str(e.value)
 
     # Test invalid $and, $or
     with pytest.raises(ValueError) as e:
@@ -1054,10 +1177,50 @@ def test_get_include(api_fixture, request):
     assert items["embeddings"] == None
     assert items["ids"][0] == "id1"
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='include'):
         items = collection.get(include=["metadatas", "undefined"])
-    assert "Include" in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='include'):
         items = collection.get(include=None)
-    assert "Include" in str(e.value)
+
+
+# make sure query results are returned in the right order
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_order(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_query_order")
+    collection.add(**records)
+
+    items = collection.query(
+        query_embeddings=[1.2, 2.24, 3.2],
+        include=["metadatas", "documents", "distances"],
+        n_results=2,
+    )
+
+    assert items["documents"][0][0] == "this document is second"
+    assert items["documents"][0][1] == "this document is first"
+
+
+# test to make sure add, get, delete error on invalid id input
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_invalid_id(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_invalid_id")
+    # Add with non-string id
+    with pytest.raises(ValueError) as e:
+        collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
+    assert "ID" in str(e.value)
+
+    # Get with non-list id
+    with pytest.raises(ValueError) as e:
+        collection.get(ids=1)
+    assert "ID" in str(e.value)
+
+    # Delete with malformed ids
+    with pytest.raises(ValueError) as e:
+        collection.delete(ids=["valid", 0])
+    assert "ID" in str(e.value)

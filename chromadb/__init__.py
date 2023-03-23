@@ -15,6 +15,7 @@ _logo = """
                 \033[38;5;069m(((((\033[38;5;203m((((    \033[38;5;220m#########\033[0m            
 
     """
+logger = logging.getLogger(__name__)
 
 __settings = chromadb.config.Settings()
 
@@ -40,7 +41,7 @@ def get_db(settings=__settings):
         require("clickhouse_host")
         require("clickhouse_port")
         require("persist_directory")
-        print("Using Clickhouse for database")
+        logger.info("Using Clickhouse for database")
         import chromadb.db.clickhouse
 
         return chromadb.db.clickhouse.Clickhouse(settings)
@@ -51,12 +52,12 @@ def get_db(settings=__settings):
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
         require("persist_directory")
-        print("Using DuckDB in-memory for database. Data will be transient.")
+        logger.info("Using DuckDB in-memory for database. Data will be transient.")
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
     else:
-        raise Exception(f"Unknown value '{setting} for chroma_db_impl")
+        raise ValueError(f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}")
 
 
 def Client(settings=__settings):
@@ -71,14 +72,14 @@ def Client(settings=__settings):
     if setting == "rest":
         require("chroma_server_host")
         require("chroma_server_http_port")
-        print("Running Chroma in client mode using REST to connect to remote server")
+        logger.info("Running Chroma in client mode using REST to connect to remote server")
         import chromadb.api.fastapi
 
         return chromadb.api.fastapi.FastAPI(settings)
     elif setting == "local":
-        print("Running Chroma using direct local API.")
+        logger.info("Running Chroma using direct local API.")
         import chromadb.api.local
 
         return chromadb.api.local.LocalAPI(settings, get_db(settings))
     else:
-        raise Exception(f"Unknown value '{setting} for chroma_api_impl")
+        raise ValueError(f"Expected chroma_api_impl to be one of rest, local, got {setting}")

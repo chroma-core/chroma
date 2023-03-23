@@ -1,6 +1,11 @@
 import fastapi
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
+
 import chromadb
 import chromadb.server
 from chromadb.errors import (
@@ -21,6 +26,29 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
+from starlette.requests import Request
+from starlette.responses import Response
+import logging
+
+logger = logging.getLogger(__name__)
+
+def use_route_names_as_operation_ids(app: FastAPI) -> None:
+    """
+    Simplify operation IDs so that generated API clients have simpler function
+    names.
+    Should be called only after all routes have been added.
+    """
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+
+
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.exception(e)
+        return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
 class FastAPI(chromadb.server.Server):
@@ -29,7 +57,16 @@ class FastAPI(chromadb.server.Server):
         self._app = fastapi.FastAPI(debug=True)
         self._api = chromadb.Client(settings)
 
+        self._app.middleware("http")(catch_exceptions_middleware)
+        self._app.add_middleware(
+            CORSMiddleware,
+            allow_headers=["*"],
+            allow_origins=["http://localhost:3000"],
+            allow_methods=["*"],
+        )
+
         self.router = fastapi.APIRouter()
+
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
@@ -78,6 +115,8 @@ class FastAPI(chromadb.server.Server):
 
         self._app.include_router(self.router)
 
+        use_route_names_as_operation_ids(self._app)
+
     def app(self):
         return self._app
 
@@ -91,13 +130,17 @@ class FastAPI(chromadb.server.Server):
         return self._api.list_collections()
 
     def create_collection(self, collection: CreateCollection):
-        return self._api.create_collection(name=collection.name, metadata=collection.metadata)
+        return self._api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,
+            get_or_create=collection.get_or_create,
+        )
 
     def get_collection(self, collection_name: str):
         return self._api.get_collection(collection_name)
 
     def update_collection(self, collection_name, collection: UpdateCollection):
-        return self._api.modify(
+        return self._api._modify(
             current_name=collection_name,
             new_name=collection.new_name,
             new_metadata=collection.new_metadata,
