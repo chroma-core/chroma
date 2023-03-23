@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://trychroma.com"><img src="https://user-images.githubusercontent.com/6764957/226718324-27329291-1e2a-414f-a3a3-e2005e873ecc.png" alt="Chroma logo"></a>
+  <a href="https://trychroma.com"><img src="https://user-images.githubusercontent.com/891664/227102922-059af6b2-fe15-4292-9307-96ae5672d74d.png" alt="Chroma logo"></a>
 </p>
 
 <p align="center">
