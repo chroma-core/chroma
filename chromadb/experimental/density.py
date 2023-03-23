@@ -1,5 +1,7 @@
 from typing import List, TYPE_CHECKING
-from chromadb.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import numpy as np
@@ -18,7 +20,7 @@ class IndexDensityDistribution:
             raise ValueError(
                 f"The collection must contain at least {estimator_neighborhood} embeddings to estimate the index density distribution")
         
-        embeddings = collection.get()["embeddings"]
+        embeddings = collection.get(include=['embeddings'])["embeddings"]
         collection_uuid = collection._client._db.get_collection_uuid_from_name(collection.name)
 
         _, dists = collection._client._db._idx.get_nearest_neighbors(
@@ -38,10 +40,6 @@ class IndexDensityDistribution:
     
     def evaluate_query(self, query_dists: List[List[float]]) -> List[float]:
         np_dists = np.array(query_dists)
-
-        # Log a warning if the number of neighbors is less than the estimator neighborhood
-        if np_dists.shape[1] < self._estimator_neighborhood:
-            logger.warning(f"The number of neighbors ({np_dists.shape[1]}) is less than the estimator neighborhood ({self._estimator_neighborhood}). Density results may be inaccurate.")
 
         # For each query distance, determine which bin it falls into
         # TODO: This could be linearly interpolated to get a more accurate (?) cdf.
