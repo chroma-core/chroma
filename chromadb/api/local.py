@@ -89,7 +89,6 @@ class LocalAPI(API):
         index_params = check_hnsw_index_params(index_params)
 
         res = self._db.create_collection(name, metadata, get_or_create, index_params)
-        print(res[0])
         return Collection(
             client=self,
             name=name,
