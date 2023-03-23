@@ -19,3 +19,7 @@ venv
 .chroma
 *.egg-info
 dist
+
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
