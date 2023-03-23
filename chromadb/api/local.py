@@ -1,7 +1,7 @@
 import json
 import uuid
 import time
-from typing import Dict, List, Optional, Sequence, Callable, Type, cast
+from typing import Dict, List, Literal, Optional, Sequence, Callable, Type, cast, TypedDict
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -15,6 +15,7 @@ from chromadb.api.types import (
     QueryResult,
     Where,
     WhereDocument,
+    HnswIndexParams,
 )
 from chromadb.api.models.Collection import Collection
 
@@ -23,13 +24,15 @@ import re
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name):
-    msg = ("Expected collection name that "
-           "(1) contains 3-63 characters, "
-           "(2) starts and ends with an alphanumeric character, "
-           "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
-           "(4) contains no two consecutive periods (..) and "
-           "(5) is not a valid IPv4 address, "
-           f"got {index_name}")
+    msg = (
+        "Expected collection name that "
+        "(1) contains 3-63 characters, "
+        "(2) starts and ends with an alphanumeric character, "
+        "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+        "(4) contains no two consecutive periods (..) and "
+        "(5) is not a valid IPv4 address, "
+        f"got {index_name}"
+    )
     if len(index_name) < 3 or len(index_name) > 63:
         raise ValueError(msg)
     if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
@@ -38,6 +41,28 @@ def check_index_name(index_name):
         raise ValueError(msg)
     if re.match("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$", index_name):
         raise ValueError(msg)
+
+
+def check_hnsw_index_params(index_params) -> HnswIndexParams:
+    if index_params is None:
+        # return default
+        return {"space": "l2", "ef": 100, "M": 16}
+
+    if index_params["space"] not in ["l2", "cosine", "ip"]:
+        raise ValueError(f"Expected space to be l2, cosine, or ip, got {index_params['space']}")
+    # default ef and M are 100 and 16
+    # set if not set
+    if "ef" not in index_params:
+        index_params["ef"] = 100
+    if "M" not in index_params:
+        index_params["M"] = 16
+
+    if index_params["ef"] < 0:
+        raise ValueError(f"Expected ef to be >= 0, got {index_params['ef']}")
+    if index_params["M"] < 0:
+        raise ValueError(f"Expected M to be >= 0, got {index_params['M']}")
+
+    return index_params
 
 
 class LocalAPI(API):
@@ -56,12 +81,19 @@ class LocalAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
         get_or_create: bool = False,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Collection:
         check_index_name(name)
+        index_params = check_hnsw_index_params(index_params)
 
-        res = self._db.create_collection(name, metadata, get_or_create)
+        res = self._db.create_collection(name, metadata, get_or_create, index_params)
+        print(res[0])
         return Collection(
-            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+            client=self,
+            name=name,
+            embedding_function=embedding_function,
+            metadata=res[0][2],
+            index_params=res[0][3],
         )
 
     def get_or_create_collection(
@@ -69,8 +101,11 @@ class LocalAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Collection:
-        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True, index_params=index_params
+        )
 
     def get_collection(
         self,
@@ -98,11 +133,14 @@ class LocalAPI(API):
         current_name: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
     ):
         if new_name is not None:
             check_index_name(new_name)
+        if new_index_params is not None:
+            new_index_params = check_hnsw_index_params(new_index_params)
 
-        self._db.update_collection(current_name, new_name, new_metadata)
+        self._db.update_collection(current_name, new_name, new_metadata, new_index_params)
 
     def delete_collection(self, name: str):
         return self._db.delete_collection(name)
@@ -119,8 +157,12 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
+        collection = self._db.get_fields_from_collection_name(
+            collection_name, fields=["uuid", "index_params"]
+        )
+        collection_uuid = collection[0]
+        index_params = collection[1]
 
-        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
             collection_uuid,
             embeddings=embeddings,
@@ -130,7 +172,7 @@ class LocalAPI(API):
         )
 
         if increment_index:
-            self._db.add_incremental(collection_uuid, added_uuids, embeddings)
+            self._db.add_incremental(collection_uuid, added_uuids, embeddings, index_params)
 
         return True  # NIT: should this return the ids of the succesfully added items?
 

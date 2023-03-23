@@ -1,8 +1,10 @@
 from typing import Callable, Dict, Optional
 from chromadb.api import API
+from chromadb.api.local import check_hnsw_index_params
 from chromadb.api.types import (
     Documents,
     Embeddings,
+    HnswIndexParams,
     IDs,
     Include,
     Metadatas,
@@ -45,11 +47,21 @@ class FastAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
         get_or_create: bool = False,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Collection:
         """Creates a collection"""
+        index_params = check_hnsw_index_params(index_params)
+
         resp = requests.post(
             self._api_url + "/collections",
-            data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
+            data=json.dumps(
+                {
+                    "name": name,
+                    "metadata": metadata,
+                    "get_or_create": get_or_create,
+                    "index_params": index_params,
+                },
+            ),
         )
         resp.raise_for_status()
         resp_json = resp.json()
@@ -58,6 +70,7 @@ class FastAPI(API):
             name=resp_json["name"],
             embedding_function=embedding_function,
             metadata=resp_json["metadata"],
+            index_params=resp_json["index_params"],
         )
 
     def get_collection(
@@ -81,16 +94,31 @@ class FastAPI(API):
         name: str,
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Collection:
         """Get a collection, or return it if it exists"""
 
-        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True, index_params=index_params
+        )
 
-    def _modify(self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None):
+    def _modify(
+        self,
+        current_name: str,
+        new_name: str,
+        new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
+    ):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
-            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+            data=json.dumps(
+                {
+                    "new_metadata": new_metadata,
+                    "new_name": new_name,
+                    "new_index_params": new_index_params,
+                }
+            ),
         )
         resp.raise_for_status()
         return resp.json()

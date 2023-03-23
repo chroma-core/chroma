@@ -32,6 +32,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def use_route_names_as_operation_ids(app: FastAPI) -> None:
     """
     Simplify operation IDs so that generated API clients have simpler function
@@ -134,6 +135,7 @@ class FastAPI(chromadb.server.Server):
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
+            index_params=collection.index_params,
         )
 
     def get_collection(self, collection_name: str):
@@ -144,6 +146,7 @@ class FastAPI(chromadb.server.Server):
             current_name=collection_name,
             new_name=collection.new_name,
             new_metadata=collection.new_metadata,
+            new_index_params=collection.new_index_params,
         )
 
     def delete_collection(self, collection_name: str):

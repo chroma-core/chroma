@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from typing import List, Union, Any
-from chromadb.api.types import Include
+from typing import List, Union, Any, Optional
+from chromadb.api.types import Include, HnswIndexParams
 
 # type supports single and batch mode
 class AddEmbedding(BaseModel):
@@ -64,9 +64,11 @@ class DeleteEmbedding(BaseModel):
 class CreateCollection(BaseModel):
     name: str
     metadata: dict = None
+    index_params: Optional[HnswIndexParams] = None
     get_or_create: bool = False
 
 
 class UpdateCollection(BaseModel):
     new_name: str = None
     new_metadata: dict = None
+    new_index_params: Optional[HnswIndexParams] = None

@@ -1,4 +1,4 @@
-from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
+from chromadb.api.types import Documents, Embeddings, HnswIndexParams, IDs, Metadatas
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
@@ -18,6 +18,7 @@ import itertools
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def clickhouse_to_duckdb_schema(table_schema):
     for item in table_schema:
@@ -78,31 +79,49 @@ class DuckDB(Clickhouse):
             f"""SELECT uuid FROM collections WHERE name = ?""", [name]
         ).fetchall()[0][0]
 
+    def get_fields_from_collection_name(self, name: str, fields: List[str]) -> List:
+        res = self._conn.execute(
+            f"""SELECT {", ".join(fields)} FROM collections WHERE name = ?""",
+            [name],
+        ).fetchall()
+
+        # if index_params was passed, json.loads it
+        if "index_params" in fields:
+            res = [[x[0], json.loads(x[1])] for x in res]
+
+        return res[0]
+
     #
     #  COLLECTION METHODS
     #
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
         if len(dupe_check) > 0:
             if get_or_create == True:
-                logger.info(f"collection with name {name} already exists, returning existing collection")
+                logger.info(
+                    f"collection with name {name} already exists, returning existing collection"
+                )
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
 
         self._conn.execute(
-            f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
-            [str(uuid.uuid4()), name, json.dumps(metadata)],
+            f"""INSERT INTO collections (uuid, name, metadata, index_params) VALUES (?, ?, ?, ?)""",
+            [str(uuid.uuid4()), name, json.dumps(metadata), json.dumps(index_params)],
         )
-        return [[str(uuid.uuid4()), name, metadata]]
+        return [[str(uuid.uuid4()), name, metadata, index_params]]
 
     def get_collection(self, name: str) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
         # json.loads the metadata
-        return [[x[0], x[1], json.loads(x[2])] for x in res]
+        return [[x[0], x[1], json.loads(x[2]), json.loads(x[3])] for x in res]
 
     def list_collections(self) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections""").fetchall()
@@ -117,16 +136,29 @@ class DuckDB(Clickhouse):
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
 
     def update_collection(
-        self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
+        self,
+        current_name: str,
+        new_name: str,
+        new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
     ):
+        current_collection = self.get_collection(current_name)[0]
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0][2]
+            new_metadata = current_collection[2]
+        if new_index_params is None:
+            new_index_params = current_collection[3]
+        else:
+            num_embeddings = self._count(current_collection[0]).fetchall()[0][0]
+            if num_embeddings > 0:
+                raise ValueError(
+                    "Cannot update index params on a collection with existing embeddings"
+                )
 
         self._conn.execute(
-            f"""UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
-            [new_name, json.dumps(new_metadata), current_name],
+            f"""UPDATE collections SET name = ?, metadata = ?, index_params =? WHERE name = ?""",
+            [new_name, json.dumps(new_metadata), json.dumps(new_index_params), current_name],
         )
 
     #

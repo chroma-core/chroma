@@ -2,7 +2,15 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Sequence, Optional, Tuple
 from uuid import UUID
 import numpy.typing as npt
-from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
+from chromadb.api.types import (
+    Embeddings,
+    Documents,
+    IDs,
+    Metadatas,
+    Where,
+    WhereDocument,
+    HnswIndexParams,
+)
 
 
 class DB(ABC):
@@ -12,7 +20,11 @@ class DB(ABC):
 
     @abstractmethod
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Sequence:
         pass
 
@@ -26,7 +38,11 @@ class DB(ABC):
 
     @abstractmethod
     def update_collection(
-        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+        self,
+        current_name: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
     ):
         pass
 
@@ -39,6 +55,10 @@ class DB(ABC):
         pass
 
     @abstractmethod
+    def get_fields_from_collection_name(self, collection_name: str, fields: List[str]) -> List:
+        pass
+
+    @abstractmethod
     def add(
         self,
         collection_uuid: str,
@@ -46,11 +66,18 @@ class DB(ABC):
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
         ids: List[UUID],
+        index_params: Optional[HnswIndexParams] = None,
     ) -> List[UUID]:
         pass
 
     @abstractmethod
-    def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
+    def add_incremental(
+        self,
+        collection_uuid: str,
+        ids: List[UUID],
+        embeddings: Embeddings,
+        index_params: Optional[HnswIndexParams] = None,
+    ):
         pass
 
     @abstractmethod

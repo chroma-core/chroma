@@ -3,6 +3,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
     Embedding,
+    HnswIndexParams,
     Include,
     Metadata,
     Document,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     metadata: Optional[Dict] = None
+    index_params: Optional[HnswIndexParams] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -41,6 +43,7 @@ class Collection(BaseModel):
         name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
         metadata: Optional[Dict] = None,
+        index_params: Optional[HnswIndexParams] = None,
     ):
 
         self._client = client
@@ -49,12 +52,11 @@ class Collection(BaseModel):
         else:
             import chromadb.utils.embedding_functions as ef
 
-
             logger.warning(
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-        super().__init__(name=name, metadata=metadata)
+        super().__init__(name=name, metadata=metadata, index_params=index_params)
 
     def __repr__(self):
         return f"Collection(name={self.name})"
@@ -209,18 +211,30 @@ class Collection(BaseModel):
             include=include,
         )
 
-    def modify(self, name: Optional[str] = None, metadata=None):
+    def modify(
+        self,
+        name: Optional[str] = None,
+        metadata=None,
+        index_params: Optional[HnswIndexParams] = None,
+    ):
         """Modify the collection name or metadata
 
         Args:
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
         """
-        self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        self._client._modify(
+            current_name=self.name,
+            new_name=name,
+            new_metadata=metadata,
+            new_index_params=index_params,
+        )
         if name:
             self.name = name
         if metadata:
             self.metadata = metadata
+        if index_params:
+            self.index_params = index_params
 
     def update(
         self,

@@ -14,6 +14,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    HnswIndexParams,
 )
 import json
 
@@ -56,6 +57,7 @@ class API(ABC):
         metadata: Optional[Dict] = None,
         get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
@@ -64,6 +66,7 @@ class API(ABC):
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
             get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
             embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
+            index_params (Optional[HnswIndexParams], optional): The parameters to use for the HNSW index. Defaults to None.
 
         Returns:
             dict: the created collection
@@ -83,7 +86,12 @@ class API(ABC):
         """
 
     @abstractmethod
-    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        index_params: Optional[HnswIndexParams] = None,
+    ) -> Collection:
         """Calls create_collection with get_or_create=True
 
         Args:
@@ -118,6 +126,7 @@ class API(ABC):
         current_name: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
     ):
         """Modify a collection in the database - can update the name and/or metadata
 

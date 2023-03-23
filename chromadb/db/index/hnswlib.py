@@ -3,6 +3,7 @@ import pickle
 import time
 from typing import Optional
 import uuid
+from chromadb.api.local import check_hnsw_index_params
 from chromadb.api.types import IndexMetadata
 import hnswlib
 import numpy as np
@@ -24,7 +25,7 @@ class Hnswlib(Index):
     def __init__(self, settings):
         self._save_folder = settings.persist_directory + "/index"
 
-    def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
+    def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4, M=16):
         # more comments available at the source: https://github.com/nmslib/hnswlib
         dimensionality = len(embeddings[0])
         for uuid, i in zip(uuids, range(len(uuids))):
@@ -34,7 +35,7 @@ class Hnswlib(Index):
         index = hnswlib.Index(
             space=space, dim=dimensionality
         )  # possible options are l2, cosine or ip
-        index.init_index(max_elements=len(embeddings), ef_construction=100, M=16)
+        index.init_index(max_elements=len(embeddings), ef_construction=100, M=M)
         index.set_ef(ef)
         index.set_num_threads(num_threads)
         index.add_items(embeddings, range(len(uuids)))
@@ -45,6 +46,9 @@ class Hnswlib(Index):
             "dimensionality": dimensionality,
             "elements": len(embeddings),
             "time_created": time.time(),
+            "space": space,
+            "ef": ef,
+            "M": M,
         }
         self._save()
 
@@ -53,12 +57,20 @@ class Hnswlib(Index):
             raise NoIndexException("Index is not initialized")
         return self._index_metadata
 
-    def add_incremental(self, collection_uuid, uuids, embeddings):
+    def add_incremental(self, collection_uuid, uuids, embeddings, index_params=None):
         if self._collection_uuid != collection_uuid:
             self._load(collection_uuid)
 
         if self._index is None:
-            self.run(collection_uuid, uuids, embeddings)
+            index_params = check_hnsw_index_params(index_params)
+            self.run(
+                collection_uuid,
+                uuids,
+                embeddings,
+                index_params["space"],
+                index_params["ef"],
+                M=index_params["M"],
+            )
 
         elif self._index is not None:
             idx_dimension = self.get_metadata()["dimensionality"]
@@ -153,7 +165,9 @@ class Hnswlib(Index):
                 self._uuid_to_id = pickle.load(f)
             with open(f"{self._save_folder}/index_metadata_{collection_uuid}.pkl", "rb") as f:
                 self._index_metadata = pickle.load(f)
-            p = hnswlib.Index(space="l2", dim=self._index_metadata["dimensionality"])
+
+            space = self._index_metadata["space"] if "space" in self._index_metadata else "l2"
+            p = hnswlib.Index(space=space, dim=self._index_metadata["dimensionality"])
             self._index = p
             self._index.load_index(
                 f"{self._save_folder}/index_{collection_uuid}.bin",

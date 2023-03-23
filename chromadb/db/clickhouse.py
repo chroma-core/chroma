@@ -1,4 +1,12 @@
-from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
+from chromadb.api.types import (
+    Documents,
+    Embeddings,
+    IDs,
+    Metadatas,
+    Where,
+    WhereDocument,
+    HnswIndexParams,
+)
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.errors import (
@@ -18,7 +26,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
+COLLECTION_TABLE_SCHEMA = [
+    {"uuid": "UUID"},
+    {"name": "String"},
+    {"metadata": "String"},
+    {"index_params": "String"},
+]
 
 EMBEDDING_TABLE_SCHEMA = [
     {"collection_uuid": "UUID"},
@@ -95,6 +108,14 @@ class Clickhouse(DB):
         )
         return res.result_rows[0][0]
 
+    def get_fields_from_collection_name(self, name: str, fields: List[str]) -> List:
+        res = self._get_conn().query(
+            f"""
+            SELECT {','.join(fields)} FROM collections WHERE name = '{name}'
+        """
+        )
+        return res.result_rows[0]
+
     def _create_where_clause(
         self,
         collection_uuid: str,
@@ -121,25 +142,31 @@ class Clickhouse(DB):
     #  COLLECTION METHODS
     #
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        get_or_create: bool = False,
+        index_params: Optional[HnswIndexParams] = None,
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
 
         if len(dupe_check) > 0:
             if get_or_create:
-                logger.info(f"collection with name {name} already exists, returning existing collection")
+                logger.info(
+                    f"collection with name {name} already exists, returning existing collection"
+                )
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
-        data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
+        data_to_insert = [[collection_uuid, name, json.dumps(metadata), json.dumps(index_params)]]
 
         self._get_conn().insert(
-            "collections", data_to_insert, column_names=["uuid", "name", "metadata"]
+            "collections", data_to_insert, column_names=["uuid", "name", "metadata", "index_params"]
         )
-        return [[collection_uuid, name, metadata]]
+        return [[collection_uuid, name, metadata, index_params]]
 
     def get_collection(self, name: str):
         res = (
@@ -151,20 +178,34 @@ class Clickhouse(DB):
             )
             .result_rows
         )
-        # json.loads the metadata
-        return [[x[0], x[1], json.loads(x[2])] for x in res]
+        # json.loads the metadata and index_params
+        return [[x[0], x[1], json.loads(x[2]), json.loads(x[3])] for x in res]
 
     def list_collections(self) -> Sequence:
         res = self._get_conn().query(f"""SELECT * FROM collections""").result_rows
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
-        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+        self,
+        current_name: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Dict] = None,
+        new_index_params: Optional[HnswIndexParams] = None,
     ):
+
+        current_collection = self.get_collection(current_name)[0]
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0][2]
+            new_metadata = current_collection[2]
+        if new_index_params is None:
+            new_index_params = current_collection[3]
+        else:
+            num_embeddings = self._count(current_collection[0])[0][0]
+            if num_embeddings > 0:
+                raise ValueError(
+                    "Cannot update index params on a collection with existing embeddings"
+                )
 
         return self._get_conn().command(
             f"""
@@ -173,6 +214,7 @@ class Clickhouse(DB):
             collections
          UPDATE
             metadata = '{json.dumps(new_metadata)}',
+            index_params = '{json.dumps(new_index_params)}',
             name = '{new_name}'
          WHERE
             name = '{current_name}'
@@ -530,8 +572,8 @@ class Clickhouse(DB):
 
         self._idx.run(collection_uuid, uuids, embeddings)
 
-    def add_incremental(self, collection_uuid, uuids, embeddings):
-        self._idx.add_incremental(collection_uuid, uuids, embeddings)
+    def add_incremental(self, collection_uuid, uuids, embeddings, index_params=None):
+        self._idx.add_incremental(collection_uuid, uuids, embeddings, index_params)
 
     def has_index(self, collection_uuid: str):
         return self._idx.has_index(collection_uuid)
