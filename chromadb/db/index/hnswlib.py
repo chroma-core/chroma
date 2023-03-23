@@ -13,6 +13,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_INDEX_PARAMS = {"space": "l2", "ef": 100, "M": 16}
+
 
 class Hnswlib(Index):
     _collection_uuid = None

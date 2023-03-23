@@ -21,6 +21,8 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
+from chromadb.db.index.hnswlib import DEFAULT_INDEX_PARAMS
+
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name):
@@ -46,7 +48,7 @@ def check_index_name(index_name):
 def check_hnsw_index_params(index_params) -> HnswIndexParams:
     if index_params is None:
         # return default
-        return {"space": "l2", "ef": 100, "M": 16}
+        return DEFAULT_INDEX_PARAMS
 
     if index_params["space"] not in ["l2", "cosine", "ip"]:
         raise ValueError(f"Expected space to be l2, cosine, or ip, got {index_params['space']}")

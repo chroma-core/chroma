@@ -8,7 +8,7 @@ from chromadb.api.types import (
     HnswIndexParams,
 )
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
+from chromadb.db.index.hnswlib import DEFAULT_INDEX_PARAMS, Hnswlib
 from chromadb.errors import (
     NoDatapointsException,
     InvalidDimensionException,
@@ -30,8 +30,9 @@ COLLECTION_TABLE_SCHEMA = [
     {"uuid": "UUID"},
     {"name": "String"},
     {"metadata": "String"},
-    {"index_params": "String"},
 ]
+
+COLLECTION_TABLE_SCHEMA_MIGRATIONS = [{"index_params": "String"}]
 
 EMBEDDING_TABLE_SCHEMA = [
     {"collection_uuid": "UUID"},
@@ -41,6 +42,12 @@ EMBEDDING_TABLE_SCHEMA = [
     {"id": "Nullable(String)"},
     {"metadata": "Nullable(String)"},
 ]
+
+
+def get_migration_default_value(key: str) -> Optional[str]:
+    if key == "index_params":
+        return json.dumps(DEFAULT_INDEX_PARAMS)
+    return None
 
 
 def db_array_schema_to_clickhouse_schema(table_schema):
@@ -73,6 +80,7 @@ class Clickhouse(DB):
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
         self._create_table_collections(self._conn)
+        self._run_collection_table_migrations(self._conn)
         self._create_table_embeddings(self._conn)
 
     def _get_conn(self) -> Client:
@@ -86,6 +94,19 @@ class Clickhouse(DB):
             {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY uuid"""
         )
+
+    def _run_collection_table_migrations(self, conn):
+        for migration in COLLECTION_TABLE_SCHEMA_MIGRATIONS:
+            for k, v in migration.items():
+
+                DEFAULT = get_migration_default_value(k)
+
+                try:
+                    conn.command(
+                        f"""ALTER TABLE collections ADD COLUMN IF NOT EXISTS {k} {v} DEFAULT {DEFAULT}"""
+                    )
+                except Exception as e:
+                    logger.info(f"migration {k} failed, skipping")
 
     def _create_table_embeddings(self, conn):
         conn.command(

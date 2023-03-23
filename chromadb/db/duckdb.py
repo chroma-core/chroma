@@ -1,12 +1,13 @@
 from chromadb.api.types import Documents, Embeddings, HnswIndexParams, IDs, Metadatas
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
+from chromadb.db.index.hnswlib import DEFAULT_INDEX_PARAMS, Hnswlib
 from chromadb.db.clickhouse import (
     Clickhouse,
     db_array_schema_to_clickhouse_schema,
     EMBEDDING_TABLE_SCHEMA,
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
+    COLLECTION_TABLE_SCHEMA_MIGRATIONS,
 )
 from typing import List, Optional, Sequence, Dict
 import pandas as pd
@@ -59,7 +60,7 @@ class DuckDB(Clickhouse):
     def _create_table_collections(self):
         self._conn.execute(
             f"""CREATE TABLE collections (
-            {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(COLLECTION_TABLE_SCHEMA))}
+            {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(COLLECTION_TABLE_SCHEMA + COLLECTION_TABLE_SCHEMA_MIGRATIONS))}
         ) """
         )
 
@@ -464,15 +465,7 @@ class PersistentDuckDB(DuckDB):
         else:
             path = self._save_folder + "/chroma-collections.parquet"
 
-            # get headers from the first row
-            df = pd.read_parquet(path)
-            headers = df.columns.tolist()
-            print(headers)
-
-            # if index_params is not in the headers, add it, and set it to our default {"space": "cosine"}
-            if "index_params" not in headers:
-                df["index_params"] = None
-                df.to_parquet(path)
+            self._run_migrations(path)
 
             self._conn.execute(f"INSERT INTO collections SELECT * FROM read_parquet('{path}');")
             logger.info(
@@ -491,3 +484,13 @@ class PersistentDuckDB(DuckDB):
 
         shutil.rmtree(self._save_folder)
         os.mkdir(self._save_folder)
+
+    def _run_migrations(self, path_to_collections_parquet):
+        df = pd.read_parquet(path_to_collections_parquet)
+        headers = df.columns.tolist()
+
+        # this column was added to enable users to specify index params
+        if "index_params" not in headers:
+            df["index_params"] = json.dumps(DEFAULT_INDEX_PARAMS)
+
+        df.to_parquet(path_to_collections_parquet)
