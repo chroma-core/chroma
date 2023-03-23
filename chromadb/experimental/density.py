@@ -27,14 +27,11 @@ class IndexDensityDistribution:
             k=estimator_neighborhood,
         )
 
-        # Drop the first element as it is the query itself and will have dist 0.
-        dists = dists[:, 1:]
-
-        # Compute the mean distances from neighbors for each embedding
-        mean_dists = np.mean(dists, axis=1)
+        # Flatten the list of dists, and filter zeros (which are the distances to the query itself)
+        dists = np.array([dist for dist_list in dists for dist in dist_list if dist != 0])
 
         # Compute the cumulative density histogram for mean distances, with n_bins bins
-        hist, bin_edges = np.histogram(mean_dists, bins=n_bins, density=True)
+        hist, bin_edges = np.histogram(dists, bins=n_bins, density=True)
         self._bin_edges = bin_edges
         self._cdf = np.cumsum(hist * np.diff(bin_edges))
         self._estimator_neighborhood = estimator_neighborhood
@@ -46,11 +43,9 @@ class IndexDensityDistribution:
         if np_dists.shape[1] < self._estimator_neighborhood:
             logger.warning(f"The number of neighbors ({np_dists.shape[1]}) is less than the estimator neighborhood ({self._estimator_neighborhood}). Density results may be inaccurate.")
 
-        mean_dists = np.mean(np_dists, axis=1)
-
         # For each query distance, determine which bin it falls into
         # TODO: This could be linearly interpolated to get a more accurate (?) cdf.
-        bin_idx = np.digitize(mean_dists, self._bin_edges) - 1
+        bin_idx = np.digitize(np_dists, self._bin_edges) - 1
 
         # Convert bin indices to percentiles
         percentiles = 1 - self._cdf[bin_idx - 1]
