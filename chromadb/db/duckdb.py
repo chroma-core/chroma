@@ -463,6 +463,17 @@ class PersistentDuckDB(DuckDB):
             logger.info(f"No existing DB found in {self._save_folder}, skipping load")
         else:
             path = self._save_folder + "/chroma-collections.parquet"
+
+            # get headers from the first row
+            df = pd.read_parquet(path)
+            headers = df.columns.tolist()
+            print(headers)
+
+            # if index_params is not in the headers, add it, and set it to our default {"space": "cosine"}
+            if "index_params" not in headers:
+                df["index_params"] = None
+                df.to_parquet(path)
+
             self._conn.execute(f"INSERT INTO collections SELECT * FROM read_parquet('{path}');")
             logger.info(
                 f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections"""
