@@ -18,6 +18,7 @@ test_segments = [
         type="test",
         scope="metadata",
         embedding_function="ef1",
+        topic=None,
         metadata={"foo": "bar", "baz": "qux"},
     ),
     Segment(
@@ -25,6 +26,7 @@ test_segments = [
         type="test",
         scope="vector",
         embedding_function="ef2",
+        topic="persistent://tentant/namespace/topic",
         metadata={"foo": "bar", "biz": "buz"},
     ),
 ]
@@ -55,4 +57,5 @@ def test_segment_read_write(db_fixture, request):
 
     assert db.get_segments(embedding_function="ef1", metadata={"foo": "bar"})[0] == test_segments[0]
 
-    # TODO test other fetch mechanisms....
+    assert db.get_segments(topic="persistent://tentant/namespace/topic")[0] == test_segments[1]
+    assert len(db.get_segments(topic="no-such-topic")) == 0

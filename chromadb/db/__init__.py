@@ -12,6 +12,7 @@ class Segment(TypedDict):
     type: str
     scope: Literal["vector", "metadata"]
     embedding_function: str
+    topic: Optional[str]
     metadata: Optional[dict[str, str]]
 
 
@@ -82,6 +83,7 @@ class SysDB(ABC):
         id: Optional[UUID] = None,
         scope: Optional[str] = None,
         embedding_function: Optional[str] = None,
+        topic: Optional[str] = None,
         metadata: Optional[dict[str, str]] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, embedding function, and/or metadata"""

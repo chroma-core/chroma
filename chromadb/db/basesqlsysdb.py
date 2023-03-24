@@ -11,8 +11,14 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
         with self.tx() as cur:
             cur.execute(
-                "INSERT INTO segments (id, type, scope, embedding_function) VALUES (?, ?, ?, ?)",
-                (segment["id"], segment["type"], segment["scope"], segment["embedding_function"]),
+                "INSERT INTO segments (id, type, scope, embedding_function, topic) VALUES (?, ?, ?, ?, ?)",
+                (
+                    segment["id"],
+                    segment["type"],
+                    segment["scope"],
+                    segment["embedding_function"],
+                    segment["topic"],
+                ),
             )
 
             if segment["metadata"]:
@@ -23,7 +29,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
         return segment
 
-    def get_segments(self, id=None, embedding_function=None, metadata=None):
+    def get_segments(self, id=None, embedding_function=None, topic=None, metadata=None):
         with self.tx() as cur:
             segments_t = Table("segments")
             metadata_t = Table("segment_metadata")
@@ -39,6 +45,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 segments_t.type,
                 segments_t.scope,
                 segments_t.embedding_function,
+                segments_t.topic,
                 metadata_t.key,
                 metadata_t.value,
             )
@@ -47,6 +54,9 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
             if embedding_function is not None:
                 query = query.where(segments_t.embedding_function == qt.Value(embedding_function))
+
+            if topic is not None:
+                query = query.where(segments_t.topic == qt.Value(topic))
 
             if metadata is not None and len(metadata) > 0:
                 subquery = self.querybuilder().from_(metadata_t).select(metadata_t.segment)
@@ -69,7 +79,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
             segments = []
             for segment_id, rows in segment_rows.items():
-                metadata = {row[4]: row[5] for row in rows}
+                metadata = {row[5]: row[6] for row in rows}
                 segments.append(
                     Segment(
                         id=segment_id,
@@ -77,6 +87,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
                         type=rows[0][1],
                         scope=rows[0][2],
                         embedding_function=rows[0][3],
+                        topic=rows[0][4],
                     )
                 )
 

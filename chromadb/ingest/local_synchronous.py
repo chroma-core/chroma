@@ -7,11 +7,7 @@ class LocalSynchronousStream(chromadb.ingest.Stream):
     embeddings to the MetaDB and Vector segments"""
 
     def __init__(self, settings):
-        self.metadb = chromadb.config.get_component(settings, 'metadata_db')
-        self.sysdb = chromadb.config.get_component(settings, 'system_db')
+        self.sysdb = chromadb.config.get_component(settings, "system_db")
 
     def submit(self, topic, message):
         pass
-
-
-

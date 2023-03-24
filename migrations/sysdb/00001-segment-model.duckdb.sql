@@ -2,7 +2,8 @@ CREATE TABLE segments (
     id UUID PRIMARY KEY,
     type TEXT,
     scope TEXT,
-    embedding_function TEXT
+    embedding_function TEXT,
+    topic TEXT
 );
 
 CREATE TABLE segment_metadata (
