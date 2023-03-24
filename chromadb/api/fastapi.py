@@ -102,23 +102,11 @@ class FastAPI(API):
             name, metadata, embedding_function, get_or_create=True, index_params=index_params
         )
 
-    def _modify(
-        self,
-        current_name: str,
-        new_name: str,
-        new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
-    ):
+    def _modify(self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
-            data=json.dumps(
-                {
-                    "new_metadata": new_metadata,
-                    "new_name": new_name,
-                    "new_index_params": new_index_params,
-                }
-            ),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
         resp.raise_for_status()
         return resp.json()

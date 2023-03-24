@@ -126,7 +126,6 @@ class API(ABC):
         current_name: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
     ):
         """Modify a collection in the database - can update the name and/or metadata
 

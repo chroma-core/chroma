@@ -207,26 +207,12 @@ class Clickhouse(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
-        self,
-        current_name: str,
-        new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
+        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
     ):
-
-        current_collection = self.get_collection(current_name)[0]
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = current_collection[2]
-        if new_index_params is None:
-            new_index_params = current_collection[3]
-        else:
-            num_embeddings = self._count(current_collection[0])[0][0]
-            if num_embeddings > 0:
-                raise ValueError(
-                    "Cannot update index params on a collection with existing embeddings"
-                )
+            new_metadata = self.get_collection(current_name)[0][2]
 
         return self._get_conn().command(
             f"""
@@ -235,7 +221,6 @@ class Clickhouse(DB):
             collections
          UPDATE
             metadata = '{json.dumps(new_metadata)}',
-            index_params = '{json.dumps(new_index_params)}',
             name = '{new_name}'
          WHERE
             name = '{current_name}'

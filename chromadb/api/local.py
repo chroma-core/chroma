@@ -21,7 +21,7 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
-from chromadb.db.index.hnswlib import DEFAULT_INDEX_PARAMS
+from chromadb.db.index.hnswlib import check_hnsw_index_params
 
 
 # mimics s3 bucket requirements for naming
@@ -43,29 +43,6 @@ def check_index_name(index_name):
         raise ValueError(msg)
     if re.match("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$", index_name):
         raise ValueError(msg)
-
-
-def check_hnsw_index_params(index_params) -> HnswIndexParams:
-    if index_params is None:
-        # return default
-        return DEFAULT_INDEX_PARAMS
-
-    if index_params["space"] not in ["l2", "cosine", "ip"]:
-        raise ValueError(f"Expected space to be l2, cosine, or ip, got {index_params['space']}")
-    # default ef and M are 100 and 16
-    # set if not set
-    if "ef" not in index_params:
-        index_params["ef"] = 100
-    if "M" not in index_params:
-        index_params["M"] = 16
-
-    if index_params["ef"] < 0:
-        raise ValueError(f"Expected ef to be >= 0, got {index_params['ef']}")
-    if index_params["M"] < 0:
-        raise ValueError(f"Expected M to be >= 0, got {index_params['M']}")
-
-    return index_params
-
 
 class LocalAPI(API):
     def __init__(self, settings, db: DB):
@@ -134,14 +111,11 @@ class LocalAPI(API):
         current_name: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
     ):
         if new_name is not None:
             check_index_name(new_name)
-        if new_index_params is not None:
-            new_index_params = check_hnsw_index_params(new_index_params)
 
-        self._db.update_collection(current_name, new_name, new_metadata, new_index_params)
+        self._db.update_collection(current_name, new_name, new_metadata)
 
     def delete_collection(self, name: str):
         return self._db.delete_collection(name)

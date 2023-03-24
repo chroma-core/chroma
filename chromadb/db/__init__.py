@@ -38,11 +38,7 @@ class DB(ABC):
 
     @abstractmethod
     def update_collection(
-        self,
-        current_name: str,
-        new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
+        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
     ):
         pass
 

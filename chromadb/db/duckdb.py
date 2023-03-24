@@ -137,29 +137,16 @@ class DuckDB(Clickhouse):
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
 
     def update_collection(
-        self,
-        current_name: str,
-        new_name: str,
-        new_metadata: Optional[Dict] = None,
-        new_index_params: Optional[HnswIndexParams] = None,
+        self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
     ):
-        current_collection = self.get_collection(current_name)[0]
         if new_name is None:
             new_name = current_name
         if new_metadata is None:
-            new_metadata = current_collection[2]
-        if new_index_params is None:
-            new_index_params = current_collection[3]
-        else:
-            num_embeddings = self._count(current_collection[0]).fetchall()[0][0]
-            if num_embeddings > 0:
-                raise ValueError(
-                    "Cannot update index params on a collection with existing embeddings"
-                )
+            new_metadata = self.get_collection(current_name)[0][2]
 
         self._conn.execute(
-            f"""UPDATE collections SET name = ?, metadata = ?, index_params =? WHERE name = ?""",
-            [new_name, json.dumps(new_metadata), json.dumps(new_index_params), current_name],
+            f"""UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
+            [new_name, json.dumps(new_metadata), current_name],
         )
 
     #

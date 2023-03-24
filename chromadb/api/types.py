@@ -46,18 +46,16 @@ class QueryResult(TypedDict):
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
-
-class IndexMetadata(TypedDict):
-    dimensionality: int
-    elements: int
-    time_created: float
-
-
 class HnswIndexParams(TypedDict):
     space: Optional[Literal["l2", "cosine", "ip"]]
     ef: Optional[int]
     M: Optional[int]
 
+class IndexMetadata(TypedDict):
+    dimensionality: int
+    elements: int
+    time_created: float
+    index_params: HnswIndexParams
 
 class EmbeddingFunction(Protocol):
     def __call__(self, texts: Documents) -> Embeddings:

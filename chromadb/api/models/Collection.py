@@ -211,30 +211,18 @@ class Collection(BaseModel):
             include=include,
         )
 
-    def modify(
-        self,
-        name: Optional[str] = None,
-        metadata=None,
-        index_params: Optional[HnswIndexParams] = None,
-    ):
+    def modify(self, name: Optional[str] = None, metadata=None):
         """Modify the collection name or metadata
 
         Args:
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
         """
-        self._client._modify(
-            current_name=self.name,
-            new_name=name,
-            new_metadata=metadata,
-            new_index_params=index_params,
-        )
+        self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
         if metadata:
             self.metadata = metadata
-        if index_params:
-            self.index_params = index_params
 
     def update(
         self,
