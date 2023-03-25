@@ -1,6 +1,9 @@
 from pydantic import BaseSettings, Field
 
 
+TELEMETRY_WHITELISTED_SETTINGS = ["chroma_db_impl", "chroma_api_impl", "chroma_server_ssl_enabled"]
+
+
 class Settings(BaseSettings):
     environment: str = ""
 
@@ -16,6 +19,8 @@ class Settings(BaseSettings):
     chroma_server_http_port: str = None
     chroma_server_ssl_enabled: bool = False
     chroma_server_grpc_port: str = None
+
+    anonymized_telemetry: bool = True
 
     def __getitem__(self, item):
         return getattr(self, item)
