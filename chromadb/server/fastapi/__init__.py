@@ -29,8 +29,6 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 from starlette.responses import Response
 import logging
-import os
-
 from chromadb.telemetry import ServerContext, Telemetry
 
 logger = logging.getLogger(__name__)
