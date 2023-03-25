@@ -7,7 +7,7 @@ import time
 from threading import Event, Thread
 import chromadb
 from pathlib import Path
-from chromadb.config import TELEMETRY_WHITELISTED_SETTINGS
+from chromadb.config import TELEMETRY_WHITELISTED_SETTINGS, Settings
 from enum import Enum
 
 
@@ -54,7 +54,8 @@ class Telemetry:
     SERVER_CONTEXT: ServerContext = ServerContext.NONE
     _curr_user_id = None
 
-    def __init__(self):
+    @abstractmethod
+    def __init__(self, settings: Settings):
         pass
 
     @abstractmethod

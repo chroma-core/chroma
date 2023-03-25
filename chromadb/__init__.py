@@ -57,7 +57,7 @@ def Client(settings=__settings):
     settings, optionally overriding the DB instance."""
 
     setting = settings.chroma_api_impl.lower()
-    telemetry_client = Posthog()
+    telemetry_client = Posthog(settings)
 
     # Submit event for client start
     telemetry_client.capture(ClientStartEvent())
