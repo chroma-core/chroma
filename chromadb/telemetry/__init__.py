@@ -32,6 +32,7 @@ class RepeatedTelemetry:
         self.start = time.time()
         self.event = Event()
         self.thread = Thread(target=self._target)
+        self.thread.daemon = True
         self.thread.start()
 
     def _target(self):
