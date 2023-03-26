@@ -29,8 +29,10 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 from starlette.responses import Response
 import logging
+from chromadb.telemetry import ServerContext, Telemetry
 
 logger = logging.getLogger(__name__)
+
 
 def use_route_names_as_operation_ids(app: FastAPI) -> None:
     """
@@ -54,6 +56,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings):
         super().__init__(settings)
+        Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
         self._api = chromadb.Client(settings)
 

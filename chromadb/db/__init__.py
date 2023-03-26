@@ -87,11 +87,10 @@ class DB(ABC):
     def delete(
         self,
         where: Where = {},
-        collection_name: Optional[str] = None,
         collection_uuid: Optional[str] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ):
+    ) -> List:
         pass
 
     @abstractmethod
