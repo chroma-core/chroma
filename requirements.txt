@@ -8,6 +8,7 @@ clickhouse-connect==0.5.7
 pydantic==1.9.0
 sentence-transformers==2.2.2
 pulsar-client==3.0.0
-fastavro==1.7.2
+protobuf==4.22.1
+mypy-protobuf==3.4.0
 pypika==0.48.9
 pypubsub==4.0.3

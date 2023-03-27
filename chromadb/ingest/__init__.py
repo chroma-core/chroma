@@ -1,23 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Union, Optional
 from chromadb.types import Topic, EmbeddingRecord, InsertType, ScalarEncoding, Vector
+import chromadb.ingest.proto.chroma_pb2 as proto
 import pulsar.schema as schema
 import array
-
-
-class InsertEmbedding(schema.Record):
-    _avro_namespace_ = "chromadb.ingest"
-    id = schema.String()
-    embedding = schema.Bytes()
-    dimension = schema.Integer()
-    encoding = schema.CustomEnum(ScalarEncoding)
-    metadata = schema.Map(schema.String())
-    insert_type = schema.CustomEnum(InsertType, default=InsertType.ADD_OR_UPDATE)
-
-
-class DeleteEmbedding(schema.Record):
-    _avro_namespace_ = "chromadb.ingest"
-    id = schema.String()
 
 
 def encode_vector(vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOAT32) -> bytes:
@@ -31,35 +17,48 @@ def encode_vector(vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOA
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 
 
-def avro_insert(
+def proto_insert(
     embedding: EmbeddingRecord, insert_type: InsertType, encoding: Optional[ScalarEncoding] = None
-) -> InsertEmbedding:
-    """Return an Avro record for an embedding insert."""
+) -> proto.EmbeddingMessage:
+    """Return an Protobuf record for an embedding insert."""
+
+    if insert_type == InsertType.ADD_ONLY:
+        action_type = proto.ActionType.INSERT
+    elif insert_type == InsertType.UPDATE_ONLY:
+        action_type = proto.ActionType.UPDATE
+    elif insert_type == InsertType.ADD_OR_UPDATE:
+        action_type = proto.ActionType.UPSERT
+    else:
+        raise ValueError(f"Unsupported insert type: {insert_type.value}")
 
     if encoding is None:
-        if isinstance(embedding["embedding"][0], int):
-            encoding = ScalarEncoding.INT32
-        elif isinstance(embedding["embedding"][0], float):
+        if isinstance(embedding["embedding"][0], float):
             encoding = ScalarEncoding.FLOAT32
+        elif isinstance(embedding["embedding"][0], int):
+            encoding = ScalarEncoding.INT32
         else:
             raise ValueError(
-                f"Unsupported scalar type for embedding: {type(embedding['embedding'][0])}"
+                f"Unsupported scalar type for vector: {type(embedding['embedding'][0])}"
             )
 
-    return InsertEmbedding(
-        id=embedding["id"],
-        embedding=encode_vector(embedding["embedding"], encoding=encoding),
+    vector = proto.Vector(
         dimension=len(embedding["embedding"]),
-        encoding=encoding,
+        encoding=proto.VectorEncoding.Value(encoding.value),
+        vector=encode_vector(embedding["embedding"]),
+    )
+
+    return proto.EmbeddingMessage(
+        id=embedding["id"],
+        type=action_type,
+        vector=vector,
         metadata=embedding["metadata"],
-        insert_type=insert_type,
     )
 
 
-def avro_delete(id: str) -> DeleteEmbedding:
+def proto_delete(id: str) -> proto.EmbeddingMessage:
     """Return an Avro record for an embedding delete."""
 
-    return DeleteEmbedding(id=id)
+    return proto.EmbeddingMessage(id=id, type=proto.ActionType.DELETE)
 
 
 class Ingest(ABC):

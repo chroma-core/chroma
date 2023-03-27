@@ -69,7 +69,7 @@ class DecoupledAPI(API):
     def _topic(self, name: str) -> str:
         "Given a user-facing collection name, return the fully qualified topic name"
         # Note: this will need to be refined for the case of multitenancy
-        return f"persistent://default/default/{name}"
+        return f"persistent://public/default/{name}"
 
     def create_collection(
         self,

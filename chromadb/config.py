@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
 
+    pulsar_host: Optional[str] = None
+    pulsar_port: Optional[str] = None
+
     duckdb_database: Optional[str] = None
 
     persist_directory: str = ".chroma"

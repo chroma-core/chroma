@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package chroma;
+
+enum ActionType {
+    INSERT = 0;
+    UPDATE = 1;
+    UPSERT = 2;
+    DELETE = 3;
+}
+
+enum VectorEncoding {
+    FLOAT32 = 0;
+    INT32 = 1;
+}
+
+message Vector {
+    int32 dimension = 3;
+    VectorEncoding encoding = 4;
+    bytes vector = 5;
+}
+
+message EmbeddingMessage {
+    string id = 1;
+    ActionType type = 2;
+    optional Vector vector = 3;
+    map<string, string> metadata = 4;
+}
