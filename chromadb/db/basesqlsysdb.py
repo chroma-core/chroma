@@ -50,8 +50,10 @@ class BaseSqlSysDB(SysDB, SqlDB):
                     [(topic["name"], key, value) for key, value in topic["metadata"].items()],
                 )
 
+    def delete_topic(self, topic_name: str) -> None:
+        raise NotImplementedError()
+
     def get_topics(self, name=None, embedding_function=None, metadata=None):
-        print("get_topics:", name)
         with self.tx() as cur:
             table = Table("topics")
             metadata_table = Table("topic_metadata")

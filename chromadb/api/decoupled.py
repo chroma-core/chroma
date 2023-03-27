@@ -5,8 +5,10 @@ from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 import chromadb.config
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.types import Topic, EmbeddingFunction, Segment
-from chromadb.ingest import Ingest
+from chromadb.types import Topic, InsertType, EmbeddingRecord, EmbeddingFunction, Segment
+import chromadb.ingest
+import chromadb.db
+import chromadb.segment
 from chromadb.api.types import (
     Documents,
     Embedding,
@@ -27,6 +29,10 @@ topic_re = re.compile(r"^([a-zA-Z0-9]+)://([a-zA-Z0-9]+)/([a-zA-Z0-9]+)/([a-zA-Z
 
 class DecoupledAPI(API):
     """API that uses the new segment-based architecture."""
+
+    ingest_impl: chromadb.ingest.Ingest
+    sysdb: chromadb.db.SysDB
+    segment_manager: chromadb.segment.SegmentManager
 
     def __init__(self, settings):
         self.settings = settings
@@ -96,7 +102,7 @@ class DecoupledAPI(API):
         if self.ingest_impl != self.sysdb:
             self.sysdb.create_topic(topic)
         if self.segment_manager != self.sysdb:
-            self.segment_manager.create_collection(name, embedding_function_name, metadata)
+            self.segment_manager.create_topic_segments(topic)
 
         return self.get_collection(name)
 
@@ -106,7 +112,7 @@ class DecoupledAPI(API):
     ):
         self.ingest_impl.delete_topic(name)
         self.sysdb.delete_topic(name)
-        self.segment_manager.delete_collection(name)
+        self.segment_manager.delete_topic_segments(name)
 
     def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
         """Calls create_collection with get_or_create=True
@@ -152,7 +158,24 @@ class DecoupledAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
-        pass
+
+        topic = self._topic(collection_name)
+
+        for i, e, m, d in zip(ids, embeddings, metadatas or [], documents or []):
+
+            if d is not None:
+                if m is None:
+                    m = {"document": d}
+                else:
+                    m["document"] = d
+
+            metadata = {k: str(v) for k, v in m.items()}
+
+            embedding = EmbeddingRecord(id=i, embedding=e, metadata=metadata)
+
+            self.ingest_impl.submit_embedding(
+                topic_name=topic, embedding=embedding, insert_type=InsertType.ADD_ONLY
+            )
 
     def _update(
         self,

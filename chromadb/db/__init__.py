@@ -83,9 +83,9 @@ class SysDB(ABC):
     @abstractmethod
     def get_topics(
         self,
-        name: Optional[str],
-        embedding_function: Optional[str],
-        metadata: Optional[dict[str, str]],
+        name: Optional[str] = None,
+        embedding_function: Optional[str] = None,
+        metadata: Optional[dict[str, str]] = None,
     ) -> Sequence[Topic]:
         """Get topics by name, embedding function or metadata"""
         pass
@@ -93,6 +93,11 @@ class SysDB(ABC):
     @abstractmethod
     def create_topic(self, topic: Topic) -> None:
         """Create a new topic"""
+        pass
+
+    @abstractmethod
+    def delete_topic(self, topic_name: str) -> None:
+        """Delete a topic and all associated segments from the SysDB"""
         pass
 
     @abstractmethod

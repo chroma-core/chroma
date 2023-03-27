@@ -1,6 +1,7 @@
 from typing import TypedDict, Optional, Sequence
 from abc import ABC, abstractmethod
 from chromadb.types import (
+    Topic,
     Vector,
     EmbeddingRecord,
     PersistentEmbeddingRecord,
@@ -8,10 +9,14 @@ from chromadb.types import (
     WhereDocument,
     VectorQuery,
     VectorQueryResult,
+    Segment,
 )
 
+class SegmentImplementation(ABC):
+    pass
 
-class MetadataReader(ABC):
+
+class MetadataReader(SegmentImplementation):
     """Embedding Metadata segment interface"""
 
     @abstractmethod
@@ -33,7 +38,7 @@ class MetadataReader(ABC):
         pass
 
 
-class VectorReader(ABC):
+class VectorReader(SegmentImplementation):
     """Embedding Vector segment interface"""
 
     @abstractmethod
@@ -52,13 +57,26 @@ class VectorReader(ABC):
 
 
 class SegmentManager(ABC):
-    """Pluggable strategy for creating new segments"""
+    """Pluggable strategy for creating, retrieving and instantiating segments as required"""
 
     @abstractmethod
-    def create_collection(
-        self, name: str, embedding_function: str, metadata: dict[str, str]
-    ) -> None:
-        """Create and initialize the segments required for a new collection"""
+    def create_topic_segments(self, topic: Topic) -> None:
+        """Create and initialize the segments required for a new topic"""
+        pass
+
+    @abstractmethod
+    def delete_topic_segments(self, name: str) -> None:
+        """Delete all the segments associated with a collection"""
+        pass
+
+    @abstractmethod
+    def initialize_all(self) -> None:
+        """Initialize all segments for which this instance is responsible"""
+        pass
+
+    @abstractmethod
+    def get_instance(self, segment: Segment) -> None:
+        """Return an instance of the given segment, creating if necessary"""
         pass
 
     @abstractmethod

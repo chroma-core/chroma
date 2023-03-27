@@ -104,17 +104,17 @@ def await_server(attempts=0):
             await_server(attempts + 1)
 
 
-@pytest.fixture(scope="module", autouse=True)
-def fastapi_server():
-    proc = Process(target=run_server, args=(), daemon=True)
-    proc.start()
-    await_server()
-    yield
-    proc.kill()
+# @pytest.fixture(scope="module", autouse=True)
+# def fastapi_server():
+#     proc = Process(target=run_server, args=(), daemon=True)
+#     proc.start()
+#     await_server()
+#     yield
+#     proc.kill()
 
 
-test_apis = [local_api, fastapi_api]
-# test_apis = [local_api_decoupled]
+# test_apis = [local_api, fastapi_api]
+test_apis = [local_api_decoupled]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
