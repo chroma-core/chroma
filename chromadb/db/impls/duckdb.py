@@ -1,10 +1,12 @@
 import chromadb.db.migrations as migrations
 from chromadb.db.migrations import MigratableDB
-from chromadb.db import Segment, SysDB
 from chromadb.config import Settings
 from chromadb.db.basesqlsysdb import BaseSqlSysDB
+from chromadb.ingest import Ingest
+from chromadb.types import EmbeddingRecord, InsertType, Topic
 import pypika
 import duckdb
+from pubsub import pub
 
 
 class TxWrapper(migrations.TxWrapper):
@@ -23,11 +25,15 @@ class TxWrapper(migrations.TxWrapper):
             return False
 
 
-class DuckDB2(MigratableDB, BaseSqlSysDB):
+class DuckDB(MigratableDB, BaseSqlSysDB, Ingest):
     def __init__(self, settings: Settings):
         settings.validate("duckdb_database")
         settings.validate("migrations")
         self._conn = duckdb.connect(database=settings.duckdb_database)  # type: ignore
+        with self.tx() as cur:
+            cur.execute("CREATE SCHEMA IF NOT EXISTS chroma")
+            cur.execute("SET SCHEMA=chroma")
+
         self._settings = settings
 
         if settings.migrations == "validate":
@@ -55,6 +61,22 @@ class DuckDB2(MigratableDB, BaseSqlSysDB):
     def migration_scope():
         return "duckdb"
 
+    def delete_topic(self, topic_name: str):
+        with self.tx() as cur:
+            cur.execute(
+                """
+                DELETE FROM messages
+                WHERE topic = ?
+                """,
+                (topic_name,),
+            )
+
+    def submit_embedding(self, topic_name: str, message: EmbeddingRecord, insert_type: InsertType):
+        raise NotImplementedError()
+
+    def submit_embedding_delete(self, topic_name: str, id: str) -> None:
+        raise NotImplementedError()
+
     def setup_migrations(self):
         with self.tx() as cur:
             cur.execute(
@@ -75,3 +97,13 @@ class DuckDB2(MigratableDB, BaseSqlSysDB):
                 return True
             except duckdb.CatalogException:
                 return False
+
+    def reset(self):
+        with self.tx() as cur:
+            cur.execute("DROP SCHEMA chroma CASCADE")
+
+        with self.tx() as cur:
+            cur.execute("CREATE SCHEMA IF NOT EXISTS chroma")
+            cur.execute("SET SCHEMA=chroma")
+
+        self.apply_migrations()

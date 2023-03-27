@@ -1,4 +1,4 @@
-import chromadb.db.duckdb2
+import chromadb.db.impls.duckdb
 import chromadb.db.migrations as migrations
 from chromadb.config import Settings
 import pytest
@@ -7,7 +7,7 @@ import copy
 
 @pytest.fixture
 def duckdb_db():
-    return chromadb.db.duckdb2.DuckDB2(Settings(duckdb_database=":memory:", migrations="none"))
+    return chromadb.db.impls.duckdb.DuckDB(Settings(duckdb_database=":memory:", migrations="none"))
 
 
 test_dbs = [duckdb_db]

@@ -5,15 +5,7 @@ from uuid import UUID
 from collections.abc import Sequence
 from enum import Enum
 import pypika
-
-
-class Segment(TypedDict):
-    id: UUID
-    type: str
-    scope: Literal["vector", "metadata"]
-    embedding_function: str
-    topic: Optional[str]
-    metadata: Optional[dict[str, str]]
+from chromadb.types import Segment, Topic, EmbeddingFunction
 
 
 class Cursor(Protocol):
@@ -82,11 +74,41 @@ class SysDB(ABC):
         self,
         id: Optional[UUID] = None,
         scope: Optional[str] = None,
-        embedding_function: Optional[str] = None,
         topic: Optional[str] = None,
         metadata: Optional[dict[str, str]] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, embedding function, and/or metadata"""
+        pass
+
+    @abstractmethod
+    def get_topics(
+        self,
+        name: Optional[str],
+        embedding_function: Optional[str],
+        metadata: Optional[dict[str, str]],
+    ) -> Sequence[Topic]:
+        """Get topics by name, embedding function or metadata"""
+        pass
+
+    @abstractmethod
+    def create_topic(self, topic: Topic) -> None:
+        """Create a new topic"""
+        pass
+
+    @abstractmethod
+    def get_embedding_functions(self, name: Optional[str]) -> Sequence[EmbeddingFunction]:
+        """Find embedding functions"""
+        pass
+
+    @abstractmethod
+    def create_embedding_function(self, embedding_function: EmbeddingFunction) -> None:
+        """Create a new embedding function"""
+        pass
+
+    @abstractmethod
+    def reset(self):
+        """Delete all tables and data. For testing only, implementations intended for production
+        may throw an exception instead of implementing this method."""
         pass
 
 
@@ -105,8 +127,6 @@ class DB(ABC):
     def persist(self):
         pass
 
-    # TODO: get rid of this! Dropping the whole database should not be
-    # available via the API.
     @abstractmethod
     def reset(self):
         pass

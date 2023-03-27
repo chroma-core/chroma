@@ -18,7 +18,6 @@ from chromadb.api.types import (
 import json
 
 
-
 class API(ABC):
     @abstractmethod
     def __init__(self):
@@ -57,6 +56,7 @@ class API(ABC):
         metadata: Optional[Dict] = None,
         get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,
+        embedding_function_name: Optional[str] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
@@ -99,7 +99,7 @@ class API(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid

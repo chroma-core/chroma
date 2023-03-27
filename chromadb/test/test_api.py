@@ -27,6 +27,20 @@ def local_api():
 
 
 @pytest.fixture
+def local_api_decoupled():
+    return chromadb.Client(
+        Settings(
+            chroma_ingest_impl="chromadb.db.impls.duckdb.DuckDB",
+            chroma_segment_manager="chromadb.segment.manager.local.LocalSegmentManager",
+            chroma_system_db_impl="chromadb.db.impls.duckdb.DuckDB",
+            chroma_api_impl="chromadb.api.decoupled.DecoupledAPI",
+            duckdb_database=":memory:",
+            enable_system_reset=True,
+        )
+    )
+
+
+@pytest.fixture
 def local_persist_api():
     return chromadb.Client(
         Settings(
@@ -100,6 +114,7 @@ def fastapi_server():
 
 
 test_apis = [local_api, fastapi_api]
+# test_apis = [l#ocal_api_decoupled]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
@@ -687,7 +702,7 @@ def test_metadata_validation_add(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError, match='metadata'):
+    with pytest.raises(ValueError, match="metadata"):
         collection.add(**bad_metadata_records)
 
 
@@ -698,7 +713,7 @@ def test_metadata_validation_update(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
-    with pytest.raises(ValueError, match='metadata'):
+    with pytest.raises(ValueError, match="metadata"):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
 
 
@@ -708,7 +723,7 @@ def test_where_validation_get(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match='where'):
+    with pytest.raises(ValueError, match="where"):
         collection.get(where={"value": {"nested": "5"}})
 
 
@@ -718,7 +733,7 @@ def test_where_validation_query(api_fixture, request):
 
     api.reset()
     collection = api.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match='where'):
+    with pytest.raises(ValueError, match="where"):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
 
 
@@ -908,13 +923,13 @@ def test_query_document_valid_operators(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError, match='where document'):
+    with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$lt": {"$nested": 2}})
 
-    with pytest.raises(ValueError, match='where document'):
+    with pytest.raises(ValueError, match="where document"):
         collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
 
-    with pytest.raises(ValueError, match='where document'):
+    with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$contains": []})
 
     # Test invalid $and, $or
@@ -1177,10 +1192,10 @@ def test_get_include(api_fixture, request):
     assert items["embeddings"] == None
     assert items["ids"][0] == "id1"
 
-    with pytest.raises(ValueError, match='include'):
+    with pytest.raises(ValueError, match="include"):
         items = collection.get(include=["metadatas", "undefined"])
 
-    with pytest.raises(ValueError, match='include'):
+    with pytest.raises(ValueError, match="include"):
         items = collection.get(include=None)
 
 

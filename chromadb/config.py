@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
 
+    chroma_ingest_impl: str = "chromadb.db.impls.duckdb.DuckDB"
+    chroma_segment_manager: str = "chromadb.segment.manager.local.LocalSegmentManager"
+    chroma_system_db_impl: str = "chromadb.db.impls.duckdb.DuckDB"
+
+    enable_system_reset: bool = False
     migrations: Literal["none", "validate", "apply"] = "apply"
 
     clickhouse_host: Optional[str] = None

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     metadata: Optional[Dict] = None
+    embedding_function_name: Optional[str] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -40,6 +41,7 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function_name: Optional[str] = None,
         metadata: Optional[Dict] = None,
     ):
 
@@ -48,7 +50,6 @@ class Collection(BaseModel):
             self._embedding_function = embedding_function
         else:
             import chromadb.utils.embedding_functions as ef
-
 
             logger.warning(
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
