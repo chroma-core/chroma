@@ -7,4 +7,4 @@ hnswlib==0.7.0
 clickhouse-connect==0.5.7
 psycopg2==2.9.5
 pydantic==1.9.0
-sentence-transformers==2.2.2 posthog==2.4.0
+sentence-transformers==2.2.2
