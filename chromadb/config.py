@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     clickhouse_host: str = None
     clickhouse_port: str = None
+    pg_uri: str = None
 
     persist_directory: str = ".chroma"
 

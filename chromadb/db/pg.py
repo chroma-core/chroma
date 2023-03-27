@@ -2,27 +2,31 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Sequence, Optional, Tuple
 from enum import Enum
 from uuid import UUID
+import logging
+from urllib.parse import urlparse, unquote
+import json
+
+import numpy as np
 import numpy.typing as npt
-from databases import Database
-import asyncio
-import psycopg2.errors
-from pypika import Table, Query
+import psycopg2
+import psycopg2.extras
+
+from chromadb.db import DB
 from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
 
-import logging
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_TABLE_SCHEMA = [
-    {"uuid": "UUID DEFAULT uuid_generate_v4 ()"},
+    {"uuid": "UUID DEFAULT uuid_generate_v4()"},
     {"name": "TEXT NULL"},
     {"metadata": "JSON"}
 ]
 
 EMBEDDING_TABLE_SCHEMA_TEMPLATE = [
-    {"collection_uuid": "UUID DEFAULT uuid_generate_v4 ()"},
-    {"uuid": "UUID"},
-    {"embedding": f"""VECTOR({dim_count})"""},
+    {"collection_uuid": "UUID"},
+    {"uuid": "UUID DEFAULT uuid_generate_v4()"},
+    {"embedding": f"VECTOR({{}})"},
     {"document": "TEXT NULL"},
     {"id": "TEXT NULL"},
     {"metadata": "JSON"},
@@ -40,7 +44,6 @@ class PGExtensionConfigurationException(Exception):
     pass
 
 
-
 class DistanceFunction(Enum):
     L2 = 'vector_l2_ops'
     CONSINE = 'vector_cosine_ops'
@@ -49,51 +52,69 @@ class DistanceFunction(Enum):
     
 class Postgres(DB):
     def __init__(self, settings):
-        self._conn =  psycopg2.connect(
-            dbname="mydatabase",
-            user="myuser",
-            password="mypassword",
-            host="localhost"
-        )
+        if not settings.pg_uri:
+            raise TypeError("pg_uri is not set")
+        self._conn =  self._connect(settings.pg_uri)
         self._settings = settings
         self._initialize_db()
-            
+    
+    def _connect(self, pg_uri):
+        try:
+            parsed_uri = urlparse(pg_uri)
+            username = unquote(parsed_uri.username)
+            password = unquote(parsed_uri.password)
+            host = parsed_uri.hostname
+            port = parsed_uri.port or 5432
+            database = parsed_uri.path.lstrip('/')
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                database=database,
+                user=username,
+                password=password,
+            )
+            return conn
+        except psycopg2.Error as e:
+            logging.error(f"Exception when connecting to Postgres database using {pg_uri}")
+            raise e
+        
     def _run_query(self, query, *params):
         if not query:
             return
         
-        cursor = self.conn.cursor()
+        cursor = self._conn.cursor()
         try:
+            logging.debug(f"running query {query} ; with params {params}")
             cursor.execute(query, params)
-            self.conn.commit()
+            self._conn.commit()
         except psycopg2.Error as e:
             logging.error(f"Exception when running query {query}")
             raise e
         return cursor
     
     def _enable_necessary_extensions(self):
-        for ext in EXTENSIONS_TO_INSTALL:
-            cursor = self._run_query("CREATE EXTENSION IF NOT EXISTS {ext_name}")
+        for ext_name in EXTENSIONS_TO_INSTALL:
+            cursor = self._run_query(f"CREATE EXTENSION IF NOT EXISTS \"{ext_name}\"")
             cursor.close()
             
     def _create_collections_table(self):
         columns = ", ".join([f"{k} {v}" for column in COLLECTION_TABLE_SCHEMA for k, v in column.items()])
-        query = f"CREATE TABLE collections ({columns})"
+        query = f"CREATE TABLE IF NOT EXISTS collections ({columns})"
         cursor = self._run_query(query)
         cursor.close()
-
-    def _create_and_index_embeddings_table(self, dim_count, space="L2"):
+    
+    def _create_and_index_embeddings_table(self, dimensionality, space="L2"):
         #  Create embeddings table
         schema = EMBEDDING_TABLE_SCHEMA_TEMPLATE.copy()
-        schema[2]["embedding"] = f"VECTOR({dim_count})"
+        schema[2]["embedding"] = f"VECTOR({dimensionality})"
         columns = ", ".join([f"{k} {v}" for column in schema for k, v in column.items()])
-        query = f"CREATE TABLE embeddings ({columns})"
+        query = f"CREATE TABLE IF NOT EXISTS embeddings ({columns})"
         cursor = self._run_query(query)
         cursor.close()
         
-        # Add index to embedding table
-        embedding_type = DistanceFunction(space).value
-        query = f"CREATE INDEX ON embeddings USING ivfflat (embedding {embedding_type});"
+        # Add index on embeddings column
+        embedding_type = DistanceFunction[space].value
+        query = f"CREATE INDEX IF NOT EXISTS embeddings_idx ON embeddings USING ivfflat (embedding {embedding_type});"
         cursor = self._run_query(query)
         cursor.close()
         
@@ -109,12 +130,23 @@ class Postgres(DB):
             INSERT INTO collections (name, metadata)
             SELECT %s, %s
             WHERE NOT EXISTS (SELECT 1 FROM collections WHERE name = %s)
+            RETURNING uuid, name, metadata
         """
-        params = (name, metadata, name)
+        params = (name, json.dumps(metadata), name)
         cursor = self._run_query(query, *params)
+        row = cursor.fetchone()
         cursor.close()
+        if row:
+            return [[row[0], row[1], row[2]]]
+        else:
+            return []
 
 
+
+    def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
+        logger.info("Not necessary to add incremental embeddings for Postgres database")
+        
+    
     def get_collection(self, name: str) -> Sequence:
         query = "SELECT * FROM collections WHERE name = %s LIMIT 1"
         params = (name,)
@@ -143,7 +175,7 @@ class Postgres(DB):
             new_metadata = self.get_collection(current_name)[0][2]
         
         query = """UPDATE collections SET name = %s, metadata = %s WHERE name = %s"""
-        params = (new_name, new_metadata, name)
+        params = (new_name, json.dumps(new_metadata), name)
         cursor = self._run_query(query, *params)
         cursor.close()
 
@@ -187,29 +219,32 @@ class Postgres(DB):
             self._create_and_index_embeddings_table(dimensionality=len(embeddings[0]))
             
         data_to_insert = [
-            [
+            (
                 collection_uuid,
                 embedding,
-                metadatas[i] if metadatas else None,
+                json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
                 ids[i],
-            ]
+            )
             for i, embedding in enumerate(embeddings)
         ]
 
-        placeholders = ', '.join(['?' for _ in range(5)])
+        placeholders = ', '.join(['%s' for _ in range(5)])
         insert_string = "collection_uuid, embedding, metadata, document, id"
-        query = f"INSERT INTO embeddings ({insert_string}) VALUES ({placeholders}) RETURNING uuid"
-        cursor = self._run_query(query, *data_to_insert)
-        returned_uuids = cursor.fetchall()
+        query = f"INSERT INTO embeddings ({insert_string}) VALUES ({placeholders}) RETURNING uuid "
+        
+        returned_uuids = []
+
+        with self._conn.cursor() as cursor:
+            psycopg2.extras.execute_batch(cursor, query, data_to_insert)
+            returned_uuids = [row[0] for row in cursor.fetchall()]
         
         self._conn.commit()
-        cursor.close()
         return returned_uuids
 
 
-     def _get(self, where={}, columns: Optional[List] = None):
-        select = f"SELECT {",".join({columns})}" if columns else "SELECT *"
+    def _get(self, where={}, columns: Optional[List] = None):
+        select = f"""SELECT {",".join({columns})}" if columns else "SELECT *"""
         cursor = self._run_query(f"{select} FROM embeddings {where}")
         rows = cursor.fetchall()
         cursor.close()
@@ -291,7 +326,7 @@ class Postgres(DB):
             if embeddings is not None:
                 data.append(embeddings[i])
             if metadatas is not None:
-                data.append(metadatas[i])
+                data.append(json.dumps(metadatas[i]))
             if documents is not None:
                 data.append(documents[i])
             data.append(ids[i])
@@ -375,32 +410,50 @@ class Postgres(DB):
         
         self._initialize_db()
 
-    def is_dim_mismatch(self, req_embeddings):
-        # SELECT num_dims(embedding) FROM my_table WHERE id = 123;
-        return False
+    def _get_index_dims(self, collection_name: str):
+        query = "SELECT vector_dims(embedding) FROM embeddings JOIN collections on collections.uuid = embeddings.collection_uuid WHERE collections.name = %s"
+        params = (collection_name,)
+        return self._run_query(query, params).fetchone()[0]
+
     
-    def is_length_mismatch(self, req_embeddings):
-        #SELECT array_length(my_vector_field, 1) as 
-        # num_elements FROM my_table WHERE id = 1;
-        return False
+    def _get_doc_length(self, collection_name):
+        query = "SELECT COUNT(DISTINCT(id)) FROM embeddings JOIN collections on collections.uuid = embeddings.collection_uuid WHERE collections.name = %s"
+        params = (collection_name,)
+        return self._run_query(query, params).fetchone()[0]
 
+    def _generate_embedding_distance_select(self, embeddings):
+        distances = []
+        placeholders = []
+        for embedding in embeddings:
+            distances.append("SELECT uuid, embedding <-> %s AS distance FROM embeddings WHERE collection_uuid = %s")
+            placeholders.append(str(embedding))
+        query = ' UNION ALL '.join(distances)
+        return query, placeholders
+    
     def _get_nearest_neighbors(self, collection_uuid, embeddings, n_results, ids=None):
-        params = [collection_uuid, embedding, n_results]
-        where_clause = f"WHERE collection_uuid = %s ORDER BY embedding <-> %s LIMIT %s"
-
+        select_list = []
+        
+        select_clauses, placeholders = self._generate_embedding_distance_select(embeddings)
+   
+        params = [*placeholders, collection_uuid]
+        where_clause = ""
         if ids:
-            ids_str = ",".join(["'%s'" % id for id in ids])
-            where_clause += f" AND id IN ({ids_str})"
-
-        query = f"SELECT uuid, embedding <-> {embeddings} AS distance FROM embeddings {where_clause}"
+            where_clause += f" AND id IN (%s)"
+            params.append(tuple(ids))
+        
+        order_by_limit_clause = f"ORDER BY distance LIMIT %s"
+        query = f"{select_clauses} {where_clause} {order_by_limit_clause}"
+        params.append(n_results)
+        
         cursor = self._run_query(query, *params)
-
-        results = []
-        for row in cursor:
-            result.append((row[0], row[1]))
-
+        rows = cursor.fetchall()
         cursor.close()
-        return results
+        uuids = []
+        distances = []
+        for row in rows:
+            uuids.append(row[0])
+            distances.append(row[1])
+        return [uuids], np.array(distances)
         
 
     def get_nearest_neighbors(
@@ -412,19 +465,17 @@ class Postgres(DB):
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
-
-        idx_metadata = self._idx.get_metadata()
-            
-        # is_dim_mismatch
-        if idx_metadata["dimensionality"] != len(embeddings[0]):
+        
+        idx_dims = self._get_index_dims(collection_name)
+        if idx_dims != len(embeddings[0]):
             raise InvalidDimensionException(
-                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
+                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_dims}"
             )
-
-        # is_length_mismatch
-        if n_results > idx_metadata["elements"]:
+        
+        doc_length = self._get_doc_length(collection_name)
+        if n_results > doc_length:
             raise NotEnoughElementsException(
-                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
+                f"Number of requested results {n_results} cannot be greater than number of elements in index {doc_length}"
             )
 
         if len(where) != 0 or len(where_document) != 0:
@@ -443,13 +494,42 @@ class Postgres(DB):
     
         return self._get_nearest_neighbors(collection_uuid, embeddings, n_results, ids)
     
-    def get_by_ids(self, uuids, columns=None) -> Sequence:
-        pass
+    def get_by_ids(self, uuids: list, columns=None) -> Sequence:
+        if not isinstance(uuids, list):
+            raise TypeError(f"Expected ids to be a list, got {uuids}")
+
+        if not uuids:
+            # create an empty pandas dataframe
+            return pd.DataFrame()
+        
+        columns = columns + ["uuid"] if columns else ["uuid"]
+
+        select_columns = ' * ' if columns is None else ",".join(columns)
+        placeholders = ', '.join(['%s' for _ in uuids])
+        query = f"""SELECT {select_columns}
+            FROM
+                embeddings 
+            WHERE 
+                uuid IN ({placeholders}) 
+            ORDER BY uuid"""
+        cursor = self._run_query(query, *uuids)
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            new_row = []
+            for value in row:
+                if isinstance(value, dict):
+                    new_row.append(json.dumps(value))
+                else:
+                    new_row.append(value)
+            result.append(tuple(new_row))
+        cursor.close()
+        return result
+
 
     def raw_sql(self, raw_sql):
         cursor = self._run_query(raw_sql)
         cursor.close()
-
 
     def create_index(self, collection_uuid: str):
         pass
@@ -459,7 +539,6 @@ class Postgres(DB):
         table_exists = cursor.fetchone()[0]
         cursor.close()
         return table_exists and self.count(collection_name) > 0
-
-
+    
     def persist(self):
         pass

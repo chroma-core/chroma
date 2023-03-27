@@ -46,6 +46,11 @@ def get_db(settings=__settings):
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
+    elif setting == "pg+pg_vector":
+        logger.info("Using postgres with pg_vector for document storage and indexing")
+        import chromadb.db.pg
+
+        return chromadb.db.pg.Postgres(settings)
     else:
         raise ValueError(
             f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}"
