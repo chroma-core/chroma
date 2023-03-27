@@ -15,14 +15,18 @@ import requests
 import json
 from typing import Sequence
 from chromadb.api.models.Collection import Collection
+from chromadb.telemetry import Telemetry
 
 
 class FastAPI(API):
     def __init__(self, settings):
-        settings.validate('chroma_server_host')
-        settings.validate('chroma_server_http_port')
+        settings.validate("chroma_server_host")
+        settings.validate("chroma_server_http_port")
+        telemetry_client = settings.get_component(settings, "chroma_telemetry_impl")
+
         url_prefix = "https" if settings.chroma_server_ssl_enabled else "http"
         self._api_url = f"{url_prefix}://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
+        self._telemetry_client = telemetry_client
 
     def heartbeat(self):
         """Returns the current server time in nanoseconds to check if the server is alive"""

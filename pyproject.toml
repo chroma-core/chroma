@@ -26,7 +26,8 @@ dependencies = [
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.21.6',
   'pulsar-client >= 3.0.0',
-  'fastavro >= 1.7.2'
+  'fastavro >= 1.7.2',
+  'posthog >= 2.4.0'
 ]
 
 [tool.black]

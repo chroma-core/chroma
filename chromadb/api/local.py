@@ -21,16 +21,21 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
+from chromadb.telemetry import Telemetry
+from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
+
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name):
-    msg = ("Expected collection name that "
-           "(1) contains 3-63 characters, "
-           "(2) starts and ends with an alphanumeric character, "
-           "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
-           "(4) contains no two consecutive periods (..) and "
-           "(5) is not a valid IPv4 address, "
-           f"got {index_name}")
+    msg = (
+        "Expected collection name that "
+        "(1) contains 3-63 characters, "
+        "(2) starts and ends with an alphanumeric character, "
+        "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+        "(4) contains no two consecutive periods (..) and "
+        "(5) is not a valid IPv4 address, "
+        f"got {index_name}"
+    )
     if len(index_name) < 3 or len(index_name) > 63:
         raise ValueError(msg)
     if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
@@ -43,7 +48,8 @@ def check_index_name(index_name):
 
 class LocalAPI(API):
     def __init__(self, settings):
-        self._db = chromadb.config.get_component(settings, 'chroma_db_impl')
+        self._db = chromadb.config.get_component(settings, "chroma_db_impl")
+        self._telemetry_client = chromadb.config.get_component(settings, "chroma_telemetry_impl")
 
     def heartbeat(self):
         return int(1000 * time.time_ns())
@@ -133,6 +139,7 @@ class LocalAPI(API):
         if increment_index:
             self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
+        self._telemetry_client.capture(CollectionAddEvent(collection_uuid, len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
     def _update(
@@ -214,9 +221,11 @@ class LocalAPI(API):
         if where_document is None:
             where_document = {}
 
+        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         deleted_uuids = self._db.delete(
-            collection_name=collection_name, where=where, ids=ids, where_document=where_document
+            collection_uuid=collection_uuid, where=where, ids=ids, where_document=where_document
         )
+        self._telemetry_client.capture(CollectionDeleteEvent(collection_uuid, len(deleted_uuids)))
         return deleted_uuids
 
     def _count(self, collection_name):

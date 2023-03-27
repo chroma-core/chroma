@@ -14,11 +14,15 @@ _legacy_config_values = {
 }
 
 
+TELEMETRY_WHITELISTED_SETTINGS = ["chroma_db_impl", "chroma_api_impl", "chroma_server_ssl_enabled"]
+
+
 class Settings(BaseSettings):
     environment: str = ""
 
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
+    chroma_telementry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
     chroma_ingest_impl: str = "chromadb.db.impls.duckdb.DuckDB"
     chroma_segment_manager: str = "chromadb.segment.manager.local.LocalSegmentManager"
@@ -47,6 +51,8 @@ class Settings(BaseSettings):
         if val is None:
             raise ValueError(f"Missing required config value '{item}'")
         return val
+
+    anonymized_telemetry: bool = True
 
     def __getitem__(self, item):
         val = getattr(self, item)

@@ -159,9 +159,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     if not isinstance(where_document, dict):
         raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
     if len(where_document) != 1:
-        raise ValueError(
-            f"Epected where document to have exactly one operator, got {where_document}"
-        )
+        raise ValueError(f"Expected where document to have exactly one operator, got {where_document}")
     for operator, operand in where_document.items():
         if operator not in ["$contains", "$and", "$or"]:
             raise ValueError(
@@ -191,7 +189,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     to control if distances is allowed"""
 
     if not isinstance(include, list):
-        raise ValueError(f"Epected include to be a list, got {include}")
+        raise ValueError(f"Expected include to be a list, got {include}")
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")

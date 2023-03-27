@@ -12,3 +12,4 @@ protobuf==4.22.1
 mypy-protobuf==3.4.0
 pypika==0.48.9
 pypubsub==4.0.3
+posthog==2.4.0

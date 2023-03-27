@@ -19,6 +19,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def clickhouse_to_duckdb_schema(table_schema):
     for item in table_schema:
         if "embedding" in item:
@@ -88,7 +89,9 @@ class DuckDB(Clickhouse):
         dupe_check = self.get_collection(name)
         if len(dupe_check) > 0:
             if get_or_create == True:
-                logger.info(f"collection with name {name} already exists, returning existing collection")
+                logger.info(
+                    f"collection with name {name} already exists, returning existing collection"
+                )
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
@@ -296,7 +299,7 @@ class DuckDB(Clickhouse):
         """
         self._conn.executemany(update_statement, update_data)
 
-    def _delete(self, where_str: Optional[str] = None):
+    def _delete(self, where_str: Optional[str] = None) -> List:
         uuids_deleted = self._conn.execute(
             f"""SELECT uuid FROM embeddings {where_str}"""
         ).fetchall()

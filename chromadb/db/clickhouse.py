@@ -130,7 +130,9 @@ class Clickhouse(DB):
 
         if len(dupe_check) > 0:
             if get_or_create:
-                logger.info(f"collection with name {name} already exists, returning existing collection")
+                logger.info(
+                    f"collection with name {name} already exists, returning existing collection"
+                )
                 return dupe_check
             else:
                 raise ValueError(f"Collection with name {name} already exists")
@@ -353,7 +355,7 @@ class Clickhouse(DB):
             if operator == "$and":
                 results.append(f"({' AND '.join(all_subresults)})")
         else:
-            raise ValueError(f"Epected one of $contains, $and, $or, got {operator}")
+            raise ValueError(f"Expected one of $contains, $and, $or, got {operator}")
 
     def get(
         self,
@@ -406,7 +408,7 @@ class Clickhouse(DB):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid)[0][0]
 
-    def _delete(self, where_str: Optional[str] = None):
+    def _delete(self, where_str: Optional[str] = None) -> List:
         deleted_uuids = (
             self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
         )
@@ -422,17 +424,10 @@ class Clickhouse(DB):
     def delete(
         self,
         where: Where = {},
-        collection_name: Optional[str] = None,
         collection_uuid: Optional[str] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ):
-        if collection_name == None and collection_uuid == None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
-
+    ) -> List:
         s3 = time.time()
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
