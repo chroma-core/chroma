@@ -114,7 +114,7 @@ def fastapi_server():
 
 
 test_apis = [local_api, fastapi_api]
-# test_apis = [l#ocal_api_decoupled]
+# test_apis = [local_api_decoupled]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")

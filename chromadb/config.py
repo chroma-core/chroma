@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
-    chroma_telementry_impl: str = "chromadb.telemetry.posthog.Posthog"
+    chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
     chroma_ingest_impl: str = "chromadb.db.impls.duckdb.DuckDB"
     chroma_segment_manager: str = "chromadb.segment.manager.local.LocalSegmentManager"
