@@ -1,6 +1,6 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib, index_exists, delete_all_indexes
+from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.errors import (
     NoDatapointsException,
     InvalidDimensionException,
@@ -531,9 +531,6 @@ class Clickhouse(DB):
     def add_incremental(self, collection_uuid, uuids, embeddings):
         index = self._index(collection_uuid)
         index.add(collection_uuid, uuids, embeddings)
-
-    def has_index(self, collection_uuid: str):
-        return index_exists(self._settings, collection_uuid)
 
     def reset_indexes(self):
         delete_all_indexes(self._settings)

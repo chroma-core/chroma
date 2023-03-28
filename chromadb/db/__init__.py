@@ -116,9 +116,5 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def has_index(self, collection_name):
-        pass
-
-    @abstractmethod
     def persist(self):
         pass

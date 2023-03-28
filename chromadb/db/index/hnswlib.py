@@ -58,10 +58,6 @@ def hexid(id):
     return id.hex if isinstance(id, UUID) else id
 
 
-def index_exists(settings, id):
-    return os.path.exists(f"{settings.persist_directory}/index/index_{id}.bin")
-
-
 def delete_all_indexes(settings):
     for file in os.listdir(f"{settings.persist_directory}/index"):
         os.remove(f"{settings.persist_directory}/index/{file}")
