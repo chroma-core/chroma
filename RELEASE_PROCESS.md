@@ -2,7 +2,7 @@
 
 This guide covers how to release chroma to PyPi
 
-#### Increase the version numner
+#### Increase the version number
 1. Create a new PR for the release that upgrades the version in code. In [this file](https://github.com/chroma-core/chroma/blob/main/chromadb/__init__.py) update the __ version __.
 ```
 __version__ = "A.B.C"
