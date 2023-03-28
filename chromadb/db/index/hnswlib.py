@@ -38,6 +38,9 @@ class HnswParams:
 
         metadata = metadata or {}
 
+        # Convert all values to strings for future compatibility.
+        metadata = {k: str(v) for k, v in metadata.items()}
+
         for param, value in metadata.items():
             if param.startswith("hnsw:"):
                 if param not in valid_params:
