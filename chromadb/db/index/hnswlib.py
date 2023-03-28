@@ -7,7 +7,7 @@ from chromadb.api.types import IndexMetadata
 import hnswlib
 import numpy as np
 from chromadb.db.index import Index
-from chromadb.errors import NoIndexException, InvalidDimensionException
+from chromadb.errors import NoIndexException, InvalidDimensionException, NotEnoughElementsException
 import logging
 import re
 from uuid import UUID
@@ -36,6 +36,8 @@ class HnswParams:
 
     def __init__(self, metadata):
 
+        metadata = metadata or {}
+
         for param, value in metadata.items():
             if param.startswith("hnsw:"):
                 if param not in valid_params:
@@ -54,6 +56,15 @@ class HnswParams:
 def hexid(id):
     """Backwards compatibility for old indexes which called uuid.hex on UUID ids"""
     return id.hex if isinstance(id, UUID) else id
+
+
+def index_exists(settings, id):
+    return os.path.exists(f"{settings.persist_directory}/index/index_{id}.bin")
+
+
+def delete_all_indexes(settings):
+    for file in os.listdir(f"{settings.persist_directory}/index"):
+        os.remove(f"{settings.persist_directory}/index/{file}")
 
 
 class Hnswlib(Index):
@@ -95,6 +106,15 @@ class Hnswlib(Index):
         }
         self._save()
 
+    def _check_dimensionality(self, data):
+        """Assert that the given data matches the index dimensionality"""
+        dim = len(data[0])
+        idx_dim = self._index.get_dim()
+        if dim != idx_dim:
+            raise InvalidDimensionException(
+                f"Dimensionality of ({dim}) does not match index dimensionality ({idx_dim})"
+            )
+
     def add(self, ids, embeddings, update=False):
         """Add or update embeddings to the index"""
 
@@ -104,11 +124,7 @@ class Hnswlib(Index):
             self._init_index(dim)
 
         # Check dimensionality
-        idx_dim = self._index.get_dim()
-        if dim != idx_dim:
-            raise InvalidDimensionException(
-                f"Dimensionality of new embeddings ({dim}) does not match index dimensionality ({idx_dim})"
-            )
+        self._check_dimensionality(embeddings)
 
         labels = []
         for id in ids:
@@ -204,6 +220,14 @@ class Hnswlib(Index):
 
         if self._index is None:
             raise NoIndexException("Index not found, please create an instance before querying")
+
+        if k > self._index_metadata["elements"]:
+            raise NotEnoughElementsException(
+                f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
+            )
+
+        # Check dimensionality
+        self._check_dimensionality(query)
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available

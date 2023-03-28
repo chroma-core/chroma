@@ -1,6 +1,6 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
+from chromadb.db.index.hnswlib import Hnswlib, index_exists, delete_all_indexes
 from chromadb.errors import (
     NoDatapointsException,
     InvalidDimensionException,
@@ -51,7 +51,6 @@ class Clickhouse(DB):
     #
     def __init__(self, settings):
         self._conn = None
-        self._idx = Hnswlib(settings)
         self._settings = settings
 
     def _init_conn(self):
@@ -80,6 +79,24 @@ class Clickhouse(DB):
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY collection_uuid"""
         )
+
+    index_cache = {}
+
+    def _index(self, collection_id):
+        """Retrieve an HNSW index instance for the given collection"""
+
+        if collection_id not in self.index_cache:
+            collection_metadata = self.get_collection(collection_id)[2]
+            index = Hnswlib(self._settings, collection_id, collection_metadata)
+            self.index_cache[collection_id] = index
+
+        return self.index_cache[collection_id]
+
+    def _delete_index(self, collection_id):
+        """Delete an index from the cache"""
+        index = self._index(collection_id)
+        index.delete()
+        del self.index_cache[collection_id]
 
     #
     #  UTILITY METHODS
@@ -195,7 +212,7 @@ class Clickhouse(DB):
          """
         )
 
-        self._idx.delete_index(collection_uuid)
+        self._delete_index(collection_uuid)
 
     #
     #  ITEM METHODS
@@ -271,9 +288,8 @@ class Clickhouse(DB):
 
         # Update the index
         if embeddings is not None:
-            update_uuids = [x[1] for x in existing_items]
-            self._idx.delete_from_index(collection_uuid, update_uuids)
-            self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
+            index = self._index(collection_uuid)
+            index.add(ids, embeddings, update=True)
 
     def _get(self, where={}, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
@@ -437,7 +453,8 @@ class Clickhouse(DB):
 
         deleted_uuids = self._delete(where_str)
 
-        self._idx.delete_from_index(collection_uuid, deleted_uuids)
+        index = self._index(collection_uuid)
+        index.delete_from_index(deleted_uuids)
 
         return deleted_uuids
 
@@ -476,21 +493,6 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        self._idx.load_if_not_loaded(collection_uuid)
-
-        idx_metadata = self._idx.get_metadata()
-        # Check query embeddings dimensionality
-        if idx_metadata["dimensionality"] != len(embeddings[0]):
-            raise InvalidDimensionException(
-                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
-            )
-
-        # Check number of requested results
-        if n_results > idx_metadata["elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
-            )
-
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
                 collection_uuid=collection_uuid, where=where, where_document=where_document
@@ -504,9 +506,9 @@ class Clickhouse(DB):
                 )
         else:
             ids = None
-        uuids, distances = self._idx.get_nearest_neighbors(
-            collection_uuid, embeddings, n_results, ids
-        )
+
+        index = self._index(collection_uuid)
+        uuids, distances = index.get_nearest_neighbors(collection_uuid, embeddings, n_results, ids)
 
         return uuids, distances
 
@@ -523,13 +525,15 @@ class Clickhouse(DB):
         uuids = [x[1] for x in get]
         embeddings = [x[2] for x in get]
 
-        self._idx.run(collection_uuid, uuids, embeddings)
+        index = self._index(collection_uuid)
+        index.add(collection_uuid, uuids, embeddings)
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
-        self._idx.add_incremental(collection_uuid, uuids, embeddings)
+        index = self._index(collection_uuid)
+        index.add(collection_uuid, uuids, embeddings)
 
     def has_index(self, collection_uuid: str):
-        return self._idx.has_index(collection_uuid)
+        return index_exists(self._settings, collection_uuid)
 
     def reset(self):
         conn = self._get_conn()
@@ -538,8 +542,8 @@ class Clickhouse(DB):
         self._create_table_collections(conn)
         self._create_table_embeddings(conn)
 
-        self._idx.reset()
-        self._idx = Hnswlib(self._settings)
+        delete_all_indexes(self._settings)
+        self.index_cache = {}
 
     def raw_sql(self, sql):
         return self._get_conn().query(sql).result_rows
