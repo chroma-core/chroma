@@ -86,8 +86,9 @@ class Clickhouse(DB):
         """Retrieve an HNSW index instance for the given collection"""
 
         if collection_id not in self.index_cache:
-            collection_metadata = self.get_collection(collection_id)[2]
-            index = Hnswlib(self._settings, collection_id, collection_metadata)
+            coll = self.get_collection_by_id(collection_id)
+            collection_metadata = coll[2]
+            index = Hnswlib(collection_id, self._settings, collection_metadata)
             self.index_cache[collection_id] = index
 
         return self.index_cache[collection_id]
@@ -172,6 +173,19 @@ class Clickhouse(DB):
         )
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res]
+
+    def get_collection_by_id(self, collection_uuid: str):
+        res = (
+            self._get_conn()
+            .query(
+                f"""
+         SELECT * FROM collections WHERE uuid = '{collection_uuid}'
+         """
+            )
+            .result_rows
+        )
+        # json.loads the metadata
+        return [[x[0], x[1], json.loads(x[2])] for x in res][0]
 
     def list_collections(self) -> Sequence:
         res = self._get_conn().query(f"""SELECT * FROM collections""").result_rows
@@ -508,7 +522,7 @@ class Clickhouse(DB):
             ids = None
 
         index = self._index(collection_uuid)
-        uuids, distances = index.get_nearest_neighbors(collection_uuid, embeddings, n_results, ids)
+        uuids, distances = index.get_nearest_neighbors(embeddings, n_results, ids)
 
         return uuids, distances
 
@@ -526,11 +540,11 @@ class Clickhouse(DB):
         embeddings = [x[2] for x in get]
 
         index = self._index(collection_uuid)
-        index.add(collection_uuid, uuids, embeddings)
+        index.add(uuids, embeddings)
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
         index = self._index(collection_uuid)
-        index.add(collection_uuid, uuids, embeddings)
+        index.add(uuids, embeddings)
 
     def reset_indexes(self):
         delete_all_indexes(self._settings)

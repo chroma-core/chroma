@@ -59,8 +59,9 @@ def hexid(id):
 
 
 def delete_all_indexes(settings):
-    for file in os.listdir(f"{settings.persist_directory}/index"):
-        os.remove(f"{settings.persist_directory}/index/{file}")
+    if os.path.exists(f"{settings.persist_directory}/index"):
+        for file in os.listdir(f"{settings.persist_directory}/index"):
+            os.remove(f"{settings.persist_directory}/index/{file}")
 
 
 class Hnswlib(Index):
@@ -77,6 +78,7 @@ class Hnswlib(Index):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
         self._id = id
+        self._index = None
 
         self._load()
 
@@ -105,7 +107,7 @@ class Hnswlib(Index):
     def _check_dimensionality(self, data):
         """Assert that the given data matches the index dimensionality"""
         dim = len(data[0])
-        idx_dim = self._index.get_dim()
+        idx_dim = self._index.dim
         if dim != idx_dim:
             raise InvalidDimensionException(
                 f"Dimensionality of ({dim}) does not match index dimensionality ({idx_dim})"
@@ -134,11 +136,14 @@ class Hnswlib(Index):
                 next_label = self._index_metadata["elements"]
                 self._id_to_label[hexid(id)] = next_label
                 self._label_to_id[next_label] = id
+                labels.append(next_label)
 
         if self._index_metadata["elements"] > self._index.get_max_elements():
             new_size = min(self._index_metadata["elements"] * self._params.resize_factor, 1000)
             self._index.resize_index(new_size)
 
+        print("embeddings: ", embeddings)
+        print("labels: ", labels)
         self._index.add_items(embeddings, labels)
         self._save()
 

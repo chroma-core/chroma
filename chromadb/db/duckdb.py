@@ -105,6 +105,10 @@ class DuckDB(Clickhouse):
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
+    def get_collection_by_id(self, uuid: str) -> Sequence:
+        res = self._conn.execute(f"""SELECT * FROM collections WHERE uuid = ?""", [uuid]).fetchone()
+        return [res[0], res[1], json.loads(res[2])]
+
     def list_collections(self) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections""").fetchall()
         return [[x[0], x[1], json.loads(x[2])] for x in res]
