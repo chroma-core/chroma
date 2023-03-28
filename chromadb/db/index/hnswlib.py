@@ -142,8 +142,6 @@ class Hnswlib(Index):
             new_size = min(self._index_metadata["elements"] * self._params.resize_factor, 1000)
             self._index.resize_index(new_size)
 
-        print("embeddings: ", embeddings)
-        print("labels: ", labels)
         self._index.add_items(embeddings, labels)
         self._save()
 
@@ -236,11 +234,11 @@ class Hnswlib(Index):
         if ids is not None:
             labels = {self._id_to_label[hexid(id)] for id in ids}
             if len(labels) < k:
-                k = len(ids)
+                k = len(labels)
 
         filter_function = None
         if len(labels) != 0:
-            filter_function = lambda id: id in ids
+            filter_function = lambda label: label in labels
 
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 
@@ -248,5 +246,5 @@ class Hnswlib(Index):
         database_labels, distances = self._index.knn_query(query, k=k, filter=filter_function)
         logger.debug(f"time to run knn query: {time.time() - s3}")
 
-        ids = [[self._label_to_id[label] for label in labels] for label in database_labels]
+        ids = [[self._label_to_id[label] for label in labels] for labels in database_labels]
         return ids, distances
