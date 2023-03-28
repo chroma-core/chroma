@@ -37,12 +37,15 @@ def get_db(settings=__settings):
         return chromadb.db.clickhouse.Clickhouse(settings)
     elif setting == "duckdb+parquet":
         require("persist_directory")
+        logger.warning(
+            f"Using embedded DuckDB with persistence: data will be stored in: {settings.persist_directory}"
+        )
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
         require("persist_directory")
-        logger.info("Using DuckDB in-memory for database. Data will be transient.")
+        logger.warning("Using embedded DuckDB without persistence: data will be transient")
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
