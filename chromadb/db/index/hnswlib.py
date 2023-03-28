@@ -220,13 +220,13 @@ class Hnswlib(Index):
         if self._index is None:
             raise NoIndexException("Index not found, please create an instance before querying")
 
+        # Check dimensionality
+        self._check_dimensionality(query)
+
         if k > self._index_metadata["elements"]:
             raise NotEnoughElementsException(
                 f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
             )
-
-        # Check dimensionality
-        self._check_dimensionality(query)
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available
