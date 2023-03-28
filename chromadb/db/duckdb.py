@@ -14,6 +14,7 @@ import json
 import duckdb
 import uuid
 import time
+import os
 import itertools
 import logging
 
@@ -43,8 +44,6 @@ def clickhouse_to_duckdb_schema(table_schema):
 class DuckDB(Clickhouse):
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
-
-        logger.warning("Using embedded DuckDB without persistence: data will be transient")
 
         self._conn = duckdb.connect()
         self._create_table_collections()
@@ -391,6 +390,9 @@ class PersistentDuckDB(DuckDB):
         if self._conn is None:
             return
 
+        if not os.path.exists(self._save_folder):
+            os.makedirs(self._save_folder)
+
         # if the db is empty, dont save
         if self._conn.query(f"SELECT COUNT() FROM embeddings") == 0:
             return
@@ -417,7 +419,8 @@ class PersistentDuckDB(DuckDB):
         """
         Load the database from disk
         """
-        import os
+        if not os.path.exists(self._save_folder):
+            os.makedirs(self._save_folder)
 
         # load in the embeddings
         if not os.path.exists(f"{self._save_folder}/chroma-embeddings.parquet"):
