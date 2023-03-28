@@ -387,7 +387,7 @@ class PersistentDuckDB(DuckDB):
         """
         Persist the database to disk
         """
-        logger.info("Persisting DB to disk, putting it in the save folder", self._save_folder)
+        logger.info(
         if self._conn is None:
             return
 
