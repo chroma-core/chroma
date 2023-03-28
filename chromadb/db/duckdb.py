@@ -1,6 +1,5 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
 from chromadb.db.clickhouse import (
     Clickhouse,
     db_array_schema_to_clickhouse_schema,
@@ -48,7 +47,6 @@ class DuckDB(Clickhouse):
         self._conn = duckdb.connect()
         self._create_table_collections()
         self._create_table_embeddings()
-        self._idx = Hnswlib(settings)
         self._settings = settings
 
         # https://duckdb.org/docs/extensions/overview
@@ -106,6 +104,10 @@ class DuckDB(Clickhouse):
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
+    def get_collection_by_id(self, uuid: str) -> Sequence:
+        res = self._conn.execute(f"""SELECT * FROM collections WHERE uuid = ?""", [uuid]).fetchone()
+        return [res[0], res[1], json.loads(res[2])]
+
     def list_collections(self) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections""").fetchall()
         return [[x[0], x[1], json.loads(x[2])] for x in res]
@@ -115,7 +117,8 @@ class DuckDB(Clickhouse):
         self._conn.execute(
             f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
         )
-        self._idx.delete_index(collection_uuid)
+
+        self._delete_index(collection_uuid)
         self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
 
     def update_collection(
@@ -349,12 +352,11 @@ class DuckDB(Clickhouse):
         self._create_table_collections()
         self._create_table_embeddings()
 
-        self._idx.reset()
-        self._idx = Hnswlib(self._settings)
+        self.reset_indexes()
 
     def __del__(self):
         logger.info("Exiting: Cleaning up .chroma directory")
-        self._idx.reset()
+        self.reset_indexes()
 
     def persist(self):
         raise NotImplementedError(
