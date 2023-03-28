@@ -535,6 +535,10 @@ class Clickhouse(DB):
     def has_index(self, collection_uuid: str):
         return index_exists(self._settings, collection_uuid)
 
+    def reset_indexes(self):
+        delete_all_indexes(self._settings)
+        self.index_cache = {}
+
     def reset(self):
         conn = self._get_conn()
         conn.command("DROP TABLE collections")
@@ -542,8 +546,7 @@ class Clickhouse(DB):
         self._create_table_collections(conn)
         self._create_table_embeddings(conn)
 
-        delete_all_indexes(self._settings)
-        self.index_cache = {}
+        self.reset_indexes()
 
     def raw_sql(self, sql):
         return self._get_conn().query(sql).result_rows
