@@ -1285,10 +1285,10 @@ def test_invalid_index_params(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_loading(api_fixture, request):
+def test_persist_index_loading_params(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test")
+    collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
     collection.add(ids="id1", documents="hello")
 
     api.persist()
@@ -1296,6 +1296,8 @@ def test_persist_index_loading(api_fixture, request):
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
+
+    assert collection.metadata["hnsw:space"] == "ip"
 
     nn = collection.query(
         query_texts="hello",
