@@ -106,12 +106,15 @@ class Clickhouse(DB):
         raise NotImplementedError("Clickhouse is a persistent database, this method is not needed")
 
     def get_collection_uuid_from_name(self, name: str) -> str:
-        res = self._get_conn().query(
-            f"""
-            SELECT uuid FROM collections WHERE name = '{name}'
-        """
-        )
-        return res.result_rows[0][0]
+        try:
+            res = self._get_conn().query(
+                f"""
+                SELECT uuid FROM collections WHERE name = '{name}'
+            """
+            )
+            return res.result_rows[0][0]
+        except IndexError:
+            raise ValueError(f"Collection with name {name} does not exist")
 
     def _create_where_clause(
         self,
