@@ -28,6 +28,10 @@ from chromadb.server.fastapi.types import (
 )
 from starlette.requests import Request
 from starlette.responses import Response
+import logging
+from chromadb.telemetry import ServerContext, Telemetry
+
+logger = logging.getLogger(__name__)
 
 
 def use_route_names_as_operation_ids(app: FastAPI) -> None:
@@ -45,12 +49,14 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as e:
+        logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings):
         super().__init__(settings)
+        Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
         self._api = chromadb.Client(settings)
 
@@ -58,7 +64,7 @@ class FastAPI(chromadb.server.Server):
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],
-            allow_origins=["http://localhost:3000"],
+            allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
 
@@ -66,6 +72,7 @@ class FastAPI(chromadb.server.Server):
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
@@ -122,6 +129,9 @@ class FastAPI(chromadb.server.Server):
 
     def persist(self):
         self._api.persist()
+
+    def version(self):
+        return self._api.get_version()
 
     def list_collections(self):
         return self._api.list_collections()

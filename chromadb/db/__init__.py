@@ -13,10 +13,7 @@ class DB(ABC):
     @abstractmethod
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ):
-        pass
-
-    def get_or_create_collection(self, name, metadata=None):
+    ) -> Sequence:
         pass
 
     @abstractmethod
@@ -24,7 +21,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Sequence[str]]:
+    def list_collections(self) -> Sequence:
         pass
 
     @abstractmethod
@@ -90,11 +87,10 @@ class DB(ABC):
     def delete(
         self,
         where: Where = {},
-        collection_name: Optional[str] = None,
         collection_uuid: Optional[str] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ):
+    ) -> List:
         pass
 
     @abstractmethod
@@ -117,10 +113,6 @@ class DB(ABC):
 
     @abstractmethod
     def create_index(self, collection_uuid: str):
-        pass
-
-    @abstractmethod
-    def has_index(self, collection_name):
         pass
 
     @abstractmethod

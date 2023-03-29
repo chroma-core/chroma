@@ -17,10 +17,12 @@ from chromadb.api.types import (
 )
 import json
 
+from chromadb.telemetry import Telemetry
+
 
 class API(ABC):
     @abstractmethod
-    def __init__(self):
+    def __init__(self, telemetry_client: Telemetry):
         pass
 
     @abstractmethod
@@ -52,6 +54,7 @@ class API(ABC):
     @abstractmethod
     def create_collection(
         self,
+        name: str,
         metadata: Optional[Dict] = None,
         get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,

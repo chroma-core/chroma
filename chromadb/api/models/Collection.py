@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, cast, List
+from typing import TYPE_CHECKING, Optional, cast, List, Dict
 from pydantic import BaseModel, PrivateAttr
 
 from chromadb.api.types import (
@@ -21,6 +21,9 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from chromadb.api import API
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
 
 class Collection(BaseModel):
     name: str
+    metadata: Optional[Dict] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -36,19 +40,21 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
+        metadata: Optional[Dict] = None,
     ):
+
         self._client = client
         if embedding_function is not None:
             self._embedding_function = embedding_function
         else:
             import chromadb.utils.embedding_functions as ef
 
-            print(
+
+            logger.warning(
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-
-        super().__init__(name=name)
+        super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):
         return f"Collection(name={self.name})"
@@ -162,7 +168,7 @@ class Collection(BaseModel):
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
-            n_results: The number of neighbots to return for each query_embedding or query_text. Optional.
+            n_results: The number of neighbors to return for each query_embedding or query_text. Optional.
             where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
@@ -213,6 +219,8 @@ class Collection(BaseModel):
         self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
+        if metadata:
+            self.metadata = metadata
 
     def update(
         self,
