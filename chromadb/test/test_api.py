@@ -1306,3 +1306,16 @@ def test_persist_index_loading_params(api_fixture, request):
     )
     for key in nn.keys():
         assert len(nn[key]) == 1
+
+
+# test get_version
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_version(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    version = api.get_version()
+
+    # assert version matches the pattern x.y.z
+    import re
+
+    assert re.match(r"\d+\.\d+\.\d+", version)
