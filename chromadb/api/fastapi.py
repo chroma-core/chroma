@@ -14,13 +14,14 @@ import requests
 import json
 from typing import Sequence
 from chromadb.api.models.Collection import Collection
+from chromadb.telemetry import Telemetry
 
 
 class FastAPI(API):
-    def __init__(self, settings):
-        self._api_url = (
-            f"http://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
-        )
+    def __init__(self, settings, telemetry_client: Telemetry):
+        url_prefix = "https" if settings.chroma_server_ssl_enabled else "http"
+        self._api_url = f"{url_prefix}://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
+        self._telemetry_client = telemetry_client
 
     def heartbeat(self):
         """Returns the current server time in nanoseconds to check if the server is alive"""
@@ -52,7 +53,13 @@ class FastAPI(API):
             data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
         )
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
     def get_collection(
         self,
@@ -62,7 +69,13 @@ class FastAPI(API):
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
         resp.raise_for_status()
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
 
     def get_or_create_collection(
         self,
@@ -78,7 +91,7 @@ class FastAPI(API):
         """Updates a collection"""
         resp = requests.put(
             self._api_url + "/collections/" + current_name,
-            data=json.dumps({"metadata": new_metadata, "name": new_name}),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
         resp.raise_for_status()
         return resp.json()
@@ -268,4 +281,10 @@ class FastAPI(API):
             resp.raise_for_status()
         except requests.HTTPError as e:
             raise (Exception(resp.text))
+        return resp.json()
+
+    def get_version(self):
+        """Returns the version of the server"""
+        resp = requests.get(self._api_url + "/version")
+        resp.raise_for_status()
         return resp.json()

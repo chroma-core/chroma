@@ -1,6 +1,6 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
 from chromadb.db import DB
-from chromadb.db.index.hnswlib import Hnswlib
+from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.errors import (
     NoDatapointsException,
     InvalidDimensionException,
@@ -13,6 +13,10 @@ import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
+from clickhouse_connect import common
+import logging
+
+logger = logging.getLogger(__name__)
 
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
 
@@ -47,10 +51,10 @@ class Clickhouse(DB):
     #
     def __init__(self, settings):
         self._conn = None
-        self._idx = Hnswlib(settings)
         self._settings = settings
 
     def _init_conn(self):
+        common.set_setting("autogenerate_session_id", False)
         self._conn = clickhouse_connect.get_client(
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
@@ -75,6 +79,25 @@ class Clickhouse(DB):
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY collection_uuid"""
         )
+
+    index_cache = {}
+
+    def _index(self, collection_id):
+        """Retrieve an HNSW index instance for the given collection"""
+
+        if collection_id not in self.index_cache:
+            coll = self.get_collection_by_id(collection_id)
+            collection_metadata = coll[2]
+            index = Hnswlib(collection_id, self._settings, collection_metadata)
+            self.index_cache[collection_id] = index
+
+        return self.index_cache[collection_id]
+
+    def _delete_index(self, collection_id):
+        """Delete an index from the cache"""
+        index = self._index(collection_id)
+        index.delete()
+        del self.index_cache[collection_id]
 
     #
     #  UTILITY METHODS
@@ -117,31 +140,29 @@ class Clickhouse(DB):
     #
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ):
-        if metadata is None:
-            metadata = {}
-
+    ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
 
         if len(dupe_check) > 0:
             if get_or_create:
-                print(f"collection with name {name} already exists, returning existing collection")
+                logger.info(
+                    f"collection with name {name} already exists, returning existing collection"
+                )
                 return dupe_check
             else:
-                raise Exception(f"collection with name {name} already exists")
+                raise ValueError(f"Collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
-        data_to_insert = []
-        data_to_insert.append([collection_uuid, name, json.dumps(metadata)])
+        data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
 
         self._get_conn().insert(
             "collections", data_to_insert, column_names=["uuid", "name", "metadata"]
         )
-        return collection_uuid
+        return [[collection_uuid, name, metadata]]
 
     def get_collection(self, name: str):
-        return (
+        res = (
             self._get_conn()
             .query(
                 f"""
@@ -150,9 +171,25 @@ class Clickhouse(DB):
             )
             .result_rows
         )
+        # json.loads the metadata
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
-    def list_collections(self) -> Sequence[Sequence[str]]:
-        return self._get_conn().query(f"""SELECT * FROM collections""").result_rows
+    def get_collection_by_id(self, collection_uuid: str):
+        res = (
+            self._get_conn()
+            .query(
+                f"""
+         SELECT * FROM collections WHERE uuid = '{collection_uuid}'
+         """
+            )
+            .result_rows
+        )
+        # json.loads the metadata
+        return [[x[0], x[1], json.loads(x[2])] for x in res][0]
+
+    def list_collections(self) -> Sequence:
+        res = self._get_conn().query(f"""SELECT * FROM collections""").result_rows
+        return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
         self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
@@ -165,12 +202,12 @@ class Clickhouse(DB):
         return self._get_conn().command(
             f"""
 
-         ALTER TABLE 
-            collections 
+         ALTER TABLE
+            collections
          UPDATE
-            metadata = '{json.dumps(new_metadata)}', 
+            metadata = '{json.dumps(new_metadata)}',
             name = '{new_name}'
-         WHERE 
+         WHERE
             name = '{current_name}'
          """
         )
@@ -189,7 +226,7 @@ class Clickhouse(DB):
          """
         )
 
-        self._idx.delete_index(collection_uuid)
+        self._delete_index(collection_uuid)
 
     #
     #  ITEM METHODS
@@ -236,10 +273,10 @@ class Clickhouse(DB):
                 parameters[f"d{i}"] = documents[i]
 
             update_statement = f"""
-            UPDATE 
+            UPDATE
                 {",".join(update_fields)}
             WHERE
-                id = {{i{i}:String}} AND 
+                id = {{i{i}:String}} AND
                 collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
             """
             updates.append(update_statement)
@@ -258,16 +295,15 @@ class Clickhouse(DB):
         # Verify all IDs exist
         existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
         if len(existing_items) != len(ids):
-            raise ValueError("Some of the supplied ids for update were not found")
+            raise ValueError(f"Could not find {len(ids) - len(existing_items)} items for update")
 
         # Update the db
         self._update(collection_uuid, ids, embeddings, metadatas, documents)
 
         # Update the index
         if embeddings is not None:
-            update_uuids = [x[1] for x in existing_items]
-            self._idx.delete_from_index(collection_uuid, update_uuids)
-            self._idx.add_incremental(collection_uuid, update_uuids, embeddings)
+            index = self._index(collection_uuid)
+            index.add(ids, embeddings, update=True)
 
     def _get(self, where={}, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
@@ -316,7 +352,9 @@ class Clickhouse(DB):
                         return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                     return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                 else:
-                    raise ValueError(f"Operator {operator} not supported")
+                    raise ValueError(
+                        f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}"
+                    )
             elif type(value) == list:
                 all_subresults = []
                 for subwhere in value:
@@ -328,7 +366,7 @@ class Clickhouse(DB):
                 elif key == "$and":
                     result.append(f"({' AND '.join(all_subresults)})")
                 else:
-                    raise ValueError(f"Operator {key} not supported with a list of where clauses")
+                    raise ValueError(f"Expected one of $or, $and, got {key}")
 
     def _format_where_document(self, where_document, results):
         operator = list(where_document.keys())[0]
@@ -345,7 +383,7 @@ class Clickhouse(DB):
             if operator == "$and":
                 results.append(f"({' AND '.join(all_subresults)})")
         else:
-            raise ValueError(f"Operator {operator} not supported")
+            raise ValueError(f"Expected one of $contains, $and, $or, got {operator}")
 
     def get(
         self,
@@ -398,7 +436,7 @@ class Clickhouse(DB):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
         return self._count(collection_uuid=collection_uuid)[0][0]
 
-    def _delete(self, where_str: Optional[str] = None):
+    def _delete(self, where_str: Optional[str] = None) -> List:
         deleted_uuids = (
             self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
         )
@@ -414,17 +452,10 @@ class Clickhouse(DB):
     def delete(
         self,
         where: Where = {},
-        collection_name: Optional[str] = None,
         collection_uuid: Optional[str] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ):
-        if collection_name == None and collection_uuid == None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
-
+    ) -> List:
         s3 = time.time()
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
@@ -436,7 +467,8 @@ class Clickhouse(DB):
 
         deleted_uuids = self._delete(where_str)
 
-        self._idx.delete_from_index(collection_uuid, deleted_uuids)
+        index = self._index(collection_uuid)
+        index.delete_from_index(deleted_uuids)
 
         return deleted_uuids
 
@@ -475,21 +507,6 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        self._idx.load_if_not_loaded(collection_uuid)
-
-        idx_metadata = self._idx.get_metadata()
-        # Check query embeddings dimensionality
-        if idx_metadata["dimensionality"] != len(embeddings[0]):
-            raise InvalidDimensionException(
-                f"Query embeddings dimensionality {len(embeddings[0])} does not match index dimensionality {idx_metadata['dimensionality']}"
-            )
-
-        # Check number of requested results
-        if n_results > idx_metadata["elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {n_results} cannot be greater than number of elements in index {idx_metadata['elements']}"
-            )
-
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
                 collection_uuid=collection_uuid, where=where, where_document=where_document
@@ -503,9 +520,9 @@ class Clickhouse(DB):
                 )
         else:
             ids = None
-        uuids, distances = self._idx.get_nearest_neighbors(
-            collection_uuid, embeddings, n_results, ids
-        )
+
+        index = self._index(collection_uuid)
+        uuids, distances = index.get_nearest_neighbors(embeddings, n_results, ids)
 
         return uuids, distances
 
@@ -522,13 +539,16 @@ class Clickhouse(DB):
         uuids = [x[1] for x in get]
         embeddings = [x[2] for x in get]
 
-        self._idx.run(collection_uuid, uuids, embeddings)
+        index = self._index(collection_uuid)
+        index.add(uuids, embeddings)
 
     def add_incremental(self, collection_uuid, uuids, embeddings):
-        self._idx.add_incremental(collection_uuid, uuids, embeddings)
+        index = self._index(collection_uuid)
+        index.add(uuids, embeddings)
 
-    def has_index(self, collection_uuid: str):
-        return self._idx.has_index(collection_uuid)
+    def reset_indexes(self):
+        delete_all_indexes(self._settings)
+        self.index_cache = {}
 
     def reset(self):
         conn = self._get_conn()
@@ -537,8 +557,7 @@ class Clickhouse(DB):
         self._create_table_collections(conn)
         self._create_table_embeddings(conn)
 
-        self._idx.reset()
-        self._idx = Hnswlib(self._settings)
+        self.reset_indexes()
 
     def raw_sql(self, sql):
         return self._get_conn().query(sql).result_rows

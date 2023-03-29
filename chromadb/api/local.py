@@ -1,6 +1,9 @@
 import json
 import time
+
 from typing import Dict, List, Optional, Sequence, Callable, cast
+from chromadb import __version__
+
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -18,23 +21,35 @@ from chromadb.api.models.Collection import Collection
 
 import re
 
+from chromadb.telemetry import Telemetry
+from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
+
 
 # mimics s3 bucket requirements for naming
-def is_valid_index_name(index_name):
+def check_index_name(index_name):
+    msg = (
+        "Expected collection name that "
+        "(1) contains 3-63 characters, "
+        "(2) starts and ends with an alphanumeric character, "
+        "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+        "(4) contains no two consecutive periods (..) and "
+        "(5) is not a valid IPv4 address, "
+        f"got {index_name}"
+    )
     if len(index_name) < 3 or len(index_name) > 63:
-        return False
+        raise ValueError(msg)
     if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
-        return False
+        raise ValueError(msg)
     if ".." in index_name:
-        return False
+        raise ValueError(msg)
     if re.match("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$", index_name):
-        return False
-    return True
+        raise ValueError(msg)
 
 
 class LocalAPI(API):
-    def __init__(self, settings, db: DB):
+    def __init__(self, settings, db: DB, telemetry_client: Telemetry):
         self._db = db
+        self._telemetry_client = telemetry_client
 
     def heartbeat(self):
         return int(1000 * time.time_ns())
@@ -49,11 +64,12 @@ class LocalAPI(API):
         embedding_function: Optional[Callable] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        if not is_valid_index_name(name):
-            raise ValueError("Invalid index name: %s" % name)  # NIT: tell the user why
+        check_index_name(name)
 
-        self._db.create_collection(name, metadata, get_or_create)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+        res = self._db.create_collection(name, metadata, get_or_create)
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
 
     def get_or_create_collection(
         self,
@@ -70,14 +86,18 @@ class LocalAPI(API):
     ) -> Collection:
         res = self._db.get_collection(name)
         if len(res) == 0:
-            raise ValueError("Collection not found: %s" % name)
-        return Collection(client=self, name=name, embedding_function=embedding_function)
+            raise ValueError(f"Collection {name} does not exist")
+        return Collection(
+            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+        )
 
     def list_collections(self) -> Sequence[Collection]:
         collections = []
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
-            collections.append(Collection(client=self, name=db_collection[1]))
+            collections.append(
+                Collection(client=self, name=db_collection[1], metadata=db_collection[2])
+            )
         return collections
 
     def _modify(
@@ -86,10 +106,8 @@ class LocalAPI(API):
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
-        # NIT: make sure we have a valid name like we do in create
         if new_name is not None:
-            if not is_valid_index_name(new_name):
-                raise ValueError("Invalid index name: %s" % new_name)
+            check_index_name(new_name)
 
         self._db.update_collection(current_name, new_name, new_metadata)
 
@@ -121,6 +139,7 @@ class LocalAPI(API):
         if increment_index:
             self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
+        self._telemetry_client.capture(CollectionAddEvent(collection_uuid, len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
     def _update(
@@ -202,9 +221,11 @@ class LocalAPI(API):
         if where_document is None:
             where_document = {}
 
+        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         deleted_uuids = self._db.delete(
-            collection_name=collection_name, where=where, ids=ids, where_document=where_document
+            collection_uuid=collection_uuid, where=where, ids=ids, where_document=where_document
         )
+        self._telemetry_client.capture(CollectionDeleteEvent(collection_uuid, len(deleted_uuids)))
         return deleted_uuids
 
     def _count(self, collection_name):
@@ -296,3 +317,6 @@ class LocalAPI(API):
     def persist(self):
         self._db.persist()
         return True
+
+    def get_version(self):
+        return __version__
