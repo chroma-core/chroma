@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     chroma_server_http_port: str = None
     chroma_server_ssl_enabled: bool = False
     chroma_server_grpc_port: str = None
-    chroma_server_cors_allow_origins: List[str] = ["http://localhost:3000"]
+    chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
     anonymized_telemetry: bool = True
 
