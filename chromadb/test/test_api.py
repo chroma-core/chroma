@@ -1397,3 +1397,19 @@ def test_update_query(api_fixture, request):
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+    
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_add_with_redunant_ids(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection("test")
+    # Add an item with a given ID
+    collection.add(ids=["id1", "id2", "id3"], documents=["hello", "world", "foo"])
+
+    # Add an item with the same ID - here add plays the role of 'upsert' 
+    collection.add(ids=["id1", "id4"], documents=["bar", "baz"])
+
+    # We should expect there to be only one item, the "world" one
+    items = collection.get(ids="id1")
+    assert len(items["ids"]) == 1
+    assert items["documents"][0] == "bar"
