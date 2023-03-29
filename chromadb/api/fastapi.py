@@ -98,8 +98,11 @@ class FastAPI(API):
 
     def delete_collection(self, name: str):
         """Deletes a collection"""
-        resp = requests.delete(self._api_url + "/collections/" + name)
-        resp.raise_for_status()
+        try:
+            resp = requests.delete(self._api_url + "/collections/" + name)
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError:
+            raise ValueError(f"Collection with name {name} does not exist")
 
     def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""

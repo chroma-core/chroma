@@ -541,6 +541,28 @@ def test_list_collections(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
+def test_delete_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    api.create_collection("testspace")
+    api.create_collection("testspace2")
+
+    collections = api.list_collections()
+    assert len(collections) == 2
+
+    api.delete_collection("testspace")
+    collections = api.list_collections()
+    assert len(collections) == 1
+
+    # delete collection should throw an error if collection does not exist
+    with pytest.raises(ValueError) as e:
+        api.delete_collection("testspace")
+
+    assert "does not exist" in str(e.value)
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_reset(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
