@@ -1407,6 +1407,7 @@ def test_add_with_redunant_ids(api_fixture, request):
     collection.add(ids=["id1", "id2", "id3"], documents=["hello", "world", "foo"])
 
     # Add an item with the same ID - here add plays the role of 'upsert' 
+    # If we have a separate upsert method, 'add' should fail and complain here. 
     collection.add(ids=["id1", "id4"], documents=["bar", "baz"])
 
     # We should expect there to be only one item, the "world" one
