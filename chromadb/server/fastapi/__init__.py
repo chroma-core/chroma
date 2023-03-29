@@ -64,7 +64,7 @@ class FastAPI(chromadb.server.Server):
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],
-            allow_origins=["http://localhost:3000"],
+            allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
 
