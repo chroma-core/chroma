@@ -87,11 +87,10 @@ class DB(ABC):
     def delete(
         self,
         where: Where = {},
-        collection_name: Optional[str] = None,
         collection_uuid: Optional[str] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ):
+    ) -> List:
         pass
 
     @abstractmethod
@@ -114,10 +113,6 @@ class DB(ABC):
 
     @abstractmethod
     def create_index(self, collection_uuid: str):
-        pass
-
-    @abstractmethod
-    def has_index(self, collection_name):
         pass
 
     @abstractmethod

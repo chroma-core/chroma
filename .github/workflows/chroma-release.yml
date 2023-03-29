@@ -98,6 +98,7 @@ jobs:
           Docker Image: `${{steps.tag.outputs.tag_name}}`
         artifacts: "dist/chroma-${{steps.version.outputs.version}}.tar.gz"
         prerelease: true
+        generateReleaseNotes: true
     - name: Update Tag
       uses: richardsimko/update-tag@v1.0.5
       if: "!startsWith(github.ref, 'refs/tags/')"

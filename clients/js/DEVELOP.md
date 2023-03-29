@@ -4,7 +4,7 @@ This readme is helpful for local dev.
 
 ### Prereqs:
 - Make sure you have Java installed (for the generator). You can download it from [java.com](https://java.com)
-- Make sure you are running the docker backend at localhost:8000 (*there is probably a way to stand up the fastapi server by itself and programatically in the loop of generating this, but not prioritizing it for now. It may be important for the release)
+- Make sure you are running the docker backend at localhost:8000 (*there is probably a way to stand up the fastapi server by itself and programmatically in the loop of generating this, but not prioritizing it for now. It may be important for the release)
 
 ### Generating
 1. `yarn` to install deps

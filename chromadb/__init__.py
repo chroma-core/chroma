@@ -1,5 +1,7 @@
 import chromadb.config
 import logging
+from chromadb.telemetry.events import ClientStartEvent
+from chromadb.telemetry.posthog import Posthog
 
 _logo = """
                 \033[38;5;069m(((((((((    \033[38;5;203m(((((\033[38;5;220m####         
@@ -18,6 +20,8 @@ _logo = """
 logger = logging.getLogger(__name__)
 
 __settings = chromadb.config.Settings()
+
+__version__ = "0.3.14"
 
 
 def configure(**kwargs):
@@ -47,17 +51,22 @@ def get_db(settings=__settings):
         return chromadb.db.clickhouse.Clickhouse(settings)
     elif setting == "duckdb+parquet":
         require("persist_directory")
+        logger.warning(
+            f"Using embedded DuckDB with persistence: data will be stored in: {settings.persist_directory}"
+        )
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
         require("persist_directory")
-        logger.info("Using DuckDB in-memory for database. Data will be transient.")
+        logger.warning("Using embedded DuckDB without persistence: data will be transient")
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
     else:
-        raise ValueError(f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}")
+        raise ValueError(
+            f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}"
+        )
 
 
 def Client(settings=__settings):
@@ -65,6 +74,10 @@ def Client(settings=__settings):
     settings, optionally overriding the DB instance."""
 
     setting = settings.chroma_api_impl.lower()
+    telemetry_client = Posthog(settings)
+
+    # Submit event for client start
+    telemetry_client.capture(ClientStartEvent())
 
     def require(key):
         assert settings[key], f"Setting '{key}' is required when chroma_api_impl={setting}"
@@ -75,11 +88,11 @@ def Client(settings=__settings):
         logger.info("Running Chroma in client mode using REST to connect to remote server")
         import chromadb.api.fastapi
 
-        return chromadb.api.fastapi.FastAPI(settings)
+        return chromadb.api.fastapi.FastAPI(settings, telemetry_client)
     elif setting == "local":
         logger.info("Running Chroma using direct local API.")
         import chromadb.api.local
 
-        return chromadb.api.local.LocalAPI(settings, get_db(settings))
+        return chromadb.api.local.LocalAPI(settings, get_db(settings), telemetry_client)
     else:
         raise ValueError(f"Expected chroma_api_impl to be one of rest, local, got {setting}")
