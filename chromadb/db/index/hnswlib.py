@@ -142,8 +142,8 @@ class Hnswlib(Index):
                 labels.append(next_label)
 
         if self._index_metadata["elements"] > self._index.get_max_elements():
-            new_size = min(self._index_metadata["elements"] * self._params.resize_factor, 1000)
-            self._index.resize_index(new_size)
+            new_size = max(self._index_metadata["elements"] * self._params.resize_factor, 1000)
+            self._index.resize_index(int(new_size))
 
         self._index.add_items(embeddings, labels)
         self._save()
