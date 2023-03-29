@@ -1,5 +1,4 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
-from chromadb.db import DB
 from chromadb.db.clickhouse import (
     Clickhouse,
     db_array_schema_to_clickhouse_schema,
@@ -18,6 +17,7 @@ import itertools
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 
 def clickhouse_to_duckdb_schema(table_schema):

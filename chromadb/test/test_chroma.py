@@ -1,4 +1,3 @@
-import pytest
 import unittest
 import os
 from unittest.mock import patch

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Union, Any
+from typing import List, Union
 from chromadb.api.types import Include
 
 # type supports single and batch mode
