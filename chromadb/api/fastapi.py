@@ -283,3 +283,9 @@ class FastAPI(API):
         except requests.HTTPError as e:
             raise (Exception(resp.text))
         return resp.json()
+
+    def get_version(self):
+        """Returns the version of the server"""
+        resp = requests.get(self._api_url + "/version")
+        resp.raise_for_status()
+        return resp.json()
