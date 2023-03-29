@@ -7,115 +7,170 @@ from chromadb.api.types import IndexMetadata
 import hnswlib
 import numpy as np
 from chromadb.db.index import Index
-from chromadb.errors import NoIndexException, InvalidDimensionException
+from chromadb.errors import NoIndexException, InvalidDimensionException, NotEnoughElementsException
 import logging
+import re
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 
+valid_params = {
+    "hnsw:space": r"^(l2|cosine|ip)$",
+    "hnsw:construction_ef": r"^\d+$",
+    "hnsw:search_ef": r"^\d+$",
+    "hnsw:M": r"^\d+$",
+    "hnsw:num_threads": r"^\d+$",
+    "hnsw:resize_factor": r"^\d+(\.\d+)?$",
+}
+
+
+class HnswParams:
+
+    space: str
+    construction_ef: int
+    search_ef: int
+    M: int
+    num_threads: int
+    resize_factor: float
+
+    def __init__(self, metadata):
+
+        metadata = metadata or {}
+
+        # Convert all values to strings for future compatibility.
+        metadata = {k: str(v) for k, v in metadata.items()}
+
+        for param, value in metadata.items():
+            if param.startswith("hnsw:"):
+                if param not in valid_params:
+                    raise ValueError(f"Unknown HNSW parameter: {param}")
+                if not re.match(valid_params[param], value):
+                    raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+
+        self.space = metadata.get("hnsw:space", "l2")
+        self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
+        self.search_ef = int(metadata.get("hnsw:search_ef", 10))
+        self.M = int(metadata.get("hnsw:M", 16))
+        self.num_threads = int(metadata.get("hnsw:num_threads", 4))
+        self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
+
+
+def hexid(id):
+    """Backwards compatibility for old indexes which called uuid.hex on UUID ids"""
+    return id.hex if isinstance(id, UUID) else id
+
+
+def delete_all_indexes(settings):
+    if os.path.exists(f"{settings.persist_directory}/index"):
+        for file in os.listdir(f"{settings.persist_directory}/index"):
+            os.remove(f"{settings.persist_directory}/index/{file}")
+
+
 class Hnswlib(Index):
-    _collection_uuid = None
-    _index = None
-    _index_metadata: Optional[IndexMetadata] = None
+    _id: str
+    _index: hnswlib.Index
+    _index_metadata: IndexMetadata
+    _params: HnswParams
 
-    _id_to_uuid = {}
-    _uuid_to_id = {}
+    # Mapping of IDs to HNSW integer labels
+    _id_to_label = {}
+    _label_to_id = {}
 
-    def __init__(self, settings):
-        settings.validate('persist_directory')
+    def __init__(self, id, settings, metadata):
+        settings.validate("persist_directory")
         self._save_folder = settings.persist_directory + "/index"
+        self._params = HnswParams(metadata)
+        self._id = id
+        self._index = None
 
-    def run(self, collection_uuid, uuids, embeddings, space="l2", ef=10, num_threads=4):
+        self._load()
+
+    def _init_index(self, dimensionality):
         # more comments available at the source: https://github.com/nmslib/hnswlib
-        dimensionality = len(embeddings[0])
-        for uuid, i in zip(uuids, range(len(uuids))):
-            self._id_to_uuid[i] = uuid
-            self._uuid_to_id[uuid.hex] = i
 
         index = hnswlib.Index(
-            space=space, dim=dimensionality
+            space=self._params.space, dim=dimensionality
         )  # possible options are l2, cosine or ip
-        index.init_index(max_elements=len(embeddings), ef_construction=100, M=16)
-        index.set_ef(ef)
-        index.set_num_threads(num_threads)
-        index.add_items(embeddings, range(len(uuids)))
+        index.init_index(
+            max_elements=1000,
+            ef_construction=self._params.construction_ef,
+            M=self._params.M,
+        )
+        index.set_ef(self._params.search_ef)
+        index.set_num_threads(self._params.num_threads)
 
         self._index = index
-        self._collection_uuid = collection_uuid
         self._index_metadata = {
             "dimensionality": dimensionality,
-            "elements": len(embeddings),
+            "elements": 0,
             "time_created": time.time(),
         }
         self._save()
 
-    def get_metadata(self) -> IndexMetadata:
-        if self._index_metadata is None:
-            raise NoIndexException("Index is not initialized")
-        return self._index_metadata
-
-    def add_incremental(self, collection_uuid, uuids, embeddings):
-        if self._collection_uuid != collection_uuid:
-            self._load(collection_uuid)
-
-        if self._index is None:
-            self.run(collection_uuid, uuids, embeddings)
-
-        elif self._index is not None:
-            idx_dimension = self.get_metadata()["dimensionality"]
-            # Check dimensionality
-            if idx_dimension != len(embeddings[0]):
-                raise InvalidDimensionException(
-                    f"Dimensionality of new embeddings ({len(embeddings[0])}) does not match index dimensionality ({idx_dimension})"
-                )
-
-            current_elements = self._index_metadata["elements"]
-            new_elements = len(uuids)
-
-            self._index.resize_index(current_elements + new_elements)
-
-            # first map the uuids to ids, offset by the current number of elements
-            for uuid, i in zip(uuids, range(len(uuids))):
-                offset = current_elements + i
-                self._id_to_uuid[offset] = uuid
-                self._uuid_to_id[uuid.hex] = offset
-
-            # add the new elements to the index
-            self._index.add_items(
-                embeddings, range(current_elements, current_elements + new_elements)
+    def _check_dimensionality(self, data):
+        """Assert that the given data matches the index dimensionality"""
+        dim = len(data[0])
+        idx_dim = self._index.dim
+        if dim != idx_dim:
+            raise InvalidDimensionException(
+                f"Dimensionality of ({dim}) does not match index dimensionality ({idx_dim})"
             )
 
-            # update the metadata
-            self._index_metadata["elements"] += new_elements
+    def add(self, ids, embeddings, update=False):
+        """Add or update embeddings to the index"""
 
+        dim = len(embeddings[0])
+
+        if self._index is None:
+            self._init_index(dim)
+
+        # Check dimensionality
+        self._check_dimensionality(embeddings)
+
+        labels = []
+        for id in ids:
+            if id in self._id_to_label:
+                if update:
+                    labels.append(self._id_to_label[hexid(id)])
+                else:
+                    raise ValueError(f"ID {id} already exists in index")
+            else:
+                self._index_metadata["elements"] += 1
+                next_label = self._index_metadata["elements"]
+                self._id_to_label[hexid(id)] = next_label
+                self._label_to_id[next_label] = id
+                labels.append(next_label)
+
+        if self._index_metadata["elements"] > self._index.get_max_elements():
+            new_size = min(self._index_metadata["elements"] * self._params.resize_factor, 1000)
+            self._index.resize_index(new_size)
+
+        self._index.add_items(embeddings, labels)
         self._save()
 
-    def delete(self, collection_uuid):
+    def delete(self):
         # delete files, dont throw error if they dont exist
         try:
-            os.remove(f"{self._save_folder}/id_to_uuid_{collection_uuid}.pkl")
-            os.remove(f"{self._save_folder}/uuid_to_id_{collection_uuid}.pkl")
-            os.remove(f"{self._save_folder}/index_metadata_{collection_uuid}.pkl")
-            os.remove(f"{self._save_folder}/index_{collection_uuid}.bin")
+            os.remove(f"{self._save_folder}/id_to_uuid_{self._id}.pkl")
+            os.remove(f"{self._save_folder}/uuid_to_id_{self._id}.pkl")
+            os.remove(f"{self._save_folder}/index_{self._id}.bin")
+            os.remove(f"{self._save_folder}/index_metadata_{self._id}.pkl")
         except:
             pass
 
-        if self._collection_uuid == collection_uuid:
-            self._index = None
-            self._collection_uuid = None
-            self._index_metadata = None
-            self._id_to_uuid = {}
-            self._uuid_to_id = {}
+        self._index = None
+        self._collection_uuid = None
+        self._id_to_label = {}
+        self._label_to_id = {}
 
-    def delete_from_index(self, collection_uuid, uuids):
-        if self._collection_uuid != collection_uuid:
-            self._load(collection_uuid)
-
+    def delete_from_index(self, ids):
         if self._index is not None:
-            for uuid in uuids:
-                self._index.mark_deleted(self._uuid_to_id[uuid.hex])
-                del self._id_to_uuid[self._uuid_to_id[uuid.hex]]
-                del self._uuid_to_id[uuid.hex]
+            for id in ids:
+                label = self._id_to_label[hexid(id)]
+                self._index.mark_deleted(label)
+                del self._label_to_id[label]
+                del self._id_to_label[hexid(id)]
 
         self._save()
 
@@ -126,99 +181,74 @@ class Hnswlib(Index):
 
         if self._index is None:
             return
-        self._index.save_index(f"{self._save_folder}/index_{self._collection_uuid}.bin")
+        self._index.save_index(f"{self._save_folder}/index_{self._id}.bin")
 
         # pickle the mappers
-        with open(f"{self._save_folder}/id_to_uuid_{self._collection_uuid}.pkl", "wb") as f:
-            pickle.dump(self._id_to_uuid, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"{self._save_folder}/uuid_to_id_{self._collection_uuid}.pkl", "wb") as f:
-            pickle.dump(self._uuid_to_id, f, pickle.HIGHEST_PROTOCOL)
-        with open(f"{self._save_folder}/index_metadata_{self._collection_uuid}.pkl", "wb") as f:
+        # Use old filenames for backwards compatibility
+        with open(f"{self._save_folder}/id_to_uuid_{self._id}.pkl", "wb") as f:
+            pickle.dump(self._label_to_id, f, pickle.HIGHEST_PROTOCOL)
+        with open(f"{self._save_folder}/uuid_to_id_{self._id}.pkl", "wb") as f:
+            pickle.dump(self._id_to_label, f, pickle.HIGHEST_PROTOCOL)
+        with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "wb") as f:
             pickle.dump(self._index_metadata, f, pickle.HIGHEST_PROTOCOL)
 
         logger.debug(f"Index saved to {self._save_folder}/index.bin")
 
-    def load_if_not_loaded(self, collection_uuid):
-        if self._collection_uuid != collection_uuid:
-            self._load(collection_uuid)
+    def _exists(self):
+        return
 
-    def _load(self, collection_uuid):
-        # if we are calling load, we clearly need a different index than the one we have
-        self._index = None
+    def _load(self):
+
+        if not os.path.exists(f"{self._save_folder}/index_{self._id}.bin"):
+            return
 
         # unpickle the mappers
-        try:
-            with open(f"{self._save_folder}/id_to_uuid_{collection_uuid}.pkl", "rb") as f:
-                self._id_to_uuid = pickle.load(f)
-            with open(f"{self._save_folder}/uuid_to_id_{collection_uuid}.pkl", "rb") as f:
-                self._uuid_to_id = pickle.load(f)
-            with open(f"{self._save_folder}/index_metadata_{collection_uuid}.pkl", "rb") as f:
-                self._index_metadata = pickle.load(f)
-            p = hnswlib.Index(space="l2", dim=self._index_metadata["dimensionality"])
-            self._index = p
-            self._index.load_index(
-                f"{self._save_folder}/index_{collection_uuid}.bin",
-                max_elements=self._index_metadata["elements"],
-            )
+        with open(f"{self._save_folder}/id_to_uuid_{self._id}.pkl", "rb") as f:
+            self._id_to_uuid = pickle.load(f)
+        with open(f"{self._save_folder}/uuid_to_id_{self._id}.pkl", "rb") as f:
+            self._uuid_to_id = pickle.load(f)
+        with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
+            self._index_metadata = pickle.load(f)
 
-            self._collection_uuid = collection_uuid
-        except:
-            logger.debug("Index not found")
+        p = hnswlib.Index(space=self._params.space, dim=self._index_metadata["dimensionality"])
+        self._index = p
+        self._index.load_index(
+            f"{self._save_folder}/index_{self._id}.bin",
+            max_elements=self._index_metadata["elements"],
+        )
+        self._index.set_ef(self._params.search_ef)
+        self._index.set_num_threads(self._params.num_threads)
 
-    def has_index(self, collection_uuid):
-        return os.path.isfile(f"{self._save_folder}/index_{collection_uuid}.bin")
-
-    def get_nearest_neighbors(self, collection_uuid, query, k, uuids=None):
-        if self._collection_uuid != collection_uuid:
-            self._load(collection_uuid)
+    def get_nearest_neighbors(self, query, k, ids=None):
 
         if self._index is None:
             raise NoIndexException("Index not found, please create an instance before querying")
 
+        # Check dimensionality
+        self._check_dimensionality(query)
+
+        if k > self._index_metadata["elements"]:
+            raise NotEnoughElementsException(
+                f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
+            )
+
         s2 = time.time()
         # get ids from uuids as a set, if they are available
-        ids = {}
-        if uuids is not None:
-            ids = {self._uuid_to_id[uuid.hex] for uuid in uuids}
-            if len(ids) < k:
-                k = len(ids)
+        labels = {}
+        if ids is not None:
+            labels = {self._id_to_label[hexid(id)] for id in ids}
+            if len(labels) < k:
+                k = len(labels)
 
         filter_function = None
-        if len(ids) != 0:
-            filter_function = lambda id: id in ids
+        if len(labels) != 0:
+            filter_function = lambda label: label in labels
 
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 
         s3 = time.time()
-        database_ids, distances = self._index.knn_query(query, k=k, filter=filter_function)
+        database_labels, distances = self._index.knn_query(query, k=k, filter=filter_function)
         logger.debug(f"time to run knn query: {time.time() - s3}")
 
-        uuids = [[self._id_to_uuid[id] for id in ids] for ids in database_ids]
-        return uuids, distances
-
-    def reset(self):
-        self._id_to_uuid = {}
-        self._uuid_to_id = {}
-        self._index = None
-        self._collection_uuid = None
-
-        if os.path.exists(f"{self._save_folder}"):
-            for f in os.listdir(f"{self._save_folder}"):
-                os.remove(os.path.join(f"{self._save_folder}", f))
-        # recreate the directory
-        if not os.path.exists(f"{self._save_folder}"):
-            os.makedirs(f"{self._save_folder}")
-
-    def delete_index(self, uuid):
-        uuid = str(uuid)
-        if self._collection_uuid == uuid:
-            self._index = None
-            self._collection_uuid = None
-            self._index_metadata = None
-            self._id_to_uuid = {}
-            self._uuid_to_id = {}
-
-        if os.path.exists(f"{self._save_folder}"):
-            for f in os.listdir(f"{self._save_folder}"):
-                if uuid in f:
-                    os.remove(os.path.join(f"{self._save_folder}", f))
+        ids = [[self._label_to_id[label] for label in labels] for labels in database_labels]
+        return ids, distances

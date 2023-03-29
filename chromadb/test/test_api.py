@@ -1239,3 +1239,85 @@ def test_invalid_id(api_fixture, request):
     with pytest.raises(ValueError) as e:
         collection.delete(ids=["valid", 0])
     assert "ID" in str(e.value)
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_index_params(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    # first standard add
+    api.reset()
+    collection = api.create_collection(name="test_index_params")
+    collection.add(**records)
+    items = collection.query(
+        query_embeddings=[0.6, 1.12, 1.6],
+        n_results=1,
+    )
+    assert items["distances"][0][0] > 4
+
+    # cosine
+    api.reset()
+    collection = api.create_collection(
+        name="test_index_params",
+        metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
+    )
+    collection.add(**records)
+    items = collection.query(
+        query_embeddings=[0.6, 1.12, 1.6],
+        n_results=1,
+    )
+    assert items["distances"][0][0] > 0
+    assert items["distances"][0][0] < 1
+
+    # ip
+    api.reset()
+    collection = api.create_collection(name="test_index_params", metadata={"hnsw:space": "ip"})
+    collection.add(**records)
+    items = collection.query(
+        query_embeddings=[0.6, 1.12, 1.6],
+        n_results=1,
+    )
+    assert items["distances"][0][0] < -5
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_invalid_index_params(api_fixture, request):
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+
+    with pytest.raises(Exception):
+        collection = api.create_collection(
+            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
+        )
+        collection.add(**records)
+
+    with pytest.raises(Exception):
+        collection = api.create_collection(
+            name="test_index_params", metadata={"hnsw:space": "foobar"}
+        )
+        collection.add(**records)
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_persist_index_loading_params(api_fixture, request):
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+    collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
+    collection.add(ids="id1", documents="hello")
+
+    api.persist()
+    del api
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = api2.get_collection("test")
+
+    assert collection.metadata["hnsw:space"] == "ip"
+
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in nn.keys():
+        assert len(nn[key]) == 1
