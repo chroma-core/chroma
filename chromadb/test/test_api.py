@@ -1314,7 +1314,6 @@ def test_get_version(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
     version = api.get_version()
-    # assert version["version"] == "0.1.0"
 
     # assert version matches the pattern x.y.z
     import re
