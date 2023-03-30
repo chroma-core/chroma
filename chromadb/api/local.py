@@ -1,12 +1,13 @@
 import json
-import uuid
 import time
-from typing import Dict, List, Optional, Sequence, Callable, Type, cast
+
+from typing import Dict, List, Optional, Sequence, Callable, cast
+from chromadb import __version__
+
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
     Documents,
-    Embedding,
     Embeddings,
     GetResult,
     IDs,
@@ -316,3 +317,6 @@ class LocalAPI(API):
     def persist(self):
         self._db.persist()
         return True
+
+    def get_version(self):
+        return __version__

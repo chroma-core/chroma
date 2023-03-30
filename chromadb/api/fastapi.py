@@ -9,7 +9,6 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
-from chromadb.errors import NoDatapointsException
 import pandas as pd
 import requests
 import json
@@ -192,7 +191,7 @@ class FastAPI(API):
 
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
 
         return True
@@ -251,7 +250,7 @@ class FastAPI(API):
 
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
 
         body = resp.json()
@@ -280,6 +279,12 @@ class FastAPI(API):
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
         try:
             resp.raise_for_status()
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             raise (Exception(resp.text))
+        return resp.json()
+
+    def get_version(self):
+        """Returns the version of the server"""
+        resp = requests.get(self._api_url + "/version")
+        resp.raise_for_status()
         return resp.json()

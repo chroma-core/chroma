@@ -1,5 +1,4 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
-from chromadb.db import DB
 from chromadb.db.clickhouse import (
     Clickhouse,
     db_array_schema_to_clickhouse_schema,
@@ -18,6 +17,7 @@ import itertools
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 
 def clickhouse_to_duckdb_schema(table_schema):
@@ -93,11 +93,12 @@ class DuckDB(Clickhouse):
             else:
                 raise ValueError(f"Collection with name {name} already exists")
 
+        collection_uuid = uuid.uuid4()
         self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
-            [str(uuid.uuid4()), name, json.dumps(metadata)],
+            [str(collection_uuid), name, json.dumps(metadata)],
         )
-        return [[str(uuid.uuid4()), name, metadata]]
+        return [[str(collection_uuid), name, metadata]]
 
     def get_collection(self, name: str) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
@@ -388,7 +389,7 @@ class PersistentDuckDB(DuckDB):
         """
         Persist the database to disk
         """
-        logger.info("Persisting DB to disk, putting it in the save folder", self._save_folder)
+        logger.info(f"Persisting DB to disk, putting it in the save folder: {self._save_folder}")
         if self._conn is None:
             return
 
