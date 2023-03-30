@@ -93,11 +93,12 @@ class DuckDB(Clickhouse):
             else:
                 raise ValueError(f"Collection with name {name} already exists")
 
+        collection_uuid = uuid.uuid4()
         self._conn.execute(
             f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
-            [str(uuid.uuid4()), name, json.dumps(metadata)],
+            [str(collection_uuid), name, json.dumps(metadata)],
         )
-        return [[str(uuid.uuid4()), name, metadata]]
+        return [[str(collection_uuid), name, metadata]]
 
     def get_collection(self, name: str) -> Sequence:
         res = self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
