@@ -7,7 +7,6 @@ from chromadb.errors import (
     NotEnoughElementsException,
 )
 import uuid
-import time
 import numpy.typing as npt
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
@@ -405,8 +404,6 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        s3 = time.time()
-
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
             cast(str, collection_uuid),
@@ -458,7 +455,6 @@ class Clickhouse(DB):
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
     ) -> List:
-        s3 = time.time()
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
             cast(str, collection_uuid),

@@ -2,10 +2,8 @@ import os
 import pickle
 import time
 from typing import Optional
-import uuid
 from chromadb.api.types import IndexMetadata
 import hnswlib
-import numpy as np
 from chromadb.db.index import Index
 from chromadb.errors import NoIndexException, InvalidDimensionException, NotEnoughElementsException
 import logging

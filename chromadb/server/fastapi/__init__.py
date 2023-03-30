@@ -1,5 +1,5 @@
 import fastapi
-from fastapi import FastAPI
+from fastapi import FastAPI as _FastAPI
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,26 +15,23 @@ from chromadb.errors import (
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
-    CountEmbedding,
     DeleteEmbedding,
     GetEmbedding,
-    ProcessEmbedding,
     QueryEmbedding,
     RawSql,  # Results,
-    SpaceKeyInput,
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
 )
 from starlette.requests import Request
-from starlette.responses import Response
+
 import logging
 from chromadb.telemetry import ServerContext, Telemetry
 
 logger = logging.getLogger(__name__)
 
 
-def use_route_names_as_operation_ids(app: FastAPI) -> None:
+def use_route_names_as_operation_ids(app: _FastAPI) -> None:
     """
     Simplify operation IDs so that generated API clients have simpler function
     names.
@@ -64,7 +61,7 @@ class FastAPI(chromadb.server.Server):
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],
-            allow_origins=["http://localhost:3000"],
+            allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
 
@@ -72,6 +69,7 @@ class FastAPI(chromadb.server.Server):
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
@@ -128,6 +126,9 @@ class FastAPI(chromadb.server.Server):
 
     def persist(self):
         self._api.persist()
+
+    def version(self):
+        return self._api.get_version()
 
     def list_collections(self):
         return self._api.list_collections()

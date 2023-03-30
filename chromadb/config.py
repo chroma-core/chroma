@@ -1,5 +1,5 @@
 from pydantic import BaseSettings
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 import importlib
 import logging
 
@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     chroma_server_http_port: Optional[str] = None
     chroma_server_ssl_enabled: bool = False
     chroma_server_grpc_port: Optional[str] = None
+    chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
     def validate(self, item):
         val = self[item]
