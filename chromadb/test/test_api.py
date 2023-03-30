@@ -10,11 +10,8 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
-<<<<<<< HEAD
 from chromadb.api.models import Collection
 import numpy as np
-=======
->>>>>>> main
 
 
 @pytest.fixture
@@ -1318,7 +1315,8 @@ def test_add_large(api_fixture, request):
     )
 
     assert collection.count() == len(large_records)
-    
+
+
 # test get_version
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_version(api_fixture, request):
