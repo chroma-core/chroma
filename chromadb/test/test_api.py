@@ -341,7 +341,7 @@ def test_get_nearest_neighbors_filter(api_fixture, request):
     # assert api.create_index(collection_name="testspace") # default is auto now
 
     with pytest.raises(Exception) as e:
-        nn = collection.query(
+        collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={"distance": "false"}
         )
 
@@ -369,16 +369,7 @@ def test_delete_with_index(api_fixture, request):
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
-    # api.create_index()
-    nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
-
-    # assert nn['embeddings']['inference_class'][0] == 'knife'
-
-    # assert api.delete(where={"inference_class": "knife"})
-
-    # nn2 = api.get_nearest_neighbors(embedding=[1.1, 2.3, 3.2],
-    #                                 n_results=1)
-    # assert nn2['embeddings']['inference_class'][0] == 'person'
+    collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
@@ -507,7 +498,7 @@ def skipping_indexing_will_fail(api_fixture, request):
 
     # incremental index
     with pytest.raises(Exception) as e:
-        nn = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+        collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
     assert str(e.value).__contains__("index not found")
 
 
@@ -523,7 +514,7 @@ def test_add_a_collection(api_fixture, request):
     assert collection.name == "testspace"
 
     # get collection should throw an error if collection does not exist
-    with pytest.raises(Exception) as e:
+    with pytest.raises(Exception):
         collection = api.get_collection("testspace2")
 
 
@@ -804,35 +795,35 @@ def test_where_valid_operators(api_fixture, request):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$invalid": 2}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$lt": "2"}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
 
     # Test invalid $and, $or
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"$and": {"int_value": {"$lt": 2}}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"$or": [{"int_value": {"$lt": 2}}]})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"$or": []})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where={"a": {"$contains": "test"}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(
             where={
                 "$or": [
