@@ -17,7 +17,7 @@ version: "3.9"
 services:
   server:
     container_name: server
-    image: ghcr.io/chroma-core/chroma:0.3.11
+    image: ghcr.io/chroma-core/chroma:0.3.14
     volumes:
       - ./index_data:/index_data
     environment:
