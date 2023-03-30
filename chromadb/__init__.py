@@ -12,12 +12,10 @@ __version__ = "0.3.14"
 
 def configure(**kwargs):
     """Override Chroma's default settings, environment variables or .env files"""
-    global __settings
     __settings = chromadb.config.Settings(**kwargs)
 
 
 def get_settings():
-    global __settings
     return __settings
 
 
