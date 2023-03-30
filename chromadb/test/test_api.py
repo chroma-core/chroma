@@ -1319,3 +1319,16 @@ def test_get_version(api_fixture, request):
     import re
 
     assert re.match(r"\d+\.\d+\.\d+", version)
+
+
+# test delete_collection
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_delete_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection("test_delete_collection")
+    collection.add(**records)
+
+    assert len(api.list_collections()) == 1
+    api.delete_collection("test_delete_collection")
+    assert len(api.list_collections()) == 0
