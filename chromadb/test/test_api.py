@@ -10,6 +10,8 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
+from chromadb.api.models import Collection
+import numpy as np
 
 
 @pytest.fixture
@@ -1294,6 +1296,25 @@ def test_persist_index_loading_params(api_fixture, request):
     )
     for key in nn.keys():
         assert len(nn[key]) == 1
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_add_large(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    ## Test adding a large number of records
+    large_records = np.random.rand(2000, 512).astype(np.float32).tolist()
+
+    collection.add(
+        embeddings=large_records,
+        ids=[f"http://example.com/{i}" for i in range(len(large_records))],
+    )
+
+    assert collection.count() == len(large_records)
 
 
 # test get_version
