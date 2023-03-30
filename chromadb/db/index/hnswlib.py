@@ -201,9 +201,9 @@ class Hnswlib(Index):
 
         # unpickle the mappers
         with open(f"{self._save_folder}/id_to_uuid_{self._id}.pkl", "rb") as f:
-            self._id_to_uuid = pickle.load(f)
+            self._label_to_id = pickle.load(f)
         with open(f"{self._save_folder}/uuid_to_id_{self._id}.pkl", "rb") as f:
-            self._uuid_to_id = pickle.load(f)
+            self._id_to_label = pickle.load(f)
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
