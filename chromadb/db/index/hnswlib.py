@@ -70,10 +70,8 @@ class Hnswlib(Index):
     _index: hnswlib.Index
     _index_metadata: IndexMetadata
     _params: HnswParams
-
-    # Mapping of IDs to HNSW integer labels
-    _id_to_label = {}
-    _label_to_id = {}
+    _id_to_label: dict[str, int]
+    _label_to_id: dict[int, str]
 
     def __init__(self, id, settings, metadata):
         settings.validate("persist_directory")
@@ -81,6 +79,9 @@ class Hnswlib(Index):
         self._params = HnswParams(metadata)
         self._id = id
         self._index = None
+        # Mapping of IDs to HNSW integer labels
+        self._id_to_label = {}
+        self._label_to_id = {}
 
         self._load()
 
@@ -141,8 +142,8 @@ class Hnswlib(Index):
                 labels.append(next_label)
 
         if self._index_metadata["elements"] > self._index.get_max_elements():
-            new_size = min(self._index_metadata["elements"] * self._params.resize_factor, 1000)
-            self._index.resize_index(new_size)
+            new_size = max(self._index_metadata["elements"] * self._params.resize_factor, 1000)
+            self._index.resize_index(int(new_size))
 
         self._index.add_items(embeddings, labels)
         self._save()
@@ -202,9 +203,9 @@ class Hnswlib(Index):
 
         # unpickle the mappers
         with open(f"{self._save_folder}/id_to_uuid_{self._id}.pkl", "rb") as f:
-            self._id_to_uuid = pickle.load(f)
+            self._label_to_id = pickle.load(f)
         with open(f"{self._save_folder}/uuid_to_id_{self._id}.pkl", "rb") as f:
-            self._uuid_to_id = pickle.load(f)
+            self._id_to_label = pickle.load(f)
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 

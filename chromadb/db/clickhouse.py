@@ -221,13 +221,13 @@ class Clickhouse(DB):
         """
         )
 
+        self._delete_index(collection_uuid)
+
         self._get_conn().command(
             f"""
          DELETE FROM collections WHERE name = '{name}'
          """
         )
-
-        self._delete_index(collection_uuid)
 
     #
     #  ITEM METHODS

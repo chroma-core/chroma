@@ -10,6 +10,8 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
+from chromadb.api.models import Collection
+import numpy as np
 
 
 @pytest.fixture
@@ -1311,6 +1313,25 @@ def test_persist_index_loading_params(api_fixture, request):
         assert len(nn[key]) == 1
 
 
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_add_large(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    ## Test adding a large number of records
+    large_records = np.random.rand(2000, 512).astype(np.float32).tolist()
+
+    collection.add(
+        embeddings=large_records,
+        ids=[f"http://example.com/{i}" for i in range(len(large_records))],
+    )
+
+    assert collection.count() == len(large_records)
+
+
 # test get_version
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_version(api_fixture, request):
@@ -1322,3 +1343,43 @@ def test_get_version(api_fixture, request):
     import re
 
     assert re.match(r"\d+\.\d+\.\d+", version)
+
+
+# test delete_collection
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_delete_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection("test_delete_collection")
+    collection.add(**records)
+
+    assert len(api.list_collections()) == 1
+    api.delete_collection("test_delete_collection")
+    assert len(api.list_collections()) == 0
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_multiple_collections(api_fixture, request):
+
+    embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
+    embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
+    ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
+    ids2 = [f"http://example.com/2/{i}" for i in range(len(embeddings2))]
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    coll1 = api.create_collection("coll1")
+    coll1.add(embeddings=embeddings1, ids=ids1)
+
+    coll2 = api.create_collection("coll2")
+    coll2.add(embeddings=embeddings2, ids=ids2)
+
+    assert len(api.list_collections()) == 2
+    assert coll1.count() == len(embeddings1)
+    assert coll2.count() == len(embeddings2)
+
+    results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
+    results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
+
+    assert results1["ids"][0][0] == ids1[0]
+    assert results2["ids"][0][0] == ids2[0]
