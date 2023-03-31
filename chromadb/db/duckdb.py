@@ -50,7 +50,6 @@ class DuckDB(Clickhouse):
         self._settings = settings
 
         # https://duckdb.org/docs/extensions/overview
-        self._conn.execute("INSTALL 'json';")
         self._conn.execute("LOAD 'json';")
 
     def _create_table_collections(self):
