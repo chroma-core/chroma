@@ -51,9 +51,9 @@ class Collection(BaseModel):
 
 
             logger.warning(
-                "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
+                "No embedding_function provided, using default embedding function: DefaultOnnxEmbeddingFunction"
             )
-            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
+            self._embedding_function = ef.DefaultOnnxEmbeddingFunction()
         super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):

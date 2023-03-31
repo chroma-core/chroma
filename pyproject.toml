@@ -27,7 +27,7 @@ dependencies = [
   'posthog >= 2.4.0',
   'onnxruntime >= 1.14.1',
   'tokenizers >= 0.13.2',
-  'tqdm' >= 4.65.0',
+  'tqdm >= 4.65.0'
 ]
 
 [tool.black]
