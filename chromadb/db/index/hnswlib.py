@@ -70,16 +70,17 @@ class Hnswlib(Index):
     _index: hnswlib.Index
     _index_metadata: IndexMetadata
     _params: HnswParams
-
-    # Mapping of IDs to HNSW integer labels
-    _id_to_label = {}
-    _label_to_id = {}
+    _id_to_label: dict[str, int]
+    _label_to_id: dict[int, str]
 
     def __init__(self, id, settings, metadata):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
         self._id = id
         self._index = None
+        # Mapping of IDs to HNSW integer labels
+        self._id_to_label = {}
+        self._label_to_id = {}
 
         self._load()
 
