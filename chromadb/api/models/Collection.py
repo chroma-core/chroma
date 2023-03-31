@@ -49,11 +49,10 @@ class Collection(BaseModel):
         else:
             import chromadb.utils.embedding_functions as ef
 
-
             logger.warning(
-                "No embedding_function provided, using default embedding function: DefaultOnnxEmbeddingFunction"
+                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction"
             )
-            self._embedding_function = ef.DefaultOnnxEmbeddingFunction()
+            self._embedding_function = ef.DefaultEmbeddingFunction()
         super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):
