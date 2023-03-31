@@ -9,6 +9,7 @@ import requests
 from tqdm import tqdm
 from typing import List, cast, Optional
 
+
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
@@ -116,17 +117,18 @@ class InstructorEmbeddingFunction(EmbeddingFunction):
 # Download with tqdm to preserve the sentence-transformers experience
 def download(url: str, fname: Path, chunk_size=1024):
     resp = requests.get(url, stream=True)
-    total = int(resp.headers.get('content-length', 0))
-    with open(fname, 'wb') as file, tqdm(
+    total = int(resp.headers.get("content-length", 0))
+    with open(fname, "wb") as file, tqdm(
         desc=str(fname),
         total=total,
-        unit='iB',
+        unit="iB",
         unit_scale=True,
         unit_divisor=1024,
     ) as bar:
         for data in resp.iter_content(chunk_size=chunk_size):
             size = file.write(data)
             bar.update(size)
+
 
 # Use pytorches default epsilon for division by zero
 # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
@@ -147,46 +149,56 @@ class DefaultOnnxEmbeddingFunction(EmbeddingFunction):
     tokenizer: Optional[Tokenizer] = None
     model: Optional[ort.InferenceSession] = None
 
-    def forward(self, documents: List[str], batch_size: int = 32):
+    def _forward(self, documents: List[str], batch_size: int = 32):
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
         self.tokenizer = cast(Tokenizer, self.tokenizer)
         self.model = cast(ort.InferenceSession, self.model)
         all_embeddings = []
         for i in range(0, len(documents), batch_size):
-            batch = documents[i:i + batch_size]
+            batch = documents[i : i + batch_size]
             encoded = [self.tokenizer.encode(d) for d in batch]
             input_ids = np.array([e.ids for e in encoded])
             attention_mask = np.array([e.attention_mask for e in encoded])
             onnx_input = {
                 "input_ids": np.array(input_ids, dtype=np.int64),
                 "attention_mask": np.array(attention_mask, dtype=np.int64),
-                "token_type_ids": np.array([np.zeros(len(e), dtype=np.int64) for e in input_ids], dtype=np.int64),
+                "token_type_ids": np.array(
+                    [np.zeros(len(e), dtype=np.int64) for e in input_ids], dtype=np.int64
+                ),
             }
             model_output = self.model.run(None, onnx_input)
             last_hidden_state = model_output[0]
             # Perform mean pooling with attention weighting
-            input_mask_expanded = np.broadcast_to(np.expand_dims(attention_mask, -1), last_hidden_state.shape)
-            embeddings = np.sum(last_hidden_state * input_mask_expanded, 1) / np.clip(input_mask_expanded.sum(1), a_min=1e-9, a_max=None)
+            input_mask_expanded = np.broadcast_to(
+                np.expand_dims(attention_mask, -1), last_hidden_state.shape
+            )
+            embeddings = np.sum(last_hidden_state * input_mask_expanded, 1) / np.clip(
+                input_mask_expanded.sum(1), a_min=1e-9, a_max=None
+            )
             embeddings = normalize(embeddings).astype(np.float32)
             all_embeddings.append(embeddings)
         return np.concatenate(all_embeddings)
 
-    def init_model_and_tokenizer(self):
-        if(self.model == None and self.tokenizer == None):
-            self.tokenizer = Tokenizer.from_file(str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "tokenizer.json"))
+    def _init_model_and_tokenizer(self):
+        if self.model == None and self.tokenizer == None:
+            self.tokenizer = Tokenizer.from_file(
+                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "tokenizer.json")
+            )
             # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
-            self.model = ort.InferenceSession(str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx"))
+            self.model = ort.InferenceSession(
+                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx")
+            )
 
     def __call__(self, texts: Documents) -> Embeddings:
         # Only download the model when it is actually used
-        self.download_model_if_not_exists()
-        self.init_model_and_tokenizer()
-        return self.forward(texts).tolist()
+        self._download_model_if_not_exists()
+        self._init_model_and_tokenizer()
+        return self._forward(texts).tolist()
 
-    def download_model_if_not_exists(self):
+    def _download_model_if_not_exists(self):
         # Model is not downloaded yet
         if not os.path.exists(self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
