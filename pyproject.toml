@@ -20,12 +20,14 @@ dependencies = [
   'pydantic >= 1.9',
   'hnswlib >= 0.7',
   'clickhouse_connect >= 0.5.7',
-  'sentence-transformers >= 2.2.2',
   'duckdb >= 0.7.1',
   'fastapi >= 0.85.1',
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.21.6',
-  'posthog >= 2.4.0'
+  'posthog >= 2.4.0',
+  'onnxruntime >= 1.14.1',
+  'tokenizers >= 0.13.2',
+  'tqdm' >= 4.65.0',
 ]
 
 [tool.black]
