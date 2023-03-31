@@ -12,6 +12,7 @@ import uvicorn
 from requests.exceptions import ConnectionError
 from chromadb.api.models import Collection
 import numpy as np
+from chromadb.utils.embedding_functions import DefaultOnnxEmbeddingFunction
 
 
 @pytest.fixture
@@ -1341,3 +1342,11 @@ def test_delete_collection(api_fixture, request):
     assert len(api.list_collections()) == 1
     api.delete_collection("test_delete_collection")
     assert len(api.list_collections()) == 0
+
+
+# test onnx embedding function
+def test_onnx_embedding():
+    embedding_function = DefaultOnnxEmbeddingFunction()
+    docs = ["this is a test" for _ in range(64)]
+    embeddings = embedding_function(docs)
+    assert len(embeddings) == 64
