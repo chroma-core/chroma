@@ -155,6 +155,65 @@ class LocalAPI(API):
 
         return True
 
+    def _upsert(
+        self,
+        collection_name: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ):        
+        # Determine which ids need to be added and which need to be updated based on the ids already in the collection
+        existing_ids = set(self._get(collection_name, ids=ids, include=[])['ids'])
+
+        ids_to_add = list(set(ids) - existing_ids)
+        ids_to_update = list(set(ids) & existing_ids)
+        
+        embeddings_to_add: Embeddings = []
+        embeddings_to_update: Embeddings = []
+        metadatas_to_add: Optional[Metadatas] = [] if metadatas else None
+        metadatas_to_update: Optional[Metadatas] = [] if metadatas else None
+        documents_to_add: Optional[Documents] = [] if documents else None
+        documents_to_update: Optional[Documents] = [] if documents else None
+
+        for i, id in enumerate(ids):
+            if id in ids_to_add:
+                if embeddings is not None:
+                    embeddings_to_add.append(embeddings[i])
+                if metadatas is not None:
+                    metadatas_to_add.append(metadatas[i])
+                if documents is not None:
+                    documents_to_add.append(documents[i])
+            elif id in ids_to_update:
+                if embeddings is not None:
+                    embeddings_to_update.append(embeddings[i])
+                if metadatas is not None:
+                    metadatas_to_update.append(metadatas[i])
+                if documents is not None:
+                    documents_to_update.append(documents[i])
+        
+        if ids_to_add:
+            self._add(
+                ids_to_add,
+                collection_name,
+                embeddings_to_add,
+                metadatas_to_add,
+                documents_to_add,
+                increment_index=increment_index,
+            )
+
+        if ids_to_update:
+            self._update(
+                collection_name,
+                ids_to_update,
+                embeddings_to_update,
+                metadatas_to_update,
+                documents_to_update,
+            )
+
+        return True
+
     def _get(
         self,
         collection_name: str,

@@ -1399,16 +1399,17 @@ def test_update_query(api_fixture, request):
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
     
 @pytest.mark.parametrize("api_fixture", test_apis)
-def test_add_with_redunant_ids(api_fixture, request):
+def test_upsert(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
     collection = api.create_collection("test")
-    # Add some items
-    collection.add(ids=["id1", "id2", "id3"], documents=["hello", "world", "foo"])
+    
+    # Add some items via upsert
+    collection.upsert(ids=["id1", "id2", "id3"], documents=["hello", "world", "foo"])
+    assert collection.count() == 3
 
-    # Add an item with the same ID - here add plays the role of 'upsert' 
-    # If we have a separate upsert method, 'add' should fail and complain here. 
-    collection.add(ids=["id1", "id4"], documents=["bar", "baz"])
+    # Add an item with the same ID 
+    collection.upsert(ids=["id1", "id4"], documents=["bar", "baz"])
 
     # We should expect there to be only one item, the "bar" one
     items = collection.get(ids="id1")
