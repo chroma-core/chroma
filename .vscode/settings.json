@@ -4,7 +4,7 @@
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",
   "files.exclude": {
-    "**/__pycache__": true,ß
+    "**/__pycache__": true,
     "**/.ipynb_checkpoints": true,
     "**/.pytest_cache": true,
     "**/chroma.egg-info": true
@@ -18,7 +18,8 @@
     "--extend-ignore=E503",
     "--max-line-length=88"
   ],
-  "python.testing.pytestArgs": ["."],
+
+  "python.testing.pytestArgs": ["chromadb"],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true
 }
