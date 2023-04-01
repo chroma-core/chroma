@@ -180,10 +180,10 @@ class FastAPI(API):
             self._api_url + "/collections/" + collection_name + "/add",
             data=json.dumps(
                 {
+                    "ids": ids,
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "ids": ids,
                     "increment_index": increment_index,
                 }
             ),
@@ -217,6 +217,36 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
+                }
+            ),
+        )
+
+        resp.raise_for_status()
+        return True
+
+    def _upsert(
+        self,
+        collection_name: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ):
+        """
+        Updates a batch of embeddings in the database
+        - pass in column oriented data lists
+        """
+
+        resp = requests.post(
+            self._api_url + "/collections/" + collection_name + "/upsert",
+            data=json.dumps(
+                {
+                    "ids": ids,
+                    "embeddings": embeddings,
+                    "metadatas": metadatas,
+                    "documents": documents,
+                    "increment_index": increment_index,
                 }
             ),
         )
