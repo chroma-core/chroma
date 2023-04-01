@@ -86,6 +86,9 @@ class FastAPI(chromadb.server.Server):
             "/api/v1/collections/{collection_name}/update", self.update, methods=["POST"]
         )
         self.router.add_api_route(
+            "/api/v1/collections/{collection_name}/upsert", self.upsert, methods=["POST"]
+        )
+        self.router.add_api_route(
             "/api/v1/collections/{collection_name}/get", self.get, methods=["POST"]
         )
         self.router.add_api_route(
@@ -174,6 +177,16 @@ class FastAPI(chromadb.server.Server):
             embeddings=add.embeddings,
             documents=add.documents,
             metadatas=add.metadatas,
+        )
+
+    def upsert(self, collection_name: str, upsert: AddEmbedding):        
+        return self._api._upsert(
+            collection_name=collection_name,
+            ids=upsert.ids,
+            embeddings=upsert.embeddings,
+            documents=upsert.documents,
+            metadatas=upsert.metadatas,
+            increment_index=upsert.increment_index,
         )
 
     def get(self, collection_name, get: GetEmbedding):
