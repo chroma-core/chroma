@@ -272,6 +272,54 @@ class Collection(BaseModel):
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
 
+    def upsert(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        increment_index: bool = True,
+    ):
+        """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
+        
+        Args:
+            ids: The ids of the embeddings to update
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            documents: The documents to associate with the embeddings. Optional.
+        """
+
+        ids = validate_ids(maybe_cast_one_to_many(ids))
+        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
+        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
+        documents = maybe_cast_one_to_many(documents) if documents else None
+
+        # Check that one of embeddings or documents is provided
+        if embeddings is None and documents is None:
+            raise ValueError("You must provide either embeddings or documents, or both")
+
+        # Check that, if they're provided, the lengths of the arrays match the length of ids
+        if embeddings is not None and len(embeddings) != len(ids):
+            raise ValueError(
+                f"Number of embeddings {len(embeddings)} must match number of ids {len(ids)}"
+            )
+        if metadatas is not None and len(metadatas) != len(ids):
+            raise ValueError(
+                f"Number of metadatas {len(metadatas)} must match number of ids {len(ids)}"
+            )
+        if documents is not None and len(documents) != len(ids):
+            raise ValueError(
+                f"Number of documents {len(documents)} must match number of ids {len(ids)}"
+            )
+
+        # If document embeddings are not provided, we need to compute them
+        if embeddings is None and documents is not None:
+            if self._embedding_function is None:
+                raise ValueError("You must provide embeddings or a function to compute them")
+            embeddings = self._embedding_function(documents)
+
+        self._client._upsert(collection_name=self.name, ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents, increment_index=increment_index)
+
     def delete(
         self,
         ids: Optional[IDs] = None,
