@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Optional
+from typing import Dict, Optional
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index
@@ -70,8 +70,8 @@ class Hnswlib(Index):
     _index: hnswlib.Index
     _index_metadata: IndexMetadata
     _params: HnswParams
-    _id_to_label: dict[str, int]
-    _label_to_id: dict[int, str]
+    _id_to_label: Dict[str, int]
+    _label_to_id: Dict[int, str]
 
     def __init__(self, id, settings, metadata):
         self._save_folder = settings.persist_directory + "/index"
