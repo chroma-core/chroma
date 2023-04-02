@@ -10,8 +10,7 @@ import importlib
 type_to_class = {
     "hnswlib-local": "chromadb.segment.impl.hnswlib.Local",
     "hnswlib-local-memory": "chromadb.segment.impl.hnswlib.LocalMemory",
-    "duckdb-memory": "chromadb.segment.impl.duckdb.DuckDB",
-    "duckdb": "chromadb.segment.impl.duckdb.DuckDBMemory",
+    "duckdb": "chromadb.segment.impl.duckdb.DuckDB",
 }
 
 

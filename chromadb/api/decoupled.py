@@ -8,7 +8,8 @@ from chromadb.api.models.Collection import Collection
 from chromadb.types import Topic, InsertEmbeddingRecord, InsertType
 import chromadb.ingest
 import chromadb.db
-import chromadb.segment
+from chromadb.segment import SegmentManager, MetadataReader, VectorReader
+import itertools
 from chromadb.api.types import (
     Documents,
     Embedding,
@@ -32,7 +33,7 @@ class DecoupledAPI(API):
 
     ingest_impl: chromadb.ingest.Producer
     sysdb: chromadb.db.SysDB
-    segment_manager: chromadb.segment.SegmentManager
+    segment_manager: SegmentManager
 
     def __init__(self, settings):
         self.settings = settings
@@ -161,7 +162,12 @@ class DecoupledAPI(API):
 
         topic = self._topic(collection_name)
 
-        for i, e, m, d in zip(ids, embeddings, metadatas or [], documents or []):
+        for i, e, m, d in zip(
+            ids,
+            embeddings,
+            metadatas or itertools.repeat(None),
+            documents or itertools.repeat(None),
+        ):
 
             if d is not None:
                 if m is None:
@@ -169,11 +175,15 @@ class DecoupledAPI(API):
                 else:
                     m["document"] = d
 
-            metadata = {k: str(v) for k, v in m.items()}
+            if m is not None:
+                metadata = {k: str(v) for k, v in m.items()}
+            else:
+                metadata = None
 
             embedding = InsertEmbeddingRecord(
                 id=i, embedding=e, metadata=metadata, insert_type=InsertType.ADD_ONLY
             )
+
             self.ingest_impl.submit_embedding(topic_name=topic, embedding=embedding)
 
     def _update(
@@ -186,8 +196,14 @@ class DecoupledAPI(API):
     ):
         pass
 
+    # TODO: this could be cached for better performance
+    def _get_metadata_reader(self, collection_name: str) -> MetadataReader:
+        segment = self.sysdb.get_segments(topic=self._topic(collection_name), scope="metadata")[0]
+        impl = self.segment_manager.get_instance(segment)
+        return cast(MetadataReader, impl)
+
     def _count(self, collection_name: str) -> int:
-        pass
+        return self._get_metadata_reader(collection_name).count_metadata()
 
     def _get(
         self,

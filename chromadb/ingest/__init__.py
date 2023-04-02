@@ -14,6 +14,18 @@ import pulsar.schema as schema
 import array
 
 
+def get_encoding(embedding: InsertEmbeddingRecord) -> ScalarEncoding:
+    """Observe the encoding of an embedding record based on the type of the vector."""
+
+    if isinstance(embedding["embedding"][0], float):
+        encoding = ScalarEncoding.FLOAT32
+    elif isinstance(embedding["embedding"][0], int):
+        encoding = ScalarEncoding.INT32
+    else:
+        raise ValueError(f"Unsupported scalar type for vector: {type(embedding['embedding'][0])}")
+    return encoding
+
+
 def encode_vector(vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOAT32) -> bytes:
     """Encode a vector into a byte array."""
 
@@ -42,14 +54,7 @@ def proto_insert(
         raise ValueError(f"Unsupported insert type: {insert_type.value}")
 
     if encoding is None:
-        if isinstance(embedding["embedding"][0], float):
-            encoding = ScalarEncoding.FLOAT32
-        elif isinstance(embedding["embedding"][0], int):
-            encoding = ScalarEncoding.INT32
-        else:
-            raise ValueError(
-                f"Unsupported scalar type for vector: {type(embedding['embedding'][0])}"
-            )
+        encoding = get_encoding(embedding)
 
     vector = proto.Vector(
         dimension=len(embedding["embedding"]),

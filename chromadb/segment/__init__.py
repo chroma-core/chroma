@@ -77,8 +77,8 @@ class SegmentManager(ABC):
         pass
 
     @abstractmethod
-    def get_instance(self, segment: Segment) -> None:
-        """Return an instance of the given segment, creating if necessary"""
+    def get_instance(self, segment: Segment) -> SegmentImplementation:
+        """Return an instance of the given segment, initializing if necessary"""
         pass
 
     @abstractmethod

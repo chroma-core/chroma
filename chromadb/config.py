@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     chroma_system_db_impl: str = "chromadb.db.impl.duckdb.DuckDB"
 
     chroma_default_vector_segment_type: str = "hnswlib-local-memory"
-    chroma_default_metadata_segment_type: str = "duckdb-memory"
+    chroma_default_metadata_segment_type: str = "duckdb"
 
     enable_system_reset: bool = False
     migrations: Literal["none", "validate", "apply"] = "apply"

@@ -2,7 +2,7 @@ import chromadb.db.migrations as migrations
 from chromadb.db.migrations import MigratableDB
 from chromadb.config import Settings
 from chromadb.db.basesqlsysdb import BaseSqlSysDB
-from chromadb.ingest import Producer, Consumer
+from chromadb.ingest import Producer, Consumer, get_encoding, encode_vector
 from chromadb.types import InsertEmbeddingRecord
 import pypika
 import duckdb
@@ -55,7 +55,7 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
 
     @staticmethod
     def migration_dirs():
-        return ["migrations/sysdb"]
+        return ["migrations/sysdb", "migrations/ingestdb"]
 
     @staticmethod
     def migration_scope():
@@ -65,14 +65,49 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         with self.tx() as cur:
             cur.execute(
                 """
-                DELETE FROM messages
+                DELETE FROM chroma.embeddings
+                WHERE topic = ?
+                """,
+                (topic_name,),
+            )
+            cur.execute(
+                """
+                DELETE FROM embedding_metadata
                 WHERE topic = ?
                 """,
                 (topic_name,),
             )
 
-    def submit_embedding(self, topic_name: str, message: InsertEmbeddingRecord):
-        raise NotImplementedError()
+    def submit_embedding(self, topic_name: str, embedding: InsertEmbeddingRecord):
+        encoding = get_encoding(embedding)
+        vector = encode_vector(embedding["embedding"], encoding)
+
+        embedding_record = {**embedding}
+        with self.tx() as cur:
+            cur.execute(
+                """
+                INSERT INTO embeddings (topic, id, encoding, vector)
+                VALUES (?, ?, ?, ?)
+                RETURNING seq
+                """,
+                (topic_name, embedding["id"], encoding.value, vector),
+            )
+            seq_id = cur.fetchone()[0]
+            embedding_record["seq_id"] = seq_id
+
+            if embedding["metadata"] is not None:
+                for key, value in embedding["metadata"].items():
+                    cur.execute(
+                        """
+                        INSERT INTO embedding_metadata (topic, id, key, value)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (topic_name, embedding["id"], key, value),
+                    )
+            self._publish(embedding_record)
+
+    def _publish(self, embedding_record):
+        pass
 
     def submit_embedding_delete(self, topic_name: str, id: str) -> None:
         raise NotImplementedError()
@@ -110,3 +145,15 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
             cur.execute("SET SCHEMA=chroma")
 
         self.apply_migrations()
+
+    def count_embeddings(self, topic_name: str) -> int:
+        """Return the number of embeddings in a topic."""
+        with self.tx() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM embeddings
+                WHERE topic = ?
+                """,
+                (topic_name,),
+            )
+            return cur.fetchone()[0]
