@@ -29,9 +29,9 @@ def local_api():
 def local_api_decoupled():
     return chromadb.Client(
         Settings(
-            chroma_ingest_impl="chromadb.db.impls.duckdb.DuckDB",
+            chroma_ingest_impl="chromadb.db.impl.duckdb.DuckDB",
             chroma_segment_manager="chromadb.segment.manager.local.LocalSegmentManager",
-            chroma_system_db_impl="chromadb.db.impls.duckdb.DuckDB",
+            chroma_system_db_impl="chromadb.db.impl.duckdb.DuckDB",
             chroma_api_impl="chromadb.api.decoupled.DecoupledAPI",
             duckdb_database=":memory:",
             enable_system_reset=True,

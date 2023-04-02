@@ -2,8 +2,8 @@ import chromadb.db.migrations as migrations
 from chromadb.db.migrations import MigratableDB
 from chromadb.config import Settings
 from chromadb.db.basesqlsysdb import BaseSqlSysDB
-from chromadb.ingest import Ingest
-from chromadb.types import EmbeddingRecord, InsertType, Topic
+from chromadb.ingest import Producer, Consumer
+from chromadb.types import InsertEmbeddingRecord
 import pypika
 import duckdb
 from pubsub import pub
@@ -25,7 +25,7 @@ class TxWrapper(migrations.TxWrapper):
             return False
 
 
-class DuckDB(MigratableDB, BaseSqlSysDB, Ingest):
+class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
     def __init__(self, settings: Settings):
         settings.validate("duckdb_database")
         settings.validate("migrations")
@@ -71,10 +71,13 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Ingest):
                 (topic_name,),
             )
 
-    def submit_embedding(self, topic_name: str, message: EmbeddingRecord, insert_type: InsertType):
+    def submit_embedding(self, topic_name: str, message: InsertEmbeddingRecord):
         raise NotImplementedError()
 
     def submit_embedding_delete(self, topic_name: str, id: str) -> None:
+        raise NotImplementedError()
+
+    def register_consume_fn(self, topic_name, consume_fn, start=None, end=None):
         raise NotImplementedError()
 
     def setup_migrations(self):

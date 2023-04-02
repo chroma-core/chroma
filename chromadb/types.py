@@ -28,7 +28,7 @@ class Segment(TypedDict):
     metadata: Optional[dict[str, str]]
 
 
-class SequentialID(Protocol):
+class SeqId(Protocol):
     def serialize(self) -> bytes:
         ...
 
@@ -60,14 +60,28 @@ class InsertType(Enum):
 Vector = Union[Sequence[float], Sequence[int]]
 
 
-class EmbeddingRecord(TypedDict):
+class BaseEmbeddingRecord(TypedDict):
     id: str
+    seq_id: SeqId
+
+
+class VectorEmbeddingRecord(BaseEmbeddingRecord):
     embedding: Vector
+
+
+class MetadataEmbeddingRecord(BaseEmbeddingRecord):
     metadata: Optional[dict[str, str]]
 
 
-class PersistentEmbeddingRecord(EmbeddingRecord):
-    sequence_id: SequentialID
+class EmbeddingRecord(VectorEmbeddingRecord, MetadataEmbeddingRecord):
+    pass
+
+
+class InsertEmbeddingRecord(TypedDict):
+    id: str
+    embedding: Vector
+    metadata: Optional[dict[str, str]]
+    insert_type: InsertType
 
 
 class VectorQuery(TypedDict):
@@ -79,7 +93,7 @@ class VectorQuery(TypedDict):
     options: Optional[dict[str, Union[str, int, float]]]
 
 
-class VectorQueryResult(PersistentEmbeddingRecord):
+class VectorQueryResult(VectorEmbeddingRecord):
     """A KNN/ANN query result"""
 
     distance: float

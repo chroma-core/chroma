@@ -1,10 +1,10 @@
-from chromadb.types import Topic, EmbeddingRecord, InsertType
-from chromadb.ingest import Ingest, proto_insert, proto_delete
+from chromadb.types import Topic, EmbeddingRecord, InsertEmbeddingRecord
+from chromadb.ingest import Producer, proto_insert, proto_delete
 import pulsar
 import pulsar.schema as schema
 
 
-class PulsarIngest(Ingest):
+class PulsarIngest(Producer):
     def __init__(self, settings) -> None:
         settings.validate("pulsar_host")
         settings.validate("pulsar_port")
@@ -19,10 +19,8 @@ class PulsarIngest(Ingest):
     def delete_topic(self, topic_name: str) -> None:
         pass
 
-    def submit_embedding(
-        self, topic_name: str, embedding: EmbeddingRecord, insert_type: InsertType
-    ) -> None:
-        pb = proto_insert(embedding, insert_type)
+    def submit_embedding(self, topic_name: str, embedding: InsertEmbeddingRecord) -> None:
+        pb = proto_insert(embedding)
         self._producer(topic_name).send(pb.SerializeToString())
 
     def submit_embedding_delete(self, topic_name: str, id: str) -> None:

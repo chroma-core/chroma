@@ -4,13 +4,15 @@ from chromadb.types import (
     Topic,
     Vector,
     EmbeddingRecord,
-    PersistentEmbeddingRecord,
+    MetadataEmbeddingRecord,
+    VectorEmbeddingRecord,
     Where,
     WhereDocument,
     VectorQuery,
     VectorQueryResult,
     Segment,
 )
+
 
 class SegmentImplementation(ABC):
     pass
@@ -28,7 +30,7 @@ class MetadataReader(SegmentImplementation):
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[PersistentEmbeddingRecord]:
+    ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         pass
 
@@ -42,7 +44,7 @@ class VectorReader(SegmentImplementation):
     """Embedding Vector segment interface"""
 
     @abstractmethod
-    def get_vectors(self, ids: Optional[Sequence[str]]) -> Sequence[PersistentEmbeddingRecord]:
+    def get_vectors(self, ids: Optional[Sequence[str]]) -> Sequence[VectorEmbeddingRecord]:
         """Get embeddings from the segment. If no IDs are provided,
         all embeddings are returned."""
         pass
@@ -57,7 +59,7 @@ class VectorReader(SegmentImplementation):
 
 
 class SegmentManager(ABC):
-    """Pluggable strategy for creating, retrieving and instantiating segments as required"""
+    """Interface for a pluggable strategy for creating, retrieving and instantiating segments as required"""
 
     @abstractmethod
     def create_topic_segments(self, topic: Topic) -> None:

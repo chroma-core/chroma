@@ -24,9 +24,12 @@ class Settings(BaseSettings):
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
-    chroma_ingest_impl: str = "chromadb.db.impls.duckdb.DuckDB"
+    chroma_ingest_impl: str = "chromadb.db.impl.duckdb.DuckDB"
     chroma_segment_manager: str = "chromadb.segment.manager.local.LocalSegmentManager"
-    chroma_system_db_impl: str = "chromadb.db.impls.duckdb.DuckDB"
+    chroma_system_db_impl: str = "chromadb.db.impl.duckdb.DuckDB"
+
+    chroma_default_vector_segment_type: str = "hnswlib-local-memory"
+    chroma_default_metadata_segment_type: str = "duckdb-memory"
 
     enable_system_reset: bool = False
     migrations: Literal["none", "validate", "apply"] = "apply"

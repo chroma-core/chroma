@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 import chromadb.config
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.types import Topic, InsertType, EmbeddingRecord, EmbeddingFunction, Segment
+from chromadb.types import Topic, InsertEmbeddingRecord, InsertType
 import chromadb.ingest
 import chromadb.db
 import chromadb.segment
@@ -28,9 +28,9 @@ topic_re = re.compile(r"^([a-zA-Z0-9]+)://([a-zA-Z0-9]+)/([a-zA-Z0-9]+)/([a-zA-Z
 
 
 class DecoupledAPI(API):
-    """API that uses the new segment-based architecture."""
+    """API that uses the new segment-based architecture in which reads and writes are decoupled."""
 
-    ingest_impl: chromadb.ingest.Ingest
+    ingest_impl: chromadb.ingest.Producer
     sysdb: chromadb.db.SysDB
     segment_manager: chromadb.segment.SegmentManager
 
@@ -171,11 +171,10 @@ class DecoupledAPI(API):
 
             metadata = {k: str(v) for k, v in m.items()}
 
-            embedding = EmbeddingRecord(id=i, embedding=e, metadata=metadata)
-
-            self.ingest_impl.submit_embedding(
-                topic_name=topic, embedding=embedding, insert_type=InsertType.ADD_ONLY
+            embedding = InsertEmbeddingRecord(
+                id=i, embedding=e, metadata=metadata, insert_type=InsertType.ADD_ONLY
             )
+            self.ingest_impl.submit_embedding(topic_name=topic, embedding=embedding)
 
     def _update(
         self,

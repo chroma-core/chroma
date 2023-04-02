@@ -1,5 +1,5 @@
 from chromadb.types import Segment, Topic, EmbeddingFunction, ScalarEncoding
-import chromadb.db.impls.duckdb
+import chromadb.db.impl.duckdb
 from chromadb.config import Settings
 import pytest
 import uuid
@@ -7,7 +7,7 @@ import uuid
 
 @pytest.fixture
 def duckdb_db():
-    return chromadb.db.impls.duckdb.DuckDB(Settings(duckdb_database=":memory:"))
+    return chromadb.db.impl.duckdb.DuckDB(Settings(duckdb_database=":memory:"))
 
 
 test_dbs = [duckdb_db]

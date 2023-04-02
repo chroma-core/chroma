@@ -1,6 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Union, Optional
-from chromadb.types import Topic, EmbeddingRecord, InsertType, ScalarEncoding, Vector
+from typing import Optional, Callable, Sequence
+from chromadb.types import (
+    Topic,
+    EmbeddingRecord,
+    InsertEmbeddingRecord,
+    InsertType,
+    ScalarEncoding,
+    Vector,
+    SeqId,
+)
 import chromadb.ingest.proto.chroma_pb2 as proto
 import pulsar.schema as schema
 import array
@@ -18,9 +26,11 @@ def encode_vector(vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOA
 
 
 def proto_insert(
-    embedding: EmbeddingRecord, insert_type: InsertType, encoding: Optional[ScalarEncoding] = None
+    embedding: InsertEmbeddingRecord, encoding: Optional[ScalarEncoding] = None
 ) -> proto.EmbeddingMessage:
     """Return an Protobuf record for an embedding insert."""
+
+    insert_type = embedding["insert_type"]
 
     if insert_type == InsertType.ADD_ONLY:
         action_type = proto.ActionType.INSERT
@@ -56,13 +66,13 @@ def proto_insert(
 
 
 def proto_delete(id: str) -> proto.EmbeddingMessage:
-    """Return an Avro record for an embedding delete."""
+    """Return an Protobuf record for an embedding delete."""
 
     return proto.EmbeddingMessage(id=id, type=proto.ActionType.DELETE)
 
 
-class Ingest(ABC):
-    """Base class for all ingest types"""
+class Producer(ABC):
+    """Interface for writing embeddings to an ingest stream"""
 
     @abstractmethod
     def create_topic(self, topic: Topic) -> None:
@@ -73,9 +83,7 @@ class Ingest(ABC):
         pass
 
     @abstractmethod
-    def submit_embedding(
-        self, topic_name: str, embedding: EmbeddingRecord, insert_type: InsertType
-    ) -> None:
+    def submit_embedding(self, topic_name: str, embedding: InsertEmbeddingRecord) -> None:
         """Add an embedding record to the given topic."""
         pass
 
@@ -89,3 +97,23 @@ class Ingest(ABC):
         """Delete all topics and data. For testing only, implementations intended for production
         may throw an exception instead of implementing this method."""
         pass
+
+
+class Consumer(ABC):
+    """Interface for reading embeddings off an ingest stream"""
+
+    @abstractmethod
+    def register_consume_fn(
+        self,
+        topic_name: str,
+        consume_fn: Callable[[Sequence[EmbeddingRecord]], bool],
+        start: Optional[SeqId] = None,
+        end: Optional[SeqId] = None,
+    ) -> None:
+        """Register a function that will be called to recieve embeddings for a given topic. The given function may be
+        called any number of times, with any number of records, and may be called concurrently.
+
+        The function should return True if and only if the embeddings were successfully processed.
+
+        If the function returns False or throws an exception, the function may be called again with the same or
+        different records."""
