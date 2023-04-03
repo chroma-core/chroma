@@ -7,13 +7,6 @@ CREATE TABLE embeddings (
     id TEXT NOT NULL,
     seq BIGINT NOT NULL DEFAULT nextval('seq_embedding_ids'),
     encoding embedding_encoding NOT NULL,
-    vector BLOB NOT NULL
-);
-
-CREATE TABLE embedding_metadata (
-    topic TEXT NOT NULL,
-    id TEXT NOT NULL,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    PRIMARY KEY (topic, id, key)
+    vector BLOB NOT NULL,
+    metadata JSON
 );

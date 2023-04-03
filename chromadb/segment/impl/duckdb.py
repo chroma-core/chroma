@@ -1,3 +1,4 @@
+
 from chromadb.segment import Segment, MetadataReader
 from chromadb.config import Settings, get_component
 from chromadb.types import MetadataEmbeddingRecord, Where, WhereDocument
@@ -23,14 +24,16 @@ class DuckDB(MetadataReader):
 
     def get_metadata(
         self,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where],
+        where_document: Optional[WhereDocument],
         ids: Optional[Sequence[str]] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
-        raise NotImplementedError
+        return self._duckdb.get_metadata(
+            self._topic, where, where_document, ids, sort, limit, offset
+        )
 
     def count_metadata(self) -> int:
         """Get the number of embeddings in this segment."""

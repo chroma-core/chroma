@@ -4,10 +4,8 @@ from chromadb.segment import Where, WhereDocument
 ID = str
 IDs = List[ID]
 
-Number = Union[int, float]
-Embedding = List[Number]
+Embedding = Union[Sequence[int], Sequence[float]]
 Embeddings = List[Embedding]
-
 
 Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
@@ -159,7 +157,9 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     if not isinstance(where_document, dict):
         raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
     if len(where_document) != 1:
-        raise ValueError(f"Expected where document to have exactly one operator, got {where_document}")
+        raise ValueError(
+            f"Expected where document to have exactly one operator, got {where_document}"
+        )
     for operator, operand in where_document.items():
         if operator not in ["$contains", "$and", "$or"]:
             raise ValueError(

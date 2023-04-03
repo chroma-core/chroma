@@ -37,6 +37,17 @@ def encode_vector(vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOA
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 
 
+def metadata_value(value):
+    if isinstance(value, str):
+        return proto.MetadataValue(string_value=value)
+    elif isinstance(value, int):
+        return proto.MetadataValue(int_value=value)
+    elif isinstance(value, float):
+        return proto.MetadataValue(float_value=value)
+    else:
+        raise ValueError(f"Unsupported metadata value type: {type(value)}")
+
+
 def proto_insert(
     embedding: InsertEmbeddingRecord, encoding: Optional[ScalarEncoding] = None
 ) -> proto.EmbeddingMessage:
@@ -66,7 +77,7 @@ def proto_insert(
         id=embedding["id"],
         type=action_type,
         vector=vector,
-        metadata=embedding["metadata"],
+        metadata={k: metadata_value(v) for k, v in embedding["metadata"]},
     )
 
 

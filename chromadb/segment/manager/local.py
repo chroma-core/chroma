@@ -72,4 +72,4 @@ class LocalSegmentManager(SegmentManager):
         raise NotImplementedError()
 
     def reset(self):
-        pass
+        self.loaded_segments = {}

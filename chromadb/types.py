@@ -17,7 +17,7 @@ class EmbeddingFunction(TypedDict):
 class Topic(TypedDict):
     name: str
     embedding_function: Optional[str]
-    metadata: Optional[dict[str, str]]
+    metadata: Optional[dict[str, Union[str, int, float]]]
 
 
 class Segment(TypedDict):
@@ -25,7 +25,7 @@ class Segment(TypedDict):
     type: str
     scope: Literal["vector", "metadata"]
     topic: Optional[str]
-    metadata: Optional[dict[str, str]]
+    metadata: Optional[dict[str, Union[str, int, float]]]
 
 
 class SeqId(Protocol):
@@ -70,7 +70,7 @@ class VectorEmbeddingRecord(BaseEmbeddingRecord):
 
 
 class MetadataEmbeddingRecord(BaseEmbeddingRecord):
-    metadata: Optional[dict[str, str]]
+    metadata: dict[str, Union[str, int, float]]
 
 
 class EmbeddingRecord(VectorEmbeddingRecord, MetadataEmbeddingRecord):
@@ -80,7 +80,7 @@ class EmbeddingRecord(VectorEmbeddingRecord, MetadataEmbeddingRecord):
 class InsertEmbeddingRecord(TypedDict):
     id: str
     embedding: Vector
-    metadata: Optional[dict[str, str]]
+    metadata: Optional[dict[str, Union[str, int, float]]]
     insert_type: InsertType
 
 

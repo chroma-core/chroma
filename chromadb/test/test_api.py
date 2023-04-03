@@ -284,6 +284,7 @@ def test_add_minimal(api_fixture, request):
     assert collection.count() == 2
 
 
+
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_from_db(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)

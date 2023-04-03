@@ -1,3 +1,4 @@
+
 from typing import TypedDict, Optional, Sequence
 from abc import ABC, abstractmethod
 from chromadb.types import (
@@ -24,8 +25,8 @@ class MetadataReader(SegmentImplementation):
     @abstractmethod
     def get_metadata(
         self,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where],
+        where_document: Optional[WhereDocument],
         ids: Optional[Sequence[str]] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,

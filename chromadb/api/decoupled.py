@@ -21,11 +21,12 @@ from chromadb.api.types import (
     QueryResult,
     Where,
     WhereDocument,
+    Union,
 )
 from chromadb.api.models.Collection import Collection
 
 # Regex for the format "<protocol>://<tenant>/<namespace/<name>"
-topic_re = re.compile(r"^([a-zA-Z0-9]+)://([a-zA-Z0-9]+)/([a-zA-Z0-9]+)/([a-zA-Z0-9]+)$")
+topic_re = re.compile(r"^(\w+)://(\w+)/(\w+)/(\w+)$")
 
 
 class DecoupledAPI(API):
@@ -202,6 +203,12 @@ class DecoupledAPI(API):
         impl = self.segment_manager.get_instance(segment)
         return cast(MetadataReader, impl)
 
+    # TODO: this could be cached for better performance
+    def _get_vector_reader(self, collection_name: str) -> VectorReader:
+        segment = self.sysdb.get_segments(topic=self._topic(collection_name), scope="vector")[0]
+        impl = self.segment_manager.get_instance(segment)
+        return cast(VectorReader, impl)
+
     def _count(self, collection_name: str) -> int:
         return self._get_metadata_reader(collection_name).count_metadata()
 
@@ -218,7 +225,46 @@ class DecoupledAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
-        pass
+
+        if page is not None:
+            if page_size is None:
+                raise ValueError("page_size must be specified if page is specified")
+            limit = page_size
+            offset = page * page_size
+
+        metadata_reader = self._get_metadata_reader(collection_name)
+        metadata_records = metadata_reader.get_metadata(
+            ids=ids,
+            where=where,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+        )
+        filtered_ids = [r["id"] for r in metadata_records]
+
+        embeddings = None
+        documents = None
+        metadatas = None
+
+        if "embeddings" in include:
+            vector_reader = self._get_vector_reader(collection_name)
+            vector_records = vector_reader.get_vectors(ids=filtered_ids)
+            embeddings = [r["embedding"] for r in vector_records]
+
+        if "documents" in include:
+            documents = [cast(str, r["metadata"]["document"]) for r in metadata_records]
+
+        if "metadatas" in include:
+            for r in metadata_records:
+                if "document" in r["metadata"]:
+                    del r["metadata"]["document"]
+
+            metadatas = [r["metadata"] for r in metadata_records]
+
+        return GetResult(
+            ids=filtered_ids, embeddings=embeddings, metadatas=metadatas, documents=documents
+        )
 
     def _delete(
         self,
@@ -227,7 +273,17 @@ class DecoupledAPI(API):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
     ):
-        pass
+        if ids is None:
+            metadata_reader = self._get_metadata_reader(collection_name)
+            metadata_records = metadata_reader.get_metadata(
+                where=where, where_document=where_document
+            )
+            ids = [r["id"] for r in metadata_records]
+
+        topic = self._topic(collection_name)
+
+        for i in ids:
+            self.ingest_impl.submit_embedding_delete(topic_name=topic, id=i)
 
     def _query(
         self,
@@ -257,3 +313,6 @@ class DecoupledAPI(API):
 
     def create_index(self, collection_name: Optional[str] = None) -> bool:
         pass
+
+
+

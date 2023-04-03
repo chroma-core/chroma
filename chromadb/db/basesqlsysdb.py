@@ -1,8 +1,9 @@
-from chromadb.types import EmbeddingFunction, Topic, ScalarEncoding
+from chromadb.types import EmbeddingFunction, Topic, ScalarEncoding, Segment
 from chromadb.db import SysDB, SqlDB
 import chromadb.db.querytools as qt
-from pypika import Table, Parameter
+from pypika import Table, CustomFunction
 from collections import defaultdict
+import json
 
 
 class BaseSqlSysDB(SysDB, SqlDB):
@@ -40,15 +41,15 @@ class BaseSqlSysDB(SysDB, SqlDB):
     def create_topic(self, topic: Topic) -> None:
         with self.tx() as cur:
 
-            cur.execute(
-                "INSERT INTO topics (name, embedding_function) VALUES (?, ?)",
-                (topic["name"], topic["embedding_function"]),
-            )
             if topic["metadata"] and len(topic["metadata"]) > 0:
-                cur.executemany(
-                    "INSERT INTO topic_metadata (topic, key, value) VALUES (?, ?, ?)",
-                    [(topic["name"], key, value) for key, value in topic["metadata"].items()],
-                )
+                metadata = json.dumps(topic["metadata"])
+            else:
+                metadata = None
+
+            cur.execute(
+                "INSERT INTO topics (name, embedding_function, metadata) VALUES (?, ?, ?)",
+                (topic["name"], topic["embedding_function"], metadata),
+            )
 
     def delete_topic(self, topic_name: str) -> None:
         raise NotImplementedError()
@@ -56,82 +57,55 @@ class BaseSqlSysDB(SysDB, SqlDB):
     def get_topics(self, name=None, embedding_function=None, metadata=None):
         with self.tx() as cur:
             table = Table("topics")
-            metadata_table = Table("topic_metadata")
-            query = (
-                self.querybuilder()
-                .from_(table)
-                .left_join(metadata_table)
-                .on(table.name == metadata_table.topic)
-            )
-            query = query.select(
-                table.name,
-                table.embedding_function,
-                metadata_table.key,
-                metadata_table.value,
-            )
+            query = self.querybuilder().from_(table)
+            query = query.select(table.name, table.embedding_function, table.metadata)
             if name is not None:
-                query = query.where(table.name == name)
+                query = query.where(table.name == qt.Value(name))
 
             if embedding_function is not None:
-                query = query.where(table.embedding_function == embedding_function)
+                query = query.where(table.embedding_function == qt.Value(embedding_function))
 
             if metadata is not None and len(metadata) > 0:
-                subquery = self.querybuilder().from_(metadata_table).select(metadata_table.topic)
-
                 for key, value in metadata.items():
-                    subquery = subquery.where(metadata_table.key == key).where(
-                        metadata_table.value == value
+                    query = query.where(
+                        _SQL_json_extract(table.metadata, f"$.{key}") == qt.Value(value)
                     )
 
-                query = query.join(subquery).on(table.name == subquery.topic)
-
-            cur.execute(str(query))
-
+            sql, params = qt.build(query, self.parameter_format())
+            cur.execute(sql, params)
             results = cur.fetchall()
 
-            return _rows_to_entities(
-                results, {"name": 0, "embedding_function": 1, "key": 2, "value": 3}
-            )
+            return [
+                Topic(name=row[0], embedding_function=row[1], metadata=_parse_json(row[2]))
+                for row in results
+            ]
 
     def create_segment(self, segment):
 
+        if segment["metadata"] and len(segment["metadata"]) > 0:
+            metadata = json.dumps(segment["metadata"])
+        else:
+            metadata = None
+
         with self.tx() as cur:
             cur.execute(
-                "INSERT INTO segments (id, type, scope, topic) VALUES (?, ?, ?, ?)",
-                (
-                    segment["id"],
-                    segment["type"],
-                    segment["scope"],
-                    segment["topic"],
-                ),
+                "INSERT INTO segments (id, type, scope, topic, metadata) VALUES (?, ?, ?, ?, ?)",
+                (segment["id"], segment["type"], segment["scope"], segment["topic"], metadata),
             )
-
-            if segment["metadata"]:
-                cur.executemany(
-                    "INSERT INTO segment_metadata (segment, key, value) VALUES (?, ?, ?)",
-                    [(segment["id"], key, value) for key, value in segment["metadata"].items()],
-                )
 
         return segment
 
     def get_segments(self, id=None, scope=None, topic=None, metadata=None):
         with self.tx() as cur:
             segments_t = Table("segments")
-            metadata_t = Table("segment_metadata")
 
-            query = (
-                self.querybuilder()
-                .from_(segments_t)
-                .left_join(metadata_t)
-                .on(segments_t.id == metadata_t.segment)
-            )
+            query = self.querybuilder().from_(segments_t)
             query = query.select(
                 segments_t.id,
                 segments_t.type,
                 segments_t.scope,
                 segments_t.topic,
-                metadata_t.key,
-                metadata_t.value,
+                segments_t.metadata,
             )
             if id is not None:
                 query = query.where(segments_t.id == qt.Value(id))
@@ -143,49 +117,28 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 query = query.where(segments_t.scope == qt.Value(scope))
 
             if metadata is not None and len(metadata) > 0:
-                subquery = self.querybuilder().from_(metadata_t).select(metadata_t.segment)
-
                 for key, value in metadata.items():
-                    subquery = subquery.where(metadata_t.key == qt.Value(key)).where(
-                        metadata_t.value == qt.Value(value)
+                    query = query.where(
+                        _SQL_json_extract(segments_t.metadata, f"$.{key}") == qt.Value(value)
                     )
-
-                query = query.join(subquery).on(segments_t.id == subquery.segment)
 
             sql, params = qt.build(query, self.parameter_format())
 
             cur.execute(sql, params)
             results = cur.fetchall()
 
-            return _rows_to_entities(
-                results, {"id": 0, "type": 1, "scope": 2, "topic": 3, "key": 4, "value": 5}
-            )
+            return [
+                Segment(
+                    id=row[0], type=row[1], scope=row[2], topic=row[3], metadata=_parse_json(row[4])
+                )
+                for row in results
+            ]
 
 
-def _group_by(rows, idx):
-    """Group rows by the value at the given index."""
-    groups = defaultdict(list)
-    for row in rows:
-        groups[row[idx]].append(row)
-    return groups
+_SQL_json_extract = CustomFunction("json_extract_string", ["value", "expression"])
 
 
-def _rows_to_entities(results, colmap):
-    """Given a list of rows, convert them to a list of entities."""
-
-    groups = _group_by(results, 0)
-
-    entities = []
-    for id, rows in groups.items():
-        metadata = {row[colmap["key"]]: row[colmap["value"]] for row in rows}
-        if None in metadata:
-            entity = {"metadata": None}
-        else:
-            entity = {"metadata": metadata}
-
-        for key, idx in colmap.items():
-            if key not in ("key", "value"):
-                entity[key] = rows[0][idx]
-        entities.append(entity)
-
-    return entities
+def _parse_json(value):
+    if value is None:
+        return None
+    return json.loads(value)

@@ -3,10 +3,18 @@ from chromadb.db.migrations import MigratableDB
 from chromadb.config import Settings
 from chromadb.db.basesqlsysdb import BaseSqlSysDB
 from chromadb.ingest import Producer, Consumer, get_encoding, encode_vector
-from chromadb.types import InsertEmbeddingRecord
+from chromadb.types import (
+    InsertEmbeddingRecord,
+    Where,
+    WhereDocument,
+    MetadataEmbeddingRecord,
+)
 import pypika
 import duckdb
 from pubsub import pub
+from typing import Sequence, Optional, cast
+from pypika import Table
+import json
 
 
 class TxWrapper(migrations.TxWrapper):
@@ -30,9 +38,6 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         settings.validate("duckdb_database")
         settings.validate("migrations")
         self._conn = duckdb.connect(database=settings.duckdb_database)  # type: ignore
-        with self.tx() as cur:
-            cur.execute("CREATE SCHEMA IF NOT EXISTS chroma")
-            cur.execute("SET SCHEMA=chroma")
 
         self._settings = settings
 
@@ -65,7 +70,7 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         with self.tx() as cur:
             cur.execute(
                 """
-                DELETE FROM chroma.embeddings
+                DELETE FROM embeddings
                 WHERE topic = ?
                 """,
                 (topic_name,),
@@ -83,27 +88,23 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         vector = encode_vector(embedding["embedding"], encoding)
 
         embedding_record = {**embedding}
+
+        metadata = None
+        if embedding["metadata"] is not None and len(embedding["metadata"]) > 0:
+            metadata = json.dumps(embedding["metadata"])
+
         with self.tx() as cur:
             cur.execute(
                 """
-                INSERT INTO embeddings (topic, id, encoding, vector)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO embeddings (topic, id, encoding, vector, metadata)
+                VALUES (?, ?, ?, ?, ?)
                 RETURNING seq
                 """,
-                (topic_name, embedding["id"], encoding.value, vector),
+                (topic_name, embedding["id"], encoding.value, vector, metadata),
             )
             seq_id = cur.fetchone()[0]
             embedding_record["seq_id"] = seq_id
 
-            if embedding["metadata"] is not None:
-                for key, value in embedding["metadata"].items():
-                    cur.execute(
-                        """
-                        INSERT INTO embedding_metadata (topic, id, key, value)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (topic_name, embedding["id"], key, value),
-                    )
             self._publish(embedding_record)
 
     def _publish(self, embedding_record):
@@ -137,13 +138,9 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
                 return False
 
     def reset(self):
-        with self.tx() as cur:
-            cur.execute("DROP SCHEMA chroma CASCADE")
-
-        with self.tx() as cur:
-            cur.execute("CREATE SCHEMA IF NOT EXISTS chroma")
-            cur.execute("SET SCHEMA=chroma")
-
+        self._conn.close()
+        # TODO: If using a persistent connection, delete the perist file
+        self._conn = duckdb.connect(database=self._settings["duckdb_database"])
         self.apply_migrations()
 
     def count_embeddings(self, topic_name: str) -> int:
@@ -157,3 +154,32 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
                 (topic_name,),
             )
             return cur.fetchone()[0]
+
+    def get_metadata(
+        self,
+        where: Optional[Where],
+        where_document: Optional[WhereDocument],
+        ids: Optional[Sequence[str]] = None,
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[MetadataEmbeddingRecord]:
+
+        table = Table("embeddings")
+
+        query = self.querybuilder().from_(table)
+
+        query = query.select(table.topic, table.id, table.seq, table.metadata)
+
+        if where is not None:
+            # TODO: Implement where-based filtering using json
+            pass
+
+    def _format_where(query, where):
+        # TODO: Answer the question of how multityped data is to be saved. Separate columns? Jsonified?
+
+        return query
+
+    def _format_where_document(query, where_document):
+
+        return query
