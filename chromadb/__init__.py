@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 __settings = chromadb.config.Settings()
 
-__version__ = "0.3.19"
+__version__ = "0.3.20"
 
 
 def configure(**kwargs):
