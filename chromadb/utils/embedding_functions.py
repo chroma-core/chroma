@@ -143,7 +143,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
                 "The tqdm python package is not installed. Please install it with `pip install tqdm`"
             )
 
-    # Borrow'ed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
+    # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
     def _download(self, url: str, fname: Path, chunk_size=1024):
         resp = requests.get(url, stream=True)
