@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Dict, Optional
+from typing import Dict
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index
@@ -154,7 +154,7 @@ class Hnswlib(Index):
             os.remove(f"{self._save_folder}/uuid_to_id_{self._id}.pkl")
             os.remove(f"{self._save_folder}/index_{self._id}.bin")
             os.remove(f"{self._save_folder}/index_metadata_{self._id}.pkl")
-        except:
+        except Exception:
             pass
 
         self._index = None
