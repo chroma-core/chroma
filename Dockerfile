@@ -10,7 +10,8 @@ COPY ./requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
-COPY ./ /chroma
+COPY ./chromadb/ chromadb 
+COPY ./log_config.yml log_config.yml
 
 EXPOSE 8000
 
