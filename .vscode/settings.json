@@ -14,7 +14,6 @@
     "python.analysis.typeCheckingMode": "basic",
     "python.linting.flake8Enabled": true,
     "python.linting.enabled": true,
-    // https://black.readthedocs.io/en/stable/guides/using_black_with_other_tools.html#flake8
     "python.linting.flake8Args": [
         "--extend-ignore=E203",
         "--extend-ignore=E501",
