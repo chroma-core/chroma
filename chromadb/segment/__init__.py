@@ -1,4 +1,3 @@
-
 from typing import TypedDict, Optional, Sequence
 from abc import ABC, abstractmethod
 from chromadb.types import (
@@ -13,9 +12,10 @@ from chromadb.types import (
     VectorQueryResult,
     Segment,
 )
+from overrides import EnforceOverrides
 
 
-class SegmentImplementation(ABC):
+class SegmentImplementation(ABC, EnforceOverrides):
     pass
 
 
@@ -59,7 +59,7 @@ class VectorReader(SegmentImplementation):
         pass
 
 
-class SegmentManager(ABC):
+class SegmentManager(ABC, EnforceOverrides):
     """Interface for a pluggable strategy for creating, retrieving and instantiating segments as required"""
 
     @abstractmethod

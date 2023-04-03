@@ -113,7 +113,8 @@ def await_server(attempts=0):
 
 
 # test_apis = [local_api, fastapi_api]
-test_apis = [local_api_decoupled]
+# test_apis = [local_api_decoupled]
+test_apis = [local_api]
 
 if "CHROMA_INTEGRATION_TEST" in os.environ:
     print("Including integration tests")
@@ -282,7 +283,6 @@ def test_add_minimal(api_fixture, request):
     collection.add(**minimal_records)
 
     assert collection.count() == 2
-
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)

@@ -1,9 +1,9 @@
-
 from chromadb.segment import Segment, MetadataReader
 from chromadb.config import Settings, get_component
 from chromadb.types import MetadataEmbeddingRecord, Where, WhereDocument
 import chromadb.db.impl.duckdb
 from typing import Optional, Sequence, cast
+from overrides import override
 
 
 class DuckDB(MetadataReader):
@@ -22,6 +22,7 @@ class DuckDB(MetadataReader):
                 "DuckDB metadata segments may only be used when `chroma_ingest_impl` == `chromadb.db.impl.duckdb.DuckDB`"
             )
 
+    @override
     def get_metadata(
         self,
         where: Optional[Where],
@@ -35,6 +36,7 @@ class DuckDB(MetadataReader):
             self._topic, where, where_document, ids, sort, limit, offset
         )
 
+    @override
     def count_metadata(self) -> int:
         """Get the number of embeddings in this segment."""
         return self._duckdb.count_embeddings(self._topic)

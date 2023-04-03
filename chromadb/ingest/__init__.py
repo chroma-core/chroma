@@ -12,6 +12,7 @@ from chromadb.types import (
 import chromadb.ingest.proto.chroma_pb2 as proto
 import pulsar.schema as schema
 import array
+from overrides import EnforceOverrides
 
 
 def get_encoding(embedding: InsertEmbeddingRecord) -> ScalarEncoding:
@@ -87,7 +88,7 @@ def proto_delete(id: str) -> proto.EmbeddingMessage:
     return proto.EmbeddingMessage(id=id, type=proto.ActionType.DELETE)
 
 
-class Producer(ABC):
+class Producer(ABC, EnforceOverrides):
     """Interface for writing embeddings to an ingest stream"""
 
     @abstractmethod
@@ -115,7 +116,7 @@ class Producer(ABC):
         pass
 
 
-class Consumer(ABC):
+class Consumer(ABC, EnforceOverrides):
     """Interface for reading embeddings off an ingest stream"""
 
     @abstractmethod

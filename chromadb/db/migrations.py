@@ -58,11 +58,6 @@ class MigratableDB(SqlDB):
         pass
 
     @abstractmethod
-    def tx(self) -> TxWrapper:
-        """Return a TxWrapper for transactions"""
-        pass
-
-    @abstractmethod
     def setup_migrations(self):
         """Idempotently creates the migrations table"""
         pass

@@ -15,16 +15,19 @@ from pubsub import pub
 from typing import Sequence, Optional, cast
 from pypika import Table
 import json
+from overrides import override
 
 
 class TxWrapper(migrations.TxWrapper):
     def __init__(self, conn):
         self._conn = conn.cursor()
 
+    @override
     def __enter__(self):
         self._conn.begin()
         return self._conn
 
+    @override
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type is None:
             self._conn.commit()
@@ -47,25 +50,31 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         if settings.migrations == "apply":
             self.apply_migrations()
 
-    def tx(self):
+    @override
+    def tx(self) -> TxWrapper:
         return TxWrapper(self._conn)  # type: ignore
 
     @staticmethod
-    def querybuilder():
+    @override
+    def querybuilder() -> type[pypika.Query]:
         return pypika.Query
 
     @staticmethod
+    @override
     def parameter_format() -> str:
         return "?"
 
     @staticmethod
-    def migration_dirs():
+    @override
+    def migration_dirs() -> Sequence[str]:
         return ["migrations/sysdb", "migrations/ingestdb"]
 
     @staticmethod
-    def migration_scope():
+    @override
+    def migration_scope() -> str:
         return "duckdb"
 
+    @override
     def delete_topic(self, topic_name: str):
         with self.tx() as cur:
             cur.execute(
@@ -83,6 +92,7 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
                 (topic_name,),
             )
 
+    @override
     def submit_embedding(self, topic_name: str, embedding: InsertEmbeddingRecord):
         encoding = get_encoding(embedding)
         vector = encode_vector(embedding["embedding"], encoding)
@@ -110,12 +120,15 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
     def _publish(self, embedding_record):
         pass
 
+    @override
     def submit_embedding_delete(self, topic_name: str, id: str) -> None:
         raise NotImplementedError()
 
+    @override
     def register_consume_fn(self, topic_name, consume_fn, start=None, end=None):
         raise NotImplementedError()
 
+    @override
     def setup_migrations(self):
         with self.tx() as cur:
             cur.execute(
@@ -129,6 +142,7 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
                 """
             )
 
+    @override
     def migrations_initialized(self):
         with self.tx() as cur:
             try:
@@ -137,6 +151,7 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
             except duckdb.CatalogException:
                 return False
 
+    @override
     def reset(self):
         self._conn.close()
         # TODO: If using a persistent connection, delete the perist file

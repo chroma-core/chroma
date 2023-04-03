@@ -4,11 +4,14 @@ import chromadb.db.querytools as qt
 from pypika import Table, CustomFunction
 from collections import defaultdict
 import json
+from overrides import override
+from typing import Sequence
 
 
 class BaseSqlSysDB(SysDB, SqlDB):
     """Base class for SQL-based SysDB instances, allowing common code to be shared between implementations."""
 
+    @override
     def create_embedding_function(self, embedding_function: EmbeddingFunction) -> None:
         with self.tx() as cur:
             cur.execute(
@@ -20,7 +23,8 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 ),
             )
 
-    def get_embedding_functions(self, name=None):
+    @override
+    def get_embedding_functions(self, name=None) -> Sequence[EmbeddingFunction]:
         with self.tx() as cur:
             table = Table("embedding_functions")
             query = (
@@ -38,6 +42,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 for row in cur.fetchall()
             ]
 
+    @override
     def create_topic(self, topic: Topic) -> None:
         with self.tx() as cur:
 
@@ -51,10 +56,12 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 (topic["name"], topic["embedding_function"], metadata),
             )
 
+    @override
     def delete_topic(self, topic_name: str) -> None:
         raise NotImplementedError()
 
-    def get_topics(self, name=None, embedding_function=None, metadata=None):
+    @override
+    def get_topics(self, name=None, embedding_function=None, metadata=None) -> Sequence[Topic]:
         with self.tx() as cur:
             table = Table("topics")
             query = self.querybuilder().from_(table)
@@ -80,7 +87,8 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 for row in results
             ]
 
-    def create_segment(self, segment):
+    @override
+    def create_segment(self, segment) -> Segment:
 
         if segment["metadata"] and len(segment["metadata"]) > 0:
             metadata = json.dumps(segment["metadata"])
@@ -95,7 +103,8 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
         return segment
 
-    def get_segments(self, id=None, scope=None, topic=None, metadata=None):
+    @override
+    def get_segments(self, id=None, scope=None, topic=None, metadata=None) -> Sequence[Segment]:
         with self.tx() as cur:
             segments_t = Table("segments")
 

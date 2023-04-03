@@ -7,6 +7,7 @@ import pypika
 from chromadb.types import Segment, Topic, EmbeddingFunction
 from chromadb.api.types import Embeddings, Metadatas, Documents, IDs, Where, WhereDocument
 import numpy.typing as npt
+from overrides import EnforceOverrides
 
 
 class Cursor(Protocol):
@@ -23,7 +24,7 @@ class Cursor(Protocol):
         ...
 
 
-class TxWrapper(ABC):
+class TxWrapper(ABC, EnforceOverrides):
     """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.
     Makes two guarantees that basic DBAPI 2.0 connections do not:
 
@@ -40,7 +41,7 @@ class TxWrapper(ABC):
         pass
 
 
-class SqlDB(ABC):
+class SqlDB(ABC, EnforceOverrides):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
 
     @abstractmethod
@@ -62,7 +63,7 @@ class SqlDB(ABC):
         pass
 
 
-class SysDB(ABC):
+class SysDB(ABC, EnforceOverrides):
     """Data interface for Chroma's System storage backend"""
 
     @abstractmethod
