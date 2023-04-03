@@ -11,13 +11,10 @@ import pandas as pd
 import json
 import duckdb
 import uuid
-import time
 import os
-import itertools
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 
 def clickhouse_to_duckdb_schema(table_schema):
@@ -71,9 +68,9 @@ class DuckDB(Clickhouse):
     #  UTILITY METHODS
     #
     def get_collection_uuid_from_name(self, name):
-        return self._conn.execute(
-            f"""SELECT uuid FROM collections WHERE name = ?""", [name]
-        ).fetchall()[0][0]
+        return self._conn.execute("SELECT uuid FROM collections WHERE name = ?", [name]).fetchall()[
+            0
+        ][0]
 
     #
     #  COLLECTION METHODS
@@ -84,7 +81,7 @@ class DuckDB(Clickhouse):
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
         if len(dupe_check) > 0:
-            if get_or_create == True:
+            if get_or_create is True:
                 logger.info(
                     f"collection with name {name} already exists, returning existing collection"
                 )
@@ -94,32 +91,32 @@ class DuckDB(Clickhouse):
 
         collection_uuid = uuid.uuid4()
         self._conn.execute(
-            f"""INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
+            """INSERT INTO collections (uuid, name, metadata) VALUES (?, ?, ?)""",
             [str(collection_uuid), name, json.dumps(metadata)],
         )
         return [[str(collection_uuid), name, metadata]]
 
     def get_collection(self, name: str) -> Sequence:
-        res = self._conn.execute(f"""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
+        res = self._conn.execute("""SELECT * FROM collections WHERE name = ?""", [name]).fetchall()
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def get_collection_by_id(self, uuid: str) -> Sequence:
-        res = self._conn.execute(f"""SELECT * FROM collections WHERE uuid = ?""", [uuid]).fetchone()
+        res = self._conn.execute("""SELECT * FROM collections WHERE uuid = ?""", [uuid]).fetchone()
         return [res[0], res[1], json.loads(res[2])]
 
     def list_collections(self) -> Sequence:
-        res = self._conn.execute(f"""SELECT * FROM collections""").fetchall()
+        res = self._conn.execute("""SELECT * FROM collections""").fetchall()
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._conn.execute(
-            f"""DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
+            """DELETE FROM embeddings WHERE collection_uuid = ?""", [collection_uuid]
         )
 
         self._delete_index(collection_uuid)
-        self._conn.execute(f"""DELETE FROM collections WHERE name = ?""", [name])
+        self._conn.execute("""DELETE FROM collections WHERE name = ?""", [name])
 
     def update_collection(
         self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
@@ -130,7 +127,7 @@ class DuckDB(Clickhouse):
             new_metadata = self.get_collection(current_name)[0][2]
 
         self._conn.execute(
-            f"""UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
+            """UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
             [new_name, json.dumps(new_metadata), current_name],
         )
 
@@ -284,11 +281,11 @@ class DuckDB(Clickhouse):
 
         update_fields = []
         if embeddings is not None:
-            update_fields.append(f"embedding = ?")
+            update_fields.append("embedding = ?")
         if metadatas is not None:
-            update_fields.append(f"metadata = ?")
+            update_fields.append("metadata = ?")
         if documents is not None:
-            update_fields.append(f"document = ?")
+            update_fields.append("document = ?")
 
         update_statement = f"""
         UPDATE
@@ -396,7 +393,7 @@ class PersistentDuckDB(DuckDB):
             os.makedirs(self._save_folder)
 
         # if the db is empty, dont save
-        if self._conn.query(f"SELECT COUNT() FROM embeddings") == 0:
+        if self._conn.query("SELECT COUNT() FROM embeddings") == 0:
             return
 
         self._conn.execute(

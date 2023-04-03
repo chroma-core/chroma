@@ -65,7 +65,7 @@ def maybe_cast_one_to_many(
 
     if isinstance(target, Sequence):
         # One Document or ID
-        if isinstance(target, str) and target != None:
+        if isinstance(target, str) and target is not None:
             return [target]  # type: ignore
         # One Embedding
         if isinstance(target[0], (int, float)):
@@ -169,10 +169,14 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     if not isinstance(where_document, dict):
         raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
     if len(where_document) != 1:
-        raise ValueError(f"Expected where document to have exactly one operator, got {where_document}")
+        raise ValueError(
+            f"Expected where document to have exactly one operator, got {where_document}"
+        )
     for operator, operand in where_document.items():
         if operator not in ["$contains", "$and", "$or"]:
-            raise ValueError(f"Expected where document operator to be one of $contains, $and, $or, got {operator}")
+            raise ValueError(
+                f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
+            )
         if operator == "$and" or operator == "$or":
             if not isinstance(operand, list):
                 raise ValueError(
@@ -205,5 +209,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
-            raise ValueError(f"Expected include item to be one of {', '.join(allowed_values)}, got {item}")
+            raise ValueError(
+                f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"
+            )
     return include
