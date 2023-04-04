@@ -1410,3 +1410,25 @@ def test_query_results_is_k_with_persistence(api_fixture, request):
         results = collection.query(query_embeddings=embeddings[0], n_results=k)
         assert len(results["distances"][0]) == k
         assert len(results["ids"][0]) == k
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_reload_after_embedding_deletion(api_fixture, request):
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+
+    collection = api.create_collection("testspace")
+    embeddings = np.random.rand(5, 10).astype(np.float32).tolist()
+    ids = [f"http://example.com/{i}" for i in range(len(embeddings))]
+    collection.add(embeddings=embeddings, ids=ids)
+
+    api.persist()
+    collection.delete()  # Deletes all the embeddings, but does not delete the collection
+
+    del api
+    del collection
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection2 = api2.get_collection("testspace")
+    assert collection2.count() == 0
