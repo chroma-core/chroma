@@ -28,7 +28,5 @@ jobs:
       run: python -m pytest
     - name: Integration Test
       run: bin/integration-test
-    - name: CD into JS dir
-      run: cd clients/js
     - name: JS Tests
-      run: yarn test:run
+      run: cd clients/js && yarn test:run
