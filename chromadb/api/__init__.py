@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Union, Sequence, Optional, Dict
 import pandas as pd
+from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
@@ -118,7 +119,7 @@ class API(ABC):
 
     def _modify(
         self,
-        current_name: str,
+        id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
@@ -135,9 +136,9 @@ class API(ABC):
     def _add(
         self,
         ids: IDs,
-        collection_name: Union[str, Sequence[str]],
-        embedding: Optional[Embeddings],
-        metadata: Optional[Metadatas] = None,
+        collection_id: UUID,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
@@ -145,7 +146,7 @@ class API(ABC):
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_name (Union[str, Sequence[str]]): The collection(s) to add the embeddings to
+            collection_ids (Union[UUID, Sequence[UUID]]): The collection(s) to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
             metadata (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
             documents (Optional[Union[str, Sequence[str]]], optional): The documents to associate with the embeddings. Defaults to None.
@@ -156,7 +157,7 @@ class API(ABC):
     @abstractmethod
     def _update(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
@@ -166,15 +167,16 @@ class API(ABC):
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_name (Union[str, Sequence[str]]): The collection(s) to add the embeddings to
+            collection_id (UUID): The collection(s) to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
         """
         pass
 
     @abstractmethod
+
     def _upsert(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
@@ -185,7 +187,7 @@ class API(ABC):
         If an entry with the same id already exists, it will be updated, otherwise it will be added.
 
         Args:
-            collection_name (str): The collection to add the embeddings to
+            collection_id (UUID): The collection to add the embeddings to
             ids (Optional[Union[str, Sequence[str]]], optional): The ids to associate with the embeddings. Defaults to None.
             embeddings (Sequence[Sequence[float]]): The sequence of embeddings to add
             metadatas (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
@@ -195,11 +197,12 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_name: str) -> int:
+    def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database
 
         Args:
-            collection_name (str): The collection to count the embeddings in.
+            collection_id (UUID): The collection to count the embeddings in.
+
 
         Returns:
             int: The number of embeddings in the collection
@@ -208,13 +211,13 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _peek(self, collection_name: str, n: int = 10) -> GetResult:
+    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         pass
 
     @abstractmethod
     def _get(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         sort: Optional[str] = None,
@@ -245,7 +248,7 @@ class API(ABC):
     @abstractmethod
     def _delete(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
@@ -261,7 +264,7 @@ class API(ABC):
     @abstractmethod
     def _query(
         self,
-        collection_name: str,
+        collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
         where: Where = {},

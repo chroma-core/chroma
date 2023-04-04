@@ -1,6 +1,6 @@
 import json
 import time
-
+from uuid import UUID
 from typing import Dict, List, Optional, Sequence, Callable, cast
 from chromadb import __version__
 import chromadb.errors as errors
@@ -93,6 +93,7 @@ class LocalAPI(API):
             client=self,
             name=name,
             embedding_function=embedding_function,
+            id=res[0][0],
             metadata=res[0][2],
         )
 
@@ -145,6 +146,7 @@ class LocalAPI(API):
         return Collection(
             client=self,
             name=name,
+            id=res[0][0],
             embedding_function=embedding_function,
             metadata=res[0][2],
         )
@@ -163,21 +165,24 @@ class LocalAPI(API):
         for db_collection in db_collections:
             collections.append(
                 Collection(
-                    client=self, name=db_collection[1], metadata=db_collection[2]
+                    client=self,
+                    id=db_collection[0],
+                    name=db_collection[1],
+                    metadata=db_collection[2],
                 )
             )
         return collections
 
     def _modify(
         self,
-        current_name: str,
+        id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
         if new_name is not None:
             check_index_name(new_name)
 
-        self._db.update_collection(current_name, new_name, new_metadata)
+        self._db.update_collection(id, new_name, new_metadata)
 
     def delete_collection(self, name: str):
         """Delete a collection with the given name.
@@ -198,21 +203,20 @@ class LocalAPI(API):
     def _add(
         self,
         ids,
-        collection_name: str,
+        collection_id: UUID,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
-        existing_ids = self._get(collection_name, ids=ids, include=[])["ids"]
+        existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
         if len(existing_ids) > 0:
             raise errors.IDAlreadyExistsError(
-                f"IDs {existing_ids} already exist in collection {collection_name}"
+                f"IDs {existing_ids} already exist in collection {collection_id}"
             )
 
-        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(
-            collection_uuid,
+            collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -220,26 +224,25 @@ class LocalAPI(API):
         )
 
         if increment_index:
-            self._db.add_incremental(collection_uuid, added_uuids, embeddings)
+            self._db.add_incremental(collection_id, added_uuids, embeddings)
 
-        self._telemetry_client.capture(CollectionAddEvent(collection_uuid, len(ids)))
+        self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
     def _update(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ):
-        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
-        self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
+        self._db.update(collection_id, ids, embeddings, metadatas, documents)
         return True
 
     def _upsert(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
@@ -247,7 +250,7 @@ class LocalAPI(API):
         increment_index: bool = True,
     ):
         # Determine which ids need to be added and which need to be updated based on the ids already in the collection
-        existing_ids = set(self._get(collection_name, ids=ids, include=[])["ids"])
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
 
         ids_to_add = []
         ids_to_update = []
@@ -279,7 +282,7 @@ class LocalAPI(API):
         if len(ids_to_add) > 0:
             self._add(
                 ids_to_add,
-                collection_name,
+                collection_id,
                 embeddings_to_add,
                 metadatas_to_add,
                 documents_to_add,
@@ -288,18 +291,19 @@ class LocalAPI(API):
 
         if len(ids_to_update) > 0:
             self._update(
-                collection_name,
+                collection_id,
                 ids_to_update,
                 embeddings_to_update,
                 metadatas_to_update,
                 documents_to_update,
             )
+        self._db.update(collection_id, ids, embeddings, metadatas, documents)
 
         return True
 
     def _get(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         sort: Optional[str] = None,
@@ -331,7 +335,7 @@ class LocalAPI(API):
         }
 
         db_result = self._db.get(
-            collection_name=collection_name,
+            collection_uuid=collection_id,
             ids=ids,
             where=where,
             sort=sort,
@@ -364,27 +368,27 @@ class LocalAPI(API):
             get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
-    def _delete(self, collection_name, ids=None, where=None, where_document=None):
+    def _delete(self, collection_id, ids=None, where=None, where_document=None):
         if where is None:
             where = {}
 
         if where_document is None:
             where_document = {}
 
-        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         deleted_uuids = self._db.delete(
-            collection_uuid=collection_uuid,
+            collection_uuid=collection_id,
             where=where,
             ids=ids,
             where_document=where_document,
         )
         self._telemetry_client.capture(
-            CollectionDeleteEvent(collection_uuid, len(deleted_uuids))
+            CollectionDeleteEvent(str(collection_id), len(deleted_uuids))
         )
+
         return deleted_uuids
 
-    def _count(self, collection_name):
-        return self._db.count(collection_name=collection_name)
+    def _count(self, collection_id):
+        return self._db.count(collection_id)
 
     def reset(self):
         """Reset the database. This will delete all collections and items.
@@ -398,7 +402,7 @@ class LocalAPI(API):
 
     def _query(
         self,
-        collection_name,
+        collection_id,
         query_embeddings,
         n_results=10,
         where={},
@@ -406,7 +410,7 @@ class LocalAPI(API):
         include: Include = ["documents", "metadatas", "distances"],
     ):
         uuids, distances = self._db.get_nearest_neighbors(
-            collection_name=collection_name,
+            collection_uuid=collection_id,
             where=where,
             where_document=where_document,
             embeddings=query_embeddings,
@@ -472,9 +476,9 @@ class LocalAPI(API):
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
-    def _peek(self, collection_name, n=10):
+    def _peek(self, collection_id: UUID, n=10):
         return self._get(
-            collection_name=collection_name,
+            collection_id=collection_id,
             limit=n,
             include=["embeddings", "documents", "metadatas"],
         )
