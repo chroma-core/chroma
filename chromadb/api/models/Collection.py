@@ -59,7 +59,12 @@ class Collection(BaseModel):
         return f"Collection(name={self.name})"
 
     def count(self) -> int:
-        """The total number of embeddings added to the database"""
+        """The total number of embeddings added to the database
+
+        Returns:
+            int: The total number of embeddings added to the database
+
+        """
         return self._client._count(collection_name=self.name)
 
     def add(
@@ -77,6 +82,13 @@ class Collection(BaseModel):
             metadata: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
             ids: The ids to associate with the embeddings. Optional.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If you don't provide either embeddings or documents
+
         """
 
         ids = validate_ids(maybe_cast_one_to_many(ids))
@@ -129,6 +141,13 @@ class Collection(BaseModel):
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents". Ids are always included. Defaults to ["metadatas", "documents"]. Optional.
+
+        Returns:
+            GetResult: A GetResult object containing the results.
+
+        Raises:
+            ValueError: If you provide both ids and a where filter
+
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -150,6 +169,9 @@ class Collection(BaseModel):
 
         Args:
             limit: The number of results to return.
+
+        Returns:
+            GetResult: A GetResult object containing the results.
         """
         return self._client._peek(self.name, limit)
 
@@ -171,6 +193,14 @@ class Collection(BaseModel):
             where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
+
+        Returns:
+            QueryResult: A QueryResult object containing the results.
+
+        Raises:
+            ValueError: If you don't provide either query_embeddings or query_texts
+            ValueError: If you provide both query_embeddings and query_texts
+
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -214,6 +244,9 @@ class Collection(BaseModel):
         Args:
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
+
+        Returns:
+            None
         """
         self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
         if name:
@@ -235,6 +268,9 @@ class Collection(BaseModel):
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
+
+        Returns:
+            None
         """
 
         ids = validate_ids(maybe_cast_one_to_many(ids))
@@ -284,6 +320,9 @@ class Collection(BaseModel):
             ids: The ids of the embeddings to delete
             where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
+
+        Returns:
+            None
         """
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
