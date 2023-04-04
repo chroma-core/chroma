@@ -1367,3 +1367,46 @@ def test_multiple_collections(api_fixture, request):
 
     assert results1["ids"][0][0] == ids1[0]
     assert results2["ids"][0][0] == ids2[0]
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_results_is_k(api_fixture, request):
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+
+    collection = api.create_collection("testspace")
+    embeddings = np.random.rand(20, 10).astype(np.float32).tolist()
+
+    ids = [f"http://example.com/{i}" for i in range(len(embeddings))]
+    collection.add(embeddings=embeddings, ids=ids)
+
+    for k in [1, 5, 10, 20]:
+        results = collection.query(query_embeddings=embeddings[0], n_results=k)
+        assert len(results["distances"][0]) == k
+        assert len(results["ids"][0]) == k
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_query_results_is_k_with_persistence(api_fixture, request):
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+
+    collection = api.create_collection("testspace")
+    embeddings = np.random.rand(20, 10).astype(np.float32).tolist()
+
+    ids = [f"http://example.com/{i}" for i in range(len(embeddings))]
+    collection.add(embeddings=embeddings, ids=ids)
+
+    api.persist()
+    del api
+    del collection
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = api2.get_collection("testspace")
+
+    for k in [1, 5, 10, 20]:
+        results = collection.query(query_embeddings=embeddings[0], n_results=k)
+        assert len(results["distances"][0]) == k
+        assert len(results["ids"][0]) == k
