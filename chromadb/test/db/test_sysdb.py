@@ -17,11 +17,33 @@ test_embedding_functions = [
     EmbeddingFunction(name="ef2", dimension=256, scalar_encoding=ScalarEncoding.INT32),
 ]
 
+test_collections = [
+    Collection(
+        id=uuid.uuid4(),
+        name="coll1",
+        topic="persistent://tenant/namespace/topic1",
+        metadata={"foo": "bar", "baz": "qux"},
+    ),
+    Collection(
+        id=uuid.uuid4(),
+        name="coll2",
+        topic="persistent://tenant/namespace/topic2",
+        metadata={"foo": "bar", "biz": "buz"},
+    ),
+    Collection(
+        id=uuid.uuid4(),
+        name="coll3",
+        topic="persistent://tenant/namespace/topic3",
+        metadata=None,
+    ),
+]
+
 test_segments = [
     Segment(
         id=uuid.uuid4(),
         type="test",
         scope="metadata",
+        collection=test_collections[0]["id"],
         topic=None,
         metadata={"foo": "bar", "baz": "qux"},
     ),
@@ -29,32 +51,16 @@ test_segments = [
         id=uuid.uuid4(),
         type="test",
         scope="vector",
+        collection=test_collections[0]["id"],
         topic="persistent://tenant/namespace/topic1",
         metadata={"foo": "bar", "biz": "buz"},
     ),
-    Segment(id=uuid.uuid4(), type="test", scope="vector", topic=None, metadata=None),
-]
-
-test_collections = [
-    Collection(
+    Segment(
         id=uuid.uuid4(),
-        name="coll1",
-        topic="persistent://tenant/namespace/topic1",
-        embedding_function=test_embedding_functions[0]["name"],
-        metadata={"foo": "bar", "baz": "qux"},
-    ),
-    Collection(
-        id=uuid.uuid4(),
-        name="coll2",
-        topic="persistent://tenant/namespace/topic2",
-        embedding_function=test_embedding_functions[1]["name"],
-        metadata={"foo": "bar", "biz": "buz"},
-    ),
-    Collection(
-        id=uuid.uuid4(),
-        name="coll3",
-        topic="persistent://tenant/namespace/topic3",
-        embedding_function=None,
+        type="test",
+        scope="vector",
+        collection=None,
+        topic=None,
         metadata=None,
     ),
 ]
@@ -67,8 +73,8 @@ def test_segment_read_write(db_fixture, request):
 
     assert len(db.get_segments()) == 0
 
-    for embedding_function in test_embedding_functions:
-        db.create_embedding_function(embedding_function)
+    for collection in test_collections:
+        db.create_collection(collection)
 
     db.create_segment(test_segments[0])
 
@@ -128,9 +134,6 @@ def test_collection_read_write(db_fixture, request):
 
     assert db.get_collections(name="coll1")[0] == test_collections[0]
     assert db.get_collections(name="coll2")[0] == test_collections[1]
-
-    assert db.get_collections(embedding_function="ef1")[0] == test_collections[0]
-    assert db.get_collections(embedding_function="ef2")[0] == test_collections[1]
 
     assert (
         db.get_collections(topic="persistent://tenant/namespace/topic1")[0] == test_collections[0]

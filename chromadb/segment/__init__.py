@@ -13,6 +13,7 @@ from chromadb.types import (
     Segment,
 )
 from overrides import EnforceOverrides
+from uuid import UUID
 
 
 class SegmentImplementation(ABC, EnforceOverrides):
@@ -68,7 +69,7 @@ class SegmentManager(ABC, EnforceOverrides):
         pass
 
     @abstractmethod
-    def delete_collection(self, name: str) -> None:
+    def delete_collection(self, id: UUID) -> None:
         """Delete all the components associated with a collection"""
         pass
 

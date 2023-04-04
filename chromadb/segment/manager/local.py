@@ -5,11 +5,11 @@ import chromadb.db
 import chromadb.config
 import uuid
 import importlib
+from overrides import override
 
 # Mapping of segment type names to Python classes so we can load them
 type_to_class = {
     "hnswlib-local": "chromadb.segment.impl.hnswlib.Local",
-    "hnswlib-local-memory": "chromadb.segment.impl.hnswlib.LocalMemory",
     "duckdb": "chromadb.segment.impl.duckdb.DuckDB",
 }
 
@@ -27,11 +27,13 @@ class LocalSegmentManager(SegmentManager):
         self.sysdb = chromadb.config.get_component(settings, "chroma_system_db_impl")
         self.loaded_segments = {}
 
+    @override
     def create_collection(self, collection: Collection) -> None:
 
         vector_segment = Segment(
             id=uuid.uuid4(),
             topic=collection["topic"],
+            collection=collection["id"],
             scope="vector",
             type=self.settings.chroma_default_vector_segment_type,
             metadata={},
@@ -40,6 +42,7 @@ class LocalSegmentManager(SegmentManager):
         metadata_segment = Segment(
             id=uuid.uuid4(),
             topic=collection["topic"],
+            collection=collection["id"],
             scope="metadata",
             type=self.settings.chroma_default_metadata_segment_type,
             metadata={},
@@ -50,9 +53,11 @@ class LocalSegmentManager(SegmentManager):
         self.get_instance(vector_segment)
         self.get_instance(metadata_segment)
 
+    @override
     def initialize_all(self):
         raise NotImplementedError()
 
+    @override
     def get_instance(self, segment: Segment) -> SegmentImplementation:
         if segment["type"] not in type_to_class:
             raise ValueError(f"Unknown segment type: {segment['type']}")
@@ -68,8 +73,10 @@ class LocalSegmentManager(SegmentManager):
         cls = getattr(module, class_name)
         return cls(self.settings, segment)
 
-    def delete_collection(self, collection_id: uuid.UUID) -> None:
+    @override
+    def delete_collection(self, id: uuid.UUID) -> None:
         raise NotImplementedError()
 
+    @override
     def reset(self):
         self.loaded_segments = {}

@@ -26,6 +26,7 @@ class Segment(TypedDict):
     type: str
     scope: Literal["vector", "metadata"]
     topic: Optional[str]
+    collection: Optional[UUID]
     metadata: Optional[dict[str, Union[str, int, float]]]
 
 

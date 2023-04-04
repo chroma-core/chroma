@@ -1,8 +1,6 @@
 from typing import Protocol, Optional, Iterable, Sequence, Union, Any, List, Tuple, Dict
 from abc import ABC, abstractmethod
 from uuid import UUID
-from collections.abc import Sequence
-from enum import Enum
 import pypika
 from chromadb.types import Segment, Collection, EmbeddingFunction
 from chromadb.api.types import Embeddings, Metadatas, Documents, IDs, Where, WhereDocument
@@ -77,6 +75,7 @@ class SysDB(ABC, EnforceOverrides):
         id: Optional[UUID] = None,
         scope: Optional[str] = None,
         topic: Optional[str] = None,
+        collection: Optional[UUID] = None,
         metadata: Optional[dict[str, Union[str, int, float]]] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, embedding function, and/or metadata"""

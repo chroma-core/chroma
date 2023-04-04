@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     metadata: Optional[Dict] = None
-    id: UUID
-    topic: str
+    id: Optional[UUID] = None  # Optional only for backwards compatibility
+    topic: Optional[str] = None  # Optional only for backwards compatibility
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -42,6 +42,8 @@ class Collection(BaseModel):
         self,
         client: "API",
         name: str,
+        id: Optional[UUID] = None,
+        topic: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
         metadata: Optional[Dict] = None,
     ):
@@ -56,7 +58,7 @@ class Collection(BaseModel):
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-        super().__init__(name=name, metadata=metadata)
+        super().__init__(name=name, metadata=metadata, id=id, topic=topic)
 
     def __repr__(self):
         return f"Collection(name={self.name})"

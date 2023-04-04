@@ -52,10 +52,19 @@ class DecoupledAPI(API):
         return Collection(
             client=self,
             name=collection["name"],
-            uuid=collection["uuid"],
+            id=collection["id"],
             metadata=collection["metadata"],
             topic=collection["topic"],
         )
+
+    def _collection_id(self, collection_name: str):
+        """Get the ID of a collection by name. Involves a round trip to the database, operations on collections
+        should prefer using IDs whenever possible."""
+
+        colls = self.sysdb.get_collections(name=collection_name)
+        if len(colls) == 0:
+            raise ValueError(f"Collection {collection_name} does not exist")
+        return colls[0]["id"]
 
     #
     # COLLECTION METHODS
@@ -89,7 +98,7 @@ class DecoupledAPI(API):
         # This will need to be revisted when we support multiple tenants
         # Or if we multiplex across topics
         topic = f"persistent://default/default/{id}"
-        coll = chromadb.types.Collection(name=name, uuid=id, metadata=metadata, topic=topic)
+        coll = chromadb.types.Collection(name=name, id=id, metadata=metadata, topic=topic)
 
         self.ingest_impl.create_topic(topic)
         self.sysdb.create_collection(coll)

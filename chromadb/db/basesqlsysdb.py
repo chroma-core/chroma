@@ -53,12 +53,11 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 metadata = None
 
             cur.execute(
-                "INSERT INTO collections (id, name, topic, embedding_function, metadata) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO collections (id, name, topic, metadata) VALUES (?, ?, ?, ?)",
                 (
                     collection["id"],
                     collection["name"],
                     collection["topic"],
-                    collection["embedding_function"],
                     metadata,
                 ),
             )
@@ -75,9 +74,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
         with self.tx() as cur:
             table = Table("collections")
             query = self.querybuilder().from_(table)
-            query = query.select(
-                table.id, table.name, table.topic, table.embedding_function, table.metadata
-            )
+            query = query.select(table.id, table.name, table.topic, table.metadata)
 
             if id is not None:
                 query = query.where(table.id == qt.Value(id))
@@ -106,8 +103,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
                     id=row[0],
                     name=row[1],
                     topic=row[2],
-                    embedding_function=row[3],
-                    metadata=_parse_json(row[4]),
+                    metadata=_parse_json(row[3]),
                 )
                 for row in results
             ]
@@ -122,14 +118,23 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
         with self.tx() as cur:
             cur.execute(
-                "INSERT INTO segments (id, type, scope, topic, metadata) VALUES (?, ?, ?, ?, ?)",
-                (segment["id"], segment["type"], segment["scope"], segment["topic"], metadata),
+                "INSERT INTO segments (id, type, scope, topic, collection, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    segment["id"],
+                    segment["type"],
+                    segment["scope"],
+                    segment["topic"],
+                    segment["collection"],
+                    metadata,
+                ),
             )
 
         return segment
 
     @override
-    def get_segments(self, id=None, scope=None, topic=None, metadata=None) -> Sequence[Segment]:
+    def get_segments(
+        self, id=None, scope=None, topic=None, collection=None, metadata=None
+    ) -> Sequence[Segment]:
         with self.tx() as cur:
             segments_t = Table("segments")
 
@@ -139,6 +144,7 @@ class BaseSqlSysDB(SysDB, SqlDB):
                 segments_t.type,
                 segments_t.scope,
                 segments_t.topic,
+                segments_t.collection,
                 segments_t.metadata,
             )
             if id is not None:
@@ -149,6 +155,9 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
             if scope is not None:
                 query = query.where(segments_t.scope == qt.Value(scope))
+
+            if collection is not None:
+                query = query.where(segments_t.collection == qt.Value(collection))
 
             if metadata is not None and len(metadata) > 0:
                 for key, value in metadata.items():
@@ -163,7 +172,12 @@ class BaseSqlSysDB(SysDB, SqlDB):
 
             return [
                 Segment(
-                    id=row[0], type=row[1], scope=row[2], topic=row[3], metadata=_parse_json(row[4])
+                    id=row[0],
+                    type=row[1],
+                    scope=row[2],
+                    topic=row[3],
+                    collection=row[4],
+                    metadata=_parse_json(row[5]),
                 )
                 for row in results
             ]
