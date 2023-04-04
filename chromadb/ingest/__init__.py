@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, Sequence
 from chromadb.types import (
-    Topic,
     EmbeddingRecord,
     InsertEmbeddingRecord,
     InsertType,
@@ -92,7 +91,7 @@ class Producer(ABC, EnforceOverrides):
     """Interface for writing embeddings to an ingest stream"""
 
     @abstractmethod
-    def create_topic(self, topic: Topic) -> None:
+    def create_topic(self, topic_name: str) -> None:
         pass
 
     @abstractmethod

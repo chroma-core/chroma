@@ -75,22 +75,12 @@ class DuckDB(MigratableDB, BaseSqlSysDB, Producer, Consumer):
         return "duckdb"
 
     @override
-    def delete_topic(self, topic_name: str):
-        with self.tx() as cur:
-            cur.execute(
-                """
-                DELETE FROM embeddings
-                WHERE topic = ?
-                """,
-                (topic_name,),
-            )
-            cur.execute(
-                """
-                DELETE FROM embedding_metadata
-                WHERE topic = ?
-                """,
-                (topic_name,),
-            )
+    def create_topic(self, topic_name: str) -> None:
+        pass  # Topic cration is implicit
+
+    @override
+    def delete_topic(self, topic_name: str) -> None:
+        raise NotImplementedError()
 
     @override
     def submit_embedding(self, topic_name: str, embedding: InsertEmbeddingRecord):

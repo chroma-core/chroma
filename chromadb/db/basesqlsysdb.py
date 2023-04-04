@@ -1,4 +1,4 @@
-from chromadb.types import EmbeddingFunction, Topic, ScalarEncoding, Segment
+from chromadb.types import EmbeddingFunction, Collection, ScalarEncoding, Segment
 from chromadb.db import SysDB, SqlDB
 import chromadb.db.querytools as qt
 from pypika import Table, CustomFunction
@@ -6,6 +6,7 @@ from collections import defaultdict
 import json
 from overrides import override
 from typing import Sequence
+from uuid import UUID
 
 
 class BaseSqlSysDB(SysDB, SqlDB):
@@ -43,31 +44,49 @@ class BaseSqlSysDB(SysDB, SqlDB):
             ]
 
     @override
-    def create_topic(self, topic: Topic) -> None:
+    def create_collection(self, collection: Collection) -> None:
         with self.tx() as cur:
 
-            if topic["metadata"] and len(topic["metadata"]) > 0:
-                metadata = json.dumps(topic["metadata"])
+            if collection["metadata"] and len(collection["metadata"]) > 0:
+                metadata = json.dumps(collection["metadata"])
             else:
                 metadata = None
 
             cur.execute(
-                "INSERT INTO topics (name, embedding_function, metadata) VALUES (?, ?, ?)",
-                (topic["name"], topic["embedding_function"], metadata),
+                "INSERT INTO collections (id, name, topic, embedding_function, metadata) VALUES (?, ?, ?, ?, ?)",
+                (
+                    collection["id"],
+                    collection["name"],
+                    collection["topic"],
+                    collection["embedding_function"],
+                    metadata,
+                ),
             )
 
     @override
-    def delete_topic(self, topic_name: str) -> None:
-        raise NotImplementedError()
+    def delete_collection(self, id: UUID) -> None:
+        with self.tx() as cur:
+            cur.execute("DELETE FROM collections WHERE id = ?", (id,))
 
     @override
-    def get_topics(self, name=None, embedding_function=None, metadata=None) -> Sequence[Topic]:
+    def get_collections(
+        self, id=None, topic=None, name=None, embedding_function=None, metadata=None
+    ) -> Sequence[Collection]:
         with self.tx() as cur:
-            table = Table("topics")
+            table = Table("collections")
             query = self.querybuilder().from_(table)
-            query = query.select(table.name, table.embedding_function, table.metadata)
+            query = query.select(
+                table.id, table.name, table.topic, table.embedding_function, table.metadata
+            )
+
+            if id is not None:
+                query = query.where(table.id == qt.Value(id))
+
             if name is not None:
                 query = query.where(table.name == qt.Value(name))
+
+            if topic is not None:
+                query = query.where(table.topic == qt.Value(topic))
 
             if embedding_function is not None:
                 query = query.where(table.embedding_function == qt.Value(embedding_function))
@@ -83,7 +102,13 @@ class BaseSqlSysDB(SysDB, SqlDB):
             results = cur.fetchall()
 
             return [
-                Topic(name=row[0], embedding_function=row[1], metadata=_parse_json(row[2]))
+                Collection(
+                    id=row[0],
+                    name=row[1],
+                    topic=row[2],
+                    embedding_function=row[3],
+                    metadata=_parse_json(row[4]),
+                )
                 for row in results
             ]
 

@@ -1,7 +1,7 @@
 from typing import TypedDict, Optional, Sequence
 from abc import ABC, abstractmethod
 from chromadb.types import (
-    Topic,
+    Collection,
     Vector,
     EmbeddingRecord,
     MetadataEmbeddingRecord,
@@ -63,13 +63,13 @@ class SegmentManager(ABC, EnforceOverrides):
     """Interface for a pluggable strategy for creating, retrieving and instantiating segments as required"""
 
     @abstractmethod
-    def create_topic_segments(self, topic: Topic) -> None:
-        """Create and initialize the segments required for a new topic"""
+    def create_collection(self, collection: Collection) -> None:
+        """Create and initialize the components (topics and segments) required for a new collection"""
         pass
 
     @abstractmethod
-    def delete_topic_segments(self, name: str) -> None:
-        """Delete all the segments associated with a collection"""
+    def delete_collection(self, name: str) -> None:
+        """Delete all the components associated with a collection"""
         pass
 
     @abstractmethod

@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional, cast, List, Dict
 from pydantic import BaseModel, PrivateAttr
+from uuid import UUID
 
 from chromadb.api.types import (
     Embedding,
@@ -32,7 +33,8 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     metadata: Optional[Dict] = None
-    embedding_function_name: Optional[str] = None
+    id: UUID
+    topic: str
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -41,7 +43,6 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
-        embedding_function_name: Optional[str] = None,
         metadata: Optional[Dict] = None,
     ):
 

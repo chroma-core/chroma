@@ -1,7 +1,6 @@
-from chromadb.types import Topic, EmbeddingRecord, InsertEmbeddingRecord
+from chromadb.types import InsertEmbeddingRecord
 from chromadb.ingest import Producer, proto_insert, proto_delete
 import pulsar
-import pulsar.schema as schema
 
 
 class PulsarIngest(Producer):
@@ -12,7 +11,7 @@ class PulsarIngest(Producer):
         self._client = pulsar.Client(f"pulsar://{settings.pulsar_host}:{settings.pulsar_port}")
         self._producers = {}
 
-    def create_topic(self, topic: Topic) -> None:
+    def create_topic(self, topic_name: str) -> None:
         # Topic creation can be implicit, for now
         pass
 

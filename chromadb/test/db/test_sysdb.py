@@ -1,4 +1,4 @@
-from chromadb.types import Segment, Topic, EmbeddingFunction, ScalarEncoding
+from chromadb.types import Segment, Collection, EmbeddingFunction, ScalarEncoding
 import chromadb.db.impl.duckdb
 from chromadb.config import Settings
 import pytest
@@ -35,18 +35,28 @@ test_segments = [
     Segment(id=uuid.uuid4(), type="test", scope="vector", topic=None, metadata=None),
 ]
 
-test_topics = [
-    Topic(
-        name="persistent://tenant/namespace/topic1",
+test_collections = [
+    Collection(
+        id=uuid.uuid4(),
+        name="coll1",
+        topic="persistent://tenant/namespace/topic1",
         embedding_function=test_embedding_functions[0]["name"],
         metadata={"foo": "bar", "baz": "qux"},
     ),
-    Topic(
-        name="persistent://tenant/namespace/topic2",
+    Collection(
+        id=uuid.uuid4(),
+        name="coll2",
+        topic="persistent://tenant/namespace/topic2",
         embedding_function=test_embedding_functions[1]["name"],
         metadata={"foo": "bar", "biz": "buz"},
     ),
-    Topic(name="persistent://tenant/namespace/topic3", embedding_function=None, metadata=None),
+    Collection(
+        id=uuid.uuid4(),
+        name="coll3",
+        topic="persistent://tenant/namespace/topic3",
+        embedding_function=None,
+        metadata=None,
+    ),
 ]
 
 
@@ -59,9 +69,6 @@ def test_segment_read_write(db_fixture, request):
 
     for embedding_function in test_embedding_functions:
         db.create_embedding_function(embedding_function)
-
-    for topic in test_topics:
-        db.create_topic(topic)
 
     db.create_segment(test_segments[0])
 
@@ -102,25 +109,32 @@ def test_embedding_function_read_write(db_fixture, request):
 
 
 @pytest.mark.parametrize("db_fixture", test_dbs)
-def test_topic_read_write(db_fixture, request):
+def test_collection_read_write(db_fixture, request):
 
     db = request.getfixturevalue(db_fixture.__name__)
 
     for embedding_function in test_embedding_functions:
         db.create_embedding_function(embedding_function)
 
-    assert len(db.get_topics()) == 0
+    assert len(db.get_collections()) == 0
 
-    db.create_topic(test_topics[0])
+    db.create_collection(test_collections[0])
 
-    assert db.get_topics()[0] == test_topics[0]
-    assert len(db.get_topics()) == 1
+    assert db.get_collections()[0] == test_collections[0]
+    assert len(db.get_collections()) == 1
 
-    db.create_topic(test_topics[1])
-    db.create_topic(test_topics[2])
+    db.create_collection(test_collections[1])
+    db.create_collection(test_collections[2])
 
-    assert db.get_topics(name="persistent://tenant/namespace/topic1")[0] == test_topics[0]
-    assert db.get_topics(name="persistent://tenant/namespace/topic2")[0] == test_topics[1]
+    assert db.get_collections(name="coll1")[0] == test_collections[0]
+    assert db.get_collections(name="coll2")[0] == test_collections[1]
 
-    assert db.get_topics(embedding_function="ef1")[0] == test_topics[0]
-    assert db.get_topics(embedding_function="ef2")[0] == test_topics[1]
+    assert db.get_collections(embedding_function="ef1")[0] == test_collections[0]
+    assert db.get_collections(embedding_function="ef2")[0] == test_collections[1]
+
+    assert (
+        db.get_collections(topic="persistent://tenant/namespace/topic1")[0] == test_collections[0]
+    )
+    assert (
+        db.get_collections(topic="persistent://tenant/namespace/topic2")[0] == test_collections[1]
+    )

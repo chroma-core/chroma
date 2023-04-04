@@ -1,10 +1,10 @@
-from typing import Protocol, Optional, Iterable, Sequence, Literal, Any, List, Tuple, Dict
+from typing import Protocol, Optional, Iterable, Sequence, Union, Any, List, Tuple, Dict
 from abc import ABC, abstractmethod
 from uuid import UUID
 from collections.abc import Sequence
 from enum import Enum
 import pypika
-from chromadb.types import Segment, Topic, EmbeddingFunction
+from chromadb.types import Segment, Collection, EmbeddingFunction
 from chromadb.api.types import Embeddings, Metadatas, Documents, IDs, Where, WhereDocument
 import numpy.typing as npt
 from overrides import EnforceOverrides
@@ -77,28 +77,30 @@ class SysDB(ABC, EnforceOverrides):
         id: Optional[UUID] = None,
         scope: Optional[str] = None,
         topic: Optional[str] = None,
-        metadata: Optional[dict[str, str]] = None,
+        metadata: Optional[dict[str, Union[str, int, float]]] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, embedding function, and/or metadata"""
         pass
 
     @abstractmethod
-    def get_topics(
+    def get_collections(
         self,
+        id: Optional[UUID] = None,
+        topic: Optional[str] = None,
         name: Optional[str] = None,
         embedding_function: Optional[str] = None,
-        metadata: Optional[dict[str, str]] = None,
-    ) -> Sequence[Topic]:
-        """Get topics by name, embedding function or metadata"""
+        metadata: Optional[dict[str, Union[str, int, float]]] = None,
+    ) -> Sequence[Collection]:
+        """Get collections by name, embedding function or metadata"""
         pass
 
     @abstractmethod
-    def create_topic(self, topic: Topic) -> None:
+    def create_collection(self, collection: Collection) -> None:
         """Create a new topic"""
         pass
 
     @abstractmethod
-    def delete_topic(self, topic_name: str) -> None:
+    def delete_collection(self, id: UUID) -> None:
         """Delete a topic and all associated segments from the SysDB"""
         pass
 

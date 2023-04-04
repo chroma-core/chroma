@@ -14,9 +14,10 @@ class EmbeddingFunction(TypedDict):
     scalar_encoding: ScalarEncoding
 
 
-class Topic(TypedDict):
+class Collection(TypedDict):
+    id: UUID
     name: str
-    embedding_function: Optional[str]
+    topic: str
     metadata: Optional[dict[str, Union[str, int, float]]]
 
 

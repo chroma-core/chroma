@@ -1,7 +1,7 @@
 CREATE TABLE segments (
     id UUID PRIMARY KEY,
-    type TEXT,
-    scope TEXT,
-    topic TEXT REFERENCES topics(name),
+    type TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    topic TEXT,
     metadata JSON
 );

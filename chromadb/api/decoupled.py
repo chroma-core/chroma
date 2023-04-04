@@ -5,7 +5,8 @@ from typing import Dict, List, Optional, Sequence, Callable, Type, cast
 import chromadb.config
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.types import Topic, InsertEmbeddingRecord, InsertType
+from chromadb.types import InsertEmbeddingRecord, InsertType
+import chromadb.types
 import chromadb.ingest
 import chromadb.db
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
@@ -24,9 +25,7 @@ from chromadb.api.types import (
     Union,
 )
 from chromadb.api.models.Collection import Collection
-
-# Regex for the format "<protocol>://<tenant>/<namespace/<name>"
-topic_re = re.compile(r"^(\w+)://(\w+)/(\w+)/(\w+)$")
+import uuid
 
 
 class DecoupledAPI(API):
@@ -46,20 +45,16 @@ class DecoupledAPI(API):
     def heartbeat(self):
         return int(1000 * time.time_ns())
 
-    def _collection(self, topic: Topic):
-        """Create a Collection object from a Topic object"""
-        match = topic_re.match(topic["name"])
-
-        if match is None:
-            raise ValueError(f"Invalid topic name: {topic['name']}")
-
-        _, _, _, name = match.groups()
-
+    def _collection_model(
+        self, collection: chromadb.types.Collection, embedding_function: Optional[Callable]
+    ) -> Collection:
+        """Create a user-facing Collection model from a back-end Collection"""
         return Collection(
             client=self,
-            name=name,
-            metadata=topic["metadata"],
-            embedding_function_name=topic["embedding_function"],
+            name=collection["name"],
+            uuid=collection["uuid"],
+            metadata=collection["metadata"],
+            topic=collection["topic"],
         )
 
     #
@@ -74,49 +69,48 @@ class DecoupledAPI(API):
 
         return collections
 
-    def _topic(self, name: str) -> str:
-        "Given a user-facing collection name, return the fully qualified topic name"
-        # Note: this will need to be refined for the case of multitenancy
-        return f"persistent://public/default/{name}"
-
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Dict] = {},
+        metadata: Optional[Dict[str, Union[str, int, float]]] = {},
         get_or_create: bool = False,
         embedding_function: Optional[Callable] = None,
-        embedding_function_name: Optional[str] = None,
     ) -> Collection:
 
-        topics = self.sysdb.get_topics(self._topic(name))
+        colls = self.sysdb.get_collections(name=name)
 
-        if len(topics) > 0:
+        if len(colls) > 0:
             if get_or_create:
-                return self.get_collection(name)
+                return self._collection_model(colls[0], embedding_function)
             else:
                 raise ValueError(f"Collection {name} already exists")
 
-        topic = Topic(
-            name=self._topic(name), metadata=metadata, embedding_function=embedding_function_name
-        )
+        id = uuid.uuid4()
+        # This will need to be revisted when we support multiple tenants
+        # Or if we multiplex across topics
+        topic = f"persistent://default/default/{id}"
+        coll = chromadb.types.Collection(name=name, uuid=id, metadata=metadata, topic=topic)
 
         self.ingest_impl.create_topic(topic)
-        if self.ingest_impl != self.sysdb:
-            self.sysdb.create_topic(topic)
-        if self.segment_manager != self.sysdb:
-            self.segment_manager.create_topic_segments(topic)
+        self.sysdb.create_collection(coll)
+        self.segment_manager.create_collection(coll)
 
-        return self.get_collection(name)
+        return self._collection_model(coll, embedding_function)
 
     def delete_collection(
         self,
         name: str,
     ):
         self.ingest_impl.delete_topic(name)
-        self.sysdb.delete_topic(name)
+        self.sysdb.delete_collection(name)
         self.segment_manager.delete_topic_segments(name)
 
-    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
+    ) -> Collection:
         """Calls create_collection with get_or_create=True
 
         Args:
@@ -126,19 +120,20 @@ class DecoupledAPI(API):
             dict: the created collection
 
         """
-        return self.create_collection(name, metadata, get_or_create=True)
+        return self.create_collection(
+            name, metadata, embedding_function=embedding_function, get_or_create=True
+        )
 
     def get_collection(
         self,
         name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        if embedding_function is not None:
-            raise ValueError("Passing a callable as an embedding function is not supported")
-        topics = self.sysdb.get_topics(self._topic(name))
-        if len(topics) == 0:
+
+        colls = self.sysdb.get_collections(name=name)
+        if len(colls) == 0:
             raise ValueError(f"Collection {name} does not exist")
-        return self._collection(topics[0])
+        return self._collection_model(colls[0], embedding_function)
 
     def _modify(
         self,
@@ -313,6 +308,3 @@ class DecoupledAPI(API):
 
     def create_index(self, collection_name: Optional[str] = None) -> bool:
         pass
-
-
-

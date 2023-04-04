@@ -6,8 +6,10 @@ CREATE TABLE embedding_functions (
     scalar_encoding scalar_encoding NOT NULL
 );
 
-CREATE TABLE topics (
-    name TEXT PRIMARY KEY,
+CREATE TABLE collections (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    topic TEXT NOT NULL,
     embedding_function TEXT REFERENCES embedding_functions(name),
     metadata JSON
 );

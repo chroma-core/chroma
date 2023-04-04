@@ -1,6 +1,6 @@
 from chromadb.segment import SegmentManager, SegmentImplementation
 from chromadb.config import Settings
-from chromadb.types import Topic, Segment
+from chromadb.types import Collection, Segment
 import chromadb.db
 import chromadb.config
 import uuid
@@ -27,11 +27,11 @@ class LocalSegmentManager(SegmentManager):
         self.sysdb = chromadb.config.get_component(settings, "chroma_system_db_impl")
         self.loaded_segments = {}
 
-    def create_topic_segments(self, topic: Topic) -> None:
+    def create_collection(self, collection: Collection) -> None:
 
         vector_segment = Segment(
             id=uuid.uuid4(),
-            topic=topic["name"],
+            topic=collection["topic"],
             scope="vector",
             type=self.settings.chroma_default_vector_segment_type,
             metadata={},
@@ -39,7 +39,7 @@ class LocalSegmentManager(SegmentManager):
 
         metadata_segment = Segment(
             id=uuid.uuid4(),
-            topic=topic["name"],
+            topic=collection["topic"],
             scope="metadata",
             type=self.settings.chroma_default_metadata_segment_type,
             metadata={},
@@ -68,7 +68,7 @@ class LocalSegmentManager(SegmentManager):
         cls = getattr(module, class_name)
         return cls(self.settings, segment)
 
-    def delete_topic_segments(self, name: str) -> None:
+    def delete_collection(self, collection_id: uuid.UUID) -> None:
         raise NotImplementedError()
 
     def reset(self):
