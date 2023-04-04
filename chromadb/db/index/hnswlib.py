@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Optional
+from typing import Dict
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index
@@ -70,8 +70,8 @@ class Hnswlib(Index):
     _index: hnswlib.Index
     _index_metadata: IndexMetadata
     _params: HnswParams
-    _id_to_label: dict[str, int]
-    _label_to_id: dict[int, str]
+    _id_to_label: Dict[str, int]
+    _label_to_id: Dict[int, str]
 
     def __init__(self, id, settings, metadata):
         settings.validate("persist_directory")
@@ -155,7 +155,7 @@ class Hnswlib(Index):
             os.remove(f"{self._save_folder}/uuid_to_id_{self._id}.pkl")
             os.remove(f"{self._save_folder}/index_{self._id}.bin")
             os.remove(f"{self._save_folder}/index_metadata_{self._id}.pkl")
-        except:
+        except Exception:
             pass
 
         self._index = None

@@ -100,6 +100,6 @@ class Telemetry:
             else:
                 with open(self.USER_ID_PATH, "r") as f:
                     self._curr_user_id = f.read()
-        except Exception as e:
+        except Exception:
             self._curr_user_id = self.UNKNOWN_USER_ID
         return self._curr_user_id

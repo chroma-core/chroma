@@ -1,0 +1,23 @@
+{
+    "git.ignoreLimitWarning": true,
+    "editor.rulers": [
+        120
+    ],
+    "editor.formatOnSave": true,
+    "python.formatting.provider": "black",
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.ipynb_checkpoints": true,
+        "**/.pytest_cache": true,
+        "**/chroma.egg-info": true
+    },
+    "python.analysis.typeCheckingMode": "basic",
+    "python.linting.flake8Enabled": true,
+    "python.linting.enabled": true,
+    "python.linting.flake8Args": [
+        "--extend-ignore=E203",
+        "--extend-ignore=E501",
+        "--extend-ignore=E503",
+        "--max-line-length=88",
+    ],
+}

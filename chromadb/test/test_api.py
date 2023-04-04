@@ -10,7 +10,6 @@ import os
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
-from chromadb.api.models import Collection
 import numpy as np
 
 
@@ -581,7 +580,7 @@ def test_peek(api_fixture, request):
         assert len(peek[key]) == 2
 
 
-#### TEST METADATA AND METADATA FILTERING ####
+# TEST METADATA AND METADATA FILTERING
 # region
 
 metadata_records = {
@@ -924,19 +923,19 @@ def test_query_document_valid_operators(api_fixture, request):
         collection.get(where_document={"$contains": []})
 
     # Test invalid $and, $or
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where_document={"$and": {"$unsupported": "doc"}})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where_document={"$or": [{"$contains": "doc"}]})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(where_document={"$or": []})
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError):
         collection.get(
             where_document={"$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]}
         )
@@ -1135,14 +1134,14 @@ def test_query_include(api_fixture, request):
     items = collection.query(
         query_embeddings=[0, 0, 0], include=["metadatas", "documents", "distances"], n_results=1
     )
-    assert items["embeddings"] == None
+    assert items["embeddings"] is None
     assert items["ids"][0][0] == "id1"
     assert items["metadatas"][0][0]["int_value"] == 1
 
     items = collection.query(
         query_embeddings=[0, 0, 0], include=["embeddings", "documents", "distances"], n_results=1
     )
-    assert items["metadatas"] == None
+    assert items["metadatas"] is None
     assert items["ids"][0][0] == "id1"
 
     items = collection.query(
@@ -1150,10 +1149,10 @@ def test_query_include(api_fixture, request):
         include=[],
         n_results=2,
     )
-    assert items["documents"] == None
-    assert items["metadatas"] == None
-    assert items["embeddings"] == None
-    assert items["distances"] == None
+    assert items["documents"] is None
+    assert items["metadatas"] is None
+    assert items["embeddings"] is None
+    assert items["distances"] is None
     assert items["ids"][0][0] == "id1"
     assert items["ids"][0][1] == "id2"
 
@@ -1167,20 +1166,20 @@ def test_get_include(api_fixture, request):
     collection.add(**records)
 
     items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
-    assert items["embeddings"] == None
+    assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
     assert items["metadatas"][0]["int_value"] == 1
     assert items["documents"][0] == "this document is first"
 
     items = collection.get(include=["embeddings", "documents"])
-    assert items["metadatas"] == None
+    assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
     assert items["embeddings"][1][0] == 1.2
 
     items = collection.get(include=[])
-    assert items["documents"] == None
-    assert items["metadatas"] == None
-    assert items["embeddings"] == None
+    assert items["documents"] is None
+    assert items["metadatas"] is None
+    assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
 
     with pytest.raises(ValueError, match="include"):
@@ -1322,7 +1321,7 @@ def test_add_large(api_fixture, request):
 
     collection = api.create_collection("testspace")
 
-    ## Test adding a large number of records
+    # Test adding a large number of records
     large_records = np.random.rand(2000, 512).astype(np.float32).tolist()
 
     collection.add(

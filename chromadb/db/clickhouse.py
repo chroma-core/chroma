@@ -3,8 +3,6 @@ from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.errors import (
     NoDatapointsException,
-    InvalidDimensionException,
-    NotEnoughElementsException,
 )
 import uuid
 import numpy.typing as npt
@@ -189,7 +187,7 @@ class Clickhouse(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res][0]
 
     def list_collections(self) -> Sequence:
-        res = self._get_conn().query(f"""SELECT * FROM collections""").result_rows
+        res = self._get_conn().query("SELECT * FROM collections").result_rows
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
@@ -398,7 +396,7 @@ class Clickhouse(DB):
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
     ) -> Sequence:
-        if collection_name == None and collection_uuid == None:
+        if collection_name is None and collection_uuid is None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
         if collection_name is not None:
@@ -415,7 +413,7 @@ class Clickhouse(DB):
         if sort is not None:
             where_str += f" ORDER BY {sort}"
         else:
-            where_str += f" ORDER BY collection_uuid"  # stable ordering
+            where_str += " ORDER BY collection_uuid"  # stable ordering
 
         if limit is not None or isinstance(limit, int):
             where_str += f" LIMIT {limit}"
@@ -499,7 +497,7 @@ class Clickhouse(DB):
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
 
         # Either the collection name or the collection uuid must be provided
-        if collection_name == None and collection_uuid == None:
+        if collection_name is None and collection_uuid is None:
             raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
 
         if collection_name is not None:

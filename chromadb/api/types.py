@@ -53,7 +53,7 @@ def maybe_cast_one_to_many(
 
     if isinstance(target, Sequence):
         # One Document or ID
-        if isinstance(target, str) and target != None:
+        if isinstance(target, str) and target is not None:
             return [target]  # type: ignore
         # One Embedding
         if isinstance(target[0], (int, float)):

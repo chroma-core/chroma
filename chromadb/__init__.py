@@ -7,11 +7,12 @@ logger = logging.getLogger(__name__)
 
 __settings = chromadb.config.Settings()
 
-__version__ = "0.3.18"
+__version__ = "0.3.20"
 
 
 def configure(**kwargs):
     """Override Chroma's default settings, environment variables or .env files"""
+    global __settings
     __settings = chromadb.config.Settings(**kwargs)
 
 

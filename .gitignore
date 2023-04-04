@@ -19,7 +19,6 @@ venv
 .chroma
 *.egg-info
 dist
-.vscode
 
 .terraform/
 .terraform.lock.hcl
