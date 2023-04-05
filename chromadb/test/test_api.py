@@ -1430,10 +1430,7 @@ def test_upsert(api_fixture, request):
     assert get_result['metadatas'][0] == new_records['metadatas'][0]
     assert get_result['documents'][0] == new_records['documents'][0]
 
-    print(get_result)
-
     query_result = collection.query(query_embeddings=get_result['embeddings'], n_results=1, include=['embeddings', 'metadatas', 'documents'])
-    print(query_result)
     assert query_result['embeddings'][0][0] == new_records['embeddings'][0]
     assert query_result['metadatas'][0][0] == new_records['metadatas'][0]
     assert query_result['documents'][0][0] == new_records['documents'][0]
