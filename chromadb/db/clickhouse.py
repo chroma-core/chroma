@@ -299,8 +299,9 @@ class Clickhouse(DB):
 
         # Update the index
         if embeddings is not None:
+            update_uuids = [x[1] for x in existing_items]
             index = self._index(collection_uuid)
-            index.add(ids, embeddings, update=True)
+            index.add(update_uuids, embeddings, update=True)
 
     def _get(self, where={}, columns: Optional[List] = None):
         select_columns = db_schema_to_keys() if columns is None else columns
