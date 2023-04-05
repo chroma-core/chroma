@@ -167,9 +167,9 @@ class LocalAPI(API):
         # Determine which ids need to be added and which need to be updated based on the ids already in the collection
         existing_ids = set(self._get(collection_name, ids=ids, include=[])['ids'])
 
-        ids_to_add = list(set(ids) - existing_ids)
-        ids_to_update = list(set(ids) & existing_ids)
-        
+
+        ids_to_add = []
+        ids_to_update = []        
         embeddings_to_add: Embeddings = []
         embeddings_to_update: Embeddings = []
         metadatas_to_add: Optional[Metadatas] = [] if metadatas else None
@@ -178,22 +178,24 @@ class LocalAPI(API):
         documents_to_update: Optional[Documents] = [] if documents else None
 
         for i, id in enumerate(ids):
-            if id in ids_to_add:
-                if embeddings is not None:
-                    embeddings_to_add.append(embeddings[i])
-                if metadatas is not None:
-                    metadatas_to_add.append(metadatas[i])
-                if documents is not None:
-                    documents_to_add.append(documents[i])
-            elif id in ids_to_update:
+            if id in existing_ids:
+                ids_to_update.append(id)
                 if embeddings is not None:
                     embeddings_to_update.append(embeddings[i])
                 if metadatas is not None:
                     metadatas_to_update.append(metadatas[i])
                 if documents is not None:
                     documents_to_update.append(documents[i])
+            else:
+                ids_to_add.append(id)
+                if embeddings is not None:
+                    embeddings_to_add.append(embeddings[i])
+                if metadatas is not None:
+                    metadatas_to_add.append(metadatas[i])
+                if documents is not None:
+                    documents_to_add.append(documents[i])
         
-        if ids_to_add:
+        if len(ids_to_add) > 0:
             self._add(
                 ids_to_add,
                 collection_name,
@@ -203,7 +205,7 @@ class LocalAPI(API):
                 increment_index=increment_index,
             )
 
-        if ids_to_update:
+        if len(ids_to_update) > 0:
             self._update(
                 collection_name,
                 ids_to_update,
