@@ -3,6 +3,7 @@
 set -e
 
 function cleanup {
+  cd ../..
   docker compose -f docker-compose.test.yml down --rmi local --volumes
 }
 
@@ -13,4 +14,3 @@ docker compose -f docker-compose.test.yml up --build -d
 cd clients/js 
 yarn
 yarn test:run
-cd ../..
