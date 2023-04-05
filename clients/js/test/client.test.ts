@@ -24,6 +24,53 @@ test('it should create the client connection', async () => {
     expect(chroma).toBeInstanceOf(ChromaClient)
 })
 
+test('it should get the version', async () => {
+    const version = await chroma.version()
+    expect(version).toBeDefined()
+    expect(version).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/)
+})
+
+test('it should get the heartbeat', async () => {
+    const heartbeat = await chroma.heartbeat()
+    expect(heartbeat).toBeDefined()
+    expect(heartbeat).toBeGreaterThan(0)
+})
+
+test('it should get or create a collection', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+
+    const collection2 = await chroma.getOrCreateCollection('test')
+    expect(collection2).toBeDefined()
+    expect(collection2).toHaveProperty('name')
+    expect(collection2.name).toBe('test')
+
+    const collection3 = await chroma.getOrCreateCollection('test3')
+    expect(collection3).toBeDefined()
+    expect(collection3).toHaveProperty('name')
+    expect(collection3.name).toBe('test3')
+})
+
+// test includes on query
+test('it should query a collection', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    const ids = ['test1', 'test2', 'test3']
+    const embeddings = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    ]
+    const metadata = [
+        { test: 'test1' },
+        { test: 'test2' },
+        { test: 'test3' }
+    ]
+    // probably add documents here as well so i can try where_document here too
+    await collection.add(ids, embeddings, metadata)
+    // then query asking for different includes
+})
+
 test('it should reset the database', async () => {
     await chroma.reset()
     let collections = await chroma.listCollections()

@@ -1,3 +1,4 @@
+import { QueryEmbeddingIncludeEnum } from "./generated";
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
 
@@ -209,6 +210,8 @@ export class Collection {
     n_results: number = 10,
     where?: object,
     query_text?: string | string[],
+    where_document?: object, // {"$contains":"search_string"}
+    include?: QueryEmbeddingIncludeEnum[], // ["metadata", "document"]
   ) {
     if ((query_embeddings === undefined) && (query_text === undefined)) {
       throw new Error(
@@ -234,6 +237,8 @@ export class Collection {
         query_embeddings: query_embeddingsArray,
         where,
         n_results,
+        where_document: where_document,
+        include: include
       },
     }).then(function (response) {
       return response.data;
@@ -286,9 +291,39 @@ export class ChromaClient {
     return await this.api.reset();
   }
 
+  // version
+  public async version() {
+    const response = await this.api.version();
+    return response.data;
+  }
+
+  // heartbeat
+  public async heartbeat() {
+    const response = await this.api.heartbeat();
+    return response.data["nanosecond heartbeat"];
+  }
+
   public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
     const newCollection = await this.api.createCollection({
       createCollection: { name, metadata },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    if (newCollection.error) {
+      throw new Error(newCollection.error);
+    }
+
+    return new Collection(name, this.api, embeddingFunction);
+  }
+
+  // get or create collection
+  public async getOrCreateCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
+    const newCollection = await this.api.createCollection({
+      createCollection: { name, metadata, get_or_create: true },
+
     }).then(function (response) {
       return response.data;
     }).catch(function ({ response }) {

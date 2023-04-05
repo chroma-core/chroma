@@ -29,7 +29,5 @@ jobs:
     - name: Integration Test
       run: bin/integration-test
     - name: JS Tests
-      run: |
-        cd clients/js 
-        yarn
-        yarn test:run
+      run: bin/js-test
+        
