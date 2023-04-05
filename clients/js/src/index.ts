@@ -94,11 +94,13 @@ type CallableFunction = {
 
 export class Collection {
   public name: string;
+  public id: string;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
-  constructor(name: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
+  constructor(name: string, id: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
     this.name = name;
+    this.id = id;
     this.api = api;
     if (embeddingFunction !== undefined)
       this.embeddingFunction = embeddingFunction;
@@ -155,7 +157,7 @@ export class Collection {
     }
 
     const response = await this.api.add({
-      collectionName: this.name,
+      collectionId: this.id,
       addEmbedding: {
         ids: idsArray,
         embeddings: embeddingsArray,
@@ -173,7 +175,7 @@ export class Collection {
   }
 
   public async count() {
-    const response = await this.api.count({ collectionName: this.name });
+    const response = await this.api.count({ collectionId: this.id });
     return response.data;
   }
 
@@ -187,7 +189,7 @@ export class Collection {
     if (ids !== undefined) idsArray = toArray(ids);
 
     var resp = await this.api.get({
-      collectionName: this.name,
+      collectionId: this.id,
       getEmbedding: {
         ids: idsArray,
         where,
@@ -229,7 +231,7 @@ export class Collection {
     const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
     const response = await this.api.getNearestNeighbors({
-      collectionName: this.name,
+      collectionId: this.id,
       queryEmbedding: {
         query_embeddings: query_embeddingsArray,
         where,
@@ -246,7 +248,7 @@ export class Collection {
 
   public async peek(limit: number = 10) {
     const response = await this.api.get({
-      collectionName: this.name,
+      collectionId: this.id,
       getEmbedding: { limit: limit },
     });
     return response.data;
@@ -258,7 +260,7 @@ export class Collection {
 
   public async delete(ids?: string[], where?: object) {
     var response = await this.api._delete({
-      collectionName: this.name,
+      collectionId: this.id,
       deleteEmbedding: { ids: ids, where: where },
     }).then(function (response) {
       return response.data;
@@ -299,7 +301,7 @@ export class ChromaClient {
       throw new Error(newCollection.error);
     }
 
-    return new Collection(name, this.api, embeddingFunction);
+    return new Collection(name, newCollection.id, this.api, embeddingFunction);
   }
 
   public async listCollections() {
@@ -308,7 +310,9 @@ export class ChromaClient {
   }
 
   public async getCollection(name: string, embeddingFunction?: CallableFunction) {
-    return new Collection(name, this.api, embeddingFunction);
+    const response = await this.api.getCollection({ collectionName: name });
+    const id = response.data.id;
+    return new Collection(name, id, this.api, embeddingFunction);
   }
 
   public async deleteCollection(name: string) {

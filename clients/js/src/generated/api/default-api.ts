@@ -47,18 +47,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Delete
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {DeleteEmbedding} deleteEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        _delete: async (collectionName: string, deleteEmbedding: DeleteEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('_delete', 'collectionName', collectionName)
+        _delete: async (collectionId: string, deleteEmbedding: DeleteEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('_delete', 'collectionId', collectionId)
             // verify required parameter 'deleteEmbedding' is not null or undefined
             assertParamExists('_delete', 'deleteEmbedding', deleteEmbedding)
-            const localVarPath = `/api/v1/collections/{collection_name}/delete`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}/delete`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -87,18 +87,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Add
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {AddEmbedding} addEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        add: async (collectionName: string, addEmbedding: AddEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('add', 'collectionName', collectionName)
+        add: async (collectionId: string, addEmbedding: AddEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('add', 'collectionId', collectionId)
             // verify required parameter 'addEmbedding' is not null or undefined
             assertParamExists('add', 'addEmbedding', addEmbedding)
-            const localVarPath = `/api/v1/collections/{collection_name}/add`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}/add`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -127,15 +127,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Count
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        count: async (collectionName: string, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('count', 'collectionName', collectionName)
-            const localVarPath = `/api/v1/collections/{collection_name}/count`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+        count: async (collectionId: string, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('count', 'collectionId', collectionId)
+            const localVarPath = `/api/v1/collections/{collection_id}/count`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -265,18 +265,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Get
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {GetEmbedding} getEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        get: async (collectionName: any, getEmbedding: GetEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('get', 'collectionName', collectionName)
+        get: async (collectionId: string, getEmbedding: GetEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('get', 'collectionId', collectionId)
             // verify required parameter 'getEmbedding' is not null or undefined
             assertParamExists('get', 'getEmbedding', getEmbedding)
-            const localVarPath = `/api/v1/collections/{collection_name}/get`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}/get`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -339,18 +339,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Get Nearest Neighbors
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {QueryEmbedding} queryEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getNearestNeighbors: async (collectionName: any, queryEmbedding: QueryEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('getNearestNeighbors', 'collectionName', collectionName)
+        getNearestNeighbors: async (collectionId: string, queryEmbedding: QueryEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('getNearestNeighbors', 'collectionId', collectionId)
             // verify required parameter 'queryEmbedding' is not null or undefined
             assertParamExists('getNearestNeighbors', 'queryEmbedding', queryEmbedding)
-            const localVarPath = `/api/v1/collections/{collection_name}/query`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}/query`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -535,18 +535,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Update
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {UpdateEmbedding} updateEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        update: async (collectionName: string, updateEmbedding: UpdateEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('update', 'collectionName', collectionName)
+        update: async (collectionId: string, updateEmbedding: UpdateEmbedding, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('update', 'collectionId', collectionId)
             // verify required parameter 'updateEmbedding' is not null or undefined
             assertParamExists('update', 'updateEmbedding', updateEmbedding)
-            const localVarPath = `/api/v1/collections/{collection_name}/update`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}/update`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -575,18 +575,18 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Update Collection
-         * @param {any} collectionName 
+         * @param {any} collectionId 
          * @param {UpdateCollection} updateCollection 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        updateCollection: async (collectionName: any, updateCollection: UpdateCollection, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'collectionName' is not null or undefined
-            assertParamExists('updateCollection', 'collectionName', collectionName)
+        updateCollection: async (collectionId: any, updateCollection: UpdateCollection, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'collectionId' is not null or undefined
+            assertParamExists('updateCollection', 'collectionId', collectionId)
             // verify required parameter 'updateCollection' is not null or undefined
             assertParamExists('updateCollection', 'updateCollection', updateCollection)
-            const localVarPath = `/api/v1/collections/{collection_name}`
-                .replace(`{${"collection_name"}}`, encodeURIComponent(String(collectionName)));
+            const localVarPath = `/api/v1/collections/{collection_id}`
+                .replace(`{${"collection_id"}}`, encodeURIComponent(String(collectionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -612,6 +612,36 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        version: async (options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/version`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -625,36 +655,36 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Delete
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {DeleteEmbedding} deleteEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async _delete(collectionName: string, deleteEmbedding: DeleteEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator._delete(collectionName, deleteEmbedding, options);
+        async _delete(collectionId: string, deleteEmbedding: DeleteEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator._delete(collectionId, deleteEmbedding, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
          * 
          * @summary Add
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {AddEmbedding} addEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async add(collectionName: string, addEmbedding: AddEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.add(collectionName, addEmbedding, options);
+        async add(collectionId: string, addEmbedding: AddEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.add(collectionId, addEmbedding, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
          * 
          * @summary Count
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async count(collectionName: string, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.count(collectionName, options);
+        async count(collectionId: string, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.count(collectionId, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
@@ -693,13 +723,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Get
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {GetEmbedding} getEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async get(collectionName: any, getEmbedding: GetEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.get(collectionName, getEmbedding, options);
+        async get(collectionId: string, getEmbedding: GetEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.get(collectionId, getEmbedding, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
@@ -716,13 +746,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Get Nearest Neighbors
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {QueryEmbedding} queryEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getNearestNeighbors(collectionName: any, queryEmbedding: QueryEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getNearestNeighbors(collectionName, queryEmbedding, options);
+        async getNearestNeighbors(collectionId: string, queryEmbedding: QueryEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getNearestNeighbors(collectionId, queryEmbedding, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
@@ -779,25 +809,35 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Update
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {UpdateEmbedding} updateEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async update(collectionName: string, updateEmbedding: UpdateEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.update(collectionName, updateEmbedding, options);
+        async update(collectionId: string, updateEmbedding: UpdateEmbedding, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.update(collectionId, updateEmbedding, options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
         /**
          * 
          * @summary Update Collection
-         * @param {any} collectionName 
+         * @param {any} collectionId 
          * @param {UpdateCollection} updateCollection 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async updateCollection(collectionName: any, updateCollection: UpdateCollection, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.updateCollection(collectionName, updateCollection, options);
+        async updateCollection(collectionId: any, updateCollection: UpdateCollection, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updateCollection(collectionId, updateCollection, options);
+            return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
+        },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async version(options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.version(options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
     }
@@ -813,34 +853,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          * 
          * @summary Delete
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {DeleteEmbedding} deleteEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        _delete(collectionName: string, deleteEmbedding: DeleteEmbedding, options?: any): AxiosPromise<any> {
-            return localVarFp._delete(collectionName, deleteEmbedding, options).then((request) => request(axios, basePath));
+        _delete(collectionId: string, deleteEmbedding: DeleteEmbedding, options?: any): AxiosPromise<any> {
+            return localVarFp._delete(collectionId, deleteEmbedding, options).then((request) => request(axios, basePath));
         },
         /**
          * 
          * @summary Add
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {AddEmbedding} addEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        add(collectionName: string, addEmbedding: AddEmbedding, options?: any): AxiosPromise<any> {
-            return localVarFp.add(collectionName, addEmbedding, options).then((request) => request(axios, basePath));
+        add(collectionId: string, addEmbedding: AddEmbedding, options?: any): AxiosPromise<any> {
+            return localVarFp.add(collectionId, addEmbedding, options).then((request) => request(axios, basePath));
         },
         /**
          * 
          * @summary Count
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        count(collectionName: string, options?: any): AxiosPromise<any> {
-            return localVarFp.count(collectionName, options).then((request) => request(axios, basePath));
+        count(collectionId: string, options?: any): AxiosPromise<any> {
+            return localVarFp.count(collectionId, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -875,13 +915,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          * 
          * @summary Get
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {GetEmbedding} getEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        get(collectionName: any, getEmbedding: GetEmbedding, options?: any): AxiosPromise<any> {
-            return localVarFp.get(collectionName, getEmbedding, options).then((request) => request(axios, basePath));
+        get(collectionId: string, getEmbedding: GetEmbedding, options?: any): AxiosPromise<any> {
+            return localVarFp.get(collectionId, getEmbedding, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -896,13 +936,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          * 
          * @summary Get Nearest Neighbors
-         * @param {any} collectionName 
+         * @param {string} collectionId 
          * @param {QueryEmbedding} queryEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getNearestNeighbors(collectionName: any, queryEmbedding: QueryEmbedding, options?: any): AxiosPromise<any> {
-            return localVarFp.getNearestNeighbors(collectionName, queryEmbedding, options).then((request) => request(axios, basePath));
+        getNearestNeighbors(collectionId: string, queryEmbedding: QueryEmbedding, options?: any): AxiosPromise<any> {
+            return localVarFp.getNearestNeighbors(collectionId, queryEmbedding, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -953,24 +993,33 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          * 
          * @summary Update
-         * @param {string} collectionName 
+         * @param {string} collectionId 
          * @param {UpdateEmbedding} updateEmbedding 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        update(collectionName: string, updateEmbedding: UpdateEmbedding, options?: any): AxiosPromise<any> {
-            return localVarFp.update(collectionName, updateEmbedding, options).then((request) => request(axios, basePath));
+        update(collectionId: string, updateEmbedding: UpdateEmbedding, options?: any): AxiosPromise<any> {
+            return localVarFp.update(collectionId, updateEmbedding, options).then((request) => request(axios, basePath));
         },
         /**
          * 
          * @summary Update Collection
-         * @param {any} collectionName 
+         * @param {any} collectionId 
          * @param {UpdateCollection} updateCollection 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        updateCollection(collectionName: any, updateCollection: UpdateCollection, options?: any): AxiosPromise<any> {
-            return localVarFp.updateCollection(collectionName, updateCollection, options).then((request) => request(axios, basePath));
+        updateCollection(collectionId: any, updateCollection: UpdateCollection, options?: any): AxiosPromise<any> {
+            return localVarFp.updateCollection(collectionId, updateCollection, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        version(options?: any): AxiosPromise<any> {
+            return localVarFp.version(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -986,7 +1035,7 @@ export interface DefaultApiDeleteRequest {
      * @type {string}
      * @memberof DefaultApiDelete
      */
-    readonly collectionName: string
+    readonly collectionId: string
 
     /**
      * 
@@ -1007,7 +1056,7 @@ export interface DefaultApiAddRequest {
      * @type {string}
      * @memberof DefaultApiAdd
      */
-    readonly collectionName: string
+    readonly collectionId: string
 
     /**
      * 
@@ -1028,7 +1077,7 @@ export interface DefaultApiCountRequest {
      * @type {string}
      * @memberof DefaultApiCount
      */
-    readonly collectionName: string
+    readonly collectionId: string
 }
 
 /**
@@ -1081,10 +1130,10 @@ export interface DefaultApiDeleteCollectionRequest {
 export interface DefaultApiGetRequest {
     /**
      * 
-     * @type {any}
+     * @type {string}
      * @memberof DefaultApiGet
      */
-    readonly collectionName: any
+    readonly collectionId: string
 
     /**
      * 
@@ -1116,10 +1165,10 @@ export interface DefaultApiGetCollectionRequest {
 export interface DefaultApiGetNearestNeighborsRequest {
     /**
      * 
-     * @type {any}
+     * @type {string}
      * @memberof DefaultApiGetNearestNeighbors
      */
-    readonly collectionName: any
+    readonly collectionId: string
 
     /**
      * 
@@ -1154,7 +1203,7 @@ export interface DefaultApiUpdateRequest {
      * @type {string}
      * @memberof DefaultApiUpdate
      */
-    readonly collectionName: string
+    readonly collectionId: string
 
     /**
      * 
@@ -1175,7 +1224,7 @@ export interface DefaultApiUpdateCollectionRequest {
      * @type {any}
      * @memberof DefaultApiUpdateCollection
      */
-    readonly collectionName: any
+    readonly collectionId: any
 
     /**
      * 
@@ -1201,7 +1250,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public _delete(requestParameters: DefaultApiDeleteRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration)._delete(requestParameters.collectionName, requestParameters.deleteEmbedding, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration)._delete(requestParameters.collectionId, requestParameters.deleteEmbedding, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1213,7 +1262,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public add(requestParameters: DefaultApiAddRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).add(requestParameters.collectionName, requestParameters.addEmbedding, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).add(requestParameters.collectionId, requestParameters.addEmbedding, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1225,7 +1274,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public count(requestParameters: DefaultApiCountRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).count(requestParameters.collectionName, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).count(requestParameters.collectionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1273,7 +1322,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public get(requestParameters: DefaultApiGetRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).get(requestParameters.collectionName, requestParameters.getEmbedding, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).get(requestParameters.collectionId, requestParameters.getEmbedding, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1297,7 +1346,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public getNearestNeighbors(requestParameters: DefaultApiGetNearestNeighborsRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).getNearestNeighbors(requestParameters.collectionName, requestParameters.queryEmbedding, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).getNearestNeighbors(requestParameters.collectionId, requestParameters.queryEmbedding, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1365,7 +1414,7 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public update(requestParameters: DefaultApiUpdateRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).update(requestParameters.collectionName, requestParameters.updateEmbedding, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).update(requestParameters.collectionId, requestParameters.updateEmbedding, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1377,6 +1426,17 @@ export class DefaultApi extends BaseAPI {
      * @memberof DefaultApi
      */
     public updateCollection(requestParameters: DefaultApiUpdateCollectionRequest, options?: AxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).updateCollection(requestParameters.collectionName, requestParameters.updateCollection, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).updateCollection(requestParameters.collectionId, requestParameters.updateCollection, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Version
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof DefaultApi
+     */
+    public version(options?: AxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).version(options).then((request) => request(this.axios, this.basePath));
     }
 }

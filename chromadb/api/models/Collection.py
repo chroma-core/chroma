@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 class Collection(BaseModel):
     name: str
+    id: UUID
     metadata: Optional[Dict] = None
-    id: Optional[UUID] = None  # Optional only for backwards compatibility
     topic: Optional[str] = None  # Optional only for backwards compatibility
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
@@ -42,7 +42,7 @@ class Collection(BaseModel):
         self,
         client: "API",
         name: str,
-        id: Optional[UUID] = None,
+        id: UUID,
         topic: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
         metadata: Optional[Dict] = None,
@@ -65,7 +65,7 @@ class Collection(BaseModel):
 
     def count(self) -> int:
         """The total number of embeddings added to the database"""
-        return self._client._count(collection_name=self.name)
+        return self._client._count(collection_id=self.id)
 
     def add(
         self,
@@ -113,7 +113,7 @@ class Collection(BaseModel):
                 raise ValueError("You must provide embeddings or a function to compute them")
             embeddings = self._embedding_function(documents)
 
-        self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
+        self._client._add(ids, self.id, embeddings, metadatas, documents, increment_index)
 
     def get(
         self,
@@ -140,7 +140,7 @@ class Collection(BaseModel):
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
-            self.name,
+            self.id,
             ids,
             where,
             None,
@@ -156,7 +156,7 @@ class Collection(BaseModel):
         Args:
             limit: The number of results to return.
         """
-        return self._client._peek(self.name, limit)
+        return self._client._peek(self.id, limit)
 
     def query(
         self,
@@ -205,7 +205,7 @@ class Collection(BaseModel):
             where_document = {}
 
         return self._client._query(
-            collection_name=self.name,
+            collection_id=self.id,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
@@ -220,7 +220,7 @@ class Collection(BaseModel):
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
         """
-        self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
         if metadata:
@@ -275,7 +275,7 @@ class Collection(BaseModel):
                 raise ValueError("You must provide embeddings or a function to compute them")
             embeddings = self._embedding_function(documents)
 
-        self._client._update(self.name, ids, embeddings, metadatas, documents)
+        self._client._update(self.id, ids, embeddings, metadatas, documents)
 
     def delete(
         self,
@@ -293,7 +293,7 @@ class Collection(BaseModel):
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
-        return self._client._delete(self.name, ids, where, where_document)
+        return self._client._delete(self.id, ids, where, where_document)
 
     def create_index(self):
         self._client.create_index(self.name)

@@ -12,6 +12,7 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
 import logging
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -191,25 +192,17 @@ class Clickhouse(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
-        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+        self, id: UUID, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
     ):
-        if new_name is None:
-            new_name = current_name
-        if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0][2]
+        if new_name is not None:
+            self._get_conn().command(
+                f"ALTER TABLE collections UPDATE name = '{new_name}' WHERE uuid = '{id}'",
+            )
 
-        return self._get_conn().command(
-            f"""
-
-         ALTER TABLE
-            collections
-         UPDATE
-            metadata = '{json.dumps(new_metadata)}',
-            name = '{new_name}'
-         WHERE
-            name = '{current_name}'
-         """
-        )
+        if new_metadata is not None:
+            self._get_conn().command(
+                f"ALTER TABLE collections UPDATE metadata = '{json.dumps(new_metadata)}' WHERE uuid = '{id}'"
+            )
 
     def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
@@ -426,13 +419,13 @@ class Clickhouse(DB):
 
         return val
 
-    def _count(self, collection_uuid: str):
+    def count(self, collection_uuid: str):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._get_conn().query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
-
-    def count(self, collection_name: str):
-        collection_uuid = self.get_collection_uuid_from_name(collection_name)
-        return self._count(collection_uuid=collection_uuid)[0][0]
+        return (
+            self._get_conn()
+            .query(f"SELECT COUNT() FROM embeddings {where_string}")
+            .result_rows[0][0]
+        )
 
     def _delete(self, where_str: Optional[str] = None) -> List:
         deleted_uuids = (
