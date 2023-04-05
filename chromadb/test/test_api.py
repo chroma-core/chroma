@@ -1387,5 +1387,13 @@ def test_update_query(api_fixture, request):
     collection.update(**updated_records)
 
     # test query
-    results = collection.query(query_embeddings=updated_records['embeddings'], n_results=1)
+    results = collection.query(
+        query_embeddings=updated_records["embeddings"],
+        n_results=1,
+        include=["embeddings", "documents", "metadatas"],
+    )
     assert len(results["ids"][0]) == 1
+    assert results["ids"][0][0] == updated_records["ids"][0]
+    assert results["documents"][0][0] == updated_records["documents"][0]
+    assert results["metadatas"][0][0]["foo"] == "bar"
+    assert results["embeddings"][0][0] == updated_records["embeddings"][0]
