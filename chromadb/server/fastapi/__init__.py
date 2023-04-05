@@ -157,7 +157,7 @@ class FastAPI(chromadb.server.Server):
     def get_collection(self, collection_name: str):
         return self._api.get_collection(collection_name)
 
-    def update_collection(self, collection_id, collection: UpdateCollection):
+    def update_collection(self, collection_id: str, collection: UpdateCollection):
         return self._api._modify(
             id=UUID(collection_id),
             new_name=collection.new_name,

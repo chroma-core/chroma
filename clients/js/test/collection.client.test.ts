@@ -15,10 +15,26 @@ test("it should list collections", async () => {
   expect(collections.length).toBe(1);
 });
 
+
+test('it should create a collection', async () => {
+  await chroma.reset()
+  const collection = await chroma.createCollection('test')
+  expect(collection).toBeDefined()
+  expect(collection).toHaveProperty('name')
+  let collections = await chroma.listCollections()
+  expect(collections).toHaveLength(1)
+  let resultColl = collections[0]
+  expect(resultColl).toHaveProperty('name')
+  expect(resultColl.name).toBe('test')
+  expect(resultColl).toHaveProperty('metadata')
+  expect(resultColl.metadata).toBeNull()
+})
+
 test("it should create a collection", async () => {
   const collection = await chroma.createCollection("test");
   expect(collection).toBeDefined();
   expect(collection).toHaveProperty("name");
+  expect(collection).toHaveProperty('id')
   expect(collection.name).toBe("test");
   let collections = await chroma.listCollections();
   expect([{ name: "test", metadata: null }]).toEqual(
@@ -32,6 +48,7 @@ test("it should create a collection", async () => {
   const collection2 = await chroma.createCollection("test2", { test: "test" });
   expect(collection2).toBeDefined();
   expect(collection2).toHaveProperty("name");
+  expect(collection2).toHaveProperty('id')
   expect(collection2.name).toBe("test2");
   expect(collection2).toHaveProperty("metadata");
   expect(collection2.metadata).toHaveProperty("test");
