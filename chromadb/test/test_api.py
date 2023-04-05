@@ -1367,3 +1367,25 @@ def test_multiple_collections(api_fixture, request):
 
     assert results1["ids"][0][0] == ids1[0]
     assert results2["ids"][0][0] == ids2[0]
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_update_query(api_fixture, request):
+
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection("test_update_query")
+    collection.add(**records)
+
+    updated_records = {
+        "ids": [records["ids"][0]],
+        "embeddings": [[0.1, 0.2, 0.3]],
+        "documents": ["updated document"],
+        "metadatas": [{"foo": "bar"}],
+    }
+
+    collection.update(**updated_records)
+
+    # test query
+    results = collection.query(query_embeddings=updated_records['embeddings'], n_results=1)
+    assert len(results["ids"][0]) == 1
