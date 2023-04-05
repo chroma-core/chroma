@@ -318,7 +318,14 @@ class Collection(BaseModel):
                 raise ValueError("You must provide embeddings or a function to compute them")
             embeddings = self._embedding_function(documents)
 
-        self._client._upsert(collection_name=self.name, ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents, increment_index=increment_index)
+        self._client._upsert(
+            collection_name=self.name,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            increment_index=increment_index,
+        )
 
     def delete(
         self,
