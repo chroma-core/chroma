@@ -17,3 +17,8 @@ export CHROMA_SERVER_HTTP_PORT=8000
 
 python -m pytest
 
+cd clients/js 
+yarn
+yarn test:run
+cd ../..
+
