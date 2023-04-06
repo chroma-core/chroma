@@ -3,3 +3,5 @@ pytest
 setuptools_scm
 httpx
 black==22.10.0 # match what's in pyproject.toml
+hypothesis
+hypothesis[numpy]
