@@ -38,7 +38,7 @@ def check_index_name(index_name):
     )
     if len(index_name) < 3 or len(index_name) > 63:
         raise ValueError(msg)
-    if not re.match("^[a-z0-9][a-z0-9._-]*[a-z0-9]$", index_name):
+    if not re.match("^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$", index_name):
         raise ValueError(msg)
     if ".." in index_name:
         raise ValueError(msg)
