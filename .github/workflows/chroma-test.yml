@@ -28,4 +28,3 @@ jobs:
       run: python -m pytest
     - name: Integration Test
       run: bin/integration-test
-        
