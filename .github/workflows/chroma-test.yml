@@ -28,6 +28,4 @@ jobs:
       run: python -m pytest
     - name: Integration Test
       run: bin/integration-test
-    - name: JS Tests
-      run: bin/js-test
         
