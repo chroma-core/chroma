@@ -14,7 +14,7 @@ def api(request):
     return chromadb.Client(configuration)
 
 
-@given(collection=strategies.collections(), embeddings=strategies.embeddings())
+@given(collection=strategies.collections(), embeddings=strategies.embedding_set())
 def test_add(api, collection, embeddings):
 
     api.reset()
@@ -22,5 +22,9 @@ def test_add(api, collection, embeddings):
     coll = api.create_collection(**collection)
     coll.add(**embeddings)
 
-    invariants.count(api, coll.name, len(collection))
-    invariants.ann_accuracy(api, coll.name, embeddings)
+    invariants.count(
+        api,
+        coll.name,
+        len(embeddings["ids"]),
+    )
+    invariants.ann_accuracy(coll, embeddings)
