@@ -82,7 +82,12 @@ class API(ABC):
         """
 
     @abstractmethod
-    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[Dict] = None,
+        embedding_function: Optional[Callable] = None,
+        ) -> Collection:
         """Calls create_collection with get_or_create=True
 
         Args:
