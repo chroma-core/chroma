@@ -32,6 +32,6 @@ def ann_accuracy(
             embeddings["documents"][i] if embeddings["documents"] is not None else None
         )
         assert result["metadatas"][i][0] == (
-            embeddings["metadatas"][i] if embeddings["metadatas"] is not None else {}
+            embeddings["metadatas"][i] if embeddings["metadatas"] is not None else None
         )
         assert result["distances"][i][0] == 0.0

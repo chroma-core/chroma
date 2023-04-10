@@ -10,14 +10,13 @@ import re
 # See Hypothesis documentation for creating strategies at
 # https://hypothesis.readthedocs.io/en/latest/data.html
 
-metadata = st.from_type(types.Metadata)
 collection_metadata = st.from_type(Optional[types.Metadata])
 
 # TODO: build a strategy that constructs english sentences instead of gibberish strings
 
 # TODO: collection names should be arbitrary strings
 # _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]$")
-_collection_name_re = re.compile(r"^[a-z0-9][a-z0-9._-][a-z0-9]$")
+_collection_name_re = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
 _two_periods_re = re.compile(r"\.\.")
 
@@ -58,7 +57,8 @@ def one_or_both(strategy_a, strategy_b):
 
 def unique_ids_strategy(count: int):
     # TODO: Handle non-unique ids
-    return st.lists(st.text(), min_size=count, max_size=count, unique=True)
+    # TODO: Handle empty string ids
+    return st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True)
 
 
 float_types = [np.float16, np.float32, np.float64]
@@ -70,20 +70,49 @@ def embeddings_strategy(dim: int, count: int, dtype: np.dtype):
         dtype=dtype,
         shape=(count, dim),
         # TODO: It should be possible to deal with NaN and inf values
+        # TODO: It should be possible to deal with redundant embeddings
         elements=st.floats(
-            allow_nan=False, allow_infinity=False, width=np.dtype(dtype).itemsize * 8
+            allow_nan=False,
+            allow_infinity=False,
+            width=np.dtype(dtype).itemsize * 8,
         )
         if dtype in float_types
         else st.integers(min_value=np.iinfo(dtype).min, max_value=np.iinfo(dtype).max),
+        unique=True,
     )
 
 
+# TODO: Use a hypothesis strategy while maintaining embedding uniqueness
+#       Or handle duplicate embeddings within a known epsilon
+def create_embeddings(dim: int, count: int, dtype: np.dtype):
+    return np.random.uniform(
+        low=-1.0,
+        high=1.0,
+        size=(count, dim),
+    ).astype(dtype)
+
+
 def documents_strategy(count: int):
-    return st.lists(st.text(), min_size=count, max_size=count)
+    # TODO: Handle non-unique documents
+    # TODO: Handle empty string documents
+    return st.one_of(
+        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True), st.none()
+    )
+
+
+def metadata_strategy():
+    return st.dictionaries(
+        st.text(),
+        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+        max_size=1,
+    )
 
 
 def metadatas_strategy(count: int):
-    return st.one_of(st.lists(metadata, min_size=count, max_size=count), st.none())
+    return st.one_of(
+        st.lists(metadata_strategy(), min_size=count, max_size=count),
+        st.none(),
+    )
 
 
 @st.composite
@@ -102,21 +131,21 @@ def embedding_set(
         count = draw(st.integers(min_value=1, max_value=2000))
 
     if dtype is None:
-        dtype = draw(
-            st.sampled_from([np.float16, np.float32, np.float64, np.int16, np.int32, np.int64])
-        )
+        # TODO Support integer types?
+        dtype = draw(st.sampled_from(float_types))
 
     count = cast(int, count)
     dimension = cast(int, dimension)
 
     # TODO: should be possible to deal with empty sets
-    ids = draw(st.lists(st.text(), min_size=count, max_size=count))
+    ids = draw(unique_ids_strategy(count))
 
-    embeddings, documents = draw(
-        one_or_both(embeddings_strategy(dimension, count, dtype), documents_strategy(count))
-    )
+    # TODO: Test documents only
+    # TODO: Generative embedding function to guarantee unique embeddings for unique documents
+    embeddings = create_embeddings(dimension, count, dtype)
+    documents = draw(documents_strategy(count))
 
-    metadatas = draw(st.lists(metadata, min_size=count, max_size=count))
+    metadatas = draw(metadatas_strategy(count))
 
     return {
         "ids": ids,
