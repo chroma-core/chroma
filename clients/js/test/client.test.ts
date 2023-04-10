@@ -1,5 +1,7 @@
 import { expect, test } from '@jest/globals';
 import { ChromaClient } from '../src/index'
+import { QueryEmbeddingIncludeEnum } from '../src/generated/models/query-embedding'
+import { GetEmbeddingIncludeEnum } from '../src/generated';
 
 const PORT = process.env.PORT || '8000'
 const URL = 'http://localhost:' + PORT
@@ -243,4 +245,79 @@ test('wrong code returns an error', async () => {
     const results = await collection.get(undefined, { "test": { "$contains": "hello" } });
     expect(results.error).toBeDefined()
     expect(results.error).toBe("ValueError('Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got $contains')")
+})
+
+// test where_document
+test('it should get embedding with matching documents', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    const ids = ['test1', 'test2', 'test3']
+    const embeddings = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    ]
+    const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }]
+    const documents = ["doc1", "doc2", "doc3"]
+    await collection.add(ids, embeddings, metadatas, documents)
+
+    const results = await collection.query([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 3, undefined, undefined, { "$contains": "doc1" })
+
+    // it should only return doc1 
+    expect(results).toBeDefined()
+    expect(results).toBeInstanceOf(Object)
+    expect(results.ids.length).toBe(1)
+    expect(['test1']).toEqual(expect.arrayContaining(results.ids[0]));
+    expect(['test2']).not.toEqual(expect.arrayContaining(results.ids[0]));
+    expect(['doc1']).toEqual(expect.arrayContaining(results.documents[0]));
+
+    const results2 = await collection.query([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 3, undefined, undefined, { "$contains": "doc1" }, [QueryEmbeddingIncludeEnum.Embeddings])
+
+    expect(results2.embeddings[0][0]).toBeInstanceOf(Array)
+    expect(results2.embeddings[0].length).toBe(1)
+    expect(results2.embeddings[0][0].length).toBe(10)
+})
+
+test('it should get embedding with matching documents', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    const ids = ['test1', 'test2', 'test3']
+    const embeddings = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    ]
+    const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }]
+    const documents = ["doc1", "doc2", "doc3"]
+    await collection.add(ids, embeddings, metadatas, documents)
+
+    const results = await collection.get(['test1'], undefined, undefined, undefined, [GetEmbeddingIncludeEnum.Embeddings, GetEmbeddingIncludeEnum.Metadatas, GetEmbeddingIncludeEnum.Documents])
+    expect(results).toBeDefined()
+    expect(results).toBeInstanceOf(Object)
+    expect(results.embeddings[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(results.metadatas[0]).toEqual({ test: 'test1' })
+    expect(results.documents[0]).toEqual('doc1')
+
+    await collection.update(
+        ['test1'],
+        [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
+        [{ test: 'test1new' }],
+        ["doc1new"]
+    )
+
+    const results2 = await collection.get(['test1'], undefined, undefined, undefined, [GetEmbeddingIncludeEnum.Embeddings, GetEmbeddingIncludeEnum.Metadatas, GetEmbeddingIncludeEnum.Documents])
+    expect(results2).toBeDefined()
+    expect(results2).toBeInstanceOf(Object)
+    expect(results2.embeddings[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11])
+    expect(results2.metadatas[0]).toEqual({ test: 'test1new' })
+    expect(results2.documents[0]).toEqual('doc1new')
+})
+
+test('it should modify collection', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    expect(collection.name).toBe('test')
+
+    await collection.modify('test2')
+    expect(collection.name).toBe('test2')
 })

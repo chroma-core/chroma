@@ -1,4 +1,4 @@
-import { QueryEmbeddingIncludeEnum } from "./generated";
+import { GetEmbeddingIncludeEnum, QueryEmbeddingIncludeEnum } from "./generated";
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
 
@@ -105,6 +105,10 @@ export class Collection {
       this.embeddingFunction = embeddingFunction;
   }
 
+  public setName(name: string) {
+    this.name = name;
+  }
+
   public async add(
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
@@ -178,11 +182,34 @@ export class Collection {
     return response.data;
   }
 
+  public async modify(
+    name?: string,
+    metadata?: object,
+  ) {
+    const response = await this.api.updateCollection({
+      collectionName: this.name,
+      updateCollection: {
+        new_name: name,
+        new_metadata: metadata,
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    this.setName(name || this.name)
+
+    return response
+  }
+
   public async get(
     ids?: string[],
     where?: object,
     limit?: number,
     offset?: number,
+    include?: GetEmbeddingIncludeEnum[],
+    where_document?: object,
   ) {
     let idsArray = undefined
     if (ids !== undefined) idsArray = toArray(ids);
@@ -194,6 +221,8 @@ export class Collection {
         where,
         limit,
         offset,
+        include,
+        where_document,
       },
     }).then(function (response) {
       return response.data;
@@ -203,6 +232,44 @@ export class Collection {
 
     return resp
 
+  }
+
+  public async update(
+    ids: string | string[],
+    embeddings?: number[] | number[][],
+    metadatas?: object | object[],
+    documents?: string | string[],
+  ) {
+    if ((embeddings === undefined) && (documents === undefined) && (metadatas === undefined)) {
+      throw new Error(
+        "embeddings, documents, and metadatas cannot all be undefined",
+      );
+    } else if ((embeddings === undefined) && (documents !== undefined)) {
+      const documentsArray = toArray(documents);
+      if (this.embeddingFunction !== undefined) {
+        embeddings = await this.embeddingFunction.generate(documentsArray)
+      } else {
+        throw new Error(
+          "embeddingFunction is undefined. Please configure an embedding function",
+        );
+      }
+    }
+
+    var resp = await this.api.update({
+      collectionName: this.name,
+      updateEmbedding: {
+        ids: toArray(ids),
+        embeddings: (embeddings ? toArrayOfArrays(embeddings) : undefined),
+        documents: toArray(documents),
+        metadatas: toArray(metadatas),
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return resp
   }
 
   public async query(
