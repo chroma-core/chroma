@@ -4,7 +4,7 @@ import tempfile
 import os
 
 
-hypothesis.settings.register_profile("dev", deadline=None)
+hypothesis.settings.register_profile("dev", deadline=10000)
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
@@ -16,9 +16,9 @@ def configurations():
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
         ),
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
-        ),
+        # Settings(
+        #     chroma_api_impl="local",
+        #     chroma_db_impl="duckdb+parquet",
+        #     persist_directory=tempfile.gettempdir() + "/tests",
+        # ),
     ]

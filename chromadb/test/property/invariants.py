@@ -1,4 +1,4 @@
-from chromadb.test.property.strategies import EmbeddingSet
+from chromadb.test.property.strategies import EmbeddingSet, Collection
 from chromadb.api import API
 
 

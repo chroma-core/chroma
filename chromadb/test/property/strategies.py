@@ -5,19 +5,27 @@ import hypothesis.extra.numpy as npst
 import numpy.typing as npt
 import numpy as np
 import chromadb.api.types as types
+import chromadb.utils.embedding_functions as embedding_functions
 import re
+
 
 # See Hypothesis documentation for creating strategies at
 # https://hypothesis.readthedocs.io/en/latest/data.html
 
-metadata = st.from_type(Optional[types.Metadata])
+metadata = st.one_of(
+    st.none(),
+    st.dictionaries(
+        st.text(),
+        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+    ),
+)
 
 # TODO: build a strategy that constructs english sentences instead of gibberish strings
 # Unsure what would happen feeding random unicode to an embedding model, could get bad results
 
 document = st.from_type(Optional[str])
 
-_coll_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]$")
+_coll_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
 _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
 _two_periods_re = re.compile(r"\.\.")
 
@@ -35,15 +43,18 @@ class Collection(TypedDict):
 
 
 @st.composite
-def collections(draw) -> Collection:
-    """Strategy to generate a set of collections"""
-
-    # name = draw(st.from_regex(coll_name_re))
-    name = draw(st.one_of(st.from_regex(_coll_name_re)))
+def collection_name(draw) -> str:
+    """Strategy to generate a valid collection name"""
+    name = draw(st.from_regex(_coll_name_re))
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
+    return name
 
-    return {"name": name, "metadata": draw(metadata)}
+
+@st.composite
+def collections(draw) -> Collection:
+    """Strategy to generate a set of collections"""
+    return {"name": draw(collection_name()), "metadata": draw(metadata)}
 
 
 @st.composite
@@ -63,9 +74,7 @@ def embeddings(
 
     if dtype is None:
         dtype = draw(
-            st.sampled_from(
-                [np.float16, np.float32, np.float64, np.int16, np.int32, np.int64]
-            )
+            st.sampled_from([np.float16, np.float32, np.float64, np.int16, np.int32, np.int64])
         )
 
     count = cast(int, count)
