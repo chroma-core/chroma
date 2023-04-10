@@ -1,4 +1,5 @@
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from typing import Optional
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
@@ -18,7 +19,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: str, model_name: str = "text-embedding-ada-002"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"):
         try:
             import openai
         except ImportError:
@@ -26,7 +27,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        openai.api_key = api_key
+        if api_key is str:
+            openai.api_key = api_key
+
         self._client = openai.Embedding
         self._model_name = model_name
 
