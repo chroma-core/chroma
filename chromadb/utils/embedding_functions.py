@@ -27,7 +27,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        if api_key is str:
+        if api_key is not None:
             openai.api_key = api_key
 
         self._client = openai.Embedding
