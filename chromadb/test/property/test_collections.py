@@ -87,13 +87,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @rule(target=collections, coll=st.one_of(consumes(collections), strategies.collections()))
     def get_or_create_coll(self, coll):
+
         c = self.api.get_or_create_collection(**coll)
         assert c.name == coll["name"]
-
-        # TODO: this is a problem with the API, the new metadata is ignored ifthe collection already exists
-        if coll["name"] not in self.existing:
-            assert c.metadata == coll["metadata"]
-
+        assert c.metadata == coll["metadata"]
         self.existing.add(coll["name"])
         return coll
 
@@ -121,15 +118,23 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return coll
 
 
-# TODO: takes 7-8 minutes to run, figure out how to make faster. It shouldn't take that long, it's only 3-5000 database operations and DuckDB is faster than that.œ
+# TODO: takes 7-8 minutes to run, figure out how to make faster. It shouldn't take that long, it's only 3-5000 database operations and DuckDB is faster than that
 def test_collections(caplog, api):
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))
 
 
-def test_upsert_metadata(api):
+def test_upsert_metadata_example(api):
     state = CollectionStateMachine(api)
     state.initialize()
     v1 = state.create_coll(coll={"name": "E40", "metadata": None})
     state.get_or_create_coll(coll={"name": "E40", "metadata": {"foo": "bar"}})
+    state.teardown()
+
+
+def test_reset_metadata_example(api):
+    state = CollectionStateMachine(api)
+    state.initialize()
+    v1 = state.create_coll(coll={"name": "A1R", "metadata": {"foo": "bar"}})
+    state.modify_coll(coll=v1, new_metadata={}, new_name=None)
     state.teardown()
