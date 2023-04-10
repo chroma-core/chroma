@@ -28,18 +28,11 @@ EMBEDDING_TABLE_SCHEMA = [
 
 
 def db_array_schema_to_clickhouse_schema(table_schema):
-    return_str = ""
-    for element in table_schema:
-        for k, v in element.items():
-            return_str += f"{k} {v}, "
-    return return_str
+    return ", ".join(f"{k} {v}" for column in table_schema for k, v in column.items())
 
 
 def db_schema_to_keys() -> List[str]:
-    keys = []
-    for element in EMBEDDING_TABLE_SCHEMA:
-        keys.append(list(element.keys())[0])
-    return keys
+    return [list(element.keys())[0] for element in EMBEDDING_TABLE_SCHEMA]
 
 
 class Clickhouse(DB):
