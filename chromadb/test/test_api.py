@@ -172,8 +172,14 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
         n_results=1,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
+
     for key in nn.keys():
         assert len(nn[key]) == 1
+    
+    assert nn['ids'] == [['id1']]
+    assert nn['embeddings'] == [[[1, 2, 3]]]
+    assert nn['documents'] == [['hello']]
+    assert nn['distances'] == [[0]]
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
