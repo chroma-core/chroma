@@ -4,14 +4,14 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
             raise ValueError(
                 "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
             )
-        self._model = SentenceTransformer(model_name)
+        self._model = SentenceTransformer(model_name, device=device)
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(list(texts), convert_to_numpy=True).tolist()
