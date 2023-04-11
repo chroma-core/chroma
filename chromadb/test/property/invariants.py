@@ -2,6 +2,7 @@ import numpy as np
 from chromadb.test.property.strategies import EmbeddingSet
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
+from hypothesis import note
 
 
 def count(api: API, collection_name: str, expected_count: int):
@@ -13,10 +14,12 @@ def count(api: API, collection_name: str, expected_count: int):
 def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
+    min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
 
-    # Validate that each embedding is its own nearest neighbor
+    # Validate that each embedding is its own nearest neighbor and adjust recall if not.
+    # Use k=10, because using k=1 with small N can affect recall very badly
     result = collection.query(
         query_embeddings=embeddings["embeddings"],
         query_texts=embeddings["documents"] if embeddings["embeddings"] is None else None,
@@ -24,14 +27,23 @@ def ann_accuracy(
         include=["embeddings", "documents", "metadatas", "distances"],
     )
 
+    missing = 0
     for i, id in enumerate(embeddings["ids"]):
-        assert result["ids"][i][0] == id
-        if embeddings["embeddings"] is not None:
-            assert np.allclose(result["embeddings"][i][0], embeddings["embeddings"][i])
-        assert result["documents"][i][0] == (
-            embeddings["documents"][i] if embeddings["documents"] is not None else None
-        )
-        assert result["metadatas"][i][0] == (
-            embeddings["metadatas"][i] if embeddings["metadatas"] is not None else None
-        )
-        assert result["distances"][i][0] == 0.0
+
+        if result["ids"][i][0] != id:
+            missing += 1
+        else:
+            if embeddings["embeddings"] is not None:
+                assert np.allclose(result["embeddings"][i][0], embeddings["embeddings"][i])
+            assert result["documents"][i][0] == (
+                embeddings["documents"][i] if embeddings["documents"] is not None else None
+            )
+            assert result["metadatas"][i][0] == (
+                embeddings["metadatas"][i] if embeddings["metadatas"] is not None else None
+            )
+            assert result["distances"][i][0] == 0.0
+
+    recall = (len(embeddings["ids"]) - missing) / len(embeddings["ids"])
+
+    note(f"recall: {recall}")
+    assert recall >= min_recall

@@ -139,11 +139,11 @@ def embedding_set(
 ) -> EmbeddingSet:
     """Strategy to generate a set of embeddings."""
 
-    if dimension is None:
-        dimension = draw(st.integers(min_value=5, max_value=2048))
-
     if count is None:
-        count = draw(st.integers(min_value=1, max_value=256))
+        count = draw(st.integers(min_value=1, max_value=512))
+
+    if dimension is None:
+        dimension = draw(st.integers(min_value=2, max_value=2048))
 
     if dtype is None:
         # TODO Support integer types?
