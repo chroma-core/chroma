@@ -1,6 +1,6 @@
 import pytest
 from hypothesis import given, settings
-import hypothesis.strategies as st
+import hypothesis.strategies
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
@@ -19,7 +19,7 @@ def test_add(api, collection, embeddings):
 
     api.reset()
 
-    coll = api.create_collection(**collection)
+    coll = api.create_collection(**collection, embedding_function=lambda x: None)
     coll.add(**embeddings)
 
     invariants.count(

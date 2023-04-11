@@ -55,10 +55,25 @@ def one_or_both(strategy_a, strategy_b):
     )
 
 
-def unique_ids_strategy(count: int):
-    # TODO: Handle non-unique ids
-    # TODO: Handle empty string ids
-    return st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True)
+@st.composite
+def unique_ids_strategy(draw, count: int):
+
+    ratio = 20
+    strs = count // ratio
+
+    str_results = draw(
+        st.lists(st.text(min_size=1, max_size=64), min_size=strs, max_size=strs, unique=True)
+    )
+
+    # Rotate selections from between the two lists
+    results = []
+    for i in range(count):
+        if i % ratio == 0 and len(str_results) > 0:
+            results.append(str_results.pop())
+        else:
+            results.append(str(draw(st.uuids())))
+
+    return results
 
 
 float_types = [np.float16, np.float32, np.float64]
@@ -125,10 +140,10 @@ def embedding_set(
     """Strategy to generate a set of embeddings."""
 
     if dimension is None:
-        dimension = draw(st.integers(min_value=1, max_value=2048))
+        dimension = draw(st.integers(min_value=5, max_value=256))
 
     if count is None:
-        count = draw(st.integers(min_value=1, max_value=2000))
+        count = draw(st.integers(min_value=1, max_value=256))
 
     if dtype is None:
         # TODO Support integer types?
@@ -142,10 +157,9 @@ def embedding_set(
 
     # TODO: Test documents only
     # TODO: Generative embedding function to guarantee unique embeddings for unique documents
-    embeddings = create_embeddings(dimension, count, dtype)
     documents = draw(documents_strategy(count))
-
     metadatas = draw(metadatas_strategy(count))
+    embeddings = create_embeddings(dimension, count, dtype)
 
     return {
         "ids": ids,
