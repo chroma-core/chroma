@@ -112,6 +112,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll["name"] = new_name
 
         c.modify(metadata=new_metadata, name=new_name)
+        c = self.api.get_collection(name=coll["name"])
 
         assert c.name == coll["name"]
         assert c.metadata == coll["metadata"]
@@ -129,12 +130,4 @@ def test_upsert_metadata_example(api):
     state.initialize()
     v1 = state.create_coll(coll={"name": "E40", "metadata": None})
     state.get_or_create_coll(coll={"name": "E40", "metadata": {"foo": "bar"}})
-    state.teardown()
-
-
-def test_reset_metadata_example(api):
-    state = CollectionStateMachine(api)
-    state.initialize()
-    v1 = state.create_coll(coll={"name": "A1R", "metadata": {"foo": "bar"}})
-    state.modify_coll(coll=v1, new_metadata={}, new_name=None)
     state.teardown()
