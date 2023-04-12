@@ -17,7 +17,6 @@ collection_metadata = st.from_type(Optional[types.Metadata])
 # TODO: build a strategy that constructs english sentences instead of gibberish strings
 
 # TODO: collection names should be arbitrary strings
-# _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]$")
 _collection_name_re = re.compile(r"^[a-z0-9][a-z0-9._-]{1,60}[a-z0-9]$")
 _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
 _two_periods_re = re.compile(r"\.\.")
