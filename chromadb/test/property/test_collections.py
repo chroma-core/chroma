@@ -36,7 +36,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @initialize()
     def initialize(self):
-        print("initializing")
         self.api.reset()
         self.existing = set()
 
