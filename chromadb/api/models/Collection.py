@@ -29,9 +29,6 @@ if TYPE_CHECKING:
     from chromadb.api import API
 
 
-default_embedding_function = None
-
-
 class Collection(BaseModel):
     name: str
     metadata: Optional[Dict] = None
@@ -50,16 +47,12 @@ class Collection(BaseModel):
         if embedding_function is not None:
             self._embedding_function = embedding_function
         else:
-            global default_embedding_function
-            if default_embedding_function is None:
-                from chromadb.utils import embedding_functions as ef
-
-                default_embedding_function = ef.SentenceTransformerEmbeddingFunction()
+            import chromadb.utils.embedding_functions as ef
 
             logger.warning(
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
-            self._embedding_function = default_embedding_function
+            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
         super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):

@@ -119,6 +119,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return coll
 
 
+# TODO: takes 7-8 minutes to run, figure out how to make faster. It shouldn't take that long, it's only 3-5000 database operations and DuckDB is faster than that
 def test_collections(caplog, api):
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))
