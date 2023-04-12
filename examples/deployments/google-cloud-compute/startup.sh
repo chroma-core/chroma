@@ -17,7 +17,7 @@ version: "3.9"
 services:
   server:
     container_name: server
-    image: ghcr.io/chroma-core/chroma:0.3.11
+    image: ghcr.io/chroma-core/chroma:0.3.14
     volumes:
       - ./index_data:/index_data
     environment:
@@ -46,7 +46,7 @@ services:
 EOF
 
 mkdir config
-sudo cat << EOF > config/backup_disk.xml
+cat << EOF > config/backup_disk.xml
 <clickhouse>
     <storage_configuration>
         <disks>
@@ -63,7 +63,7 @@ sudo cat << EOF > config/backup_disk.xml
 </clickhouse>
 EOF
 
-sudo cat << EOF > config/chroma_users.xml
+cat << EOF > config/chroma_users.xml
 <clickhouse>
     <profiles>
         <default>
