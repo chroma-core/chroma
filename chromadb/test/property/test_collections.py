@@ -1,5 +1,5 @@
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 import chromadb
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection

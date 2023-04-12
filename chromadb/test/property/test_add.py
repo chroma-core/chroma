@@ -1,8 +1,6 @@
 import pytest
-from hypothesis import given, settings
-import hypothesis.strategies
+from hypothesis import given
 import chromadb
-from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants

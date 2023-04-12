@@ -1,8 +1,7 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Dict, Optional, Sequence, Tuple, TypedDict, cast
+from typing import Optional, Sequence, TypedDict, cast
 import hypothesis.extra.numpy as npst
-import numpy.typing as npt
 import numpy as np
 import chromadb.api.types as types
 import re
