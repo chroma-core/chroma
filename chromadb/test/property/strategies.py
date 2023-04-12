@@ -6,6 +6,9 @@ import numpy as np
 import chromadb.api.types as types
 import re
 
+# Set the random seed for reproducibility
+np.random.seed(0)
+
 # See Hypothesis documentation for creating strategies at
 # https://hypothesis.readthedocs.io/en/latest/data.html
 
@@ -64,7 +67,8 @@ def unique_ids_strategy(draw, count: int):
         st.lists(st.text(min_size=1, max_size=64), min_size=strs, max_size=strs, unique=True)
     )
 
-    # Rotate selections from between the two lists
+    # Rotate selections from between the two lists. This is a workaround for making sure we don't try to generate
+    # too many strings, causing the Hypothesis health check to fail.ß
     results = []
     for i in range(count):
         if i % ratio == 0 and len(str_results) > 0:
@@ -77,6 +81,8 @@ def unique_ids_strategy(draw, count: int):
 
 float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]
+
+# TODO: Handle single embedding, metadata, and document i.e. not list
 
 
 def embeddings_strategy(dim: int, count: int, dtype: np.dtype):
@@ -115,10 +121,11 @@ def documents_strategy(count: int):
 
 
 def metadata_strategy():
+    # TODO: Handle NaN and inf values
+    # TODO: Handle empty string keys
     return st.dictionaries(
-        st.text(),
+        st.text(min_size=1),
         st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
-        max_size=1,
     )
 
 

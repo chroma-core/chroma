@@ -17,6 +17,7 @@ def test_add(api, collection, embeddings):
 
     api.reset()
 
+    # TODO: Generative embedding functions
     coll = api.create_collection(**collection, embedding_function=lambda x: None)
     coll.add(**embeddings)
 

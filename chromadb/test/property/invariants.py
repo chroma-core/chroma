@@ -19,7 +19,6 @@ def ann_accuracy(
     """Validate that the API performs nearest_neighbor searches correctly"""
 
     # Validate that each embedding is its own nearest neighbor and adjust recall if not.
-    # Use k=10, because using k=1 with small N can affect recall very badly
     result = collection.query(
         query_embeddings=embeddings["embeddings"],
         query_texts=embeddings["documents"] if embeddings["embeddings"] is None else None,
