@@ -1,5 +1,4 @@
-import { DefaultApi } from "./generated/api";
-import { Configuration } from "./generated/configuration";
+import {Configuration, DefaultApi} from "./generated";
 
 // a function to convert a non-Array object to an Array
 function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -92,6 +91,8 @@ type CallableFunction = {
   generate(texts: string[]): Promise<number[][]>;
 };
 
+// we need to override constructors to make it work with jest
+// https://stackoverflow.com/questions/76007003/jest-tobeinstanceof-expected-constructor-array-received-constructor-array
 function repack(value: unknown): any {
   if(Boolean(value) && typeof value === 'object') {
     if (Array.isArray(value)) {
@@ -166,7 +167,7 @@ export class Collection {
       );
     }
 
-    const response = await this.api.add({
+    return await this.api.add({
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
@@ -176,12 +177,10 @@ export class Collection {
         increment_index: increment_index,
       },
     }).then(function (response) {
-            return response.json()
-    }).catch(function ({ response }) {
+      return response.json()
+    }).catch(function ({response}) {
       return response.data;
-    });
-
-    return response
+    })
   }
 
   public async count() {
@@ -240,7 +239,7 @@ export class Collection {
 
     const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
-    const response = await this.api.getNearestNeighbors({
+    return await this.api.getNearestNeighbors({
       collectionName: this.name,
       queryEmbedding: {
         query_embeddings: query_embeddingsArray,
@@ -248,12 +247,10 @@ export class Collection {
         n_results,
       },
     }).then(async function (response) {
-            return repack(await response.json())
-    }).catch(function ({ response }) {
+      return repack(await response.json())
+    }).catch(function ({response}) {
       return response.data;
     });
-
-    return response;
   }
 
   public async peek(limit: number = 10) {
@@ -270,16 +267,14 @@ export class Collection {
   }
 
   public async delete(ids?: string[], where?: object) {
-    var response = await this.api._delete({
+    return await this.api._delete({
       collectionName: this.name,
-      deleteEmbedding: { ids: ids, where: where },
+      deleteEmbedding: {ids: ids, where: where},
     }).then(function (response) {
-            return response.json()
-    }).catch(function ({ response }) {
+      return response.json()
+    }).catch(function ({response}) {
       return response.data;
-    });
-
-    return response
+    })
   }
 
 }
@@ -329,13 +324,11 @@ export class ChromaClient {
   }
 
   public async deleteCollection(name: string) {
-    const response = await this.api.deleteCollection({ collectionName: name }).then(function (response) {
-            return response.json()
-    }).catch(function ({ response }) {
+    return await this.api.deleteCollection({collectionName: name}).then(function (response) {
+      return response.json()
+    }).catch(function ({response}) {
       return response.data;
-    });
-
-    return response
+    })
   }
 
 }
