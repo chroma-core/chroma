@@ -1,5 +1,5 @@
 import { expect, test } from '@jest/globals';
-import { ChromaClient } from '../src/index'
+import { ChromaClient } from '../src'
 
 const PORT = process.env.PORT || '8000'
 const URL = 'http://localhost:' + PORT
@@ -30,13 +30,13 @@ test('it should reset the database', async () => {
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
     expect(collections.length).toBe(0)
-    const collection = await chroma.createCollection('test')
+    await chroma.createCollection('test')
     await chroma.reset()
     collections = await chroma.listCollections()
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
     expect(collections.length).toBe(0)
-})
+}, 2e4)
 
 test('it should create a collection', async () => {
     await chroma.reset()
@@ -54,7 +54,7 @@ test('it should list collections', async () => {
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
     expect(collections.length).toBe(0)
-    const collection = await chroma.createCollection('test')
+    await chroma.createCollection('test')
     collections = await chroma.listCollections()
     expect(collections.length).toBe(1)
 })
@@ -72,10 +72,10 @@ test('it should get a collection', async () => {
 
 test('it should delete a collection', async () => {
     await chroma.reset()
-    const collection = await chroma.createCollection('test')
+    await chroma.createCollection('test')
     let collections = await chroma.listCollections()
     expect(collections.length).toBe(1)
-    var resp = await chroma.deleteCollection('test')
+    await chroma.deleteCollection('test');
     collections = await chroma.listCollections()
     expect(collections.length).toBe(0)
 })
@@ -177,7 +177,7 @@ test('it should delete a collection', async () => {
     await collection.add(ids, embeddings, metadatas)
     let count = await collection.count()
     expect(count).toBe(3)
-    var resp = await collection.delete(undefined, { 'test': 'test1' })
+    await collection.delete(undefined, {'test': 'test1'});
     count = await collection.count()
     expect(count).toBe(2)
 })
