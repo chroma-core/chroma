@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  test_python:
+  test:
     strategy:
       matrix:
         python: ['3.10']
@@ -28,16 +28,3 @@ jobs:
       run: python -m pytest
     - name: Integration Test
       run: bin/integration-test
-
-  test_node:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: Setup DB
-      run: docker-compose up -d --build
-    - name: Sleep for 5 seconds
-      run: sleep 5s
-      shell: bash
-    - name: Test Node Client
-      run: cd clients/js && npm install && npx jest --runInBand

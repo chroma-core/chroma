@@ -197,7 +197,7 @@ export class Collection {
     let idsArray = undefined
     if (ids !== undefined) idsArray = toArray(ids);
 
-    var resp = await this.api.get({
+    return await this.api.get({
       collectionName: this.name,
       getEmbedding: {
         ids: idsArray,
@@ -207,11 +207,9 @@ export class Collection {
       },
     }).then(async function (response) {
       return repack(await response.json())
-    }).catch(function ({ response }) {
+    }).catch(function ({response}) {
       return response.data;
-    });
-
-    return resp
+    })
 
   }
 

@@ -36,7 +36,7 @@ test('it should reset the database', async () => {
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
     expect(collections.length).toBe(0)
-}, 2e4)
+})
 
 test('it should create a collection', async () => {
     await chroma.reset()
