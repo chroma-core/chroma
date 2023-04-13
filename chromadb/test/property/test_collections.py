@@ -96,8 +96,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule(
         target=collections,
         coll=consumes(collections),
-        new_metadata=strategies.metadata,
-        new_name=st.one_of(st.from_regex(strategies._coll_name_re), st.none()),
+        new_metadata=strategies.collection_metadata,
+        new_name=st.one_of(st.from_regex(strategies._collection_name_re), st.none()),
     )
     def modify_coll(self, coll, new_metadata, new_name):
         c = self.api.get_collection(name=coll["name"])

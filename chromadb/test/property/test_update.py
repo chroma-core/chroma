@@ -14,7 +14,7 @@ def api(request):
     return chromadb.Client(configuration)
 
 
-@given(collection=strategies.collections(), embeddings=strategies.embeddings())
+@given(collection=strategies.collections(), embeddings=strategies.embedding_set())
 def test_update(api, collection, embeddings):
     api.reset()
 
