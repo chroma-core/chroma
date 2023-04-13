@@ -1,5 +1,5 @@
+from chromadb.test.property.strategies import EmbeddingSet, Collection
 import numpy as np
-from chromadb.test.property.strategies import EmbeddingSet
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from hypothesis import note

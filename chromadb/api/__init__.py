@@ -61,7 +61,8 @@ class API(ABC):
         Args:
             name (str): The name of the collection to create. The name must be unique.
             metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
-            get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
+            get_or_create (bool, optional): If True, will return the collection if it already exists,
+                and update the metadata (if applicable). Defaults to False.
             embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
 
         Returns:
@@ -83,7 +84,8 @@ class API(ABC):
 
     @abstractmethod
     def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
-        """Calls create_collection with get_or_create=True
+        """Calls create_collection with get_or_create=True.
+           If the collection exists, but with different metadata, the metadata will be replaced.
 
         Args:
             name (str): The name of the collection to create. The name must be unique.

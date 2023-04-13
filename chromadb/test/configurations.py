@@ -4,7 +4,7 @@ import tempfile
 import os
 
 
-hypothesis.settings.register_profile("dev", deadline=None)
+hypothesis.settings.register_profile("dev", deadline=10000)
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 

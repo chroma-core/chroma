@@ -143,6 +143,9 @@ class Clickhouse(DB):
 
         if len(dupe_check) > 0:
             if get_or_create:
+                if dupe_check[0][2] != metadata:
+                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    dupe_check = self.get_collection(name)
                 logger.info(
                     f"collection with name {name} already exists, returning existing collection"
                 )

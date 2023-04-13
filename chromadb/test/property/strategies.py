@@ -4,6 +4,7 @@ from typing import Optional, Sequence, TypedDict, cast
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
+import chromadb.utils.embedding_functions as embedding_functions
 import re
 
 # Set the random seed for reproducibility
@@ -12,12 +13,19 @@ np.random.seed(0)
 # See Hypothesis documentation for creating strategies at
 # https://hypothesis.readthedocs.io/en/latest/data.html
 
-collection_metadata = st.from_type(Optional[types.Metadata])
+collection_metadata = st.one_of(
+    st.none(),
+    st.dictionaries(
+        st.text(),
+        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+    ),
+)
 
 # TODO: build a strategy that constructs english sentences instead of gibberish strings
 
-# TODO: collection names should be arbitrary strings
-_collection_name_re = re.compile(r"^[a-z0-9][a-z0-9._-]{1,60}[a-z0-9]$")
+document = st.from_type(Optional[str])
+
+_collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
 _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
 _two_periods_re = re.compile(r"\.\.")
 
@@ -37,15 +45,20 @@ class Collection(TypedDict):
 
 
 @st.composite
-def collections(draw) -> Collection:
+def collection_name(draw) -> Collection:
     """Strategy to generate a set of collections"""
 
     # name = draw(st.from_regex(coll_name_re))
     name = draw(st.one_of(st.from_regex(_collection_name_re)))
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
+    return name
 
-    return {"name": name, "metadata": draw(collection_metadata)}
+
+@st.composite
+def collections(draw) -> Collection:
+    """Strategy to generate a set of collections"""
+    return {"name": draw(collection_name()), "metadata": draw(collection_metadata)}
 
 
 def one_or_both(strategy_a, strategy_b):
