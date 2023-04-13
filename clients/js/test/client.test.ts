@@ -123,7 +123,7 @@ test('it should query a collection', async () => {
     expect(['test3']).not.toEqual(expect.arrayContaining(results.ids[0]));
 })
 
-test('it should peek a collection', async () => {
+test('it should peek a collection with embeddings', async () => {
     await chroma.reset()
     const collection = await chroma.createCollection('test')
     const ids = ['test1', 'test2', 'test3']

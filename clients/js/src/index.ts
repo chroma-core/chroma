@@ -92,6 +92,18 @@ type CallableFunction = {
   generate(texts: string[]): Promise<number[][]>;
 };
 
+function repack(value: unknown): any {
+  if(Boolean(value) && typeof value === 'object') {
+    if (Array.isArray(value)) {
+      return new Array(...value);
+    } else {
+      return {...value};
+    }
+  } else {
+    return value;
+  }
+}
+
 export class Collection {
   public name: string;
   private api: DefaultApi;
@@ -164,7 +176,7 @@ export class Collection {
         increment_index: increment_index,
       },
     }).then(function (response) {
-      return response.data;
+            return response.json()
     }).catch(function ({ response }) {
       return response.data;
     });
@@ -174,7 +186,7 @@ export class Collection {
 
   public async count() {
     const response = await this.api.count({ collectionName: this.name });
-    return response.data;
+      return response.json()
   }
 
   public async get(
@@ -194,8 +206,8 @@ export class Collection {
         limit,
         offset,
       },
-    }).then(function (response) {
-      return response.data;
+    }).then(async function (response) {
+      return repack(await response.json())
     }).catch(function ({ response }) {
       return response.data;
     });
@@ -235,8 +247,8 @@ export class Collection {
         where,
         n_results,
       },
-    }).then(function (response) {
-      return response.data;
+    }).then(async function (response) {
+            return repack(await response.json())
     }).catch(function ({ response }) {
       return response.data;
     });
@@ -249,7 +261,8 @@ export class Collection {
       collectionName: this.name,
       getEmbedding: { limit: limit },
     });
-    return response.data;
+      const data =await response.json();
+      return repack(data);
   }
 
   public async createIndex() {
@@ -261,7 +274,7 @@ export class Collection {
       collectionName: this.name,
       deleteEmbedding: { ids: ids, where: where },
     }).then(function (response) {
-      return response.data;
+            return response.json()
     }).catch(function ({ response }) {
       return response.data;
     });
@@ -289,13 +302,16 @@ export class ChromaClient {
   public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
     const newCollection = await this.api.createCollection({
       createCollection: { name, metadata },
-    }).then(function (response) {
-      return response.data;
+    }).then(async function (response) {
+            const data = await response.json();
+            return repack(data);
     }).catch(function ({ response }) {
       return response.data;
     });
 
+    // @ts-ignore
     if (newCollection.error) {
+      // @ts-ignore
       throw new Error(newCollection.error);
     }
 
@@ -304,7 +320,8 @@ export class ChromaClient {
 
   public async listCollections() {
     const response = await this.api.listCollections();
-    return response.data;
+    const data = await response.json();
+    return Array.isArray(data) ? new Array(...data) : data;
   }
 
   public async getCollection(name: string, embeddingFunction?: CallableFunction) {
@@ -313,7 +330,7 @@ export class ChromaClient {
 
   public async deleteCollection(name: string) {
     const response = await this.api.deleteCollection({ collectionName: name }).then(function (response) {
-      return response.data;
+            return response.json()
     }).catch(function ({ response }) {
       return response.data;
     });
