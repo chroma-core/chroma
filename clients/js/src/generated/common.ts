@@ -13,9 +13,8 @@
  */
 
 
-import { Configuration } from "./configuration";
-import { RequiredError, RequestArgs } from "./base";
-import { AxiosInstance, AxiosResponse } from 'axios';
+import {Configuration} from "./configuration";
+import {RequiredError} from "./base";
 
 /**
  *
@@ -40,10 +39,9 @@ export const assertParamExists = function (functionName: string, paramName: stri
  */
 export const setApiKeyToObject = async function (object: any, keyParamName: string, configuration?: Configuration) {
     if (configuration && configuration.apiKey) {
-        const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+        object[keyParamName] = typeof configuration.apiKey === 'function'
             ? await configuration.apiKey(keyParamName)
             : await configuration.apiKey;
-        object[keyParamName] = localVarApiKeyValue;
     }
 }
 
@@ -130,9 +128,9 @@ export const toPathString = function (url: URL) {
  *
  * @export
  */
-export const createRequestFunction = function (axiosArgs: RequestInit & {url: string}, BASE_PATH: string, configuration?: Configuration) {
+export const createRequestFunction = function (requestInit: RequestInit & {url: string}, BASE_PATH: string, configuration?: Configuration) {
     return (basePath: string = BASE_PATH) => {
-        const url = (configuration?.basePath || basePath) + axiosArgs.url;
-        return fetch(url, axiosArgs);
+        const url = (configuration?.basePath || basePath) + requestInit.url;
+        return fetch(url, requestInit);
     };
 }

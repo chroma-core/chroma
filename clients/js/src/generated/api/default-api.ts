@@ -18,7 +18,7 @@ import { Configuration } from '../configuration';
 // @ts-ignore
 import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObject, setBearerAuthToObject, setOAuthToObject, setSearchParams, serializeDataIfNeeded, toPathString, createRequestFunction } from '../common';
 // @ts-ignore
-import { BASE_PATH, COLLECTION_FORMATS, RequestArgs, BaseAPI, RequiredError } from '../base';
+import { BASE_PATH, COLLECTION_FORMATS, BaseAPI, RequiredError } from '../base';
 // @ts-ignore
 import { AddEmbedding } from '../models';
 // @ts-ignore
@@ -38,10 +38,10 @@ import { UpdateCollection } from '../models';
 // @ts-ignore
 import { UpdateEmbedding } from '../models';
 /**
- * DefaultApi - axios parameter creator
+ * DefaultApi - fetch parameter creator
  * @export
  */
-export const DefaultApiAxiosParamCreator = function (configuration?: Configuration) {
+export const DefaultApiParamCreator = function (configuration?: Configuration) {
     return {
         /**
          *
@@ -617,7 +617,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
  * @export
  */
 export const DefaultApiFp = function(configuration?: Configuration) {
-    const localVarAxiosParamCreator = DefaultApiAxiosParamCreator(configuration)
+    const localVarParamCreator = DefaultApiParamCreator(configuration)
     return {
         /**
          *
@@ -628,8 +628,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async _delete(collectionName: string, deleteEmbedding: DeleteEmbedding, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator._delete(collectionName, deleteEmbedding, options);
-            return createRequestFunction(localVarAxiosArgs, BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator._delete(collectionName, deleteEmbedding, options);
+            return createRequestFunction(localVarArgs, BASE_PATH, configuration);
         },
         /**
          *
@@ -640,8 +640,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async add(collectionName: string, addEmbedding: AddEmbedding, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.add(collectionName, addEmbedding, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.add(collectionName, addEmbedding, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -651,8 +651,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async count(collectionName: string, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.count(collectionName, options);
-            return createRequestFunction(localVarAxiosArgs, BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.count(collectionName, options);
+            return createRequestFunction(localVarArgs, BASE_PATH, configuration);
         },
         /**
          *
@@ -662,8 +662,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async createCollection(createCollection: CreateCollection, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.createCollection(createCollection, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.createCollection(createCollection, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -673,8 +673,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async createIndex(collectionName: string, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.createIndex(collectionName, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.createIndex(collectionName, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -684,8 +684,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async deleteCollection(collectionName: string, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteCollection(collectionName, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.deleteCollection(collectionName, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -696,8 +696,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async get(collectionName: any, getEmbedding: GetEmbedding, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.get(collectionName, getEmbedding, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.get(collectionName, getEmbedding, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -707,8 +707,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async getCollection(collectionName: string, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getCollection(collectionName, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.getCollection(collectionName, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -719,8 +719,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async getNearestNeighbors(collectionName: any, queryEmbedding: QueryEmbedding, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getNearestNeighbors(collectionName, queryEmbedding, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.getNearestNeighbors(collectionName, queryEmbedding, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -729,8 +729,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async listCollections(options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listCollections(options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.listCollections(options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -739,8 +739,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async persist(options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.persist(options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.persist(options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -750,8 +750,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async rawSql(rawSql: RawSql, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.rawSql(rawSql, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.rawSql(rawSql, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -760,8 +760,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async reset(options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.reset(options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.reset(options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -770,8 +770,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async root(options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.root(options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.root(options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -782,8 +782,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async update(collectionName: string, updateEmbedding: UpdateEmbedding, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.update(collectionName, updateEmbedding, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.update(collectionName, updateEmbedding, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
         /**
          *
@@ -794,8 +794,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @throws {RequiredError}
          */
         async updateCollection(collectionName: any, updateCollection: UpdateCollection, options?: RequestInit): Promise<( basePath?: string) => Promise<Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.updateCollection(collectionName, updateCollection, options);
-            return createRequestFunction(localVarAxiosArgs,  BASE_PATH, configuration);
+            const localVarArgs = await localVarParamCreator.updateCollection(collectionName, updateCollection, options);
+            return createRequestFunction(localVarArgs,  BASE_PATH, configuration);
         },
     }
 };
