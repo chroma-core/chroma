@@ -28,7 +28,7 @@ pip install chromadb # python client
 # for client-server mode, docker-compose up -d --build
 ```
 
-The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@AntonTroynikov/Chroma)):
+The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
 
 ```python 
 import chromadb
