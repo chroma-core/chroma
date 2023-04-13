@@ -1,3 +1,4 @@
+import operator
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 
@@ -33,13 +34,16 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __call__(self, texts: Documents) -> Embeddings:
         # replace newlines, which can negatively affect performance.
         texts = [t.replace("\n", " ") for t in texts]
-        # Call the OpenAI Embedding API in parallel for each document
+
+        # Call the OpenAI Embedding API
+        embeddings = self._client.create(input=texts, engine=self._model_name)["data"]
+
+        # Sort resulting embeddings by index
+        sorted_embeddings = sorted(embeddings, key=operator.attrgetter('index'))
+
+        # Return just the embeddings
         return [
-            result["embedding"]
-            for result in self._client.create(
-                input=texts,
-                engine=self._model_name,
-            )["data"]
+            result["embedding"] for result in sorted_embeddings
         ]
 
 
