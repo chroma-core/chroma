@@ -123,6 +123,11 @@ class DuckDB(Clickhouse):
     ):
         if new_name is None:
             new_name = current_name
+        else:
+            dupe_check = self.get_collection(new_name)
+
+            if len(dupe_check) > 0:
+                raise ValueError(f"Collection with name {new_name} already exists")
         if new_metadata is None:
             new_metadata = self.get_collection(current_name)[0][2]
 

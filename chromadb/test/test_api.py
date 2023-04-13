@@ -177,6 +177,52 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_update_collection_name(api_fixture, request):
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+
+    metadata = {"a": 1}
+    api.create_collection("test", metadata)
+
+    api._modify("test", "new_name")
+
+    collection = api.get_collection("new_name")
+
+    assert collection.name == "new_name"
+    assert collection.metadata == metadata
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_update_collection_metadata(api_fixture, request):
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+
+    metadata = {"a": 1}
+    api.create_collection("test", metadata)
+
+    new_metadata = {"b": 2}
+
+    api._modify("test", new_metadata=new_metadata)
+
+    collection = api.get_collection("test")
+
+    assert collection.name == "test"
+    assert collection.metadata == new_metadata
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
+def test_update_collection_with_existing_collection_name(api_fixture, request):
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+
+    api.create_collection("test")
+    api.create_collection("test_two")
+
+    with pytest.raises(ValueError):
+        api._modify("test_two", "test")
+
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
