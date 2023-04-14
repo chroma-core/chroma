@@ -27,18 +27,11 @@ EMBEDDING_TABLE_SCHEMA = [
 
 
 def db_array_schema_to_databend_schema(table_schema):
-    return_str = ""
-    for element in table_schema:
-        for k, v in element.items():
-            return_str += f"{k} {v}, "
-    return return_str
+    return ", ".join(f"{k} {v}" for column in table_schema for k, v in column.items())
 
 
 def db_schema_to_keys() -> List[str]:
-    keys = []
-    for element in EMBEDDING_TABLE_SCHEMA:
-        keys.append(list(element.keys())[0])
-    return keys
+    return [list(element.keys())[0] for element in EMBEDDING_TABLE_SCHEMA]
 
 
 class Databend(DB):
@@ -52,7 +45,8 @@ class Databend(DB):
     def _init_conn(self):
         self._conn = Client(
             host=self._settings.databend_host, port=self._settings.databend_port,
-            user=self._settings.databend_user, password=self._settings.databend_password, database=self._settings.databend_database,
+            user=self._settings.databend_user, password=self._settings.databend_password,
+            database=self._settings.databend_database,
             secure=self._settings.databend_secure
         )
         self._create_table_collections(self._conn)
