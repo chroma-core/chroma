@@ -22,3 +22,15 @@ def configurations():
             persist_directory=tempfile.gettempdir() + "/tests",
         ),
     ]
+
+
+def persist_configurations():
+    """Only returns configurations that persist to disk."""
+    return [
+        Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=tempfile.gettempdir() + "/tests",
+        ),
+    ]
+

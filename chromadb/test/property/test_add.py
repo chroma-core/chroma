@@ -1,6 +1,7 @@
 import pytest
 from hypothesis import given
 import chromadb
+from chromadb.api import API
 from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -13,8 +14,9 @@ def api(request):
 
 
 @given(collection=strategies.collections(), embeddings=strategies.embedding_set())
-def test_add(api, collection, embeddings):
-
+def test_add(
+    api: API, collection: strategies.Collection, embeddings: strategies.EmbeddingSet
+):
     api.reset()
 
     # TODO: Generative embedding functions
