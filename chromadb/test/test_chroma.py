@@ -31,6 +31,22 @@ class GetDBTest(unittest.TestCase):
         )
         assert mock.called
 
+    @patch("chromadb.db.databend.Databend", autospec=True)
+    def test_databend(self, mock):
+        chromadb.get_db(
+            chromadb.config.Settings(
+                chroma_db_impl="databend",
+                persist_directory="./foo",
+                databend_host="127.0.0.1",
+                databend_port=8000,
+                databend_user="root",
+                databend_password="root",
+                databend_database="default",
+                databend_secure=False,
+            )
+        )
+        assert mock.called
+
 
 class GetAPITest(unittest.TestCase):
     @patch("chromadb.db.duckdb.DuckDB", autospec=True)
