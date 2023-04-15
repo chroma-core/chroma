@@ -1,4 +1,5 @@
-import {DefaultApi, Configuration} from "./generated/src";
+import {Configuration, ApiApi, Api} from "./generated";
+import Count200Response = Api.Count200Response;
 
 // a function to convert a non-Array object to an Array
 function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -27,11 +28,23 @@ async function handleError(error: unknown) {
             }
         } catch (e: unknown) {
             return {
+                //@ts-ignore
                 error: (e && typeof e === 'object' && 'message' in e) ? e.message : 'unknown error'
             }
         }
     }
     return {error};
+}
+
+async function handleSuccess(response: Response | string | Count200Response) {
+    switch (true) {
+        case response instanceof Response:
+            return repack(await (response as Response).json());
+        case typeof response === 'string':
+            return repack(JSON.parse(response as string));
+        default:
+            return repack(response);
+    }
 }
 
 class EmbeddingFunction {
@@ -40,8 +53,8 @@ class EmbeddingFunction {
 let OpenAIApi: any;
 
 export class OpenAIEmbeddingFunction {
-    private api_key: string;
-    private org_id: string;
+    private readonly api_key: string;
+    private readonly org_id: string;
     private model: string;
 
     constructor(openai_api_key: string, openai_model?: string, openai_organization_id?: string) {
@@ -124,10 +137,10 @@ function repack(value: unknown): any {
 
 export class Collection {
     public name: string;
-    private api: DefaultApi;
+    private api: ApiApi;
     public embeddingFunction: CallableFunction | undefined;
 
-    constructor(name: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
+    constructor(name: string, api: ApiApi, embeddingFunction?: CallableFunction) {
         this.name = name;
         this.api = api;
         if (embeddingFunction !== undefined)
@@ -184,23 +197,21 @@ export class Collection {
             );
         }
 
-        return await this.api.add({
-            collectionName: this.name,
-            addEmbedding: {
-                ids: idsArray,
-                embeddings: embeddingsArray,
-                documents: documentsArray,
-                metadatas: metadatasArray,
-                incrementIndex: increment_index,
-            },
-        }).then(function (response) {
+        return await this.api.add(this.name, {
+            ids: idsArray,
+            embeddings: embeddingsArray,
+            //@ts-ignore
+            documents: documentsArray,
+            metadatas: metadatasArray,
+            incrementIndex: increment_index,
+        }).then(function (response: any) {
             return JSON.parse(response)
         }).catch(handleError)
     }
 
     public async count() {
-        const response = await this.api.count({collectionName: this.name});
-        return JSON.parse(response)
+        const response = await this.api.count(this.name);
+        return handleSuccess(response)
     }
 
     public async get(
@@ -212,17 +223,12 @@ export class Collection {
         let idsArray = undefined
         if (ids !== undefined) idsArray = toArray(ids);
 
-        return await this.api.get({
-            collectionName: this.name,
-            getEmbedding: {
-                ids: idsArray,
-                where,
-                limit,
-                offset,
-            },
-        }).then(async function (response) {
-            return repack(JSON.parse(response))
-        }).catch(handleError)
+        return await this.api.aGet(this.name, {
+            ids: idsArray,
+            where,
+            limit,
+            offset,
+        }).then(handleSuccess).catch(handleError)
 
     }
 
@@ -250,51 +256,39 @@ export class Collection {
 
         const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
-        return await this.api.getNearestNeighbors({
-            collectionName: this.name,
-            queryEmbedding: {
-                queryEmbeddings: query_embeddingsArray,
-                where,
-                nResults: n_results,
-            },
-        }).then(async function (response) {
-            return repack(JSON.parse(response))
-        }).catch(handleError);
+        return await this.api.getNearestNeighbors(this.name, {
+            query_embeddings: query_embeddingsArray,
+            where,
+            n_results: n_results,
+        }).then(handleSuccess).catch(handleError);
     }
 
     public async peek(limit: number = 10) {
-        const response = await this.api.get({
-            collectionName: this.name,
-            getEmbedding: {limit: limit},
+        const response = await this.api.aGet(this.name, {
+            limit: limit
         });
-        const data = JSON.parse(response);
-        return repack(data);
+        return handleSuccess(response)
     }
 
     public async createIndex() {
-        return await this.api.createIndex({collectionName: this.name});
+        return await this.api.createIndex(this.name);
     }
 
     public async delete(ids?: string[], where?: object) {
-        return await this.api._delete({
-            collectionName: this.name,
-            deleteEmbedding: {ids: ids, where: where},
-        }).then(function (response) {
-            return JSON.parse(response)
-        }).catch(handleError)
+        return await this.api.aDelete(this.name, {ids: ids, where: where}).then(handleSuccess).catch(handleError)
     }
 
 }
 
 export class ChromaClient {
-    private api: DefaultApi;
+    private api: ApiApi;
 
     constructor(basePath?: string) {
         if (basePath === undefined) basePath = "http://localhost:8000";
         const apiConfig: Configuration = new Configuration({
             basePath,
         });
-        this.api = new DefaultApi(apiConfig);
+        this.api = new ApiApi(apiConfig);
     }
 
     public async reset() {
@@ -303,13 +297,8 @@ export class ChromaClient {
 
     public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
         const newCollection = await this.api.createCollection({
-            createCollection: {name, metadata},
-        }).then(async function (response) {
-            const data = JSON.parse(response);
-            return repack(data);
-        }).catch(function ({response}) {
-            return response;
-        });
+            name, metadata
+        }).then(handleSuccess).catch(handleError);
 
         // @ts-ignore
         if (newCollection.error) {
@@ -322,8 +311,7 @@ export class ChromaClient {
 
     public async listCollections() {
         const response = await this.api.listCollections();
-        const data = JSON.parse(response);
-        return Array.isArray(data) ? new Array(...data) : data;
+        return handleSuccess(response)
     }
 
     public async getCollection(name: string, embeddingFunction?: CallableFunction) {
@@ -331,9 +319,7 @@ export class ChromaClient {
     }
 
     public async deleteCollection(name: string) {
-        return await this.api.deleteCollection({collectionName: name}).then(function (response) {
-            return JSON.parse(response)
-        }).catch(handleError)
+        return await this.api.deleteCollection(name).then(handleSuccess).catch(handleError)
     }
 
 }
