@@ -73,6 +73,9 @@ def Client(settings=__settings):
         require("chroma_server_host")
         require("chroma_server_http_port")
         logger.info("Running Chroma in client mode using REST to connect to remote server")
+        logger.info("""⚠️ This basic stack doesn't support any kind of authentication;
+                    anyone who knows your server IP will be able to add and query for embeddings.
+                    More information: https://docs.trychroma.com/deployment""")
         import chromadb.api.fastapi
 
         return chromadb.api.fastapi.FastAPI(settings, telemetry_client)
