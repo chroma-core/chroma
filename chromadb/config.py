@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     clickhouse_host: str = None
     clickhouse_port: str = None
 
+    databend_host: str = None
+    databend_port: str = None
+    databend_user: str = None
+    databend_password: str = None
+    databend_database: str = None
+    databend_secure: bool = None
+
     persist_directory: str = ".chroma"
 
     chroma_server_host: str = None

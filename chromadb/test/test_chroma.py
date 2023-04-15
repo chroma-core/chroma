@@ -38,13 +38,14 @@ class GetDBTest(unittest.TestCase):
                 chroma_db_impl="databend",
                 persist_directory="./foo",
                 databend_host="127.0.0.1",
-                databend_port=8000,
+                databend_port="8000",
                 databend_user="root",
                 databend_password="root",
                 databend_database="default",
                 databend_secure=False,
             )
         )
+        print(mock.called)
         assert mock.called
 
 

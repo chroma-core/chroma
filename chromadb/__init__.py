@@ -50,6 +50,12 @@ def get_db(settings=__settings):
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
+    elif setting == "databend":
+        require("databend_host")
+        require("databend_port")
+        require("databend_user")
+        import chromadb.db.databend
+        return chromadb.db.databend.Databend(settings)
     else:
         raise ValueError(
             f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}"
