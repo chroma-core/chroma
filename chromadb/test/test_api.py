@@ -176,7 +176,7 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
         assert len(nn[key]) == 1
 
 
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_update_collection_name(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
@@ -192,7 +192,7 @@ def test_update_collection_name(api_fixture, request):
     assert collection.metadata == metadata
 
 
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_update_collection_metadata(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
@@ -209,7 +209,7 @@ def test_update_collection_metadata(api_fixture, request):
     assert collection.name == "test"
     assert collection.metadata == new_metadata
 
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_update_collection_with_existing_collection_name(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
