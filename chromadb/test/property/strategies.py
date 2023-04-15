@@ -69,6 +69,10 @@ def one_or_both(strategy_a, strategy_b):
     )
 
 
+# Temporarily generate only these to avoid SQL formatting issues.
+legal_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
+
+
 @st.composite
 def unique_ids_strategy(draw, count: int):
 
@@ -76,7 +80,12 @@ def unique_ids_strategy(draw, count: int):
     strs = count // ratio
 
     str_results = draw(
-        st.lists(st.text(min_size=1, max_size=64), min_size=strs, max_size=strs, unique=True)
+        st.lists(
+            st.text(alphabet=legal_characters, min_size=1, max_size=64),
+            min_size=strs,
+            max_size=strs,
+            unique=True,
+        )
     )
 
     # Rotate selections from between the two lists. This is a workaround for making sure we don't try to generate
