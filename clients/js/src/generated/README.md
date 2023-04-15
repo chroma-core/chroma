@@ -1,6 +1,6 @@
 ## chromadb@0.1.0
 
-This generator creates TypeScript/JavaScript client that utilizes [fetch](https://nodejs.org/en/blog/announcements/v18-release-announce). The generated Node module can be used in the following environments:
+This generator creates TypeScript/JavaScript client that utilizes [Fetch API](https://fetch.spec.whatwg.org/). The generated Node module can be used in the following environments:
 
 Environment
 * Node.js

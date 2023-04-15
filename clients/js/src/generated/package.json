@@ -2,22 +2,14 @@
   "name": "chromadb",
   "version": "0.1.0",
   "description": "OpenAPI client for chromadb",
-  "author": "OpenAPI-Generator Contributors",
-  "keywords": [
-    "typescript",
-    "openapi-client",
-    "openapi-generator",
-    "chromadb"
-  ],
-  "license": "Unlicense",
+  "author": "OpenAPI-Generator",
   "main": "./dist/index.js",
   "typings": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc --outDir dist/",
+    "build": "tsc",
     "prepare": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "^12.11.5",
-    "typescript": "^3.6.4"
+    "typescript": "^2.4"
   }
 }
