@@ -179,6 +179,7 @@ def test_failure_scenario(caplog, api):
 
 
 def test_multi_add(api):
+    api.reset()
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
@@ -193,6 +194,7 @@ def test_multi_add(api):
 
 
 def test_escape_chars_in_ids(api):
+    api.reset()
     id = "\x1f"
     coll = api.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])
