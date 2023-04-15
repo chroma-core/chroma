@@ -1,6 +1,7 @@
 import { expect, test } from '@jest/globals';
 import chroma from './initClient'
 import { DOCUMENTS, EMBEDDINGS, IDS } from './data';
+import { GetEmbeddingIncludeEnum } from '../src/generated';
 
 test('it should add single embeddings to a collection', async () => {
     await chroma.reset()
@@ -11,6 +12,8 @@ test('it should add single embeddings to a collection', async () => {
     await collection.add(id, embedding, metadata)
     const count = await collection.count()
     expect(count).toBe(1)
+    var res = await collection.get([id], undefined, undefined, undefined, [GetEmbeddingIncludeEnum.Embeddings])
+    expect(res.embeddings[0]).toEqual(embedding)
 })
 
 test('it should add batch embeddings to a collection', async () => {
@@ -19,6 +22,8 @@ test('it should add batch embeddings to a collection', async () => {
     await collection.add(IDS, EMBEDDINGS)
     const count = await collection.count()
     expect(count).toBe(3)
+    var res = await collection.get(IDS, undefined, undefined, undefined, [GetEmbeddingIncludeEnum.Embeddings])
+    expect(res.embeddings).toEqual(EMBEDDINGS) // reverse because of the order of the ids
 })
 
 test('add documents', async () => {
