@@ -1,4 +1,4 @@
-import { DefaultApi, Configuration} from "./generated/src";
+import {DefaultApi, Configuration} from "./generated/src";
 
 // a function to convert a non-Array object to an Array
 function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -16,6 +16,22 @@ function toArrayOfArrays<T>(obj: Array<Array<T>> | Array<T>): Array<Array<T>> {
     } else {
         return [obj] as Array<Array<T>>;
     }
+}
+
+async function handleError(error: unknown) {
+    if (error instanceof Response) {
+        try {
+            const res = await error.json();
+            if ('error' in res) {
+                return {error: res.error}
+            }
+        } catch (e: unknown) {
+            return {
+                error: (e && typeof e === 'object' && 'message' in e) ? e.message : 'unknown error'
+            }
+        }
+    }
+    return {error};
 }
 
 class EmbeddingFunction {
@@ -178,15 +194,13 @@ export class Collection {
                 incrementIndex: increment_index,
             },
         }).then(function (response) {
-            return response.json()
-        }).catch(function ({response}) {
-            return response.data;
-        })
+            return JSON.parse(response)
+        }).catch(handleError)
     }
 
     public async count() {
         const response = await this.api.count({collectionName: this.name});
-        return response.json()
+        return JSON.parse(response)
     }
 
     public async get(
@@ -207,10 +221,8 @@ export class Collection {
                 offset,
             },
         }).then(async function (response) {
-            return repack(await response.json())
-        }).catch(function ({response}) {
-            return response.data;
-        })
+            return repack(JSON.parse(response))
+        }).catch(handleError)
 
     }
 
@@ -246,10 +258,8 @@ export class Collection {
                 nResults: n_results,
             },
         }).then(async function (response) {
-            return repack(await response.json())
-        }).catch(function ({response}) {
-            return response.data;
-        });
+            return repack(JSON.parse(response))
+        }).catch(handleError);
     }
 
     public async peek(limit: number = 10) {
@@ -257,7 +267,7 @@ export class Collection {
             collectionName: this.name,
             getEmbedding: {limit: limit},
         });
-        const data = await response.json();
+        const data = JSON.parse(response);
         return repack(data);
     }
 
@@ -270,10 +280,8 @@ export class Collection {
             collectionName: this.name,
             deleteEmbedding: {ids: ids, where: where},
         }).then(function (response) {
-            return response.json()
-        }).catch(function ({response}) {
-            return response.data;
-        })
+            return JSON.parse(response)
+        }).catch(handleError)
     }
 
 }
@@ -297,10 +305,10 @@ export class ChromaClient {
         const newCollection = await this.api.createCollection({
             createCollection: {name, metadata},
         }).then(async function (response) {
-            const data = await response.json();
+            const data = JSON.parse(response);
             return repack(data);
         }).catch(function ({response}) {
-            return response.data;
+            return response;
         });
 
         // @ts-ignore
@@ -314,7 +322,7 @@ export class ChromaClient {
 
     public async listCollections() {
         const response = await this.api.listCollections();
-        const data = await response.json();
+        const data = JSON.parse(response);
         return Array.isArray(data) ? new Array(...data) : data;
     }
 
@@ -324,10 +332,8 @@ export class ChromaClient {
 
     public async deleteCollection(name: string) {
         return await this.api.deleteCollection({collectionName: name}).then(function (response) {
-            return response.json()
-        }).catch(function ({response}) {
-            return response.data;
-        })
+            return JSON.parse(response)
+        }).catch(handleError)
     }
 
 }
