@@ -167,14 +167,12 @@ class Databend(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res[1]]
 
     def get_collection_by_id(self, collection_uuid: str):
-        res = (
-            self._get_conn()
-            .execute(
-                f"""
+        _, res = self._get_conn().execute(
+            f"""
          SELECT * FROM collections WHERE uuid = '{collection_uuid}'
          """
-            )
         )
+
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res][0]
 
@@ -240,7 +238,6 @@ class Databend(DB):
             for data in single_data:
                 flatten_data_to_insert.append(data)
         column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
-        self._get_conn().insert("embeddings", data_to_insert, column_names=column_names)
         self._get_conn().execute(
             'INSERT INTO embeddings ("collection_uuid", "uuid", "embedding", "metadata", "document", "id") VALUES (?,?,?,?,?,?)',
             flatten_data_to_insert)
@@ -458,9 +455,10 @@ class Databend(DB):
     def get_by_ids(self, ids: list, columns: Optional[List] = None):
         columns = columns + ["uuid"] if columns else ["uuid"]
         select_columns = db_schema_to_keys() if columns is None else columns
-        response = self._get_conn().execute(
+        ids_str = "'" + "','".join([id.hex for id in ids]) + "'"
+        _, response = self._get_conn().execute(
             f"""
-            SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
+            SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({ids_str})
             """
         )
 
