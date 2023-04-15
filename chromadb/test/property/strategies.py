@@ -151,6 +151,9 @@ def metadatas_strategy(count: int):
 @st.composite
 def embedding_set(
     draw,
+    dimension_st: st.SearchStrategy[int] = st.integers(min_value=2, max_value=2048),
+    count_st: st.SearchStrategy[int] = st.integers(min_value=1, max_value=512),
+    dtype_st: st.SearchStrategy[np.dtype] = st.sampled_from(float_types),
     dimension: Optional[int] = None,
     count: Optional[int] = None,
     dtype: Optional[np.dtype] = None,
@@ -158,14 +161,14 @@ def embedding_set(
     """Strategy to generate a set of embeddings."""
 
     if count is None:
-        count = draw(st.integers(min_value=1, max_value=512))
+        count = draw(count_st)
 
     if dimension is None:
-        dimension = draw(st.integers(min_value=2, max_value=2048))
+        dimension = draw(dimension_st)
 
     if dtype is None:
         # TODO Support integer types?
-        dtype = draw(st.sampled_from(float_types))
+        dtype = draw(dtype_st)
 
     count = cast(int, count)
     dimension = cast(int, dimension)
