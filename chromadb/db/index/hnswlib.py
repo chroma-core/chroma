@@ -225,6 +225,10 @@ class Hnswlib(Index):
         # Check dimensionality
         self._check_dimensionality(query)
 
+        # Check Number of requested results
+        if k < 0:
+            raise TypeError(f"Number of requested results {k}, cannot be negative.")
+
         if k > self._index_metadata["elements"]:
             logger.warning(
                 f"Number of requested results {k} is greater than number of elements in index {self._index_metadata['elements']}, updating n_results = {self._index_metadata['elements']}"
