@@ -76,26 +76,11 @@ legal_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567
 @st.composite
 def unique_ids_strategy(draw, count: int):
 
-    ratio = 20
-    strs = count // ratio
+    strat = st.text(alphabet=legal_characters, min_size=1, max_size=64)
 
-    str_results = draw(
-        st.lists(
-            st.text(alphabet=legal_characters, min_size=1, max_size=64),
-            min_size=strs,
-            max_size=strs,
-            unique=True,
-        )
-    )
-
-    # Rotate selections from between the two lists. This is a workaround for making sure we don't try to generate
-    # too many strings, causing the Hypothesis health check to fail.ß
     results = []
     for i in range(count):
-        if i % ratio == 0 and len(str_results) > 0:
-            results.append(str_results.pop())
-        else:
-            results.append(str(draw(st.uuids())))
+        results.append(str(draw(strat)))
 
     return results
 
@@ -182,14 +167,12 @@ def embedding_set(
     count = cast(int, count)
     dimension = cast(int, dimension)
 
-    # TODO: should be possible to deal with empty sets
-    ids = draw(unique_ids_strategy(count))
-
     # TODO: Test documents only
     # TODO: Generative embedding function to guarantee unique embeddings for unique documents
     documents = draw(documents_strategy(count))
     metadatas = draw(metadatas_strategy(count))
     embeddings = create_embeddings(dimension, count, dtype)
+    ids = draw(unique_ids_strategy(count))
 
     return {
         "ids": ids,

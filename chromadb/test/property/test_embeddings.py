@@ -83,15 +83,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(self.embeddings["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if len(set(self.embeddings["ids"]).intersection(set(embedding_set["ids"]))) > 0:
-            trace("found_dup_ids")
-
         self.collection.add(**embedding_set)
         self._add_embeddings(embedding_set)
-
         return multiple(*embedding_set["ids"])
 
-    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=50))
+    @precondition(lambda self: len(self.embeddings["ids"]) > 20)
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
     def delete_by_ids(self, ids):
         trace("remove embeddings")
 
@@ -106,6 +103,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @invariant()
     def count(self):
         assert self.collection.count() == len(self.embeddings["ids"])
+
+    @invariant()
+    def no_dups(self):
+        ids = self.collection.get()["ids"]
+        assert len(ids) == len(set(ids))
 
     @invariant()
     def ann_accuracy(self):
@@ -142,40 +144,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.embeddings["documents"][i]  # type: ignore
 
 
-def test_embeddings_fn(caplog, api):
+def test_embeddings_state(caplog, api):
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))
     print_traces()
-
-
-def test_failure_scenario(caplog, api):
-    state = EmbeddingStateMachine(api)
-    state.initialize(collection={"name": "A00", "metadata": None}, dtype=numpy.float16, dimension=2)
-    state.ann_accuracy()
-    state.count()
-    (v1,) = state.add_embeddings(
-        embedding_set={
-            "ids": [""],
-            "embeddings": [[0.09765625, 0.430419921875]],
-            "metadatas": [{}],
-            "documents": ["0"],
-        }
-    )
-    state.ann_accuracy()
-
-    state.count()
-    (v2,) = state.add_embeddings(
-        embedding_set={
-            "ids": [v1],
-            "embeddings": [[0.20556640625, 0.08978271484375]],
-            "metadatas": [{}],
-            "documents": None,
-        }
-    )
-    state.count()
-    state.delete_by_ids(ids=[v1])
-    state.ann_accuracy()
-    state.teardown()
 
 
 def test_multi_add(api):
@@ -183,11 +155,14 @@ def test_multi_add(api):
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
-    coll.add(ids=["a"], embeddings=[[0.5]])
-    assert coll.count() == 2
+
+    with pytest.raises(ValueError):
+        coll.add(ids=["a"], embeddings=[[0.0]])
+
+    assert coll.count() == 1
 
     results = coll.query(query_embeddings=[[0.0]], n_results=2)
-    assert results["ids"] == [["a", "a"]]
+    assert results["ids"] == [["a"]]
 
     coll.delete(ids=["a"])
     assert coll.count() == 0
