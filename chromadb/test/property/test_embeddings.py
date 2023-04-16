@@ -92,9 +92,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(self.embeddings["ids"]) > 0:
             trace("add_more_embeddings")
 
-        self.collection.add(**embedding_set)
-        self._add_embeddings(embedding_set)
-        return multiple(*embedding_set["ids"])
+        if set(embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
+            with pytest.raises(ValueError):
+                self.collection.add(**embedding_set)
+            return multiple()
+        else:
+            self.collection.add(**embedding_set)
+            self._add_embeddings(embedding_set)
+            return multiple(*embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
@@ -195,11 +200,18 @@ def test_multi_add(api):
 
     assert coll.count() == 1
 
-    results = coll.query(query_embeddings=[[0.0]], n_results=2)
-    assert results["ids"] == [["a"]]
+    results = coll.get()
+    assert results["ids"] == ["a"]
 
     coll.delete(ids=["a"])
     assert coll.count() == 0
+
+
+def test_dup_add(api):
+    api.reset()
+    coll = api.create_collection(name="foo")
+    with pytest.raises(ValueError):
+        coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
 def test_escape_chars_in_ids(api):
