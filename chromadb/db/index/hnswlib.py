@@ -226,9 +226,10 @@ class Hnswlib(Index):
         self._check_dimensionality(query)
 
         if k > self._index_metadata["elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
+            logger.warning(
+                f"Number of requested results {k} is greater than number of elements in index {self._index_metadata['elements']}, updating n_results = {self._index_metadata['elements']}"
             )
+            k = self._index_metadata["elements"]
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available
