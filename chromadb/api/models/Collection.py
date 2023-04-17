@@ -12,6 +12,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     ID,
+    N_results,
     OneOrMany,
     WhereDocument,
     maybe_cast_one_to_many,
@@ -20,6 +21,7 @@ from chromadb.api.types import (
     validate_metadatas,
     validate_where,
     validate_where_document,
+    validate_n_results,
 )
 import logging
 
@@ -157,7 +159,7 @@ class Collection(BaseModel):
         self,
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
-        n_results: int = 10,
+        n_results: Optional[N_results] = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],
@@ -177,6 +179,7 @@ class Collection(BaseModel):
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
         include = validate_include(include, allow_distances=True)
+        n_results = validate_n_results(n_results)
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
         if (query_embeddings is None and query_texts is None) or (
