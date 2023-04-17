@@ -161,8 +161,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         else:
             documents = [None] * len(embeddings["ids"])
 
-        self.embeddings["metadatas"] += metadatas  # type: ignore
-        self.embeddings["documents"] += documents  # type: ignore
+        self.embeddings["metadatas"].extend(metadatas)  # type: ignore
+        self.embeddings["documents"].extend(documents)  # type: ignore
 
     def _remove_embeddings(self, indices_to_remove: Set[int]):
 
