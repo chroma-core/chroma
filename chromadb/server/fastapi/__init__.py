@@ -217,7 +217,7 @@ class FastAPI(chromadb.server.Server):
             raise HTTPException(status_code=500, detail=str(e))
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
-        except NotEnoughElementsException as e:
+        except TypeError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
     def raw_sql(self, raw_sql: RawSql):
