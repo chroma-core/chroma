@@ -213,7 +213,7 @@ class Collection(BaseModel):
         """
 
         ids, embeddings, metadatas, documents = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents
+            ids, embeddings, metadatas, documents, require_embeddings=False
         )
 
         self._client._update(self.name, ids, embeddings, metadatas, documents)
@@ -270,7 +270,7 @@ class Collection(BaseModel):
         self._client.create_index(self.name)
 
     def _validate_embedding_set(
-        self, ids, embeddings, metadatas, documents
+        self, ids, embeddings, metadatas, documents, require_embeddings=True
     ) -> Tuple[IDs, Optional[List[Embedding]], Optional[List[Metadata]], Optional[List[Document]]]:
 
         ids = validate_ids(maybe_cast_one_to_many(ids))
@@ -279,8 +279,9 @@ class Collection(BaseModel):
         documents = maybe_cast_one_to_many(documents) if documents else None
 
         # Check that one of embeddings or documents is provided
-        if embeddings is None and documents is None:
-            raise ValueError("You must provide either embeddings or documents, or both")
+        if require_embeddings:
+            if embeddings is None and documents is None:
+                raise ValueError("You must provide either embeddings or documents, or both")
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
         if embeddings is not None and len(embeddings) != len(ids):
