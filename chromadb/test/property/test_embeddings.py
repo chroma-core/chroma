@@ -79,7 +79,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.dtype = dtype
         self.dimension = dimension
         self.collection = self.api.create_collection(**collection)
-        global init_count
         trace("init")
         self.embeddings = {"ids": [], "embeddings": [], "metadatas": [], "documents": []}
 
