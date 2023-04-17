@@ -1424,10 +1424,22 @@ def test_invalid_n_results_param(api_fixture, request):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**records)
-    with pytest.raises(Exception):
-        results2 = collection.query(
+    with pytest.raises(TypeError) as exc:
+        results1 = collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]],
             n_results=-1,
             where={},
             include=["embeddings", "documents", "metadatas", "distances"],
         )
+    assert "Number of requested results -1, cannot be negative." in str(exc.value)
+    assert exc.type == TypeError
+
+    with pytest.raises(ValueError) as exc:
+        results2 = collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results="one",
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+    assert "int" in str(exc.value)
+    assert exc.type == ValueError
