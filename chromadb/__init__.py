@@ -2,6 +2,7 @@ import chromadb.config
 import logging
 from chromadb.telemetry.events import ClientStartEvent
 from chromadb.telemetry.posthog import Posthog
+import importlib.util
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,9 @@ def Client(settings=__settings):
     def require(key):
         assert settings[key], f"Setting '{key}' is required when chroma_api_impl={setting}"
 
+    def require_installed(key):
+        assert importlib.util.find_spec(key), f"Package '{key}' is required when chroma_api_impl='local'. Switch to 'rest' or install chroma[server]."
+
     if setting == "rest":
         require("chroma_server_host")
         require("chroma_server_http_port")
@@ -77,6 +81,9 @@ def Client(settings=__settings):
 
         return chromadb.api.fastapi.FastAPI(settings, telemetry_client)
     elif setting == "local":
+        required_dependencies = ['pandas', 'duckdb'] # TODO: add other server requirements
+        for dep in required_dependencies:
+            require_installed(dep)
         logger.info("Running Chroma using direct local API.")
         import chromadb.api.local
 
