@@ -105,7 +105,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
 
-    @precondition(lambda self: len(self.embeddings["ids"]) > 5)
     @rule(
         embedding_set=strategies.embedding_set(
             dtype_st=dtype_shared_st,
