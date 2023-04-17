@@ -52,16 +52,8 @@ dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype"
 dimension_shared_st = st.shared(st.integers(min_value=2, max_value=2048), key="dimension")
 
 
-class PopulatedEmbeddingSet(TypedDict):
-    ids: types.IDs
-    embeddings: List[types.Embedding]
-    metadatas: List[types.Metadata]
-    documents: List[types.Document]
-
-
 class EmbeddingStateMachine(RuleBasedStateMachine):
 
-    embeddings: PopulatedEmbeddingSet
     collection: Collection
 
     embedding_ids: Bundle = Bundle("embedding_ids")
