@@ -104,18 +104,23 @@ export class Collection {
       this.embeddingFunction = embeddingFunction;
   }
 
-  public async add(
+  private async validate(
+    require_embeddings: boolean,
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
   ) {
-    if ((embeddings === undefined) && (documents === undefined)) {
-      throw new Error(
-        "embeddings and documents cannot both be undefined",
-      );
-    } else if ((embeddings === undefined) && (documents !== undefined)) {
+
+    if (require_embeddings) {
+      if ((embeddings === undefined) && (documents === undefined)) {
+        throw new Error(
+          "embeddings and documents cannot both be undefined",
+        );
+      }
+    }
+
+    if ((embeddings === undefined) && (documents !== undefined)) {
       const documentsArray = toArray(documents);
       if (this.embeddingFunction !== undefined) {
         embeddings = await this.embeddingFunction.generate(documentsArray)
@@ -154,11 +159,38 @@ export class Collection {
       );
     }
 
+    const uniqueIds = new Set(idsArray);
+    if (uniqueIds.size !== idsArray.length) {
+      const duplicateIds = idsArray.filter((item, index) => idsArray.indexOf(item) !== index);
+      throw new Error(
+        `Expected IDs to be unique, found duplicates for: ${duplicateIds}`,
+      );
+    }
+
+    return [idsArray, embeddingsArray, metadatasArray, documentsArray]
+  }
+
+  public async add(
+    ids: string | string[],
+    embeddings: number[] | number[][] | undefined,
+    metadatas?: object | object[],
+    documents?: string | string[],
+    increment_index: boolean = true,
+  ) {
+
+    const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
+      true,
+      ids,
+      embeddings,
+      metadatas,
+      documents
+    )
+
     const response = await this.api.add({
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
-        embeddings: embeddingsArray,
+        embeddings: (embeddingsArray as any[]),
         documents: documentsArray,
         metadatas: metadatasArray,
         increment_index: increment_index,
@@ -171,6 +203,42 @@ export class Collection {
 
     return response
   }
+
+  public async upsert(
+    ids: string | string[],
+    embeddings: number[] | number[][] | undefined,
+    metadatas?: object | object[],
+    documents?: string | string[],
+    increment_index: boolean = true,
+  ) {
+
+    const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
+      true,
+      ids,
+      embeddings,
+      metadatas,
+      documents
+    )
+
+    const response = await this.api.upsert({
+      collectionName: this.name,
+      addEmbedding: {
+        ids: idsArray,
+        embeddings: (embeddingsArray as any[]),
+        documents: documentsArray,
+        metadatas: metadatasArray,
+        increment_index: increment_index,
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return response
+
+  }
+
 
   public async count() {
     const response = await this.api.count({ collectionName: this.name });
