@@ -270,7 +270,7 @@ class Collection(BaseModel):
         self._client.create_index(self.name)
 
     def _validate_embedding_set(
-        self, ids, embeddings, documents, metadatas
+        self, ids, embeddings, metadatas, documents
     ) -> Tuple[IDs, Optional[List[Embedding]], Optional[List[Metadata]], Optional[List[Document]]]:
 
         ids = validate_ids(maybe_cast_one_to_many(ids))
