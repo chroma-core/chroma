@@ -1397,3 +1397,37 @@ def test_update_query(api_fixture, request):
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_get_nearest_neighbors_where_n_results_more_than_element(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+
+    results1 = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=5,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in results1.keys():
+        assert len(results1[key][0]) == 2
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_invalid_n_results_param(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+    with pytest.raises(Exception):
+        results2 = collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results=-1,
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
