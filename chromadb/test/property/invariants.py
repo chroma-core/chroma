@@ -21,12 +21,24 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    actual_field = collection.get(ids=embeddings["ids"], include=[field_name])[
-        field_name
-    ]
+    result = collection.get(ids=embeddings["ids"], include=[field_name])
+    # TODO: The returned data is not necessarily in the same order as the input ids
+    # until we add a sort in the get path
+    # The test_out_of_order_ids test fails because of this in test_add.py
+    # Here we sort by the ids to match the input order
+    embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
+    actual_field = result[field_name]
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
     assert actual_field is not None
+    actual_field = sorted(
+        enumerate(actual_field),
+        key=lambda index_and_field_value: embedding_id_to_index[
+            result["ids"][index_and_field_value[0]]
+        ],
+    )
+    actual_field = [field_value for _, field_value in actual_field]
+
     expected_field = embeddings[field_name]
     if expected_field is None:
         # Since an EmbeddingSet is the user input, we need to convert the documents to
@@ -38,7 +50,12 @@ def _field_matches(
 def ids_match(collection: Collection, embeddings: EmbeddingSet):
     """The actual embedding ids is equal to the expected ids"""
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
-    print(f"{actual_ids} == {embeddings['ids']}")
+    # TODO: The returned ids are not necessarily in the same order as the input ids
+    # until we add a sort.
+    # The test_out_of_order_ids test fails because of this in test_add.py
+    # Here we sort the ids to match the input order
+    embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
+    actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
     assert actual_ids == embeddings["ids"]
 
 

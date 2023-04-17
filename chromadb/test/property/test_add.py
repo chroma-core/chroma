@@ -31,6 +31,7 @@ def test_add(
     invariants.ann_accuracy(coll, embeddings)
 
 
+# TODO: This test fails right now because the ids are not sorted by the input order
 def test_out_of_order_ids(api: API):
     api.reset()
     ooo_ids = [
