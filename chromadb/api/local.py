@@ -41,7 +41,7 @@ def check_index_name(index_name):
         raise ValueError(msg)
     if ".." in index_name:
         raise ValueError(msg)
-    if re.match("^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$", index_name):
+    if re.match("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", index_name):
         raise ValueError(msg)
 
 
