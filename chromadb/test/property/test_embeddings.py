@@ -48,8 +48,8 @@ def api(request):
     return chromadb.Client(configuration)
 
 
-dtype_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")
-dimension_st = st.shared(st.integers(min_value=2, max_value=2048), key="dimension")
+dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")
+dimension_shared_st = st.shared(st.integers(min_value=2, max_value=2048), key="dimension")
 
 
 class PopulatedEmbeddingSet(TypedDict):
@@ -72,8 +72,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @initialize(
         collection=strategies.collections(),
-        dtype=dtype_st,
-        dimension=dimension_st,
+        dtype=dtype_shared_st,
+        dimension=dimension_shared_st,
     )
     def initialize(self, collection, dtype, dimension):
         self.api.reset()
@@ -85,7 +85,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @rule(
         target=embedding_ids,
-        embedding_set=strategies.embedding_set(dtype_st=dtype_st, dimension_st=dimension_st),
+        embedding_set=strategies.embedding_set(
+            dtype_st=dtype_shared_st, dimension_st=dimension_shared_st
+        ),
     )
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
@@ -117,8 +119,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @precondition(lambda self: len(self.embeddings["ids"]) > 5)
     @rule(
         embedding_set=strategies.embedding_set(
-            dtype_st=dtype_st,
-            dimension_st=dimension_st,
+            dtype_st=dtype_shared_st,
+            dimension_st=dimension_shared_st,
             id_st=embedding_ids,
             count_st=st.integers(min_value=1, max_value=5),
             documents_st_fn=lambda c: st.lists(
