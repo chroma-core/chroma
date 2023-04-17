@@ -1,5 +1,6 @@
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
+import axios from "axios"
 
 // a function to convert a non-Array object to an Array
 function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -279,7 +280,13 @@ export class ChromaClient {
     const apiConfig: Configuration = new Configuration({
       basePath,
     });
-    this.api = new DefaultApi(apiConfig);
+
+    const axiosInstance = axios.create({
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    })
+
+    this.api = new DefaultApi(apiConfig, basePath, axiosInstance);
   }
 
   public async reset() {
