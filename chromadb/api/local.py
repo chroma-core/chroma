@@ -126,7 +126,7 @@ class LocalAPI(API):
         increment_index: bool = True,
     ):
 
-        existing_ids = set(self._get(collection_name, ids=ids, include=[])["ids"])
+        existing_ids = self._get(collection_name, ids=ids, include=[])["ids"]
         if len(existing_ids) > 0:
             raise ValueError(f"IDs {existing_ids} already exist in collection {collection_name}")
 
