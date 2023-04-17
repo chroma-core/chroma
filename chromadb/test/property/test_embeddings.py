@@ -100,13 +100,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def delete_by_ids(self, ids):
         trace("remove embeddings")
 
-        indices_to_remove = set()
-        for i in range(len(self.embeddings["ids"])):
-            if self.embeddings["ids"][i] in ids:
-                indices_to_remove.add(i)
+        indices_to_remove = [self.embeddings["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
-        self._remove_embeddings(indices_to_remove)
+        self._remove_embeddings(set(indices_to_remove))
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 5)
     @rule(
