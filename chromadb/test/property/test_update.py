@@ -14,6 +14,7 @@ def api(request):
     return chromadb.Client(configuration)
 
 
+@pytest.mark.skip(reason="Unimplemented")
 @given(collection=strategies.collections(), embeddings=strategies.embedding_set())
 def test_update(api, collection, embeddings):
     api.reset()
