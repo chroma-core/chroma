@@ -1,6 +1,6 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, Sequence, TypedDict, cast
+from typing import Optional, Sequence, TypedDict, Callable, List, cast
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
@@ -105,11 +105,11 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype):
     ).astype(dtype)
 
 
-def documents_strategy(count: int):
+def documents_strategy(count: int) -> st.SearchStrategy[Optional[List[str]]]:
     # TODO: Handle non-unique documents
     # TODO: Handle empty string documents
     return st.one_of(
-        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True), st.none()
+        st.none(), st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True)
     )
 
 
@@ -122,11 +122,8 @@ def metadata_strategy():
     )
 
 
-def metadatas_strategy(count: int):
-    return st.one_of(
-        st.lists(metadata_strategy(), min_size=count, max_size=count),
-        st.none(),
-    )
+def metadatas_strategy(count: int) -> st.SearchStrategy[Optional[List[types.Metadata]]]:
+    return st.one_of(st.none(), st.lists(metadata_strategy(), min_size=count, max_size=count))
 
 
 @st.composite
@@ -136,6 +133,10 @@ def embedding_set(
     count_st: st.SearchStrategy[int] = st.integers(min_value=1, max_value=512),
     dtype_st: st.SearchStrategy[np.dtype] = st.sampled_from(float_types),
     id_st: st.SearchStrategy[str] = st.text(alphabet=legal_id_characters, min_size=1, max_size=64),
+    documents_st_fn: Callable[[int], st.SearchStrategy[Optional[List[str]]]] = documents_strategy,
+    metadatas_st_fn: Callable[
+        [int], st.SearchStrategy[Optional[List[types.Metadata]]]
+    ] = metadatas_strategy,
     dimension: Optional[int] = None,
     count: Optional[int] = None,
     dtype: Optional[np.dtype] = None,
@@ -157,8 +158,8 @@ def embedding_set(
 
     # TODO: Test documents only
     # TODO: Generative embedding function to guarantee unique embeddings for unique documents
-    documents = draw(documents_strategy(count))
-    metadatas = draw(metadatas_strategy(count))
+    documents = draw(documents_st_fn(count))
+    metadatas = draw(metadatas_st_fn(count))
 
     embeddings = create_embeddings(dimension, count, dtype)
 

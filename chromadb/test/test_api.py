@@ -212,7 +212,7 @@ def test_heartbeat(api_fixture, request):
 
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-    "ids": ["https://example.com", "https://example.com"],
+    "ids": ["https://example.com/1", "https://example.com/2"],
 }
 
 
@@ -251,7 +251,7 @@ def test_get_or_create(api_fixture, request):
 
 minimal_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-    "ids": ["https://example.com", "https://example.com"],
+    "ids": ["https://example.com/1", "https://example.com/2"],
 }
 
 

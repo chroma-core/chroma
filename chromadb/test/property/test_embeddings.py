@@ -4,6 +4,7 @@ from hypothesis import given, assume, settings, note
 import hypothesis.strategies as st
 from typing import List, Set, TypedDict, Sequence
 import chromadb
+import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
@@ -67,7 +68,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     def __init__(self, api):
         super().__init__()
-        self.api = chromadb.Client(configurations()[0])
+        self.api = api
 
     @initialize(
         collection=strategies.collections(),
@@ -91,9 +92,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(self.embeddings["ids"]) > 0:
             trace("add_more_embeddings")
 
-        self.collection.add(**embedding_set)
-        self._add_embeddings(embedding_set)
-        return multiple(*embedding_set["ids"])
+        if set(embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
+            with pytest.raises(errors.IDAlreadyExistsError):
+                self.collection.add(**embedding_set)
+            return multiple()
+        else:
+            self.collection.add(**embedding_set)
+            self._add_embeddings(embedding_set)
+            return multiple(*embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
@@ -115,6 +121,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             dimension_st=dimension_st,
             id_st=embedding_ids,
             count_st=st.integers(min_value=1, max_value=5),
+            documents_st_fn=lambda c: st.lists(
+                st.text(min_size=1), min_size=c, max_size=c, unique=True
+            ),
         )
     )
     def update_embeddings(self, embedding_set):
@@ -151,8 +160,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         else:
             documents = [None] * len(embeddings["ids"])
 
-        self.embeddings["metadatas"] += metadatas  # type: ignore
-        self.embeddings["documents"] += documents  # type: ignore
+        self.embeddings["metadatas"].extend(metadatas)  # type: ignore
+        self.embeddings["documents"].extend(documents)  # type: ignore
 
     def _remove_embeddings(self, indices_to_remove: Set[int]):
 
@@ -189,16 +198,23 @@ def test_multi_add(api):
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
-    with pytest.raises(ValueError):
+    with pytest.raises(errors.IDAlreadyExistsError):
         coll.add(ids=["a"], embeddings=[[0.0]])
 
     assert coll.count() == 1
 
-    results = coll.query(query_embeddings=[[0.0]], n_results=2)
-    assert results["ids"] == [["a"]]
+    results = coll.get()
+    assert results["ids"] == ["a"]
 
     coll.delete(ids=["a"])
     assert coll.count() == 0
+
+
+def test_dup_add(api):
+    api.reset()
+    coll = api.create_collection(name="foo")
+    with pytest.raises(errors.DuplicateIDError):
+        coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
 def test_escape_chars_in_ids(api):
