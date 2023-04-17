@@ -55,7 +55,6 @@ dimension_shared_st = st.shared(st.integers(min_value=2, max_value=2048), key="d
 class EmbeddingStateMachine(RuleBasedStateMachine):
 
     collection: Collection
-
     embedding_ids: Bundle = Bundle("embedding_ids")
 
     def __init__(self, api):
@@ -123,12 +122,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @invariant()
     def count(self):
-        assert self.collection.count() == len(self.embeddings["ids"])
+        invariants.count(self.api, self.collection.name, len(self.embeddings["ids"]))
 
     @invariant()
-    def no_dups(self):
-        ids = self.collection.get()["ids"]
-        assert len(ids) == len(set(ids))
+    def no_duplicates(self):
+        invariants.no_duplicates(self.collection)
 
     @invariant()
     def ann_accuracy(self):

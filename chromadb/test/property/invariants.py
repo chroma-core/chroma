@@ -12,6 +12,11 @@ def count(api: API, collection_name: str, expected_count: int):
     assert count == expected_count
 
 
+def no_duplicates(collection: Collection):
+    ids = collection.get()["ids"]
+    assert len(ids) == len(set(ids))
+
+
 def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
