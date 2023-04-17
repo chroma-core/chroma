@@ -67,7 +67,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     def __init__(self, api):
         super().__init__()
-        self.api = chromadb.Client(configurations()[0])
+        self.api = api
 
     @initialize(
         collection=strategies.collections(),
@@ -121,6 +121,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             dimension_st=dimension_st,
             id_st=embedding_ids,
             count_st=st.integers(min_value=1, max_value=5),
+            documents_st_fn=lambda c: st.lists(
+                st.text(min_size=1), min_size=c, max_size=c, unique=True
+            ),
         )
     )
     def update_embeddings(self, embedding_set):
