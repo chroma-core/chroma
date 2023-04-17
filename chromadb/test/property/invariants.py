@@ -1,4 +1,4 @@
-from typing import Sequence, cast
+from typing import Literal, Sequence, Union, cast
 from chromadb.test.property.strategies import EmbeddingSet
 import numpy as np
 from chromadb.api import API, types
@@ -12,19 +12,44 @@ def count(api: API, collection_name: str, expected_count: int):
     assert count == expected_count
 
 
-def metadata_matches(collection: Collection, embeddings: EmbeddingSet):
-    """The actual embedding metadata is equal to the expected metadata"""
-
-    actual_metadata = collection.get(ids=embeddings["ids"], include=["metadatas"])[
-        "metadatas"
+def _field_matches(
+    collection: Collection,
+    embeddings: EmbeddingSet,
+    field_name: Union[Literal["documents"], Literal["metadatas"]],
+):
+    """
+    The actual embedding field is equal to the expected field
+    field_name: one of [documents, metadatas]
+    """
+    actual_field = collection.get(ids=embeddings["ids"], include=[field_name])[
+        field_name
     ]
-    # TODO: read code to figure out if this can be None?
-    assert actual_metadata is not None
-    expected_metadata = embeddings["metadatas"]
-    if expected_metadata is not None:
-        cast(Sequence[types.Metadata], expected_metadata)
-        for i, metadata in enumerate(actual_metadata):
-            assert metadata == expected_metadata[i]
+    # This assert should never happen, if we include metadatas/documents it will be
+    # [None, None..] if there is no metadata. It will not be just None.
+    assert actual_field is not None
+    expected_field = embeddings[field_name]
+    if expected_field is None:
+        # Since an EmbeddingSet is the user input, we need to convert the documents to
+        # a List since thats what the API returns -> none per entry
+        expected_field = [None] * len(embeddings["ids"])
+    assert actual_field == expected_field
+
+
+def ids_match(collection: Collection, embeddings: EmbeddingSet):
+    """The actual embedding ids is equal to the expected ids"""
+    actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
+    print(f"{actual_ids} == {embeddings['ids']}")
+    assert actual_ids == embeddings["ids"]
+
+
+def metadatas_match(collection: Collection, embeddings: EmbeddingSet):
+    """The actual embedding metadata is equal to the expected metadata"""
+    _field_matches(collection, embeddings, "metadatas")
+
+
+def documents_match(collection: Collection, embeddings: EmbeddingSet):
+    """The actual embedding documents is equal to the expected documents"""
+    _field_matches(collection, embeddings, "documents")
 
 
 def ann_accuracy(

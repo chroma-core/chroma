@@ -1,6 +1,6 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, Sequence, TypedDict, cast
+from typing import List, Optional, Sequence, TypedDict, cast
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
@@ -17,7 +17,9 @@ collection_metadata = st.one_of(
     st.none(),
     st.dictionaries(
         st.text(),
-        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+        st.one_of(
+            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
+        ),
     ),
 )
 
@@ -31,12 +33,17 @@ _two_periods_re = re.compile(r"\.\.")
 
 
 class EmbeddingSet(TypedDict):
+    """
+    An Embedding Set is a generated set of embeddings, ids, metadatas, and documents
+     that represent what a user would pass to the API.
+    """
+
     ids: types.IDs
     embeddings: Optional[types.Embeddings]
 
     # TODO: We should be able to handle None values
-    metadatas: Optional[Sequence[types.Metadata]]
-    documents: Optional[Sequence[types.Document]]
+    metadatas: Optional[List[types.Metadata]]
+    documents: Optional[List[types.Document]]
 
 
 class Collection(TypedDict):
@@ -69,26 +76,20 @@ def one_or_both(strategy_a, strategy_b):
     )
 
 
+# Temporarily generate only these to avoid SQL formatting issues.
+# TODO: remove this once the SQL layer handles these cases
+legal_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
+
+
 @st.composite
 def unique_ids_strategy(draw, count: int):
+    strat = st.text(alphabet=legal_characters, min_size=1, max_size=64)
 
-    ratio = 20
-    strs = count // ratio
+    results = set()
+    while len(results) < count:
+        results.add(draw(strat))
 
-    str_results = draw(
-        st.lists(st.text(min_size=1, max_size=64), min_size=strs, max_size=strs, unique=True)
-    )
-
-    # Rotate selections from between the two lists. This is a workaround for making sure we don't try to generate
-    # too many strings, causing the Hypothesis health check to fail.ß
-    results = []
-    for i in range(count):
-        if i % ratio == 0 and len(str_results) > 0:
-            results.append(str_results.pop())
-        else:
-            results.append(str(draw(st.uuids())))
-
-    return results
+    return list(results)
 
 
 float_types = [np.float16, np.float32, np.float64]
@@ -128,7 +129,8 @@ def documents_strategy(count: int):
     # TODO: Handle non-unique documents
     # TODO: Handle empty string documents
     return st.one_of(
-        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True), st.none()
+        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True),
+        st.none(),
     )
 
 
@@ -137,7 +139,9 @@ def metadata_strategy():
     # TODO: Handle empty string keys
     return st.dictionaries(
         st.text(min_size=1),
-        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+        st.one_of(
+            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
+        ),
     )
 
 

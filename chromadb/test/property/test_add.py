@@ -29,3 +29,38 @@ def test_add(
         len(embeddings["ids"]),
     )
     invariants.ann_accuracy(coll, embeddings)
+
+
+def test_out_of_order_ids(api: API):
+    api.reset()
+    ooo_ids = [
+        "40",
+        "05",
+        "8",
+        "6",
+        "10",
+        "01",
+        "00",
+        "3",
+        "04",
+        "20",
+        "02",
+        "9",
+        "30",
+        "11",
+        "13",
+        "2",
+        "0",
+        "7",
+        "06",
+        "5",
+        "50",
+        "12",
+        "03",
+        "4",
+        "1",
+    ]
+    coll = api.create_collection("test", embedding_function=lambda x: [1, 2, 3])
+    coll.add(ids=ooo_ids, embeddings=[[1, 2, 3] for _ in range(len(ooo_ids))])
+    get_ids = coll.get(ids=ooo_ids)["ids"]
+    assert get_ids == ooo_ids
