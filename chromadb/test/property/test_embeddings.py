@@ -4,6 +4,7 @@ from hypothesis import given, assume, settings, note
 import hypothesis.strategies as st
 from typing import List, Set, TypedDict, Sequence
 import chromadb
+import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
@@ -93,7 +94,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             trace("add_more_embeddings")
 
         if set(embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
-            with pytest.raises(ValueError):
+            with pytest.raises(errors.IDAlreadyExistsError):
                 self.collection.add(**embedding_set)
             return multiple()
         else:
@@ -198,7 +199,7 @@ def test_multi_add(api):
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
-    with pytest.raises(ValueError):
+    with pytest.raises(errors.IDAlreadyExistsError):
         coll.add(ids=["a"], embeddings=[[0.0]])
 
     assert coll.count() == 1
@@ -213,7 +214,7 @@ def test_multi_add(api):
 def test_dup_add(api):
     api.reset()
     coll = api.create_collection(name="foo")
-    with pytest.raises(ValueError):
+    with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 

@@ -1,4 +1,5 @@
 from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+import chromadb.errors as errors
 
 ID = str
 IDs = List[ID]
@@ -86,7 +87,7 @@ def validate_ids(ids: IDs) -> IDs:
             raise ValueError(f"Expected ID to be a str, got {id}")
     if len(ids) != len(set(ids)):
         dups = set([x for x in ids if ids.count(x) > 1])
-        raise ValueError(f"Expected IDs to be unique, found duplicates for: {dups}")
+        raise errors.DuplicateIDError(f"Expected IDs to be unique, found duplicates for: {dups}")
     return ids
 
 
