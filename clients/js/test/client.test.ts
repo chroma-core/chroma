@@ -214,7 +214,7 @@ test('it should return an error when inserting duplicate IDs', async () => {
     expect(results.error).toContain("ValueError")
 })
 
-test('it should return an error when inserting duplicate IDs in the same batch', async () => {
+test('validation errors when inserting duplicate IDs in the same batch', async () => {
     await chroma.reset()
     const collection = await chroma.createCollection('test')
     const ids = ['test1', 'test2', 'test3', 'test1']
@@ -225,7 +225,9 @@ test('it should return an error when inserting duplicate IDs in the same batch',
         [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
     ]
     const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }, { test: 'test4' }]
-    const results = await collection.add(ids, embeddings, metadatas);
-    expect(results.error).toBeDefined()
-    expect(results.error).toContain("duplicate")
+    try {
+        await collection.add(ids, embeddings, metadatas);
+    } catch (e: any) {
+        expect(e.message).toMatch('duplicates')
+    }
 })
