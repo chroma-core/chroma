@@ -14,6 +14,8 @@ Metadatas = List[Metadata]
 Document = str
 Documents = List[Document]
 
+N_results = int
+
 Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -213,3 +215,13 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
                 f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"
             )
     return include
+
+
+def validate_n_results(n_results: N_results) -> N_results:
+    """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
+    # Check Number of requested results
+    if not isinstance(n_results, int):
+        raise ValueError(f"Expected include to be a int, got {n_results}")
+    if n_results < 0:
+        raise TypeError(f"Number of requested results {n_results}, cannot be negative.")
+    return n_results
