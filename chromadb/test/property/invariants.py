@@ -46,10 +46,11 @@ def ann_accuracy(
             )
             assert result["distances"][i][0] == 0.0
 
-    recall = (len(embeddings["ids"]) - missing) / len(embeddings["ids"])
+    size = len(embeddings["ids"])
+    recall = (size - missing) / size
 
     try:
-        note(f"recall: {recall}")
+        note(f"recall: {recall}, missing {missing} out of {size}")
     except InvalidArgument:
         pass  # it's ok if we're running outside hypothesis
 

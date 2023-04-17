@@ -2,11 +2,12 @@ import pytest
 import logging
 from hypothesis import given, assume, settings, note
 import hypothesis.strategies as st
-from typing import List, Set
+from typing import List, Set, TypedDict, Sequence
 import chromadb
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
+import chromadb.api.types as types
 import chromadb.test.property.strategies as strategies
 import numpy as np
 import numpy
@@ -46,9 +47,20 @@ def api(request):
     return chromadb.Client(configuration)
 
 
+dtype_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")
+dimension_st = st.shared(st.integers(min_value=2, max_value=2048), key="dimension")
+
+
+class PopulatedEmbeddingSet(TypedDict):
+    ids: types.IDs
+    embeddings: List[types.Embedding]
+    metadatas: List[types.Metadata]
+    documents: List[types.Document]
+
+
 class EmbeddingStateMachine(RuleBasedStateMachine):
 
-    embeddings: strategies.EmbeddingSet
+    embeddings: PopulatedEmbeddingSet
     collection: Collection
 
     embedding_ids: Bundle = Bundle("embedding_ids")
@@ -59,8 +71,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @initialize(
         collection=strategies.collections(),
-        dtype=st.shared(st.sampled_from(strategies.float_types), key="dtype"),
-        dimension=st.shared(st.integers(min_value=2, max_value=2048), key="dimension"),
+        dtype=dtype_st,
+        dimension=dimension_st,
     )
     def initialize(self, collection, dtype, dimension):
         self.api.reset()
@@ -73,10 +85,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @rule(
         target=embedding_ids,
-        embedding_set=strategies.embedding_set(
-            dtype_st=st.shared(st.sampled_from(strategies.float_types), key="dtype"),
-            dimension_st=st.shared(st.integers(min_value=2, max_value=2048), key="dimension"),
-        ),
+        embedding_set=strategies.embedding_set(dtype_st=dtype_st, dimension_st=dimension_st),
     )
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
@@ -99,6 +108,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         self.collection.delete(ids=ids)
         self._remove_embeddings(indices_to_remove)
+
+    @precondition(lambda self: len(self.embeddings["ids"]) > 5)
+    @rule(
+        embedding_set=strategies.embedding_set(
+            dtype_st=dtype_st,
+            dimension_st=dimension_st,
+            id_st=embedding_ids,
+            count_st=st.integers(min_value=1, max_value=5),
+        )
+    )
+    def update_embeddings(self, embedding_set):
+        trace("update embeddings")
+        self.collection.update(**embedding_set)
+        self._update_embeddings(embedding_set)
 
     @invariant()
     def count(self):
@@ -129,8 +152,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         else:
             documents = [None] * len(embeddings["ids"])
 
-        self.embeddings["metadatas"].extend(metadatas)  # type: ignore
-        self.embeddings["documents"].extend(documents)  # type: ignore
+        self.embeddings["metadatas"] += metadatas  # type: ignore
+        self.embeddings["documents"] += documents  # type: ignore
 
     def _remove_embeddings(self, indices_to_remove: Set[int]):
 
@@ -139,9 +162,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
         for i in indices_list:
             del self.embeddings["ids"][i]
-            del self.embeddings["embeddings"][i]  # type: ignore
-            del self.embeddings["metadatas"][i]  # type: ignore
-            del self.embeddings["documents"][i]  # type: ignore
+            del self.embeddings["embeddings"][i]
+            del self.embeddings["metadatas"][i]
+            del self.embeddings["documents"][i]
+
+    def _update_embeddings(self, embeddings: strategies.EmbeddingSet):
+
+        for i in range(len(embeddings["ids"])):
+            idx = self.embeddings["ids"].index(embeddings["ids"][i])
+            if embeddings["embeddings"]:
+                self.embeddings["embeddings"][idx] = embeddings["embeddings"][i]
+            if embeddings["metadatas"]:
+                self.embeddings["metadatas"][idx] = embeddings["metadatas"][i]
+            if embeddings["documents"]:
+                self.embeddings["documents"][idx] = embeddings["documents"][i]
 
 
 def test_embeddings_state(caplog, api):

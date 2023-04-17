@@ -70,20 +70,7 @@ def one_or_both(strategy_a, strategy_b):
 
 
 # Temporarily generate only these to avoid SQL formatting issues.
-legal_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
-
-
-@st.composite
-def unique_ids_strategy(draw, count: int):
-
-    strat = st.text(alphabet=legal_characters, min_size=1, max_size=64)
-
-    results = []
-    for i in range(count):
-        results.append(str(draw(strat)))
-
-    return results
-
+legal_id_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
 
 float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]
@@ -148,6 +135,7 @@ def embedding_set(
     dimension_st: st.SearchStrategy[int] = st.integers(min_value=2, max_value=2048),
     count_st: st.SearchStrategy[int] = st.integers(min_value=1, max_value=512),
     dtype_st: st.SearchStrategy[np.dtype] = st.sampled_from(float_types),
+    id_st: st.SearchStrategy[str] = st.text(alphabet=legal_id_characters, min_size=1, max_size=64),
     dimension: Optional[int] = None,
     count: Optional[int] = None,
     dtype: Optional[np.dtype] = None,
@@ -171,8 +159,13 @@ def embedding_set(
     # TODO: Generative embedding function to guarantee unique embeddings for unique documents
     documents = draw(documents_strategy(count))
     metadatas = draw(metadatas_strategy(count))
+
     embeddings = create_embeddings(dimension, count, dtype)
-    ids = draw(unique_ids_strategy(count))
+
+    ids = set()
+    while len(ids) < count:
+        ids.add(draw(id_st))
+    ids = list(ids)
 
     return {
         "ids": ids,
