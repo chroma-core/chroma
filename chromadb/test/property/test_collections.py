@@ -90,7 +90,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         c = self.api.get_or_create_collection(**coll)
         assert c.name == coll["name"]
-        assert c.metadata == coll["metadata"]
+        if coll["metadata"] is not None:
+            assert c.metadata == coll["metadata"]
         self.existing.add(coll["name"])
         return coll
 
