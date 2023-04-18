@@ -1,4 +1,3 @@
-import operator
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 
@@ -39,12 +38,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         embeddings = self._client.create(input=texts, engine=self._model_name)["data"]
 
         # Sort resulting embeddings by index
-        sorted_embeddings = sorted(embeddings, key=operator.attrgetter('index'))
+        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
         # Return just the embeddings
-        return [
-            result["embedding"] for result in sorted_embeddings
-        ]
+        return [result["embedding"] for result in sorted_embeddings]
 
 
 class CohereEmbeddingFunction(EmbeddingFunction):
