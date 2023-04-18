@@ -197,3 +197,35 @@ test('wrong code returns an error', async () => {
     expect(results.error).toBeDefined()
     expect(results.error).toBe("ValueError('Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got $contains')")
 })
+
+test('it should return an error when inserting duplicate IDs', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    const ids = ['test1', 'test2', 'test3']
+    const embeddings = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    ]
+    const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }]
+    await collection.add(ids, embeddings, metadatas)
+    const results = await collection.add(ids, embeddings, metadatas);
+    expect(results.error).toBeDefined()
+    expect(results.error).toContain("ValueError")
+})
+
+test('it should return an error when inserting duplicate IDs in the same batch', async () => {
+    await chroma.reset()
+    const collection = await chroma.createCollection('test')
+    const ids = ['test1', 'test2', 'test3', 'test1']
+    const embeddings = [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+    ]
+    const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }, { test: 'test4' }]
+    const results = await collection.add(ids, embeddings, metadatas);
+    expect(results.error).toBeDefined()
+    expect(results.error).toContain("duplicate")
+})
