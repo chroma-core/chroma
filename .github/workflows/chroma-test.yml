@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - team/hypothesis-tests
   pull_request:
     branches:
       - main
+      - team/hypothesis-tests
 
 jobs:
   test:
