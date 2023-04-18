@@ -14,6 +14,7 @@ from hypothesis.stateful import (
     rule,
     initialize,
     precondition,
+    multiple,
     consumes,
     run_state_machine_as_test,
 )
@@ -45,10 +46,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll["name"] in self.existing:
             with pytest.raises(Exception):
                 c = self.api.create_collection(**coll)
-            c = self.api.get_collection(name=coll["name"])
-        else:
-            c = self.api.create_collection(**coll)
-            self.existing.add(coll["name"])
+            return multiple()
+
+        c = self.api.create_collection(**coll)
+        self.existing.add(coll["name"])
 
         assert c.name == coll["name"]
         assert c.metadata == coll["metadata"]

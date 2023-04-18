@@ -3,7 +3,7 @@ import time
 
 from typing import Dict, List, Optional, Sequence, Callable, cast
 from chromadb import __version__
-
+import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -125,6 +125,12 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
+
+        existing_ids = self._get(collection_name, ids=ids, include=[])["ids"]
+        if len(existing_ids) > 0:
+            raise errors.IDAlreadyExistsError(
+                f"IDs {existing_ids} already exist in collection {collection_name}"
+            )
 
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         added_uuids = self._db.add(

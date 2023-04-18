@@ -12,3 +12,11 @@ class InvalidDimensionException(Exception):
 
 class NotEnoughElementsException(Exception):
     pass
+
+
+class IDAlreadyExistsError(ValueError):
+    pass
+
+
+class DuplicateIDError(ValueError):
+    pass
