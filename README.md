@@ -90,3 +90,4 @@ Chroma is a rapidly developing project. We welcome PR contributors and ideas for
 ## License
 
 [Apache 2.0](./LICENSE)
+

@@ -378,6 +378,36 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Heartbeat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        heartbeat: async (options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/heartbeat`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary List Collections
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -612,6 +642,36 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        version: async (options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/version`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -727,6 +787,16 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Heartbeat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async heartbeat(options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.heartbeat(options);
+            return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
+        },
+        /**
+         * 
          * @summary List Collections
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -798,6 +868,16 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          */
         async updateCollection(collectionName: any, updateCollection: UpdateCollection, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.updateCollection(collectionName, updateCollection, options);
+            return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
+        },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async version(options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.version(options);
             return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
         },
     }
@@ -906,6 +986,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Heartbeat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        heartbeat(options?: any): AxiosPromise<any> {
+            return localVarFp.heartbeat(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary List Collections
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -971,6 +1060,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         updateCollection(collectionName: any, updateCollection: UpdateCollection, options?: any): AxiosPromise<any> {
             return localVarFp.updateCollection(collectionName, updateCollection, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Version
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        version(options?: any): AxiosPromise<any> {
+            return localVarFp.version(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -1302,6 +1400,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary Heartbeat
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof DefaultApi
+     */
+    public heartbeat(options?: AxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).heartbeat(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
      * @summary List Collections
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -1378,5 +1487,16 @@ export class DefaultApi extends BaseAPI {
      */
     public updateCollection(requestParameters: DefaultApiUpdateCollectionRequest, options?: AxiosRequestConfig) {
         return DefaultApiFp(this.configuration).updateCollection(requestParameters.collectionName, requestParameters.updateCollection, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Version
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof DefaultApi
+     */
+    public version(options?: AxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).version(options).then((request) => request(this.axios, this.basePath));
     }
 }
