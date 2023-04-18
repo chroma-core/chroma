@@ -29,6 +29,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
 
         if api_key is not None:
             openai.api_key = api_key
+        # If the api key is still not set, raise an error
+        elif openai.api_key is None:
+            raise ValueError(
+                "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
+            )
 
         self._client = openai.Embedding
         self._model_name = model_name
