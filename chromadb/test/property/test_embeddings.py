@@ -104,6 +104,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
 
+    # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
+    # Using a value < 5 causes retries and lowers the number of valid samples
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
     @rule(
         embedding_set=strategies.embedding_set(
             dtype_st=dtype_shared_st,
@@ -174,8 +177,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 self.embeddings["documents"][idx] = embeddings["documents"][i]
 
 
-# TODO: Investigate why update on HNSW index causes very low recall in certain cases
-@pytest.mark.xfail(reason="Unusual behavior when updating HNSW index")
 def test_embeddings_state(caplog, api):
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))
