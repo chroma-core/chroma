@@ -11,6 +11,7 @@ from chromadb.test.configurations import persist_configurations
 CreatePersistAPI = Callable[[], API]
 
 
+# TODO: fixtures should be common across tests
 @pytest.fixture(scope="module", params=persist_configurations())
 def create_api(request) -> CreatePersistAPI:
     configuration = request.param

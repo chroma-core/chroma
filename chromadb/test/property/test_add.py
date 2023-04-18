@@ -32,7 +32,7 @@ def test_add(
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
 )
