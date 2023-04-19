@@ -1,17 +1,13 @@
 import pytest
 import logging
-from hypothesis import given, assume, settings, note
 import hypothesis.strategies as st
-from typing import List, Set, TypedDict, Sequence
+from typing import Set
 import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
-import chromadb.api.types as types
 import chromadb.test.property.strategies as strategies
-import numpy as np
-import numpy
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -24,7 +20,6 @@ from hypothesis.stateful import (
     invariant,
 )
 from collections import defaultdict
-import time
 import chromadb.test.property.invariants as invariants
 
 
@@ -49,15 +44,16 @@ def api(request):
 
 
 dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")
-dimension_shared_st = st.shared(st.integers(min_value=2, max_value=2048), key="dimension")
+dimension_shared_st = st.shared(
+    st.integers(min_value=2, max_value=2048), key="dimension"
+)
 
 
 class EmbeddingStateMachine(RuleBasedStateMachine):
-
     collection: Collection
     embedding_ids: Bundle = Bundle("embedding_ids")
 
-    def __init__(self, api):
+    def __init__(self, api: API):
         super().__init__()
         self.api = api
 
@@ -72,7 +68,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.dimension = dimension
         self.collection = self.api.create_collection(**collection)
         trace("init")
-        self.embeddings = {"ids": [], "embeddings": [], "metadatas": [], "documents": []}
+        self.embeddings = {
+            "ids": [],
+            "embeddings": [],
+            "metadatas": [],
+            "documents": [],
+        }
 
     @rule(
         target=embedding_ids,
@@ -152,7 +153,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.embeddings["documents"].extend(documents)  # type: ignore
 
     def _remove_embeddings(self, indices_to_remove: Set[int]):
-
         indices_list = list(indices_to_remove)
         indices_list.sort(reverse=True)
 
@@ -163,7 +163,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.embeddings["documents"][i]
 
     def _update_embeddings(self, embeddings: strategies.EmbeddingSet):
-
         for i in range(len(embeddings["ids"])):
             idx = self.embeddings["ids"].index(embeddings["ids"][i])
             if embeddings["embeddings"]:
@@ -182,7 +181,7 @@ def test_embeddings_state(caplog, api):
     print_traces()
 
 
-def test_multi_add(api):
+def test_multi_add(api: API):
     api.reset()
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
@@ -200,7 +199,7 @@ def test_multi_add(api):
     assert coll.count() == 0
 
 
-def test_dup_add(api):
+def test_dup_add(api: API):
     api.reset()
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
@@ -209,7 +208,7 @@ def test_dup_add(api):
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api):
+def test_escape_chars_in_ids(api: API):
     api.reset()
     id = "\x1f"
     coll = api.create_collection(name="foo")

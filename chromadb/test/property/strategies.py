@@ -1,6 +1,6 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, Sequence, TypedDict, Callable, List, cast
+from typing import Optional, TypedDict, Callable, List, cast
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
@@ -17,7 +17,9 @@ collection_metadata = st.one_of(
     st.none(),
     st.dictionaries(
         st.text(),
-        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+        st.one_of(
+            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
+        ),
     ),
 )
 
@@ -31,12 +33,17 @@ _two_periods_re = re.compile(r"\.\.")
 
 
 class EmbeddingSet(TypedDict):
+    """
+    An Embedding Set is a generated set of embeddings, ids, metadatas, and documents
+     that represent what a user would pass to the API.
+    """
+
     ids: types.IDs
     embeddings: Optional[types.Embeddings]
 
     # TODO: We should be able to handle None values
-    metadatas: Optional[Sequence[types.Metadata]]
-    documents: Optional[Sequence[types.Document]]
+    metadatas: Optional[List[types.Metadata]]
+    documents: Optional[List[types.Document]]
 
 
 class Collection(TypedDict):
@@ -70,7 +77,9 @@ def one_or_both(strategy_a, strategy_b):
 
 
 # Temporarily generate only these to avoid SQL formatting issues.
-legal_id_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
+legal_id_characters = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
+)
 
 float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]
@@ -109,7 +118,8 @@ def documents_strategy(count: int) -> st.SearchStrategy[Optional[List[str]]]:
     # TODO: Handle non-unique documents
     # TODO: Handle empty string documents
     return st.one_of(
-        st.none(), st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True)
+        st.none(),
+        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True),
     )
 
 
@@ -118,12 +128,16 @@ def metadata_strategy():
     # TODO: Handle empty string keys
     return st.dictionaries(
         st.text(min_size=1),
-        st.one_of(st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)),
+        st.one_of(
+            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
+        ),
     )
 
 
 def metadatas_strategy(count: int) -> st.SearchStrategy[Optional[List[types.Metadata]]]:
-    return st.one_of(st.none(), st.lists(metadata_strategy(), min_size=count, max_size=count))
+    return st.one_of(
+        st.none(), st.lists(metadata_strategy(), min_size=count, max_size=count)
+    )
 
 
 @st.composite
@@ -132,8 +146,12 @@ def embedding_set(
     dimension_st: st.SearchStrategy[int] = st.integers(min_value=2, max_value=2048),
     count_st: st.SearchStrategy[int] = st.integers(min_value=1, max_value=512),
     dtype_st: st.SearchStrategy[np.dtype] = st.sampled_from(float_types),
-    id_st: st.SearchStrategy[str] = st.text(alphabet=legal_id_characters, min_size=1, max_size=64),
-    documents_st_fn: Callable[[int], st.SearchStrategy[Optional[List[str]]]] = documents_strategy,
+    id_st: st.SearchStrategy[str] = st.text(
+        alphabet=legal_id_characters, min_size=1, max_size=64
+    ),
+    documents_st_fn: Callable[
+        [int], st.SearchStrategy[Optional[List[str]]]
+    ] = documents_strategy,
     metadatas_st_fn: Callable[
         [int], st.SearchStrategy[Optional[List[types.Metadata]]]
     ] = metadatas_strategy,
