@@ -4,7 +4,9 @@ import tempfile
 import os
 
 
-hypothesis.settings.register_profile("dev", deadline=10000)
+hypothesis.settings.register_profile(
+    "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
+)
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
