@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 import chromadb
 import chromadb.server
 from chromadb.errors import (
+    ChromaError,
     NoDatapointsException,
     InvalidDimensionException,
     NotEnoughElementsException,
@@ -45,6 +46,10 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
+    except ChromaError as e:
+        return JSONResponse(content={"error": e.name(),
+                                     "message": e.message()},
+                            status_code=e.code())
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
@@ -203,22 +208,15 @@ class FastAPI(chromadb.server.Server):
         return self._api.reset()
 
     def get_nearest_neighbors(self, collection_name, query: QueryEmbedding):
-        try:
-            nnresult = self._api._query(
-                collection_name=collection_name,
-                where=query.where,
-                where_document=query.where_document,
-                query_embeddings=query.query_embeddings,
-                n_results=query.n_results,
-                include=query.include,
-            )
-            return nnresult
-        except NoDatapointsException as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        except InvalidDimensionException as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        except NotEnoughElementsException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        nnresult = self._api._query(
+            collection_name=collection_name,
+            where=query.where,
+            where_document=query.where_document,
+            query_embeddings=query.query_embeddings,
+            n_results=query.n_results,
+            include=query.include,
+        )
+        return nnresult
 
     def raw_sql(self, raw_sql: RawSql):
         return self._api.raw_sql(raw_sql.raw_sql)
