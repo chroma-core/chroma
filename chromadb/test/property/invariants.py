@@ -4,6 +4,7 @@ import numpy as np
 from chromadb.api import API, types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
+from hypothesis.errors import InvalidArgument
 
 
 def count(api: API, collection_name: str, expected_count: int):
@@ -70,12 +71,20 @@ def documents_match(collection: Collection, embeddings: EmbeddingSet):
     _field_matches(collection, embeddings, "documents")
 
 
+def no_duplicates(collection: Collection):
+    ids = collection.get()["ids"]
+    assert len(ids) == len(set(ids))
+
+
 def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
     min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
+
+    if len(embeddings["ids"]) == 0:
+        return  # nothing to test here
 
     # Validate that each embedding is its own nearest neighbor and adjust recall if not.
     result = collection.query(
@@ -108,7 +117,12 @@ def ann_accuracy(
             )
             assert result["distances"][i][0] == 0.0
 
-    recall = (len(embeddings["ids"]) - missing) / len(embeddings["ids"])
+    size = len(embeddings["ids"])
+    recall = (size - missing) / size
 
-    note(f"recall: {recall}")
+    try:
+        note(f"recall: {recall}, missing {missing} out of {size}")
+    except InvalidArgument:
+        pass  # it's ok if we're running outside hypothesis
+
     assert recall >= min_recall
