@@ -1,6 +1,8 @@
 {
   "git.ignoreLimitWarning": true,
-  "editor.rulers": [120],
+  "editor.rulers": [
+    120
+  ],
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",
   "files.exclude": {
@@ -18,8 +20,9 @@
     "--extend-ignore=E503",
     "--max-line-length=88"
   ],
-
-  "python.testing.pytestArgs": ["chromadb"],
+  "python.testing.pytestArgs": [
+    "."
+  ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true
 }
