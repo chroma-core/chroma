@@ -92,7 +92,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return multiple()
         else:
             self.collection.add(**embedding_set)
-            self.upsert_embeddings(embedding_set)
+            self._upsert_embeddings(embedding_set)
             return multiple(*embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
