@@ -1,3 +1,4 @@
+import logging
 from typing import Callable
 from hypothesis import given
 import pytest
@@ -6,7 +7,8 @@ from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.configurations import persist_configurations
-
+from chromadb.test.property.test_embeddings import EmbeddingStateMachine
+from hypothesis.stateful import run_state_machine_as_test, rule
 
 CreatePersistAPI = Callable[[], API]
 
@@ -60,3 +62,96 @@ def test_persist(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+
+
+class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
+    def __init__(self, create_api: CreatePersistAPI):
+        self.api = create_api()
+        self.create_api = create_api
+        super().__init__(self.api)
+
+    @rule()
+    def persist(self):
+        self.api.persist()
+        collection_name = self.collection.name
+        del self.api
+        self.api = self.create_api()
+        self.collection = self.api.get_collection(collection_name)
+
+
+def test_persist_embeddings_state(caplog, create_api: CreatePersistAPI):
+    caplog.set_level(logging.ERROR)
+    run_state_machine_as_test(lambda: PersistEmbeddingsStateMachine(create_api))
+
+
+import numpy
+
+
+def test_persist_state_machine_example(create_api):
+    state = PersistEmbeddingsStateMachine(create_api)
+    state.initialize(
+        collection={"name": "A00", "metadata": None}, dtype=numpy.float16, dimension=2
+    )
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    state.persist()
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    (v1,) = state.add_embeddings(
+        embedding_set={
+            "ids": ["0"],
+            "embeddings": [[0.09765625, 0.430419921875]],
+            "metadatas": None,
+            "documents": None,
+        }
+    )
+    # state.ann_accuracy()
+    # recall: 1.0, missing 0 out of 1
+    state.count()
+    state.teardown()
+
+
+def test_persist_state_machine_example_b(create_api):
+    state = PersistEmbeddingsStateMachine(create_api)
+    state.initialize(
+        collection={"name": "e00", "metadata": None}, dtype=numpy.float16, dimension=2
+    )
+    state.ann_accuracy()
+    state.count()
+    state.no_duplicates()
+    state.persist()
+    state.ann_accuracy()
+    state.count()
+    state.no_duplicates()
+    state.persist()
+    state.ann_accuracy()
+    state.count()
+    state.no_duplicates()
+    state.persist()
+    state.ann_accuracy()
+    state.count()
+    state.no_duplicates()
+    state.teardown()
+
+    # state = PersistEmbeddingsStateMachine(create_api)
+    # state.initialize(
+    #     collection={"name": "e00", "metadata": None}, dtype=numpy.float16, dimension=2
+    # )
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    # state.persist()
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    # state.persist()
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    # state.persist()
+    # state.ann_accuracy()
+    # state.count()
+    # state.no_duplicates()
+    # state.teardown()
