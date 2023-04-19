@@ -8,6 +8,7 @@ from hypothesis import given
 import pytest
 import json
 from urllib import request
+from chromadb.api import API
 from chromadb.test.configurations import (
     persist_old_version_configurations,
 )
@@ -20,7 +21,8 @@ import multiprocessing
 from chromadb import Client
 from chromadb.config import Settings
 
-MINIMUM_VERSION = "0.3.21"
+MINIMUM_VERSION = "0.3.20"
+COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
@@ -121,12 +123,24 @@ def persist_generated_data_with_old_version(
     version, settings, collection_strategy, embeddings_strategy
 ):
     old_module = switch_to_version(version)
-    api = old_module.Client(settings)
+    api: API = old_module.Client(settings)
     api.reset()
     coll = api.create_collection(
         **collection_strategy, embedding_function=lambda x: None
     )
     coll.add(**embeddings_strategy)
+    # We can't use the invariants module here because it uses the current version
+    # Just use some basic checks for sanity and manual testing where you break the new
+    # version
+
+    # Check count
+    assert coll.count() == len(embeddings_strategy["embeddings"])
+    # Check ids
+    result = coll.get()
+    actual_ids = result["ids"]
+    embedding_id_to_index = {id: i for i, id in enumerate(embeddings_strategy["ids"])}
+    actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+    assert actual_ids == embeddings_strategy["ids"]
     api.persist()
     del api
 
@@ -146,7 +160,9 @@ def test_cycle_versions(
     version, settings = version_settings
 
     # Add data with an old version + check the invariants are preserved in that version
-    if version == MINIMUM_VERSION:
+    if packaging_version.Version(version) <= packaging_version.Version(
+        COLLECTION_NAME_LOWERCASE_VERSION
+    ):
         # Old versions do not support upper case collection names
         collection_strategy["name"] = collection_strategy["name"].lower()
 
