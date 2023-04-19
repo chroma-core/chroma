@@ -132,3 +132,11 @@ def test_upsert_metadata_example(api):
     v1 = state.create_coll(coll={"name": "E40", "metadata": None})
     state.get_or_create_coll(coll={"name": "E40", "metadata": {"foo": "bar"}})
     state.teardown()
+
+
+def test_create_coll_with_none_metadata(api):
+    coll = {"name": "foo", "metadata": None}
+    api.reset()
+    c = api.get_or_create_collection(**coll)
+    assert c.name == coll["name"]
+    assert c.metadata == coll["metadata"]
