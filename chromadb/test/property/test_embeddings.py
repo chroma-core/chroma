@@ -220,6 +220,8 @@ def test_dup_add(api: API):
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
+    with pytest.raises(errors.DuplicateIDError):
+        coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
 # TODO: Use SQL escaping correctly internally
