@@ -243,6 +243,7 @@ class LocalAPI(API):
         where={},
         where_document={},
         include: Include = ["documents", "metadatas", "distances"],
+        ids: Optional[IDs] = None,
     ):
         uuids, distances = self._db.get_nearest_neighbors(
             collection_name=collection_name,
@@ -250,6 +251,7 @@ class LocalAPI(API):
             where_document=where_document,
             embeddings=query_embeddings,
             n_results=n_results,
+            ids=ids,
         )
 
         include_embeddings = "embeddings" in include

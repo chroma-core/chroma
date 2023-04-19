@@ -26,6 +26,7 @@ class QueryEmbedding(BaseModel):
     query_embeddings: List
     n_results: int = 10
     include: Include = ["metadatas", "documents", "distances"]
+    ids: Union[str, List] = None
 
 
 class ProcessEmbedding(BaseModel):

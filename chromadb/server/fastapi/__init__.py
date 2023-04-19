@@ -215,6 +215,7 @@ class FastAPI(chromadb.server.Server):
                 query_embeddings=query.query_embeddings,
                 n_results=query.n_results,
                 include=query.include,
+                ids=query.ids,
             )
             return nnresult
         except NoDatapointsException as e:

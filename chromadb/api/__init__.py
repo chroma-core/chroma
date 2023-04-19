@@ -240,6 +240,7 @@ class API(ABC):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        ids: Optional[IDs] = None,
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding
         ⚠️ This method should not be used directly.
@@ -248,6 +249,9 @@ class API(ABC):
             embedding (Sequence[float]): The embedding to find the nearest neighbors of
             n_results (int, optional): The number of nearest neighbors to return. Defaults to 10.
             where (Dict[str, str], optional): A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+            where_document (Dict[str, str], optional): A dictionary of key-value pairs to filter the documents by. Defaults to {}.
+            include (Include, optional): A list of fields to include in the results. Defaults to ["embeddings", "metadatas", "documents", "distances"].
+            ids (Optional[IDs], optional): A list of ids to filter the embeddings by. Defaults to None.
         """
         pass
 

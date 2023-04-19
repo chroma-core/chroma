@@ -1142,6 +1142,28 @@ def test_query_include(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
+def test_query_ids(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+
+    api.reset()
+    collection = api.create_collection("test_query_ids")
+    collection.add(**records)
+
+    items = collection.query(query_embeddings=[0, 0, 0], n_results=2)
+    print(items)
+    assert items["ids"][0][0] == "id1"
+    assert items["ids"][0][1] == "id2"
+
+    items = collection.query(query_embeddings=[[0, 0, 0], [1, 2, 1.2]], n_results=1, ids=["id2"])
+    assert len(items["ids"]) == 2
+    print(items)
+    assert items["metadatas"][0][0]["int_value"] == 2
+    assert items["metadatas"][1][0]["int_value"] == 2
+    assert items["ids"][0][0] == "id2"
+    assert items["ids"][1][0] == "id2"
+
+
+@pytest.mark.parametrize("api_fixture", test_apis)
 def test_get_include(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 

@@ -232,6 +232,7 @@ class FastAPI(API):
         where={},
         where_document={},
         include: Include = ["metadatas", "documents", "distances"],
+        ids=None,
     ):
         """Gets the nearest neighbors of a single embedding"""
 
@@ -244,6 +245,7 @@ class FastAPI(API):
                     "where": where,
                     "where_document": where_document,
                     "include": include,
+                    "ids": ids,
                 }
             ),
         )

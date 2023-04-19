@@ -113,7 +113,7 @@ class Clickhouse(DB):
     def _create_where_clause(
         self,
         collection_uuid: str,
-        ids: Optional[List[str]] = None,
+        ids: Optional[IDs] = None,
         where: Where = {},
         where_document: WhereDocument = {},
     ):
@@ -493,6 +493,7 @@ class Clickhouse(DB):
         n_results: int,
         collection_name=None,
         collection_uuid=None,
+        ids: Optional[IDs] = None,
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
 
         # Either the collection name or the collection uuid must be provided
@@ -502,22 +503,21 @@ class Clickhouse(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        if len(where) != 0 or len(where_document) != 0:
+        uuids = None
+        if ids is not None or len(where) != 0 or len(where_document) != 0:
             results = self.get(
-                collection_uuid=collection_uuid, where=where, where_document=where_document
+                collection_uuid=collection_uuid, where=where, where_document=where_document, ids=ids
             )
 
             if len(results) > 0:
-                ids = [x[1] for x in results]
+                uuids = [x[1] for x in results]
             else:
                 raise NoDatapointsException(
                     f"No datapoints found for the supplied filter {json.dumps(where)}"
                 )
-        else:
-            ids = None
 
         index = self._index(collection_uuid)
-        uuids, distances = index.get_nearest_neighbors(embeddings, n_results, ids)
+        uuids, distances = index.get_nearest_neighbors(embeddings, n_results, uuids)
 
         return uuids, distances
 

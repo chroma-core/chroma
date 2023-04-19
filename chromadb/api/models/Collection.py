@@ -161,6 +161,7 @@ class Collection(BaseModel):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],
+        ids: Optional[IDs] = None,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -171,6 +172,7 @@ class Collection(BaseModel):
             where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
+            ids: The ids of the embeddings to pre-filter for query. Optional.
         """
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
@@ -206,6 +208,7 @@ class Collection(BaseModel):
             where=where,
             where_document=where_document,
             include=include,
+            ids=ids,
         )
 
     def modify(self, name: Optional[str] = None, metadata=None):
