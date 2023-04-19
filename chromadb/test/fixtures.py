@@ -1,4 +1,5 @@
 from chromadb.config import Settings
+from chromadb import Client
 import hypothesis
 import tempfile
 import os
@@ -10,29 +11,35 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
-def configurations():
-    """Based on the environment, return a list of API configurations to test."""
-    return [
-        Settings(
+def duckdb():
+    yield Client(
+       Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
-        ),
+        )
+    )
+
+
+def duckdb_parquet():
+    yield Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb+parquet",
             persist_directory=tempfile.gettempdir() + "/tests",
-        ),
-    ]
+        )
+    )
+
+
+def fixtures():
+    return [duckdb, duckdb_parquet]
 
 
 def persist_configurations():
-    """Only returns configurations that persist to disk."""
     return [
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb+parquet",
             persist_directory=tempfile.gettempdir() + "/tests",
-        ),
+        )
     ]
-

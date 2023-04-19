@@ -2,15 +2,14 @@ import pytest
 from hypothesis import given
 import chromadb
 from chromadb.api import API
-from chromadb.test.configurations import configurations
+from chromadb.test.fixtures import fixtures
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 
 
-@pytest.fixture(scope="module", params=configurations())
+@pytest.fixture(scope="module", params=fixtures())
 def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
+    yield next(request.param())
 
 
 @given(collection=strategies.collections(), embeddings=strategies.embedding_set())
