@@ -1,8 +1,13 @@
 import sys
+import os
+import shutil
 import subprocess
 import tempfile
+from typing import Generator, Tuple
 from hypothesis import given
 import pytest
+import json
+from urllib import request
 import importlib
 from chromadb.config import Settings
 from chromadb.test.configurations import (
@@ -11,13 +16,24 @@ from chromadb.test.configurations import (
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from importlib.util import spec_from_file_location, module_from_spec
+from packaging import version as packaging_version
+import re
 
-# TODO: fetch this from pypi
-test_old_versions = [
-    # "0.3.18",  # 0.3.19 was a bad release
-    # "0.3.20",
-    "0.3.18",
-]
+version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
+def versions():
+    """Returns the pinned minimum version and the latest version of chromadb."""
+    url = "https://pypi.org/pypi/chromadb/json"
+    data = json.load(request.urlopen(request.Request(url)))
+    versions = list(data["releases"].keys())
+    # Older versions on pypi contain "devXYZ" suffixes
+    versions = [v for v in versions if version_re.match(v)]
+    versions.sort(key=packaging_version.Version)
+    return ["0.3.21", versions[-1]]
+
+
+test_old_versions = versions()
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
 
@@ -29,49 +45,80 @@ def get_path_to_version_library(version):
     return get_path_to_version_install(version) + "/chromadb/__init__.py"
 
 
-@pytest.fixture(scope="module", params=test_old_versions, autouse=True)
-def install_old_versions(request):
-    version = request.param
+def install_version(version):
+    # Check if already installed
+    version_library = get_path_to_version_library(version)
+    if os.path.exists(version_library):
+        return
     path = get_path_to_version_install(version)
-    print(path)
     install(f"chromadb=={version}", path)
 
 
 def install(pkg, path):
+    # -q -q to suppress pip output to ERROR level
+    # https://pip.pypa.io/en/stable/cli/pip/#quiet
+    print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", pkg, "--target={}".format(path)]
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "-q",
+            "-q",
+            "install",
+            pkg,
+            "--target={}".format(path),
+        ]
     )
 
 
 def switch_to_version(version):
     module_name = "chromadb"
+    # Remove old version from sys.modules, except test modules
+    old_modules = {
+        n: m
+        for n, m in sys.modules.items()
+        if n == module_name
+        or (n.startswith(module_name + ".") and not n.startswith(module_name + ".test"))
+    }
+    for n in old_modules:
+        del sys.modules[n]
+
+    # Load the target version
+    new_module = None
     if version == "current":
         # Will import from current working directory
-        current_module = importlib.import_module(module_name)
-        return current_module
+        new_module = importlib.import_module(module_name)
     else:
-        module_name = f"{module_name}_{version}"
+        path = get_path_to_version_library(version)
+        spec = spec_from_file_location(module_name, path)
+        assert spec is not None and spec.loader is not None
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        new_module = module
+        assert new_module.__version__ == version
 
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-    path = get_path_to_version_library(version)
-    spec = spec_from_file_location(module_name, path)
-
-    assert spec is not None and spec.loader is not None
-
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules[module_name] = module
-    assert module.__version__ == version
-    return module
+    sys.modules[module_name] = new_module
+    return new_module
 
 
 @pytest.fixture(
     scope="module", params=persist_old_version_configurations(test_old_versions)
 )
-def settings(request):
+def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
-    return configuration
+    version = configuration[0]
+    install_version(version)
+    yield configuration
+    # Cleanup the installed version
+    path = get_path_to_version_install(version)
+    shutil.rmtree(path)
+    # TODO: Once we share the api fixtures between tests, we can move this cleanup to
+    # the shared fixture
+    # Cleanup the persisted data
+    data_path = configuration[1].persist_directory
+    if os.path.exists(data_path):
+        shutil.rmtree(data_path)
 
 
 @given(
@@ -79,16 +126,20 @@ def settings(request):
     embeddings_strategy=strategies.embedding_set(),
 )
 def test_cycle_versions(
-    settings: Settings,
+    version_settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.EmbeddingSet,
 ):
     # Test backwards compatibility
     # For the current version, ensure that we can load a collection from
     # the previous versions
-    print("SWITCH")
-    old_module = switch_to_version("0.3.18")
-    print(old_module.__version__)
+    version, settings = version_settings
+
+    # Add data with an old version + check the invariants are preserved in that version
+    if version == "0.3.21":
+        # Old versions do not support upper case collection names
+        collection_strategy["name"] = collection_strategy["name"].lower()
+    old_module = switch_to_version(version)
     api = old_module.Client(settings)
     api.reset()
     coll = api.create_collection(
@@ -109,8 +160,9 @@ def test_cycle_versions(
     api.persist()
     del api
 
+    # Switch to the current version (local working directory) and check the invariants
+    # are preserved for the collection
     current_module = switch_to_version("current")
-    print(current_module.__version__)
     api = current_module.Client(settings)
     coll = api.get_collection(
         name=collection_strategy["name"], embedding_function=lambda x: None
@@ -125,4 +177,3 @@ def test_cycle_versions(
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
     del api
-    print("TESTS PASS")

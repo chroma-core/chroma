@@ -1,11 +1,13 @@
-from typing import List
+from typing import List, Tuple
 from chromadb.config import Settings
 import hypothesis
 import tempfile
 import os
 
 
-hypothesis.settings.register_profile("dev", deadline=10000)
+hypothesis.settings.register_profile(
+    "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
+)
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
@@ -36,16 +38,21 @@ def persist_configurations():
     ]
 
 
-def persist_old_version_configurations(versions: List[str]):
+def persist_old_version_configurations(
+    versions: List[str],
+) -> List[Tuple[str, Settings]]:
     """
     Only returns configurations that persist to disk at a given path for a version.
     """
 
     return [
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+        (
+            version,
+            Settings(
+                chroma_api_impl="local",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+            ),
         )
         for version in versions
     ]
