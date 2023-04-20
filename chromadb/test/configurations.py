@@ -35,4 +35,3 @@ def persist_configurations():
             persist_directory=tempfile.gettempdir() + "/tests",
         ),
     ]
-

@@ -1,14 +1,17 @@
 import logging
+import multiprocessing
 from typing import Callable
 from hypothesis import given
 import pytest
 import chromadb
+import traceback
 from chromadb.api import API
+from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.configurations import persist_configurations
 from chromadb.test.property.test_embeddings import EmbeddingStateMachine
-from hypothesis.stateful import run_state_machine_as_test, rule
+from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 
 CreatePersistAPI = Callable[[], API]
 
@@ -18,6 +21,12 @@ CreatePersistAPI = Callable[[], API]
 def create_api(request) -> CreatePersistAPI:
     configuration = request.param
     return lambda: chromadb.Client(configuration)
+
+
+@pytest.fixture(scope="module", params=persist_configurations())
+def settings(request) -> Settings:
+    configuration = request.param
+    return configuration
 
 
 @given(
@@ -64,94 +73,47 @@ def test_persist(
     invariants.ann_accuracy(coll, embeddings_strategy)
 
 
+def load_and_check(settings: Settings, collection_name: str, embeddings_set, conn):
+    api = chromadb.Client(settings)
+    coll = api.get_collection(name=collection_name, embedding_function=lambda x: None)
+    try:
+        invariants.count(api, coll.name, len(embeddings_set["ids"]))
+        invariants.metadatas_match(coll, embeddings_set)
+        invariants.documents_match(coll, embeddings_set)
+        invariants.ids_match(coll, embeddings_set)
+        invariants.ann_accuracy(coll, embeddings_set)
+    except Exception as e:
+        conn.send(e)
+
+
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
-    def __init__(self, create_api: CreatePersistAPI):
-        self.api = create_api()
-        self.create_api = create_api
+    def __init__(self, settings: Settings):
+        self.api = chromadb.Client(settings)
+        self.settings = settings
         super().__init__(self.api)
 
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
     @rule()
     def persist(self):
         self.api.persist()
         collection_name = self.collection.name
-        del self.api
-        self.api = self.create_api()
-        self.collection = self.api.get_collection(collection_name)
+
+        # Create a new process
+        # And then inside the process run the invariants
+        # we do this because we cannot test loading the data otherwise since
+        # the data might be persist at the will of the gc
+        # TODO: Once we switch off of duckdb and onto sqlite we can remove this
+        conn1, conn2 = multiprocessing.Pipe()
+        p = multiprocessing.Process(
+            target=load_and_check,
+            args=(self.settings, collection_name, self.embeddings, conn2),
+        )
+        p.start()
+        p.join()
+        if conn1.poll():
+            raise conn1.recv()
 
 
-def test_persist_embeddings_state(caplog, create_api: CreatePersistAPI):
+def test_persist_embeddings_state(caplog, settings: Settings):
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: PersistEmbeddingsStateMachine(create_api))
-
-
-import numpy
-
-
-def test_persist_state_machine_example(create_api):
-    state = PersistEmbeddingsStateMachine(create_api)
-    state.initialize(
-        collection={"name": "A00", "metadata": None}, dtype=numpy.float16, dimension=2
-    )
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    state.persist()
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    (v1,) = state.add_embeddings(
-        embedding_set={
-            "ids": ["0"],
-            "embeddings": [[0.09765625, 0.430419921875]],
-            "metadatas": None,
-            "documents": None,
-        }
-    )
-    # state.ann_accuracy()
-    # recall: 1.0, missing 0 out of 1
-    state.count()
-    state.teardown()
-
-
-def test_persist_state_machine_example_b(create_api):
-    state = PersistEmbeddingsStateMachine(create_api)
-    state.initialize(
-        collection={"name": "e00", "metadata": None}, dtype=numpy.float16, dimension=2
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.persist()
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.persist()
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.persist()
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.teardown()
-
-    # state = PersistEmbeddingsStateMachine(create_api)
-    # state.initialize(
-    #     collection={"name": "e00", "metadata": None}, dtype=numpy.float16, dimension=2
-    # )
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    # state.persist()
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    # state.persist()
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    # state.persist()
-    # state.ann_accuracy()
-    # state.count()
-    # state.no_duplicates()
-    # state.teardown()
+    run_state_machine_as_test(lambda: PersistEmbeddingsStateMachine(settings))
