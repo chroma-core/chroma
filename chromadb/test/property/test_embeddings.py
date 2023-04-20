@@ -234,3 +234,4 @@ def test_escape_chars_in_ids(api: API):
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
+
