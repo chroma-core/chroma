@@ -74,9 +74,20 @@ def duckdb_parquet():
     )
 
 
-def fixtures():
-    return [duckdb, duckdb_parquet]
+def integration_api():
+    """Fixture generator for returning a client configured via environmenet
+    variables, intended for externally configured integration tests
+    """
+    yield chromadb.Client()
 
+
+def fixtures():
+    api_fixtures = [duckdb, duckdb_parquet, fastapi]
+    if "CHROMA_INTEGRATION_TEST" in os.environ:
+        api_fixtures.append(integration_api)
+    if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
+        api_fixtures = [integration_api]
+    return api_fixtures
 
 def persist_configurations():
     return [
