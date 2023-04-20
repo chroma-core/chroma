@@ -205,11 +205,11 @@ class Clickhouse(DB):
          ALTER TABLE
             collections
          UPDATE
-            metadata = '{json.dumps(new_metadata)}',
-            name = '{new_name}'
+            metadata = %s,
+            name = %s
          WHERE
-            name = '{current_name}'
-         """
+            name = %s
+         """, [json.dumps(new_metadata), new_name, current_name]
         )
 
     def delete_collection(self, name: str):
@@ -263,20 +263,20 @@ class Clickhouse(DB):
             update_fields = []
             parameters[f"i{i}"] = ids[i]
             if embeddings is not None:
-                update_fields.append(f"embedding = {{e{i}:Array(Float64)}}")
+                update_fields.append(f"embedding = %(e{i})s")
                 parameters[f"e{i}"] = embeddings[i]
             if metadatas is not None:
-                update_fields.append(f"metadata = {{m{i}:String}}")
+                update_fields.append(f"metadata = %(m{i})s")
                 parameters[f"m{i}"] = json.dumps(metadatas[i])
             if documents is not None:
-                update_fields.append(f"document = {{d{i}:String}}")
+                update_fields.append(f"document = %(d{i})s")
                 parameters[f"d{i}"] = documents[i]
 
             update_statement = f"""
             UPDATE
                 {",".join(update_fields)}
             WHERE
-                id = {{i{i}:String}} AND
+                id = %(i{i})s AND
                 collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
             """
             updates.append(update_statement)
