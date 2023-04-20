@@ -42,7 +42,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @rule(target=collections, coll=strategies.collections())
     def create_coll(self, coll):
-
         if coll["name"] in self.existing:
             with pytest.raises(Exception):
                 c = self.api.create_collection(**coll)
@@ -67,7 +66,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @rule(coll=consumes(collections))
     def delete_coll(self, coll):
-
         if coll["name"] in self.existing:
             self.api.delete_collection(name=coll["name"])
             self.existing.remove(coll["name"])
@@ -85,12 +83,15 @@ class CollectionStateMachine(RuleBasedStateMachine):
         for c in colls:
             assert c.name in self.existing
 
-    @rule(target=collections, coll=st.one_of(consumes(collections), strategies.collections()))
+    @rule(
+        target=collections,
+        coll=st.one_of(consumes(collections), strategies.collections()),
+    )
     def get_or_create_coll(self, coll):
-
         c = self.api.get_or_create_collection(**coll)
         assert c.name == coll["name"]
-        assert c.metadata == coll["metadata"]
+        if coll["metadata"] is not None:
+            assert c.metadata == coll["metadata"]
         self.existing.add(coll["name"])
         return coll
 
@@ -131,3 +132,11 @@ def test_upsert_metadata_example(api):
     v1 = state.create_coll(coll={"name": "E40", "metadata": None})
     state.get_or_create_coll(coll={"name": "E40", "metadata": {"foo": "bar"}})
     state.teardown()
+
+
+def test_create_coll_with_none_metadata(api):
+    coll = {"name": "foo", "metadata": None}
+    api.reset()
+    c = api.get_or_create_collection(**coll)
+    assert c.name == coll["name"]
+    assert c.metadata == coll["metadata"]
