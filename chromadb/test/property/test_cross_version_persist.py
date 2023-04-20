@@ -61,6 +61,7 @@ def install_version(version):
 def install(pkg, path):
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
+    # TODO: make sure this doesn't downgrade anything
     print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(
         [
@@ -79,6 +80,7 @@ def install(pkg, path):
 def switch_to_version(version):
     module_name = "chromadb"
     # Remove old version from sys.modules, except test modules
+    # TODO: remove test modules too
     old_modules = {
         n: m
         for n, m in sys.modules.items()
@@ -89,6 +91,7 @@ def switch_to_version(version):
         del sys.modules[n]
 
     # Load the target version and override the path to the installed version
+    # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
     path = get_path_to_version_library(version)
     sys.path.insert(0, get_path_to_version_install(version))
     spec = spec_from_file_location(module_name, path)
@@ -192,4 +195,7 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+
+    # TODO: add some data and then check that the invariants are preserved
+
     del api

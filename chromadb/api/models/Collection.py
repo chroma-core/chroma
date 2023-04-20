@@ -59,7 +59,7 @@ class Collection(BaseModel):
 
     def count(self) -> int:
         """The total number of embeddings added to the database"""
-        return self._client._count(collection_name=self.name)
+        return self._client._count(collection_name=self.name) + 10
 
     def add(
         self,
