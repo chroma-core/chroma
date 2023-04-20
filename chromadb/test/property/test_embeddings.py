@@ -92,7 +92,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             return multiple()
         else:
             self.collection.add(**embedding_set)
-            self._add_embeddings(embedding_set)
+            self._upsert_embeddings(embedding_set)
             return multiple(*embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
@@ -122,7 +122,25 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def update_embeddings(self, embedding_set):
         trace("update embeddings")
         self.collection.update(**embedding_set)
-        self._update_embeddings(embedding_set)
+        self._upsert_embeddings(embedding_set)
+
+    # Using a value < 3 causes more retries and lowers the number of valid samples
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 3)
+    @rule(
+        embedding_set=strategies.embedding_set(
+            dtype_st=dtype_shared_st,
+            dimension_st=dimension_shared_st,
+            id_st=st.one_of(embedding_ids, strategies.default_id_st),
+            count_st=st.integers(min_value=1, max_value=5),
+            documents_st_fn=lambda c: st.lists(
+                st.text(min_size=1), min_size=c, max_size=c, unique=True
+            ),
+        ),
+    )
+    def upsert_embeddings(self, embedding_set):
+        trace("upsert embeddings")
+        self.collection.upsert(**embedding_set)
+        self._upsert_embeddings(embedding_set)
 
     @invariant()
     def count(self):
@@ -138,22 +156,30 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             collection=self.collection, embeddings=self.embeddings, min_recall=0.95
         )
 
-    def _add_embeddings(self, embeddings: strategies.EmbeddingSet):
-        self.embeddings["ids"].extend(embeddings["ids"])
-        self.embeddings["embeddings"].extend(embeddings["embeddings"])  # type: ignore
-
-        if "metadatas" in embeddings and embeddings["metadatas"] is not None:
-            metadatas = embeddings["metadatas"]
-        else:
-            metadatas = [None] * len(embeddings["ids"])
-
-        if "documents" in embeddings and embeddings["documents"] is not None:
-            documents = embeddings["documents"]
-        else:
-            documents = [None] * len(embeddings["ids"])
-
-        self.embeddings["metadatas"].extend(metadatas)  # type: ignore
-        self.embeddings["documents"].extend(documents)  # type: ignore
+    def _upsert_embeddings(self, embeddings: strategies.EmbeddingSet):
+        for idx, id in enumerate(embeddings["ids"]):
+            if id in self.embeddings["ids"]:
+                target_idx = self.embeddings["ids"].index(id)
+                if "embeddings" in embeddings and embeddings["embeddings"] is not None:
+                    self.embeddings["embeddings"][target_idx] = embeddings["embeddings"][idx]
+                if "metadatas" in embeddings and embeddings["metadatas"] is not None:
+                    self.embeddings["metadatas"][target_idx] = embeddings["metadatas"][idx]
+                if "documents" in embeddings and embeddings["documents"] is not None:
+                    self.embeddings["documents"][target_idx] = embeddings["documents"][idx]
+            else:
+                self.embeddings["ids"].append(id)
+                if "embeddings" in embeddings and embeddings["embeddings"] is not None:
+                    self.embeddings["embeddings"].append(embeddings["embeddings"][idx])
+                else:
+                    self.embeddings["embeddings"].append(None)
+                if "metadatas" in embeddings and embeddings["metadatas"] is not None:
+                    self.embeddings["metadatas"].append(embeddings["metadatas"][idx])
+                else:
+                    self.embeddings["metadatas"].append(None)
+                if "documents" in embeddings and embeddings["documents"] is not None:
+                    self.embeddings["documents"].append(embeddings["documents"][idx])
+                else:
+                    self.embeddings["documents"].append(None)
 
     def _remove_embeddings(self, indices_to_remove: Set[int]):
         indices_list = list(indices_to_remove)
@@ -164,17 +190,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.embeddings["embeddings"][i]
             del self.embeddings["metadatas"][i]
             del self.embeddings["documents"][i]
-
-    def _update_embeddings(self, embeddings: strategies.EmbeddingSet):
-        for i in range(len(embeddings["ids"])):
-            idx = self.embeddings["ids"].index(embeddings["ids"][i])
-            if embeddings["embeddings"]:
-                self.embeddings["embeddings"][idx] = embeddings["embeddings"][i]
-            if embeddings["metadatas"]:
-                self.embeddings["metadatas"][idx] = embeddings["metadatas"][i]
-            if embeddings["documents"]:
-                self.embeddings["documents"][idx] = embeddings["documents"][i]
-
 
 def test_embeddings_state(caplog, api):
     caplog.set_level(logging.ERROR)
@@ -205,6 +220,8 @@ def test_dup_add(api: API):
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
+    with pytest.raises(errors.DuplicateIDError):
+        coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
 # TODO: Use SQL escaping correctly internally
