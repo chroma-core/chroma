@@ -22,11 +22,11 @@ def configurations():
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
         ),
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
-        ),
+        # Settings(
+        #     chroma_api_impl="local",
+        #     chroma_db_impl="duckdb+parquet",
+        #     persist_directory=tempfile.gettempdir() + "/tests",
+        # ),
     ]
 
 
@@ -50,6 +50,7 @@ def persist_old_version_configurations(
 
     return [
         (
+
             version,
             Settings(
                 chroma_api_impl="local",

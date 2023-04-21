@@ -219,3 +219,105 @@ class DeterministicRuleStrategy(SearchStrategy):
             if not bundle:
                 return False
         return True
+
+
+# See if there's a way to unify this so we're randomly generating keys
+filterable_metadata = st.fixed_dictionaries({}, optional={"intKey": st.integers(max_value=2**31-1,
+                                                                                min_value=-2**31-1),
+                                                          "floatKey": st.floats(allow_infinity=False, allow_nan=False),
+                                                          "textKey": st.text()})
+
+
+# TODO remove hardcoded values
+doc_tokens = ["apple", "grape", "peach", "cherry", "orange",
+              "banana", "papaya", "plum", "mango", "melon"]
+
+readable_document = st.lists(st.sampled_from(doc_tokens),
+                             min_size=2,
+                             max_size=10).map(lambda l: " ".join(l))
+
+where_document_clause = st.sampled_from(doc_tokens).map(lambda t: {"$contains": t})
+
+@st.composite
+def where_clause(draw, int_values, float_values, text_values):
+    key = draw(st.sampled_from(["intKey", "floatKey", "textKey"]))
+    if key == "intKey":
+        hypothesis.assume(len(int_values) > 0)
+        value = draw(st.sampled_from(int_values))
+    elif key == "floatKey":
+        hypothesis.assume(len(float_values) > 0)
+        value = draw(st.sampled_from(float_values))
+    else:
+        hypothesis.assume(len(text_values) > 0)
+        value = draw(st.sampled_from(text_values))
+
+    legal_ops = [None, "$eq", "$ne"]
+    if key != "textKey":
+        legal_ops = ["$gt", "$lt", "$lte", "$gte"] + legal_ops
+
+    op = draw(st.sampled_from(legal_ops))
+
+    if op is None:
+        return {key: value}
+    else:
+        return {key: {op: value}}
+
+
+@st.composite
+def binary_operator_clause(draw, base_st):
+    op = draw(st.sampled_from(["$and", "$or"]))
+    return {op: [draw(base_st), draw(base_st)]}
+
+@st.composite
+def recursive_where_clause(draw, int_values, float_values, text_values):
+    base_st = where_clause(int_values, float_values, text_values)
+    return draw(st.recursive(base_st, binary_operator_clause))
+
+
+recursive_where_document_clause = st.recursive(where_document_clause,
+                                               binary_operator_clause)
+
+
+@st.composite
+def filterable_embedding_set(draw):
+
+    def documents_st_fn(count):
+        return st.lists(max_size=count, min_size=count,
+                        elements=readable_document)
+
+    def metadatas_st_fn(count):
+        return st.lists(max_size=count, min_size=count,
+                        elements=filterable_metadata)
+
+    return draw(embedding_set(dimension=2,
+                              documents_st_fn=documents_st_fn,
+                              metadatas_st_fn=metadatas_st_fn))  # type: ignore
+
+
+@st.composite
+def filterable_embedding_set_with_filters(draw):
+
+    es = draw(filterable_embedding_set())
+
+    int_values = []
+    float_values = []
+    text_values = []
+    for m in es["metadatas"]:
+        if "intKey" in m:
+            int_values.append(m["intKey"])
+        if "floatKey" in m:
+            float_values.append(m["floatKey"])
+        if "textKey" in m:
+            text_values.append(m["textKey"])
+
+    size = len(es["ids"])
+
+    filters = draw(st.lists(recursive_where_clause(int_values,
+                                                   float_values,
+                                                   text_values),
+                            min_size=size, max_size=size))
+
+    doc_filters = draw(st.lists(recursive_where_document_clause,
+                                min_size=size, max_size=size))
+
+    return es, filters, doc_filters
