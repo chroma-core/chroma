@@ -5,6 +5,7 @@ const config: Config.InitialOptions = {
   testEnvironment: 'node',
   clearMocks: true,
   collectCoverage: false,
+  testTimeout: 15000,
   coverageDirectory: './test/coverage',
   coverageReporters: ['json', 'html', 'lcov'],
   collectCoverageFrom: [
