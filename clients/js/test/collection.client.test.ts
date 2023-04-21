@@ -1,9 +1,11 @@
 import { expect, test } from '@jest/globals';
-import { ChromaClient } from '../src/index'
 import chroma from './initClient'
 
-test('it should list collections', async () => {
+beforeEach( async() => {
     await chroma.reset()
+});
+
+test('it should list collections', async () => {
     let collections = await chroma.listCollections()
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
@@ -14,7 +16,6 @@ test('it should list collections', async () => {
 })
 
 test('it should create a collection', async () => {
-    await chroma.reset()
     const collection = await chroma.createCollection('test')
     expect(collection).toBeDefined()
     expect(collection).toHaveProperty('name')
@@ -37,7 +38,6 @@ test('it should create a collection', async () => {
 })
 
 test('it should get a collection', async () => {
-    await chroma.reset()
     const collection = await chroma.createCollection('test')
     const collection2 = await chroma.getCollection('test')
     expect(collection).toBeDefined()
@@ -48,7 +48,6 @@ test('it should get a collection', async () => {
 })
 
 test('it should get or create a collection', async () => {
-    await chroma.reset()
     await chroma.createCollection('test')
 
     const collection2 = await chroma.getOrCreateCollection('test')
@@ -63,7 +62,6 @@ test('it should get or create a collection', async () => {
 })
 
 test('it should delete a collection', async () => {
-    await chroma.reset()
     const collection = await chroma.createCollection('test')
     let collections = await chroma.listCollections()
     expect(collections.length).toBe(1)
