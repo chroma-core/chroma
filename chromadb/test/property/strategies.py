@@ -84,26 +84,6 @@ legal_id_characters = (
 float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]
 
-# TODO: Handle single embedding, metadata, and document i.e. not list
-
-
-def embeddings_strategy(dim: int, count: int, dtype: np.dtype):
-    return npst.arrays(
-        dtype=dtype,
-        shape=(count, dim),
-        # TODO: It should be possible to deal with NaN and inf values
-        # TODO: It should be possible to deal with redundant embeddings
-        elements=st.floats(
-            allow_nan=False,
-            allow_infinity=False,
-            width=np.dtype(dtype).itemsize * 8,
-        )
-        if dtype in float_types
-        else st.integers(min_value=np.iinfo(dtype).min, max_value=np.iinfo(dtype).max),
-        unique=True,
-    )
-
-
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
 def create_embeddings(dim: int, count: int, dtype: np.dtype):
