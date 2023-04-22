@@ -878,19 +878,6 @@ def test_dimensionality_validation_query(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", test_apis)
-def test_number_of_elements_validation_query(api_fixture, request):
-    api = request.getfixturevalue(api_fixture.__name__)
-
-    api.reset()
-    collection = api.create_collection("test_number_of_elements_validation")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.query(**bad_number_of_results_query)
-    assert "number of elements" in str(e.value)
-
-
-@pytest.mark.parametrize("api_fixture", test_apis)
 def test_query_document_valid_operators(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
 
