@@ -1,7 +1,8 @@
 import pytest
 import logging
+from hypothesis import given
 import hypothesis.strategies as st
-from typing import Set
+from typing import Set, Optional
 import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
@@ -49,6 +50,8 @@ dimension_shared_st = st.shared(
 )
 
 
+collection_st = st.shared(strategies.collections(), key="coll")
+
 class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle = Bundle("embedding_ids")
@@ -57,16 +60,12 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         super().__init__()
         self.api = api
 
-    @initialize(
-        collection=strategies.collections(),
-        dtype=dtype_shared_st,
-        dimension=dimension_shared_st,
-    )
-    def initialize(self, collection, dtype, dimension):
+    @initialize(collection=collection_st)
+    def initialize(self, collection: strategies.Collection):
         self.api.reset()
-        self.dtype = dtype
-        self.dimension = dimension
-        self.collection = self.api.create_collection(**collection)
+        self.collection = self.api.create_collection(name=collection.name,
+                                                     metadata=collection.metadata,
+                                                     embedding_function=collection.ef)
         trace("init")
         self.embeddings = {
             "ids": [],
@@ -75,12 +74,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             "documents": [],
         }
 
-    @rule(
-        target=embedding_ids,
-        embedding_set=strategies.embedding_set(
-            dtype_st=dtype_shared_st, dimension_st=dimension_shared_st
-        ),
-    )
+    @rule(target=embedding_ids,
+          embedding_set=strategies.recordsets(collection_st))
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
         if len(self.embeddings["ids"]) > 0:
@@ -108,17 +103,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
     @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
-    @rule(
-        embedding_set=strategies.embedding_set(
-            dtype_st=dtype_shared_st,
-            dimension_st=dimension_shared_st,
-            id_st=embedding_ids,
-            count_st=st.integers(min_value=1, max_value=5),
-            documents_st_fn=lambda c: st.lists(
-                st.text(min_size=1), min_size=c, max_size=c, unique=True
-            ),
-        )
-    )
+    @rule(embedding_set=strategies.recordsets(collection_strategy=collection_st,
+                                              id_strategy=embedding_ids,
+                                              min_size=1,
+                                              max_size=5))
     def update_embeddings(self, embedding_set):
         trace("update embeddings")
         self.collection.update(**embedding_set)
@@ -126,17 +114,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
     @precondition(lambda self: len(self.embeddings["ids"]) >= 3)
-    @rule(
-        embedding_set=strategies.embedding_set(
-            dtype_st=dtype_shared_st,
-            dimension_st=dimension_shared_st,
-            id_st=st.one_of(embedding_ids, strategies.default_id_st),
-            count_st=st.integers(min_value=1, max_value=5),
-            documents_st_fn=lambda c: st.lists(
-                st.text(min_size=1), min_size=c, max_size=c, unique=True
-            ),
-        ),
-    )
+    @rule(embedding_set=strategies.recordsets(
+              collection_strategy=collection_st,
+              id_strategy=st.one_of(embedding_ids, strategies.safe_text),
+              min_size=1, max_size=5))
     def upsert_embeddings(self, embedding_set):
         trace("upsert embeddings")
         self.collection.upsert(**embedding_set)
@@ -153,10 +134,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @invariant()
     def ann_accuracy(self):
         invariants.ann_accuracy(
-            collection=self.collection, embeddings=self.embeddings, min_recall=0.95
+            collection=self.collection, embeddings=self.embeddings, min_recall=0.95  #type: ignore
         )
 
-    def _upsert_embeddings(self, embeddings: strategies.EmbeddingSet):
+    def _upsert_embeddings(self, embeddings: strategies.RecordSet):
         for idx, id in enumerate(embeddings["ids"]):
             if id in self.embeddings["ids"]:
                 target_idx = self.embeddings["ids"].index(id)

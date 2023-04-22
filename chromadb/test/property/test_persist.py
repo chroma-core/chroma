@@ -1,5 +1,6 @@
 from typing import Callable
 from hypothesis import given
+import hypothesis.strategies as st
 import pytest
 import chromadb
 from chromadb.api import API
@@ -18,20 +19,22 @@ def create_api(request) -> CreatePersistAPI:
     return lambda: chromadb.Client(configuration)
 
 
+collection_st = st.shared(strategies.collections(), key="coll")
 @given(
-    collection_strategy=strategies.collections(),
-    embeddings_strategy=strategies.embedding_set(),
+    collection_strategy=collection_st,
+    embeddings_strategy=strategies.recordsets(collection_st),
 )
 def test_persist(
     create_api: CreatePersistAPI,
     collection_strategy: strategies.Collection,
-    embeddings_strategy: strategies.EmbeddingSet,
+    embeddings_strategy: strategies.RecordSet,
 ):
     api_1 = create_api()
     api_1.reset()
-    coll = api_1.create_collection(
-        **collection_strategy, embedding_function=lambda x: None
-    )
+    coll = api_1.create_collection(name=collection_strategy.name,
+                                   metadata=collection_strategy.metadata,
+                                   embedding_function=lambda x: None)
+
     coll.add(**embeddings_strategy)
 
     invariants.count(
@@ -49,7 +52,7 @@ def test_persist(
 
     api_2 = create_api()
     coll = api_2.get_collection(
-        name=collection_strategy["name"], embedding_function=lambda x: None
+        name=collection_strategy.name, embedding_function=lambda x: None
     )
     invariants.count(
         api_2,

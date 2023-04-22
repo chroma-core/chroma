@@ -1,5 +1,7 @@
+
 import pytest
 from hypothesis import given
+import hypothesis.strategies as st
 import chromadb
 from chromadb.api import API
 from chromadb.test.configurations import configurations
@@ -13,14 +15,16 @@ def api(request):
     return chromadb.Client(configuration)
 
 
-@given(collection=strategies.collections(), embeddings=strategies.embedding_set())
+collection_st = st.shared(strategies.collections(), key="coll")
+@given(collection=collection_st,
+       embeddings=strategies.recordsets(collection_st))
 def test_add(
-    api: API, collection: strategies.Collection, embeddings: strategies.EmbeddingSet
+    api: API, collection: strategies.Collection, embeddings: strategies.RecordSet
 ):
     api.reset()
 
     # TODO: Generative embedding functions
-    coll = api.create_collection(**collection, embedding_function=lambda x: None)
+    coll = api.create_collection(name=collection.name, metadata=collection.metadata)
     coll.add(**embeddings)
 
     invariants.count(
