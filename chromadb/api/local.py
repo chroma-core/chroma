@@ -52,6 +52,7 @@ class LocalAPI(API):
         self._telemetry_client = telemetry_client
 
     def heartbeat(self):
+        """Ping the database to ensure it is alive"""
         return int(1000 * time.time_ns())
 
     #
@@ -64,6 +65,27 @@ class LocalAPI(API):
         embedding_function: Optional[Callable] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        """Create a new collection with the given name and metadata.
+        Args:
+            name: The name of the collection to create
+            metadata: Optional metadata to associate with the collection
+            embedding_function: Optional function to use to embed documents
+            get_or_create: If True, return the existing collection if it exists
+
+        Returns:
+            The newly created collection
+
+        Raises:
+            ValueError: If the collection already exists and get_or_create is False
+            ValueError: If the collection name is invalid
+
+        Examples:
+            >>> client.create_collection("my_collection")
+            collection(name="my_collection", metadata={})
+
+            >>> client.create_collection("my_collection", metadata={"foo": "bar"})
+            collection(name="my_collection", metadata={"foo": "bar"})
+        """
         check_index_name(name)
 
         res = self._db.create_collection(name, metadata, get_or_create)
@@ -77,6 +99,19 @@ class LocalAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
+        """Get or create a collection with the given name and metadata.
+        Args:
+            name: The name of the collection to get or create
+            metadata: Optional metadata to associate with the collection
+            embedding_function: Optional function to use to embed documents
+
+        Returns:
+            The collection
+
+        Examples:
+            >>> client.get_or_create_collection("my_collection")
+            collection(name="my_collection", metadata={})
+        """
         return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
     def get_collection(
@@ -84,6 +119,21 @@ class LocalAPI(API):
         name: str,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
+        """Get a collection with the given name.
+        Args:
+            name: The name of the collection to get
+            embedding_function: Optional function to use to embed documents
+
+        Returns:
+            The collection
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            >>> client.get_collection("my_collection")
+            collection(name="my_collection", metadata={})
+        """
         res = self._db.get_collection(name)
         if len(res) == 0:
             raise ValueError(f"Collection {name} does not exist")
@@ -92,6 +142,14 @@ class LocalAPI(API):
         )
 
     def list_collections(self) -> Sequence[Collection]:
+        """List all collections.
+        Returns:
+            A list of collections
+
+        Examples:
+            >>> client.list_collections()
+            [collection(name="my_collection", metadata={})]
+        """
         collections = []
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
@@ -112,6 +170,16 @@ class LocalAPI(API):
         self._db.update_collection(current_name, new_name, new_metadata)
 
     def delete_collection(self, name: str):
+        """Delete a collection with the given name.
+        Args:
+            name: The name of the collection to delete
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            >>> client.delete_collection("my_collection")
+        """
         return self._db.delete_collection(name)
 
     #
@@ -232,6 +300,12 @@ class LocalAPI(API):
         return self._db.count(collection_name=collection_name)
 
     def reset(self):
+        """Reset the database. This will delete all collections and items.
+
+        Returns:
+            True if the database was reset successfully
+
+        """
         self._db.reset()
         return True
 
@@ -315,8 +389,20 @@ class LocalAPI(API):
         )
 
     def persist(self):
+        """Persist the database to disk.
+
+        Returns:
+            True if the database was persisted successfully
+
+        """
         self._db.persist()
         return True
 
     def get_version(self):
+        """Get the version of Chroma.
+
+        Returns:
+            The version of Chroma
+
+        """
         return __version__
