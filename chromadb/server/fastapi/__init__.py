@@ -132,7 +132,7 @@ class FastAPI(chromadb.server.Server):
         self._api.persist()
 
     def version(self):
-        return {"version": self._api.get_version()}
+        return self._api.get_version()
 
     def list_collections(self):
         return self._api.list_collections()

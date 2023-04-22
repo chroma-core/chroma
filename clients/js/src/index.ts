@@ -61,7 +61,7 @@ async function handleSuccess(response: Response | string | Count200Response) {
     case response instanceof Response:
       return repack(await (response as Response).json());
     case typeof response === "string":
-      return repack(JSON.parse(response as string));
+      return repack((response as string)); // currently version is the only thing that return non-JSON
     default:
       return repack(response);
   }
@@ -399,8 +399,7 @@ export class ChromaClient {
 
   public async version() {
     const response = await this.api.version();
-    let ret = await handleSuccess(response);
-    return ret["version"]
+    return await handleSuccess(response);
   }
 
   public async heartbeat() {
