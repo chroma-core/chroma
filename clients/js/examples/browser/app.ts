@@ -1,38 +1,36 @@
 // import env.ts
-import { ChromaClient } from "../../src/index"
+import { ChromaClient } from "../../src/index";
 
 window.onload = async () => {
   const chroma = new ChromaClient("http://localhost:8000");
-  await chroma.reset()
+  await chroma.reset();
 
   const collection = await chroma.createCollection("test-from-js");
-  console.log("collection", collection)
+  console.log("collection", collection);
 
   // first generate some data
   var ids: string[] = [];
-  var embeddings: Array<any> = []
-  var metadata: Array<any> = []
+  var embeddings: Array<any> = [];
+  var metadata: Array<any> = [];
   for (let i = 0; i < 100; i++) {
     ids.push("test-id-" + i.toString());
     embeddings.push([1, 2, 3, 4, 5]);
-    metadata.push({ "test": "test" });
+    metadata.push({ test: "test" });
   }
 
-  let add = await collection.add(
-    ids,
-    embeddings,
-    metadata
-  )
-  console.log("add", add)
+  let add = await collection.add(ids, embeddings, metadata);
+  console.log("add", add);
 
   let count = await collection.count();
   console.log("count", count);
 
-  const queryData = await collection.query([1, 2, 3, 4, 5], 5, { "test": "test" });
+  const queryData = await collection.query([1, 2, 3, 4, 5], 5, {
+    test: "test",
+  });
 
   console.log("queryData", queryData);
 
-  await collection.delete()
+  await collection.delete();
 
   let count2 = await collection.count();
   console.log("count2", count2);
@@ -50,5 +48,4 @@ window.onload = async () => {
   // node!.innerHTML = `<pre>${JSON.stringify(getData, null, 4)}</pre>`;
   // node = document.querySelector("#collection-query");
   // node!.innerHTML = `<pre>${JSON.stringify(queryData, null, 4)}</pre>`;
-
 };

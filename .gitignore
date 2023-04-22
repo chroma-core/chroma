@@ -21,3 +21,4 @@ dist
 .terraform.lock.hcl
 terraform.tfstate
 .hypothesis/
+.idea
