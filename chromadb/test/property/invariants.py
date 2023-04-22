@@ -1,4 +1,4 @@
-from typing import Literal, Sequence, Union, cast
+from typing import Callable, Literal, Sequence, Union, cast
 from chromadb.test.property.strategies import EmbeddingSet
 import numpy as np
 from chromadb.api import API, types
@@ -75,9 +75,29 @@ def no_duplicates(collection: Collection):
     assert len(ids) == len(set(ids))
 
 
+def _exact_knn_indices(
+    query: types.Embeddings,
+    targets: types.Embeddings,
+    distance_fn: Callable = lambda x, y: np.linalg.norm(x - y),
+):
+    """Return the indices of the exact k nearest neighbors for each query"""
+    np_query = np.array(query)
+    np_targets = np.array(targets)
+
+    # Compute the distance between each query and each target, using the distance function
+    distances = np.apply_along_axis(
+        lambda query: np.apply_along_axis(distance_fn, 1, np_targets, query),
+        1,
+        np_query,
+    )
+    # Sort the distances and return the indices
+    return np.argsort(distances), distances
+
+
 def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
+    n_results: int = 1,
     min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
@@ -85,13 +105,22 @@ def ann_accuracy(
     if len(embeddings["ids"]) == 0:
         return  # nothing to test here
 
+    if embeddings["embeddings"] is None:
+        # If we don't have embeddings, we can't do an ANN search
+        return
+
+    # Perform exact distance computation
+    neighbor_indices = _exact_knn_indices(
+        embeddings["embeddings"], embeddings["embeddings"]
+    )
+
     # Validate that each embedding is its own nearest neighbor and adjust recall if not.
     result = collection.query(
         query_embeddings=embeddings["embeddings"],
         query_texts=embeddings["documents"]
         if embeddings["embeddings"] is None
         else None,
-        n_results=1,
+        n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
 
