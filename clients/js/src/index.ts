@@ -68,7 +68,7 @@ export class CohereEmbeddingFunction {
   private api_key: string;
   private model: string;
 
-  constructor(api_key: string, model?: string) {
+  constructor(cohere_api_key: string, model?: string) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       CohereAiApi = require("cohere-ai");
@@ -77,7 +77,7 @@ export class CohereEmbeddingFunction {
         "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`",
       );
     }
-    this.api_key = api_key;
+    this.api_key = cohere_api_key;
     this.model = model || "large";
   }
 
