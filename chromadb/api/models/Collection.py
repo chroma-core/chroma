@@ -88,6 +88,10 @@ class Collection(BaseModel):
 
         Raises:
             ValueError: If you don't provide either embeddings or documents
+            ValueError: If the length of ids, embeddings, metadatas, or documents don't match
+            ValueError: If you don't provide an embedding function and don't provide embeddings
+            ValueError: If you provide both embeddings and documents
+            ValueError: If you provide an id that already exists
 
         """
 
@@ -144,9 +148,6 @@ class Collection(BaseModel):
 
         Returns:
             GetResult: A GetResult object containing the results.
-
-        Raises:
-            ValueError: If you provide both ids and a where filter
 
         """
         where = validate_where(where) if where else None

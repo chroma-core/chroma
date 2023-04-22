@@ -77,6 +77,7 @@ class LocalAPI(API):
 
         Raises:
             ValueError: If the collection already exists and get_or_create is False
+            ValueError: If the collection name is invalid
 
         Examples:
             >>> client.create_collection("my_collection")
