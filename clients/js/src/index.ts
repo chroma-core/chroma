@@ -29,7 +29,7 @@ export class OpenAIEmbeddingFunction {
   private org_id: string;
   private model: string;
 
-  constructor(api_key: string, model?: string, org_id?: string) {
+  constructor(openai_api_key: string, openai_model?: string, openai_organization_id?: string) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       OpenAIApi = require("openai");
@@ -38,9 +38,9 @@ export class OpenAIEmbeddingFunction {
         "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
       );
     }
-    this.api_key = api_key;
-    this.org_id = org_id || "";
-    this.model = model || "text-embedding-ada-002";
+    this.api_key = openai_api_key;
+    this.org_id = openai_organization_id || "";
+    this.model = openai_model || "text-embedding-ada-002";
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
