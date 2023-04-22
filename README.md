@@ -84,9 +84,10 @@ Embeddings databases (also known as **vector databases**) store embeddings and a
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project. 
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x)
-- [Review the roadmap and contribute your ideas](https://github.com/chroma-core/chroma/wiki/Roadmap)
+- [Review the roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues)
 
 ## License
 
 [Apache 2.0](./LICENSE)
+

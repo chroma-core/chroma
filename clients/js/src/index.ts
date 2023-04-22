@@ -1,3 +1,4 @@
+import { GetEmbeddingIncludeEnum, QueryEmbeddingIncludeEnum } from "./generated";
 import { DefaultApi } from "./generated/api";
 import { Configuration } from "./generated/configuration";
 
@@ -50,7 +51,7 @@ export class OpenAIEmbeddingFunction {
     const openai = new OpenAIApi.OpenAIApi(configuration);
     const embeddings = [];
     const response = await openai.createEmbedding({
-      model: "text-embedding-ada-002",
+      model: this.model,
       input: texts,
     });
     const data = response.data['data'];
@@ -94,14 +95,23 @@ type CallableFunction = {
 
 export class Collection {
   public name: string;
+  public metadata: object | undefined;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
-  constructor(name: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
+  constructor(name: string, api: DefaultApi, metadata?: object, embeddingFunction?: CallableFunction) {
     this.name = name;
+    this.metadata = metadata;
     this.api = api;
     if (embeddingFunction !== undefined)
       this.embeddingFunction = embeddingFunction;
+  }
+
+  private setName(name: string) {
+    this.name = name;
+  }
+  private setMetadata(metadata: object | undefined) {
+    this.metadata = metadata;
   }
 
   public async add(
@@ -177,11 +187,35 @@ export class Collection {
     return response.data;
   }
 
+  public async modify(
+    name?: string,
+    metadata?: object,
+  ) {
+    const response = await this.api.updateCollection({
+      collectionName: this.name,
+      updateCollection: {
+        new_name: name,
+        new_metadata: metadata,
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    this.setName(name || this.name)
+    this.setMetadata(metadata || this.metadata)
+
+    return response
+  }
+
   public async get(
     ids?: string[],
     where?: object,
     limit?: number,
     offset?: number,
+    include?: GetEmbeddingIncludeEnum[],
+    where_document?: object,
   ) {
     let idsArray = undefined
     if (ids !== undefined) idsArray = toArray(ids);
@@ -193,6 +227,8 @@ export class Collection {
         where,
         limit,
         offset,
+        include,
+        where_document,
       },
     }).then(function (response) {
       return response.data;
@@ -204,11 +240,51 @@ export class Collection {
 
   }
 
+  public async update(
+    ids: string | string[],
+    embeddings?: number[] | number[][],
+    metadatas?: object | object[],
+    documents?: string | string[],
+  ) {
+    if ((embeddings === undefined) && (documents === undefined) && (metadatas === undefined)) {
+      throw new Error(
+        "embeddings, documents, and metadatas cannot all be undefined",
+      );
+    } else if ((embeddings === undefined) && (documents !== undefined)) {
+      const documentsArray = toArray(documents);
+      if (this.embeddingFunction !== undefined) {
+        embeddings = await this.embeddingFunction.generate(documentsArray)
+      } else {
+        throw new Error(
+          "embeddingFunction is undefined. Please configure an embedding function",
+        );
+      }
+    }
+
+    var resp = await this.api.update({
+      collectionName: this.name,
+      updateEmbedding: {
+        ids: toArray(ids),
+        embeddings: (embeddings ? toArrayOfArrays(embeddings) : undefined),
+        documents: toArray(documents),
+        metadatas: toArray(metadatas),
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return resp
+  }
+
   public async query(
     query_embeddings: number[] | number[][] | undefined,
     n_results: number = 10,
     where?: object,
-    query_text?: string | string[],
+    query_text?: string | string[], // TODO: should be named query_texts to match python API
+    where_document?: object, // {"$contains":"search_string"}
+    include?: QueryEmbeddingIncludeEnum[], // ["metadata", "document"]
   ) {
     if ((query_embeddings === undefined) && (query_text === undefined)) {
       throw new Error(
@@ -234,6 +310,8 @@ export class Collection {
         query_embeddings: query_embeddingsArray,
         where,
         n_results,
+        where_document: where_document,
+        include: include
       },
     }).then(function (response) {
       return response.data;
@@ -256,10 +334,10 @@ export class Collection {
     return await this.api.createIndex({ collectionName: this.name });
   }
 
-  public async delete(ids?: string[], where?: object) {
+  public async delete(ids?: string[], where?: object, where_document?: object) {
     var response = await this.api._delete({
       collectionName: this.name,
-      deleteEmbedding: { ids: ids, where: where },
+      deleteEmbedding: { ids: ids, where: where, where_document: where_document },
     }).then(function (response) {
       return response.data;
     }).catch(function ({ response }) {
@@ -286,6 +364,20 @@ export class ChromaClient {
     return await this.api.reset();
   }
 
+  public async version() {
+    const response = await this.api.version();
+    return response.data;
+  }
+
+  public async heartbeat() {
+    const response = await this.api.heartbeat();
+    return response.data["nanosecond heartbeat"];
+  }
+
+  public async persist() {
+    throw new Error("Not implemented in JS client")
+  }
+
   public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
     const newCollection = await this.api.createCollection({
       createCollection: { name, metadata },
@@ -299,7 +391,24 @@ export class ChromaClient {
       throw new Error(newCollection.error);
     }
 
-    return new Collection(name, this.api, embeddingFunction);
+    return new Collection(name, this.api, metadata, embeddingFunction);
+  }
+
+  public async getOrCreateCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
+    const newCollection = await this.api.createCollection({
+      createCollection: { name, metadata, get_or_create: true },
+
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    if (newCollection.error) {
+      throw new Error(newCollection.error);
+    }
+
+    return new Collection(name, this.api, newCollection.metadata, embeddingFunction);
   }
 
   public async listCollections() {
@@ -308,7 +417,13 @@ export class ChromaClient {
   }
 
   public async getCollection(name: string, embeddingFunction?: CallableFunction) {
-    return new Collection(name, this.api, embeddingFunction);
+    const response = await this.api.getCollection({ collectionName: name }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return new Collection(response.name, this.api, response.metadata, embeddingFunction);
   }
 
   public async deleteCollection(name: string) {

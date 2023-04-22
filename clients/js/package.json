@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -31,8 +31,8 @@
     "test:run": "jest --runInBand",
     "test:runfull": "PORT=8001 jest --runInBand",
     "test:update": "run-s db:clean db:run && jest --runInBand --updateSnapshot && run-s db:clean",
-    "db:clean": "cd ../.. && docker-compose -f docker-compose-js-tests.yml down --volumes",
-    "db:run": "cd ../.. && docker-compose -f docker-compose-js-tests.yml up --detach && sleep 5",
+    "db:clean": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml down --volumes",
+    "db:run": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml up --detach && sleep 5",
     "clean": "rimraf dist",
     "build": "run-s clean build:*",
     "build:main": "tsc -p tsconfig.json",
