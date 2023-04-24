@@ -61,7 +61,6 @@ def install_version(version):
 def install(pkg, path):
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
-    # TODO: make sure this doesn't downgrade anything
     print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(
         [
