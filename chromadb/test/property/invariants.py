@@ -9,7 +9,8 @@ from hypothesis.errors import InvalidArgument
 
 def count(api: API, collection_name: str, expected_count: int):
     """The given collection count is equal to the number of embeddings"""
-    count = api._count(collection_name)
+    collection = api.get_collection(collection_name)
+    count = collection.count()
     assert count == expected_count
 
 
