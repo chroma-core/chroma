@@ -1,10 +1,9 @@
 import logging
 import multiprocessing
-from typing import Callable, Generator
+from typing import Generator
 from hypothesis import given
 import pytest
 import chromadb
-from chromadb.api import API
 from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -14,24 +13,16 @@ from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 import os
 import shutil
 
-CreatePersistAPI = Callable[[], API]
-
 
 # TODO: fixtures should be common across tests
 @pytest.fixture(scope="module", params=persist_configurations())
-def create_api(request) -> Generator[CreatePersistAPI, None, None]:
+def settings(request) -> Generator[Settings, None, None]:
     configuration = request.param
-    yield lambda: chromadb.Client(configuration)
+    yield configuration
     save_path = configuration.persist_directory
     # Remove if it exists
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
-
-
-@pytest.fixture(scope="module", params=persist_configurations())
-def settings(request) -> Settings:
-    configuration = request.param
-    return configuration
 
 
 @given(
@@ -39,11 +30,11 @@ def settings(request) -> Settings:
     embeddings_strategy=strategies.embedding_set(),
 )
 def test_persist(
-    create_api: CreatePersistAPI,
+    settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.EmbeddingSet,
 ):
-    api_1 = create_api()
+    api_1 = chromadb.Client(settings)
     api_1.reset()
     coll = api_1.create_collection(
         **collection_strategy, embedding_function=lambda x: None
@@ -63,7 +54,7 @@ def test_persist(
     api_1.persist()
     del api_1
 
-    api_2 = create_api()
+    api_2 = chromadb.Client(settings)
     coll = api_2.get_collection(
         name=collection_strategy["name"], embedding_function=lambda x: None
     )
