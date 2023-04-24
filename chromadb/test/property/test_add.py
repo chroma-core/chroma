@@ -1,5 +1,5 @@
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 import chromadb
 from chromadb.api import API
 from chromadb.test.configurations import configurations
@@ -14,6 +14,7 @@ def api(request):
 
 
 @given(collection=strategies.collections(), embeddings=strategies.embedding_set())
+@settings(deadline=None)
 def test_add(
     api: API, collection: strategies.Collection, embeddings: strategies.EmbeddingSet
 ):

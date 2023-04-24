@@ -98,7 +98,7 @@ def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
     n_results: int = 1,
-    min_recall: float = 0.99,
+    min_recall: float = 1.0,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
 
@@ -114,8 +114,7 @@ def ann_accuracy(
         embeddings["embeddings"], embeddings["embeddings"]
     )
 
-    # Validate that each embedding is its own nearest neighbor and adjust recall if not.
-    result = collection.query(
+    query_results = collection.query(
         query_embeddings=embeddings["embeddings"],
         query_texts=embeddings["documents"]
         if embeddings["embeddings"] is None
@@ -124,49 +123,39 @@ def ann_accuracy(
         include=["embeddings", "documents", "metadatas", "distances"],
     )
 
-    for e in range(len(embeddings["ids"])):
-        for i in range(n_results):
-            assert result["ids"][e][i] == embeddings["ids"][indices[e][i]]
+    # Dict of ids to indices
+    id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
+    missing = 0
+    for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
+        expected_ids = np.array(embeddings["ids"])[indices_i[:n_results]]
+        missing += len(set(expected_ids) - set(query_results["ids"][i]))
+
+        # For each id in the query results, find the index in the embeddings set
+        # and assert that the embeddings are the same
+        for j, id in enumerate(query_results["ids"][i]):
+            # This may be because the true nth nearest neighbor didn't get returned by the ANN query
+            if id not in expected_ids:
+                continue
+            index = id_to_index[id]
+            assert np.allclose(distances_i[index], query_results["distances"][i][j])
+            assert np.allclose(
+                embeddings["embeddings"][index], query_results["embeddings"][i][j]
+            )
             if embeddings["documents"] is not None:
                 assert (
-                    result["documents"][e][i] == embeddings["documents"][indices[e][i]]
+                    embeddings["documents"][index] == query_results["documents"][i][j]
                 )
             if embeddings["metadatas"] is not None:
                 assert (
-                    result["metadatas"][e][i] == embeddings["metadatas"][indices[e][i]]
+                    embeddings["metadatas"][index] == query_results["metadatas"][i][j]
                 )
-            assert np.allclose(
-                result["embeddings"][e][i], embeddings["embeddings"][indices[e][i]]
-            )
-            assert np.allclose(result["distances"][e][i], distances[e][indices[e][i]])
 
-    # missing = 0
-    # for i, id in enumerate(embeddings["ids"]):
-    #     if result["ids"][i][0] != id:
-    #         missing += 1
-    #     else:
-    #         if embeddings["embeddings"] is not None:
-    #             assert np.allclose(
-    #                 result["embeddings"][i][0], embeddings["embeddings"][i]
-    #             )
-    #         assert result["documents"][i][0] == (
-    #             embeddings["documents"][i]
-    #             if embeddings["documents"] is not None
-    #             else None
-    #         )
-    #         assert result["metadatas"][i][0] == (
-    #             embeddings["metadatas"][i]
-    #             if embeddings["metadatas"] is not None
-    #             else None
-    #         )
-    #         assert result["distances"][i][0] == 0.0
+    size = len(embeddings["ids"])
+    recall = (size - missing) / size
 
-    # size = len(embeddings["ids"])
-    # recall = (size - missing) / size
+    try:
+        note(f"recall: {recall}, missing {missing} out of {size}")
+    except InvalidArgument:
+        pass  # it's ok if we're running outside hypothesis
 
-    # try:
-    #     note(f"recall: {recall}, missing {missing} out of {size}")
-    # except InvalidArgument:
-    #     pass  # it's ok if we're running outside hypothesis
-
-    # assert recall >= min_recall
+    assert recall >= min_recall
