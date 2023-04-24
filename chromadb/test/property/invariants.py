@@ -105,6 +105,7 @@ def ann_accuracy(
     if len(embeddings["ids"]) == 0:
         return  # nothing to test here
 
+    # TODO Remove once we support querying by documents in tests
     if embeddings["embeddings"] is None:
         # If we don't have embeddings, we can't do an ANN search
         return
