@@ -302,7 +302,10 @@ class Clickhouse(DB):
 
         # Update the index
         if embeddings is not None:
-            update_uuids = [x[1] for x in existing_items]
+            # `get` current returns items in arbitrary order.
+            # TODO if we fix `get`, we can remove this explicit mapping.
+            uuid_mapping = {r[4]: r[1] for r in existing_items}
+            update_uuids = [uuid_mapping[id] for id in ids]
             index = self._index(collection_uuid)
             index.add(update_uuids, embeddings, update=True)
 
