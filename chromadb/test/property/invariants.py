@@ -24,8 +24,6 @@ def _field_matches(
     field_name: one of [documents, metadatas]
     """
     result = collection.get(ids=embeddings["ids"], include=[field_name])
-    # TODO: The returned data is not necessarily in the same order as the input ids
-    # until we add a sort in the get path
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
@@ -52,8 +50,6 @@ def _field_matches(
 def ids_match(collection: Collection, embeddings: EmbeddingSet):
     """The actual embedding ids is equal to the expected ids"""
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
-    # TODO: The returned ids are not necessarily in the same order as the input ids
-    # until we add a sort.
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
