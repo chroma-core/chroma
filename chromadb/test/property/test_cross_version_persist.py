@@ -80,12 +80,10 @@ def install(pkg, path):
 def switch_to_version(version):
     module_name = "chromadb"
     # Remove old version from sys.modules, except test modules
-    # TODO: remove test modules too
     old_modules = {
         n: m
         for n, m in sys.modules.items()
-        if n == module_name
-        or (n.startswith(module_name + ".") and not n.startswith(module_name + ".test"))
+        if n == module_name or (n.startswith(module_name + "."))
     }
     for n in old_modules:
         del sys.modules[n]
@@ -195,7 +193,3 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
-
-    # TODO: add some data and then check that the invariants are preserved
-
-    del api
