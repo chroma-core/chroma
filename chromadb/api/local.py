@@ -24,6 +24,7 @@ import re
 from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
+
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name):
     msg = (
@@ -66,8 +67,12 @@ class LocalAPI(API):
         check_index_name(name)
 
         res = self._db.create_collection(name, metadata, get_or_create)
+        self.persist()
         return Collection(
-            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+            client=self,
+            name=name,
+            embedding_function=embedding_function,
+            metadata=res[0][2],
         )
 
     def get_or_create_collection(
@@ -76,7 +81,9 @@ class LocalAPI(API):
         metadata: Optional[Dict] = None,
         embedding_function: Optional[Callable] = None,
     ) -> Collection:
-        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True
+        )
 
     def get_collection(
         self,
@@ -87,7 +94,10 @@ class LocalAPI(API):
         if len(res) == 0:
             raise ValueError(f"Collection {name} does not exist")
         return Collection(
-            client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
+            client=self,
+            name=name,
+            embedding_function=embedding_function,
+            metadata=res[0][2],
         )
 
     def list_collections(self) -> Sequence[Collection]:
@@ -95,7 +105,9 @@ class LocalAPI(API):
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
             collections.append(
-                Collection(client=self, name=db_collection[1], metadata=db_collection[2])
+                Collection(
+                    client=self, name=db_collection[1], metadata=db_collection[2]
+                )
             )
         return collections
 
@@ -109,9 +121,12 @@ class LocalAPI(API):
             check_index_name(new_name)
 
         self._db.update_collection(current_name, new_name, new_metadata)
+        self.persist()
 
     def delete_collection(self, name: str):
-        return self._db.delete_collection(name)
+        res = self._db.delete_collection(name)
+        self.persist()
+        return res
 
     #
     # ITEM METHODS
@@ -125,7 +140,6 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ):
-
         existing_ids = self._get(collection_name, ids=ids, include=[])["ids"]
         if len(existing_ids) > 0:
             raise errors.IDAlreadyExistsError(
@@ -144,6 +158,7 @@ class LocalAPI(API):
         if increment_index:
             self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
+        self.persist()
         self._telemetry_client.capture(CollectionAddEvent(collection_uuid, len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
@@ -157,7 +172,7 @@ class LocalAPI(API):
     ):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
-
+        self.persist()
         return True
 
     def _get(
@@ -189,7 +204,9 @@ class LocalAPI(API):
 
         # Remove plural from include since db columns are singular
         db_columns = [column[:-1] for column in include] + ["id"]
-        column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+        column_index = {
+            column_name: index for index, column_name in enumerate(db_columns)
+        }
 
         db_result = self._db.get(
             collection_name=collection_name,
@@ -211,11 +228,17 @@ class LocalAPI(API):
 
         for entry in db_result:
             if include_embeddings:
-                cast(List, get_result["embeddings"]).append(entry[column_index["embedding"]])
+                cast(List, get_result["embeddings"]).append(
+                    entry[column_index["embedding"]]
+                )
             if include_documents:
-                cast(List, get_result["documents"]).append(entry[column_index["document"]])
+                cast(List, get_result["documents"]).append(
+                    entry[column_index["document"]]
+                )
             if include_metadatas:
-                cast(List, get_result["metadatas"]).append(entry[column_index["metadata"]])
+                cast(List, get_result["metadatas"]).append(
+                    entry[column_index["metadata"]]
+                )
             get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
@@ -228,9 +251,15 @@ class LocalAPI(API):
 
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         deleted_uuids = self._db.delete(
-            collection_uuid=collection_uuid, where=where, ids=ids, where_document=where_document
+            collection_uuid=collection_uuid,
+            where=where,
+            ids=ids,
+            where_document=where_document,
         )
-        self._telemetry_client.capture(CollectionDeleteEvent(collection_uuid, len(deleted_uuids)))
+        self.persist()
+        self._telemetry_client.capture(
+            CollectionDeleteEvent(collection_uuid, len(deleted_uuids))
+        )
         return deleted_uuids
 
     def _count(self, collection_name):
@@ -238,6 +267,7 @@ class LocalAPI(API):
 
     def reset(self):
         self._db.reset()
+        self.persist()
         return True
 
     def _query(
@@ -275,8 +305,12 @@ class LocalAPI(API):
             ids = []
             metadatas = []
             # Remove plural from include since db columns are singular
-            db_columns = [column[:-1] for column in include if column != "distances"] + ["id"]
-            column_index = {column_name: index for index, column_name in enumerate(db_columns)}
+            db_columns = [
+                column[:-1] for column in include if column != "distances"
+            ] + ["id"]
+            column_index = {
+                column_name: index for index, column_name in enumerate(db_columns)
+            }
             db_result = self._db.get_by_ids(uuids[i], columns=db_columns)
 
             for entry in db_result:

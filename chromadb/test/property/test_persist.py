@@ -1,10 +1,9 @@
 import logging
 import multiprocessing
-from typing import Callable
+from typing import Callable, Generator
 from hypothesis import given
 import pytest
 import chromadb
-import traceback
 from chromadb.api import API
 from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
@@ -12,15 +11,21 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.configurations import persist_configurations
 from chromadb.test.property.test_embeddings import EmbeddingStateMachine
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
+import os
+import shutil
 
 CreatePersistAPI = Callable[[], API]
 
 
 # TODO: fixtures should be common across tests
 @pytest.fixture(scope="module", params=persist_configurations())
-def create_api(request) -> CreatePersistAPI:
+def create_api(request) -> Generator[CreatePersistAPI, None, None]:
     configuration = request.param
-    return lambda: chromadb.Client(configuration)
+    yield lambda: chromadb.Client(configuration)
+    save_path = configuration.persist_directory
+    # Remove if it exists
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
 
 
 @pytest.fixture(scope="module", params=persist_configurations())
@@ -74,9 +79,11 @@ def test_persist(
 
 
 def load_and_check(settings: Settings, collection_name: str, embeddings_set, conn):
-    api = chromadb.Client(settings)
-    coll = api.get_collection(name=collection_name, embedding_function=lambda x: None)
     try:
+        api = chromadb.Client(settings)
+        coll = api.get_collection(
+            name=collection_name, embedding_function=lambda x: None
+        )
         invariants.count(api, coll.name, len(embeddings_set["ids"]))
         invariants.metadatas_match(coll, embeddings_set)
         invariants.documents_match(coll, embeddings_set)
@@ -84,6 +91,7 @@ def load_and_check(settings: Settings, collection_name: str, embeddings_set, con
         invariants.ann_accuracy(coll, embeddings_set)
     except Exception as e:
         conn.send(e)
+        raise e
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
@@ -95,23 +103,21 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
     @rule()
     def persist(self):
-        self.api.persist()
         collection_name = self.collection.name
-
-        # Create a new process
-        # And then inside the process run the invariants
-        # we do this because we cannot test loading the data otherwise since
-        # the data might be persist at the will of the gc
+        # Create a new process and then inside the process run the invariants
         # TODO: Once we switch off of duckdb and onto sqlite we can remove this
+        ctx = multiprocessing.get_context("spawn")
         conn1, conn2 = multiprocessing.Pipe()
-        p = multiprocessing.Process(
+        p = ctx.Process(
             target=load_and_check,
             args=(self.settings, collection_name, self.embeddings, conn2),
         )
         p.start()
         p.join()
+
         if conn1.poll():
-            raise conn1.recv()
+            e = conn1.recv()
+            raise e
 
 
 def test_persist_embeddings_state(caplog, settings: Settings):
