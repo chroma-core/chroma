@@ -1,3 +1,4 @@
+from typing import List, Tuple
 from chromadb.config import Settings
 import hypothesis
 import tempfile
@@ -36,3 +37,22 @@ def persist_configurations():
         ),
     ]
 
+
+def persist_old_version_configurations(
+    versions: List[str],
+) -> List[Tuple[str, Settings]]:
+    """
+    Only returns configurations that persist to disk at a given path for a version.
+    """
+
+    return [
+        (
+            version,
+            Settings(
+                chroma_api_impl="local",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+            ),
+        )
+        for version in versions
+    ]

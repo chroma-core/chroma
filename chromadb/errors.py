@@ -15,8 +15,12 @@ class NotEnoughElementsException(Exception):
 
 
 class IDAlreadyExistsError(ValueError):
+    """ID already exists in the collection."""
+
     pass
 
 
 class DuplicateIDError(ValueError):
+    """Duplicate IDs in an operation."""
+
     pass

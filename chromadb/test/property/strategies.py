@@ -4,7 +4,6 @@ from typing import Optional, TypedDict, Callable, List, cast
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
-import chromadb.utils.embedding_functions as embedding_functions
 import re
 
 # Set the random seed for reproducibility
