@@ -379,9 +379,8 @@ class DuckDB(Clickhouse):
         self.reset_indexes()
 
     def persist(self):
-        raise NotImplementedError(
-            "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
-        )
+        # No-op for duckdb without persistence
+        pass
 
 
 class PersistentDuckDB(DuckDB):
