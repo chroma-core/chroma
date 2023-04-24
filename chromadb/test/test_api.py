@@ -5,7 +5,6 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import os
-import inspect
 from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
@@ -1222,8 +1221,7 @@ def test_empty_collection(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
     collection = api.create_collection("test_empty_collection")
-    cnt = collection.count()
-    assert cnt == 0, "collection should be empty"
+    assert collection.count() == 0, "collection should be empty"
 
     # check that query does not crash
     try:
@@ -1231,7 +1229,6 @@ def test_empty_collection(api_fixture, request):
             query_embeddings=[[1.1, 2.3, 3.3], [5.1, 4.3, 2.2]],
             n_results=1
         )
-        print(f"results are {type(results)} with members {inspect.getmembers(results)}")
         assert not results.get("ids"), "expecting empty QueryResult object"
         assert not results.get("embeddings"), "expecting empty embeddings QueryResult object"
     except Exception as e:
