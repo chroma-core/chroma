@@ -4,6 +4,12 @@ from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
 import tempfile
+import os
+import inspect
+from multiprocessing import Process
+import uvicorn
+from requests.exceptions import ConnectionError
+
 import numpy as np
 
 
@@ -1211,6 +1217,26 @@ def test_update_query(api):
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
 
 
+@pytest.mark.parametrize("api_fixture", test_apis)
+def test_empty_collection(api_fixture, request):
+    api = request.getfixturevalue(api_fixture.__name__)
+    api.reset()
+    collection = api.create_collection("test_empty_collection")
+    cnt = collection.count()
+    assert cnt == 0, "collection should be empty"
+
+    # check that query does not crash
+    try:
+        results = collection.query(
+            query_embeddings=[[1.1, 2.3, 3.3], [5.1, 4.3, 2.2]],
+            n_results=1
+        )
+        print(f"results are {type(results)} with members {inspect.getmembers(results)}")
+        assert not results.get("ids"), "expecting empty QueryResult object"
+        assert not results.get("embeddings"), "expecting empty embeddings QueryResult object"
+    except Exception as e:
+        pytest.fail(f"Exception: {e=}")
+
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
     "ids": ["id1", "id2", "id3"],
@@ -1280,3 +1306,4 @@ def test_upsert(api):
     assert get_result["embeddings"][0] == [1.1, 0.99, 2.21]
     assert get_result["metadatas"][0] == {"string_value": "a new string value"}
     assert get_result["documents"][0] is None
+
