@@ -71,10 +71,6 @@ def collection_name(draw) -> str:
 
     return name
 
-
-documents = st.lists(st.text(max_size=32),
-                     min_size=2, max_size=10).map(lambda x: " ".join(x))
-
 collection_metadata = st.one_of(st.none(),
                                 st.dictionaries(safe_text, st.one_of(*safe_values)))
 
@@ -95,6 +91,7 @@ class Collection():
     dimension: int
     dtype: np.dtype
     known_metadata_keys: Dict[str, st.SearchStrategy]
+    known_document_keywords: List[str]
     has_documents: bool = False
     embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
 
@@ -113,9 +110,18 @@ def collections(draw):
         known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
     has_documents = draw(st.booleans())
+    if has_documents:
+        known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+    else:
+        known_document_keywords = []
 
-    return Collection(name, metadata, dimension, dtype,
-                      known_metadata_keys, has_documents)
+    return Collection(name=name,
+                      metadata=metadata,
+                      dimension=dimension,
+                      dtype=dtype,
+                      known_metadata_keys=known_metadata_keys,
+                      has_documents=has_documents,
+                      known_document_keywords=known_document_keywords)
 
 @st.composite
 def metadata(draw, collection: Collection):
@@ -127,6 +133,18 @@ def metadata(draw, collection: Collection):
     md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
     return md
 
+@st.composite
+def document(draw, collection: Collection):
+    """Strategy for generating documents that could be a part of the given collection"""
+
+    if collection.known_document_keywords:
+        known_words_st = st.sampled_from(collection.known_document_keywords)
+    else:
+        known_words_st = st.just("")
+
+    random_words_st = st.text(min_size=1)
+    words = draw(st.lists(st.one_of(known_words_st, random_words_st)))
+    return " ".join(words)
 
 @st.composite
 def record(draw,
@@ -138,14 +156,14 @@ def record(draw,
     embeddings = create_embeddings(collection.dimension, 1, collection.dtype)
 
     if collection.has_documents:
-        document = draw(documents)
+        doc = draw(document(collection))
     else:
-        document = None
+        doc = None
 
     return {"id": draw(id_strategy),
             "embedding": embeddings[0],
             "metadata": md,
-            "document": document}
+            "document": doc}
 
 
 @st.composite
@@ -244,6 +262,14 @@ def where_clause(draw, collection):
     else:
         return {key: {op: value}}
 
+@st.composite
+def where_doc_clause(draw, collection):
+    """Generate a where_document filter that could be used against the given collection"""
+    if collection.known_document_keywords:
+        word = draw(st.sampled_from(collection.known_document_keywords))
+    else:
+        word = draw(safe_text)
+    return {"$contains": word}
 
 @st.composite
 def binary_operator_clause(draw, base_st):
@@ -255,11 +281,15 @@ def recursive_where_clause(draw, collection):
     base_st = where_clause(collection)
     return draw(st.recursive(base_st, binary_operator_clause))
 
+@st.composite
+def recursive_where_doc_clause(draw, collection):
+    base_st = where_doc_clause(collection)
+    return draw(st.recursive(base_st, binary_operator_clause))
 
 class Filter(TypedDict):
     where: Optional[Dict[str, Union[str, int, float]]]
     ids: Optional[List[str]]
-
+    where_document: Optional[types.WhereDocument]
 
 @st.composite
 def filters(draw,
@@ -269,11 +299,14 @@ def filters(draw,
     collection = draw(collection_st)
     recordset = draw(recordset_st)
 
-    where_clauses = draw(st.one_of(st.none(), recursive_where_clause(collection)))
+    where_clause = draw(st.one_of(st.none(), recursive_where_clause(collection)))
+    where_document_clause = draw(st.one_of(st.none(),
+                                            recursive_where_doc_clause(collection)))
     ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
 
     if ids:
         ids = list(set(ids))
 
-    return {"where": where_clauses,
+    return {"where": where_clause,
+            "where_document": where_document_clause,
             "ids": ids}

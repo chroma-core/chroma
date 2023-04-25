@@ -46,6 +46,17 @@ def _filter_where_clause(clause, mm):
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
+def _filter_where_doc_clause(clause, doc):
+
+    key, expr = list(clause.items())[0]
+    if key == "$and":
+        return all(_filter_where_doc_clause(clause, doc) for clause in expr)
+    elif key == "$or":
+        return any(_filter_where_doc_clause(clause, doc) for clause in expr)
+    elif key == "$contains":
+        return expr in doc
+    else:
+        raise ValueError("Unknown operator: {}".format(key))
 
 def _filter_embedding_set(recordset: strategies.RecordSet,
                           filter: strategies.Filter):
@@ -62,12 +73,18 @@ def _filter_embedding_set(recordset: strategies.RecordSet,
             if not _filter_where_clause(filter["where"], metadatas[i]):
                 ids.discard(recordset["ids"][i])
 
+        if filter["where_document"]:
+            documents = recordset["documents"] or [""] * len(recordset["ids"])
+            if not _filter_where_doc_clause(filter["where_document"],
+                                            documents[i]):
+                ids.discard(recordset["ids"][i])
+
     return list(ids)
 
 
 collection_st = st.shared(strategies.collections(), key="coll")
 recordset_st = st.shared(strategies.recordsets(collection_st,
-                                               max_size=1000), key="recordset")
+                                                max_size=1000), key="recordset")
 
 
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture,
