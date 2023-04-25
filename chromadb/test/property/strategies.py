@@ -48,7 +48,7 @@ class RecordSet(TypedDict):
 
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
 # TODO: support empty strings everywhere
-sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./"
+sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 
 safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
@@ -121,6 +121,9 @@ def collections(draw):
 def metadata(draw, collection: Collection):
     """Strategy for generating metadata that could be a part of the given collection"""
     md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    for key in collection.known_metadata_keys.keys():
+        if key in md:
+            del md[key]
     md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
     return md
 
@@ -221,38 +224,17 @@ class DeterministicRuleStrategy(SearchStrategy):
         return True
 
 
-# See if there's a way to unify this so we're randomly generating keys
-filterable_metadata = st.fixed_dictionaries({}, optional={"intKey": st.integers(max_value=2**31-1,
-                                                                                min_value=-2**31-1),
-                                                          "floatKey": st.floats(allow_infinity=False, allow_nan=False),
-                                                          "textKey": st.text()})
-
-
-# TODO remove hardcoded values
-doc_tokens = ["apple", "grape", "peach", "cherry", "orange",
-              "banana", "papaya", "plum", "mango", "melon"]
-
-readable_document = st.lists(st.sampled_from(doc_tokens),
-                             min_size=2,
-                             max_size=10).map(lambda l: " ".join(l))
-
-where_document_clause = st.sampled_from(doc_tokens).map(lambda t: {"$contains": t})
-
 @st.composite
-def where_clause(draw, int_values, float_values, text_values):
-    key = draw(st.sampled_from(["intKey", "floatKey", "textKey"]))
-    if key == "intKey":
-        hypothesis.assume(len(int_values) > 0)
-        value = draw(st.sampled_from(int_values))
-    elif key == "floatKey":
-        hypothesis.assume(len(float_values) > 0)
-        value = draw(st.sampled_from(float_values))
-    else:
-        hypothesis.assume(len(text_values) > 0)
-        value = draw(st.sampled_from(text_values))
+def where_clause(draw, collection):
+    """Generate a filter that could be used in a query against the given collection"""
+
+    known_keys = sorted(collection.known_metadata_keys.keys())
+
+    key = draw(st.sampled_from(known_keys))
+    value = draw(collection.known_metadata_keys[key])
 
     legal_ops = [None, "$eq", "$ne"]
-    if key != "textKey":
+    if not isinstance(value, str):
         legal_ops = ["$gt", "$lt", "$lte", "$gte"] + legal_ops
 
     op = draw(st.sampled_from(legal_ops))
@@ -269,55 +251,13 @@ def binary_operator_clause(draw, base_st):
     return {op: [draw(base_st), draw(base_st)]}
 
 @st.composite
-def recursive_where_clause(draw, int_values, float_values, text_values):
-    base_st = where_clause(int_values, float_values, text_values)
+def recursive_where_clause(draw, collection):
+    base_st = where_clause(collection)
     return draw(st.recursive(base_st, binary_operator_clause))
 
-
-recursive_where_document_clause = st.recursive(where_document_clause,
-                                               binary_operator_clause)
-
-
 @st.composite
-def filterable_embedding_set(draw):
+def filters(draw, collection_st: st.SearchStrategy[Collection]):
 
-    def documents_st_fn(count):
-        return st.lists(max_size=count, min_size=count,
-                        elements=readable_document)
+    collection = draw(collection_st)
 
-    def metadatas_st_fn(count):
-        return st.lists(max_size=count, min_size=count,
-                        elements=filterable_metadata)
-
-    return draw(embedding_set(dimension=2,
-                              documents_st_fn=documents_st_fn,
-                              metadatas_st_fn=metadatas_st_fn))  # type: ignore
-
-
-@st.composite
-def filterable_embedding_set_with_filters(draw):
-
-    es = draw(filterable_embedding_set())
-
-    int_values = []
-    float_values = []
-    text_values = []
-    for m in es["metadatas"]:
-        if "intKey" in m:
-            int_values.append(m["intKey"])
-        if "floatKey" in m:
-            float_values.append(m["floatKey"])
-        if "textKey" in m:
-            text_values.append(m["textKey"])
-
-    size = len(es["ids"])
-
-    filters = draw(st.lists(recursive_where_clause(int_values,
-                                                   float_values,
-                                                   text_values),
-                            min_size=size, max_size=size))
-
-    doc_filters = draw(st.lists(recursive_where_document_clause,
-                                min_size=size, max_size=size))
-
-    return es, filters, doc_filters
+    return draw(recursive_where_clause(collection))

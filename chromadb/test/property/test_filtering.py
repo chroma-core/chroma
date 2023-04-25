@@ -55,46 +55,27 @@ def _filter_embedding_set(es, where_clause):
             ids.append(es["ids"][i])
     return ids
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(collection=strategies.collections(),
-       es_and_filters=strategies.filterable_embedding_set_with_filters())
-def test_filterable_metadata(caplog, api, collection, es_and_filters):
+
+collection_st = st.shared(strategies.collections(), key="coll")
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture,
+                                 HealthCheck.large_base_example])
+@given(collection=collection_st,
+       recordset=strategies.recordsets(collection_st),
+       filters=st.lists(strategies.filters(collection_st), min_size=1))
+def test_filterable_metadata(caplog, api, collection, recordset, filters):
     caplog.set_level(logging.ERROR)
-    es, filters, doc_filters = es_and_filters
 
     api.reset()
-    coll = api.create_collection(**collection)
-    coll.add(**es)
+    coll = api.create_collection(name=collection.name,
+                                 metadata=collection.metadata,
+                                 embedding_function=collection.embedding_function)
+    coll.add(**recordset)
 
-    invariants.ann_accuracy(coll, es)
+    invariants.ann_accuracy(coll, recordset)
 
     for where_clause in filters:
         result_ids = coll.get(where=where_clause)["ids"]
-        expected_ids = _filter_embedding_set(es, where_clause)
+        expected_ids = _filter_embedding_set(recordset, where_clause)
         assert sorted(result_ids) == sorted(expected_ids)
-
-
-
-def test_failing_case(caplog, api):
-    caplog.set_level(logging.ERROR)
-
-    collection = {'name': 'A00', 'metadata': None}
-
-    es = {'ids': ['1', '0'],
-          'embeddings': [[0.09765625, 0.430419921875],
-                         [0.20556640625, 0.08978271484375]],
-          'metadatas': [{}, {'intKey': 0}],
-          'documents': ['apple apple', 'apple apple']}
-
-    api.reset()
-    coll = api.create_collection(**collection)
-    coll.add(**es)
-
-    filters =  [{'intKey': {'$gt': 0}}, {'intKey': {'$ne': 0}}]
-
-    for where_clause in filters:
-        result_ids = coll.get(where=where_clause)["ids"]
-        expected_ids = _filter_embedding_set(es, where_clause)
-        assert sorted(result_ids) == sorted(expected_ids)
-
 
