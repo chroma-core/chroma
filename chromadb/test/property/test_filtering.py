@@ -15,18 +15,18 @@ def api(request):
     return chromadb.Client(configuration)
 
 
-def _filter(clause, mm):
+def _filter_where_clause(clause, mm):
     """Return true if the where clause is true for the given metadata map"""
 
     key, expr = list(clause.items())[0]
 
     if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float):
-        return _filter({key: {"$eq": expr}}, mm)
+        return _filter_where_clause({key: {"$eq": expr}}, mm)
 
     if key == "$and":
-        return all(_filter(clause, mm) for clause in expr)
+        return all(_filter_where_clause(clause, mm) for clause in expr)
     if key == "$or":
-        return any(_filter(clause, mm) for clause in expr)
+        return any(_filter_where_clause(clause, mm) for clause in expr)
 
     op = list(expr.keys())[0]
     val = expr[op]
@@ -47,22 +47,34 @@ def _filter(clause, mm):
         raise ValueError("Unknown operator: {}".format(key))
 
 
-def _filter_embedding_set(es, where_clause):
-    """Return IDs from the embedding set that match the where clause"""
-    ids = []
-    for i in range(len(es["ids"])):
-        if _filter(where_clause, es["metadatas"][i]):
-            ids.append(es["ids"][i])
-    return ids
+def _filter_embedding_set(recordset: strategies.RecordSet,
+                          filter: strategies.Filter):
+    """Return IDs from the embedding set that match the given filter object"""
+    ids = set(recordset["ids"])
+
+    if filter["ids"]:
+        ids = ids.intersection(filter["ids"])
+
+    for i in range(len(recordset["ids"])):
+
+        if filter["where"]:
+            metadatas = recordset["metadatas"] or [{}] * len(recordset["ids"])
+            if not _filter_where_clause(filter["where"], metadatas[i]):
+                ids.discard(recordset["ids"][i])
+
+    return list(ids)
 
 
 collection_st = st.shared(strategies.collections(), key="coll")
+recordset_st = st.shared(strategies.recordsets(collection_st,
+                                               max_size=1000), key="recordset")
+
 
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture,
                                  HealthCheck.large_base_example])
 @given(collection=collection_st,
-       recordset=strategies.recordsets(collection_st),
-       filters=st.lists(strategies.filters(collection_st), min_size=1))
+       recordset=recordset_st,
+       filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1))
 def test_filterable_metadata(caplog, api, collection, recordset, filters):
     caplog.set_level(logging.ERROR)
 
@@ -74,8 +86,8 @@ def test_filterable_metadata(caplog, api, collection, recordset, filters):
 
     invariants.ann_accuracy(coll, recordset)
 
-    for where_clause in filters:
-        result_ids = coll.get(where=where_clause)["ids"]
-        expected_ids = _filter_embedding_set(recordset, where_clause)
+    for filter in filters:
+        result_ids = coll.get(**filter)["ids"]
+        expected_ids = _filter_embedding_set(recordset, filter)
         assert sorted(result_ids) == sorted(expected_ids)
 

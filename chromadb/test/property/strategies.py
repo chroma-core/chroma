@@ -255,9 +255,25 @@ def recursive_where_clause(draw, collection):
     base_st = where_clause(collection)
     return draw(st.recursive(base_st, binary_operator_clause))
 
+
+class Filter(TypedDict):
+    where: Optional[Dict[str, Union[str, int, float]]]
+    ids: Optional[List[str]]
+
+
 @st.composite
-def filters(draw, collection_st: st.SearchStrategy[Collection]):
+def filters(draw,
+            collection_st: st.SearchStrategy[Collection],
+            recordset_st: st.SearchStrategy[RecordSet]) -> Filter:
 
     collection = draw(collection_st)
+    recordset = draw(recordset_st)
 
-    return draw(recursive_where_clause(collection))
+    where_clauses = draw(st.one_of(st.none(), recursive_where_clause(collection)))
+    ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
+
+    if ids:
+        ids = list(set(ids))
+
+    return {"where": where_clauses,
+            "ids": ids}
