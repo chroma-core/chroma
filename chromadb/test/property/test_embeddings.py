@@ -37,12 +37,6 @@ def print_traces():
         print(f"{key}: {value}")
 
 
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
-
-
 dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")
 dimension_shared_st = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
@@ -161,11 +155,17 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             if id in self.embeddings["ids"]:
                 target_idx = self.embeddings["ids"].index(id)
                 if "embeddings" in embeddings and embeddings["embeddings"] is not None:
-                    self.embeddings["embeddings"][target_idx] = embeddings["embeddings"][idx]
+                    self.embeddings["embeddings"][target_idx] = embeddings[
+                        "embeddings"
+                    ][idx]
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
-                    self.embeddings["metadatas"][target_idx] = embeddings["metadatas"][idx]
+                    self.embeddings["metadatas"][target_idx] = embeddings["metadatas"][
+                        idx
+                    ]
                 if "documents" in embeddings and embeddings["documents"] is not None:
-                    self.embeddings["documents"][target_idx] = embeddings["documents"][idx]
+                    self.embeddings["documents"][target_idx] = embeddings["documents"][
+                        idx
+                    ]
             else:
                 self.embeddings["ids"].append(id)
                 if "embeddings" in embeddings and embeddings["embeddings"] is not None:
@@ -190,6 +190,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.embeddings["embeddings"][i]
             del self.embeddings["metadatas"][i]
             del self.embeddings["documents"][i]
+
 
 def test_embeddings_state(caplog, api):
     caplog.set_level(logging.ERROR)
@@ -234,4 +235,3 @@ def test_escape_chars_in_ids(api: API):
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
-

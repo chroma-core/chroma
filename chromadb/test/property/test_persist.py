@@ -5,14 +5,14 @@ import chromadb
 from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from chromadb.test.configurations import persist_configurations
+from chromadb.test.configurations import configurations
 
 
 CreatePersistAPI = Callable[[], API]
 
 
 # TODO: fixtures should be common across tests
-@pytest.fixture(scope="module", params=persist_configurations())
+@pytest.fixture(scope="module", params=configurations(True))
 def create_api(request) -> CreatePersistAPI:
     configuration = request.param
     return lambda: chromadb.Client(configuration)
