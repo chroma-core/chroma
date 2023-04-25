@@ -62,14 +62,16 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if not api:
             api = chromadb.Client(configurations()[0])
         self.api = api
-        self._rules_strategy = MyRuleStrategy(self)
+        self._rules_strategy = strategies.DeterministicRuleStrategy(self)
 
     @initialize(collection=collection_st)
     def initialize(self, collection: strategies.Collection):
         self.api.reset()
-        self.collection = self.api.create_collection(name=collection.name,
-                                                     metadata=collection.metadata,
-                                                     embedding_function=collection.ef)
+        self.collection = self.api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,
+            embedding_function=collection.embedding_function
+        )
         trace("init")
         self.embeddings = {
             "ids": [],
@@ -220,103 +222,3 @@ def test_escape_chars_in_ids(api: API):
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
-
-
-# ==========================================================
-
-@st.composite
-def often_invalid(draw):
-    n = draw(st.lists(st.text(), min_size=5, unique=True))
-    return n
-
-@given(es=strategies.recordsets())
-def test_generate_embeddings(es):
-    assert es is not None
-
-
-@given(data=often_invalid())
-def test_hypothesis(data):
-    assert data is not None
-
-
-
-class MyStateMachine(RuleBasedStateMachine):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._rules_strategy = MyRuleStrategy(self)
-
-    #@rule(my_data=strategies.dictionaries(strategies.safe_text, st.one_of(*strategies.safe_values)))
-    #@rule(my_data=st.lists(st.text(), min_size=1, unique=False))
-    @rule(my_data=st.text())
-    def rule1(self, my_data):
-       #print("IN RULE 1:", my_data)
-       assert my_data is not None
-
-
-TestMyStateMachine = MyStateMachine.TestCase
-
-
-
-from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.strategies._internal.featureflags import FeatureStrategy
-from hypothesis.errors import InvalidArgument, InvalidDefinition
-
-class MyRuleStrategy(SearchStrategy):
-    def __init__(self, machine):
-        super().__init__()
-        self.machine = machine
-        self.rules = list(machine.rules())
-
-        # The order is a bit arbitrary. Primarily we're trying to group rules
-        # that write to the same location together, and to put rules with no
-        # target first as they have less effect on the structure. We order from
-        # fewer to more arguments on grounds that it will plausibly need less
-        # data. This probably won't work especially well and we could be
-        # smarter about it, but it's better than just doing it in definition
-        # order.
-        self.rules.sort(
-            key=lambda rule: (
-                sorted(rule.targets),
-                len(rule.arguments),
-                rule.function.__name__,
-            )
-        )
-
-    def __repr__(self):
-        return "{}(machine={}({{...}}))".format(
-            self.__class__.__name__,
-            self.machine.__class__.__name__,
-        )
-
-    def do_draw(self, data):
-        if not any(self.is_valid(rule) for rule in self.rules):
-            msg = f"No progress can be made from state {self.machine!r}"
-            raise InvalidDefinition(msg) from None
-
-        # Note: The order of the filters here is actually quite important,
-        # because checking is_enabled makes choices, so increases the size of
-        # the choice sequence. This means that if we are in a case where many
-        # rules are invalid we will make a lot more choices if we ask if they
-        # are enabled before we ask if they are valid, so our test cases will
-        # be artificially large.
-
-        rule = data.draw(
-            st.sampled_from([r for r in self.rules if self.is_valid(r)])
-        )
-
-        #print("pre-arg-draw")
-        argdata = data.draw(rule.arguments_strategy)
-        #print("post-arg-draw: ", argdata)
-
-        return (rule, argdata)
-
-    def is_valid(self, rule):
-        if not all(precond(self.machine) for precond in rule.preconditions):
-            return False
-
-        for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)
-            if not bundle:
-                return False
-        return True

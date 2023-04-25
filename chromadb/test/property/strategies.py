@@ -6,6 +6,11 @@ import numpy as np
 import chromadb.api.types as types
 import chromadb.utils.embedding_functions as embedding_functions
 import re
+from hypothesis.strategies._internal.strategies import SearchStrategy
+from hypothesis.strategies._internal.featureflags import FeatureStrategy
+from hypothesis.errors import InvalidArgument, InvalidDefinition
+
+from dataclasses import dataclass
 
 # Set the random seed for reproducibility
 np.random.seed(0) # unnecessary, hypothesis does this for us
@@ -23,14 +28,12 @@ np.random.seed(0) # unnecessary, hypothesis does this for us
 # Whenever a strategy marks itself as invalid, Hypothesis tries to start the entire
 # state machine run over. See https://github.com/HypothesisWorks/hypothesis/issues/3618
 
-# To avoid this, follow the following rules when creating strategies in this file:
-# 1. Don't use `assume`
-# 2. Don't use `SearchStrategy.filter`
-# 3. Don't use the built-in collection strategies (e.g. `st.lists` with Unique=True)
+# Because strategy generation is all interrelated, seemingly small changes (especially
+# ones called early in a test) can have an outside effect. Generating lists with
+# unique=True, or dictionaries with a min size seems especially bad.
 
-# Unfortunately, this hurts shrinking behavior and could cause performance issues.
-# It's definitely an issue with Hypothesis, but necessary for now to get the state
-# machines to run.
+# Please make changes to these strategies incrementally, testing to make sure they don't
+# start generating unsatisfiable examples.
 
 
 class RecordSet(TypedDict):
@@ -86,28 +89,15 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
     ).astype(dtype).tolist()
 
 
+@dataclass
 class Collection():
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
     dtype: np.dtype
     known_metadata_keys: Dict[str, st.SearchStrategy]
-
-    def __init__(self,
-                 name: str,
-                 metadata: Optional[Optional[types.Metadata]],
-                 dimension: int,
-                 dtype: np.dtype,
-                 known_metadata_keys: Dict[str, st.SearchStrategy],
-                 has_documents: bool) -> None:
-        self.name = name
-        self.metadata = metadata
-        self.dimension = dimension
-        self.dtype = dtype
-        self.known_metadata_keys = known_metadata_keys
-        self.has_documents = has_documents
-        self.ef = lambda x: None
-
+    has_documents: bool = False
+    embedding_function: Callable[[str], types.Embedding] = lambda x: []
 
 @st.composite
 def collections(draw):
@@ -118,9 +108,10 @@ def collections(draw):
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
-    known_metadata_keys = draw(st.dictionaries(safe_text,
-                                               st.sampled_from([*safe_values]),
-                                               min_size=5))
+    known_metadata_keys = {}
+    while len(known_metadata_keys) < 5:
+        key = draw(safe_text)
+        known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
     has_documents = draw(st.booleans())
 
@@ -130,27 +121,9 @@ def collections(draw):
 @st.composite
 def metadata(draw, collection: Collection):
     """Strategy for generating metadata that could be a part of the given collection"""
-
-    #random_metadata_st = st.dictionaries(safe_text, st.one_of(*safe_values))
-    #known_metadata_st = st.fixed_dictionaries(mapping={},
-    #                                          optional=collection.known_metadata_keys)
-    #metadata_st = _dict_merge(random_metadata_st, known_metadata_st)
-
-    strategy = st.dictionaries(
-        st.text(min_size=1),
-        st.one_of(
-            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
-        ),
-    )
-
-    # size = draw(st.integers(min_value=0, max_value=10))
-    # result = {}
-    # for i in range(size):
-    #     result[] = draw(st.integers())
-
-    return draw(strategy)
-
-    #return draw(st.one_of(metadata_st))
+    md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
+    return md
 
 
 @st.composite
@@ -173,9 +146,8 @@ def record(draw,
             "document": document}
 
 
-# Reecordsets, but draws by row instead of by column
 @st.composite
-def recordsetsX(draw,
+def recordsets(draw,
                collection_strategy=collections(),
                id_strategy=safe_text,
                min_size=1,
@@ -183,110 +155,68 @@ def recordsetsX(draw,
 
     collection = draw(collection_strategy)
 
-    count = draw(st.integers(min_value=min_size, max_value=max_size))
+    records = draw(st.lists(record(collection, id_strategy),
+                            min_size=min_size, max_size=max_size))
 
-    ids = set()
-    while len(ids) < count:
-        ids.add(draw(id_strategy))
-    ids = list(ids)
-
-    embeddings = create_embeddings(collection.dimension, count, collection.dtype)
-
-    metadatas = [draw(metadata(collection)) for _ in range(count)]
-    docs = None #[r["document"] for r in records]
+    records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
     return {
-        "ids": ids,
-        "embeddings": embeddings,
-        "metadatas": metadatas,
-        "documents": docs
+        "ids": [r["id"] for r in records],
+        "embeddings": [r["embedding"] for r in records],
+        "metadatas": [r["metadata"] for r in records],
+        "documents": [r["document"] for r in records] if collection.has_documents else None,
     }
 
 
-@st.composite
-def _dict_merge(draw, *strategies: st.SearchStrategy[Dict]) -> Dict:
-    """Strategy to merge the results of multiple strategies that return dicts into a single dict"""
-    result = {}
-    for strategy in strategies:
-        result.update(draw(strategy))
-    return result
+# This class is mostly cloned from from hypothesis.stateful.RuleStrategy,
+# but always runs all the rules, instead of using a FeatureStrategy to
+# enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
+# combined with the complexity of our other strategies, leads to an
+# unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
+class DeterministicRuleStrategy(SearchStrategy):
+    def __init__(self, machine):
+        super().__init__()
+        self.machine = machine
+        self.rules = list(machine.rules())
 
+        # The order is a bit arbitrary. Primarily we're trying to group rules
+        # that write to the same location together, and to put rules with no
+        # target first as they have less effect on the structure. We order from
+        # fewer to more arguments on grounds that it will plausibly need less
+        # data. This probably won't work especially well and we could be
+        # smarter about it, but it's better than just doing it in definition
+        # order.
+        self.rules.sort(
+            key=lambda rule: (
+                sorted(rule.targets),
+                len(rule.arguments),
+                rule.function.__name__,
+            )
+        )
 
+    def __repr__(self):
+        return "{}(machine={}({{...}}))".format(
+            self.__class__.__name__,
+            self.machine.__class__.__name__,
+        )
 
-## ==================== ##
-## === Old Shit =======##
+    def do_draw(self, data):
+        if not any(self.is_valid(rule) for rule in self.rules):
+            msg = f"No progress can be made from state {self.machine!r}"
+            raise InvalidDefinition(msg) from None
 
-def metadata_strategy():
-    # TODO: Handle NaN and inf values
-    # TODO: Handle empty string keys
-    return st.dictionaries(
-        st.text(min_size=1),
-        st.one_of(
-            st.text(), st.integers(), st.floats(allow_infinity=False, allow_nan=False)
-        ),
-    )
+        rule = data.draw(
+            st.sampled_from([r for r in self.rules if self.is_valid(r)])
+        )
+        argdata = data.draw(rule.arguments_strategy)
+        return (rule, argdata)
 
-def metadatas_strategy(count: int) -> st.SearchStrategy[Optional[List[types.Metadata]]]:
-    return st.one_of(
-        st.none(), st.lists(metadata_strategy(), min_size=count, max_size=count)
-    )
+    def is_valid(self, rule):
+        if not all(precond(self.machine) for precond in rule.preconditions):
+            return False
 
-def documents_strategy(count: int) -> st.SearchStrategy[Optional[List[str]]]:
-    # TODO: Handle non-unique documents
-    # TODO: Handle empty string documents
-    return st.one_of(
-        st.none(),
-        st.lists(st.text(min_size=1), min_size=count, max_size=count, unique=True),
-    )
-
-@st.composite
-def recordsets(
-    draw,
-    collection_strategy=collections(),
-    id_strategy=safe_text,
-    min_size=1,
-    max_size=50,
-    #dimension_st: st.SearchStrategy[int] = st.integers(min_value=2, max_value=2048),
-    count_st: st.SearchStrategy[int] = st.integers(min_value=1, max_value=512),
-    #dtype_st: st.SearchStrategy[np.dtype] = st.sampled_from(float_types),
-    documents_st_fn: Callable[
-        [int], st.SearchStrategy[Optional[List[str]]]
-    ] = documents_strategy,
-    metadatas_st_fn: Callable[
-        [int], st.SearchStrategy[Optional[List[types.Metadata]]]
-    ] = metadatas_strategy,
-    dimension: Optional[int] = None,
-    count: Optional[int] = None,
-    dtype: Optional[np.dtype] = None,
-) -> RecordSet:
-    """Strategy to generate a set of embeddings."""
-
-    if count is None:
-        count = draw(count_st)
-
-    collection = draw(collection_strategy)
-
-    dimension = collection.dimension
-    dtype = collection.dtype
-
-    count = cast(int, count)
-    dimension = cast(int, dimension)
-
-    # TODO: Test documents only
-    # TODO: Generative embedding function to guarantee unique embeddings for unique documents
-    documents = draw(documents_st_fn(count))
-    metadatas = draw(metadatas_st_fn(count))
-
-    embeddings = create_embeddings(dimension, count, dtype)
-
-    ids = set()
-    while len(ids) < count:
-        ids.add(draw(id_strategy))
-    ids = list(ids)
-
-    return {
-        "ids": ids,
-        "embeddings": embeddings if embeddings is not None else None,
-        "metadatas": metadatas,
-        "documents": documents,
-    }
+        for b in rule.bundles:
+            bundle = self.machine.bundle(b.name)
+            if not bundle:
+                return False
+        return True
