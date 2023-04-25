@@ -91,7 +91,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.settings = settings
         super().__init__(self.api)
 
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
     @rule()
     def persist(self):
         collection_name = self.collection.name
