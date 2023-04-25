@@ -96,7 +96,7 @@ class Collection():
     dtype: np.dtype
     known_metadata_keys: Dict[str, st.SearchStrategy]
     has_documents: bool = False
-    embedding_function: Callable[[str], types.Embedding] = lambda x: []
+    embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
 
 @st.composite
 def collections(draw):
