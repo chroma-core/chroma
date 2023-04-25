@@ -96,8 +96,8 @@ class Collection():
     embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
 
 @st.composite
-def collections(draw):
-    """Strategy to generate a Collection object"""
+def collections(draw, add_filterable_data=False):
+    """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
@@ -105,12 +105,13 @@ def collections(draw):
     dtype = draw(st.sampled_from(float_types))
 
     known_metadata_keys = {}
-    while len(known_metadata_keys) < 5:
-        key = draw(safe_text)
-        known_metadata_keys[key] = draw(st.sampled_from(safe_values))
+    if add_filterable_data:
+        while len(known_metadata_keys) < 5:
+            key = draw(safe_text)
+            known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
     has_documents = draw(st.booleans())
-    if has_documents:
+    if has_documents and add_filterable_data:
         known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
     else:
         known_document_keywords = []
@@ -127,10 +128,11 @@ def collections(draw):
 def metadata(draw, collection: Collection):
     """Strategy for generating metadata that could be a part of the given collection"""
     md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
-    for key in collection.known_metadata_keys.keys():
-        if key in md:
-            del md[key]
-    md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
+    if collection.known_document_keywords:
+        for key in collection.known_metadata_keys.keys():
+            if key in md:
+                del md[key]
+        md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
     return md
 
 @st.composite
@@ -140,7 +142,7 @@ def document(draw, collection: Collection):
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
-        known_words_st = st.just("")
+        known_words_st = st.text(min_size=1)
 
     random_words_st = st.text(min_size=1)
     words = draw(st.lists(st.one_of(known_words_st, random_words_st)))

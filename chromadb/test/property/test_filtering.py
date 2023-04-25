@@ -82,7 +82,7 @@ def _filter_embedding_set(recordset: strategies.RecordSet,
     return list(ids)
 
 
-collection_st = st.shared(strategies.collections(), key="coll")
+collection_st = st.shared(strategies.collections(add_filterable_data=True), key="coll")
 recordset_st = st.shared(strategies.recordsets(collection_st,
                                                 max_size=1000), key="recordset")
 
