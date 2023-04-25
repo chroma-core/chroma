@@ -1,5 +1,5 @@
-from typing import Literal, Sequence, Union, cast
 from chromadb.test.property.strategies import RecordSet
+from typing import Callable, Literal, Sequence, Union, cast
 import numpy as np
 from chromadb.api import API, types
 from chromadb.api.models.Collection import Collection
@@ -9,7 +9,8 @@ from hypothesis.errors import InvalidArgument
 
 def count(api: API, collection_name: str, expected_count: int):
     """The given collection count is equal to the number of embeddings"""
-    count = api._count(collection_name)
+    collection = api.get_collection(collection_name)
+    count = collection.count()
     assert count == expected_count
 
 
@@ -23,8 +24,6 @@ def _field_matches(
     field_name: one of [documents, metadatas]
     """
     result = collection.get(ids=embeddings["ids"], include=[field_name])
-    # TODO: The returned data is not necessarily in the same order as the input ids
-    # until we add a sort in the get path
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
@@ -51,8 +50,6 @@ def _field_matches(
 def ids_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding ids is equal to the expected ids"""
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
-    # TODO: The returned ids are not necessarily in the same order as the input ids
-    # until we add a sort.
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
@@ -75,46 +72,81 @@ def no_duplicates(collection: Collection):
     assert len(ids) == len(set(ids))
 
 
+def _exact_distances(
+    query: types.Embeddings,
+    targets: types.Embeddings,
+    distance_fn: Callable = lambda x, y: np.linalg.norm(x - y) ** 2,
+):
+    """Return the ordered indices and distances from each query to each target"""
+    np_query = np.array(query)
+    np_targets = np.array(targets)
+
+    # Compute the distance between each query and each target, using the distance function
+    distances = np.apply_along_axis(
+        lambda query: np.apply_along_axis(distance_fn, 1, np_targets, query),
+        1,
+        np_query,
+    )
+    # Sort the distances and return the indices
+    return np.argsort(distances), distances
+
+
 def ann_accuracy(
     collection: Collection,
     embeddings: RecordSet,
-    min_recall: float = 0.99,
+    n_results: int = 1,
+    min_recall: float = 1.0,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
 
     if len(embeddings["ids"]) == 0:
         return  # nothing to test here
 
-    # Validate that each embedding is its own nearest neighbor and adjust recall if not.
-    result = collection.query(
+    # TODO Remove once we support querying by documents in tests
+    if embeddings["embeddings"] is None:
+        # If we don't have embeddings, we can't do an ANN search
+        return
+
+    # Perform exact distance computation
+    indices, distances = _exact_distances(
+        embeddings["embeddings"], embeddings["embeddings"]
+    )
+
+    query_results = collection.query(
         query_embeddings=embeddings["embeddings"],
         query_texts=embeddings["documents"]
         if embeddings["embeddings"] is None
         else None,
-        n_results=1,
+        n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
 
+    # Dict of ids to indices
+    id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
     missing = 0
-    for i, id in enumerate(embeddings["ids"]):
-        if result["ids"][i][0] != id:
-            missing += 1
-        else:
-            if embeddings["embeddings"] is not None:
-                assert np.allclose(
-                    result["embeddings"][i][0], embeddings["embeddings"][i]
+    for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
+        expected_ids = np.array(embeddings["ids"])[indices_i[:n_results]]
+        missing += len(set(expected_ids) - set(query_results["ids"][i]))
+
+        # For each id in the query results, find the index in the embeddings set
+        # and assert that the embeddings are the same
+        for j, id in enumerate(query_results["ids"][i]):
+            # This may be because the true nth nearest neighbor didn't get returned by the ANN query
+            if id not in expected_ids:
+                continue
+            index = id_to_index[id]
+            assert np.allclose(distances_i[index], query_results["distances"][i][j])
+            assert np.allclose(
+                embeddings["embeddings"][index], query_results["embeddings"][i][j]
+            )
+            if embeddings["documents"] is not None:
+                assert (
+                    embeddings["documents"][index] == query_results["documents"][i][j]
                 )
-            assert result["documents"][i][0] == (
-                embeddings["documents"][i]
-                if embeddings["documents"] is not None
-                else None
-            )
-            assert result["metadatas"][i][0] == (
-                embeddings["metadatas"][i]
-                if embeddings["metadatas"] is not None
-                else None
-            )
-            assert result["distances"][i][0] == 0.0
+            if embeddings["metadatas"] is not None:
+                assert (
+                    embeddings["metadatas"][index] == query_results["metadatas"][i][j]
+                )
 
     size = len(embeddings["ids"])
     recall = (size - missing) / size

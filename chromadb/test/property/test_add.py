@@ -1,7 +1,7 @@
 
 import pytest
-from hypothesis import given
 import hypothesis.strategies as st
+from hypothesis import given, settings
 import chromadb
 from chromadb.api import API
 from chromadb.test.configurations import configurations
@@ -18,6 +18,7 @@ def api(request):
 collection_st = st.shared(strategies.collections(), key="coll")
 @given(collection=collection_st,
        embeddings=strategies.recordsets(collection_st))
+@settings(deadline=None)
 def test_add(
     api: API, collection: strategies.Collection, embeddings: strategies.RecordSet
 ):
@@ -32,7 +33,7 @@ def test_add(
         coll.name,
         len(embeddings["ids"]),
     )
-    invariants.ann_accuracy(coll, embeddings)
+    invariants.ann_accuracy(coll, embeddings, n_results=len(embeddings["ids"]))
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
