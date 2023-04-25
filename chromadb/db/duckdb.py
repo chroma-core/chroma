@@ -13,6 +13,7 @@ import duckdb
 import uuid
 import os
 import logging
+import atexit
 
 logger = logging.getLogger(__name__)
 
@@ -379,8 +380,9 @@ class DuckDB(Clickhouse):
         self.reset_indexes()
 
     def persist(self):
-        # No-op for duckdb without persistence
-        pass
+        raise NotImplementedError(
+            "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
+        )
 
 
 class PersistentDuckDB(DuckDB):
@@ -396,6 +398,8 @@ class PersistentDuckDB(DuckDB):
 
         self._save_folder = settings.persist_directory
         self.load()
+        # https://docs.python.org/3/library/atexit.html
+        atexit.register(self.persist)
 
     def set_save_folder(self, path):
         self._save_folder = path

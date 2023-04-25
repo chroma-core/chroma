@@ -108,8 +108,9 @@ class Clickhouse(DB):
     #  UTILITY METHODS
     #
     def persist(self):
-        # No-op for clickhouse
-        pass
+        raise NotImplementedError(
+            "Clickhouse is a persistent database, this method is not needed"
+        )
 
     def get_collection_uuid_from_name(self, name: str) -> str:
         res = self._get_conn().query(

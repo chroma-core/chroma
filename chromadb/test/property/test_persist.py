@@ -94,6 +94,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
     @rule()
     def persist(self):
+        self.api.persist()
         collection_name = self.collection.name
         # Create a new process and then inside the process run the invariants
         # TODO: Once we switch off of duckdb and onto sqlite we can remove this

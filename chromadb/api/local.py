@@ -67,7 +67,6 @@ class LocalAPI(API):
         check_index_name(name)
 
         res = self._db.create_collection(name, metadata, get_or_create)
-        self.persist()
         return Collection(
             client=self,
             name=name,
@@ -121,11 +120,9 @@ class LocalAPI(API):
             check_index_name(new_name)
 
         self._db.update_collection(current_name, new_name, new_metadata)
-        self.persist()
 
     def delete_collection(self, name: str):
         res = self._db.delete_collection(name)
-        self.persist()
         return res
 
     #
@@ -158,7 +155,6 @@ class LocalAPI(API):
         if increment_index:
             self._db.add_incremental(collection_uuid, added_uuids, embeddings)
 
-        self.persist()
         self._telemetry_client.capture(CollectionAddEvent(collection_uuid, len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
@@ -172,7 +168,6 @@ class LocalAPI(API):
     ):
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.update(collection_uuid, ids, embeddings, metadatas, documents)
-        self.persist()
         return True
 
     def _upsert(
@@ -183,13 +178,12 @@ class LocalAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):        
+    ):
         # Determine which ids need to be added and which need to be updated based on the ids already in the collection
-        existing_ids = set(self._get(collection_name, ids=ids, include=[])['ids'])
-
+        existing_ids = set(self._get(collection_name, ids=ids, include=[])["ids"])
 
         ids_to_add = []
-        ids_to_update = []        
+        ids_to_update = []
         embeddings_to_add: Embeddings = []
         embeddings_to_update: Embeddings = []
         metadatas_to_add: Optional[Metadatas] = [] if metadatas else None
@@ -214,7 +208,7 @@ class LocalAPI(API):
                     metadatas_to_add.append(metadatas[i])
                 if documents is not None:
                     documents_to_add.append(documents[i])
-        
+
         if len(ids_to_add) > 0:
             self._add(
                 ids_to_add,
@@ -317,7 +311,6 @@ class LocalAPI(API):
             ids=ids,
             where_document=where_document,
         )
-        self.persist()
         self._telemetry_client.capture(
             CollectionDeleteEvent(collection_uuid, len(deleted_uuids))
         )
@@ -328,7 +321,6 @@ class LocalAPI(API):
 
     def reset(self):
         self._db.reset()
-        self.persist()
         return True
 
     def _query(
