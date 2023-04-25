@@ -8,7 +8,10 @@ from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.configurations import persist_configurations
-from chromadb.test.property.test_embeddings import EmbeddingStateMachine
+from chromadb.test.property.test_embeddings import (
+    EmbeddingStateMachine,
+    EmbeddingStateMachineStates,
+)
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 import os
 import shutil
@@ -85,15 +88,22 @@ def load_and_check(settings: Settings, collection_name: str, embeddings_set, con
         raise e
 
 
+class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
+    persist = "persist"
+
+
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     def __init__(self, settings: Settings):
         self.api = chromadb.Client(settings)
         self.settings = settings
+        self.last_persist_delay = 10
         super().__init__(self.api)
 
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
+    @precondition(lambda self: self.last_persist_delay <= 0)
     @rule()
     def persist(self):
+        self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         self.api.persist()
         collection_name = self.collection.name
         # Create a new process and then inside the process run the invariants
@@ -110,6 +120,12 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         if conn1.poll():
             e = conn1.recv()
             raise e
+
+    def on_state_change(self, new_state):
+        if new_state == PersistEmbeddingsStateMachineStates.persist:
+            self.last_persist_delay = 10
+        else:
+            self.last_persist_delay -= 1
 
 
 def test_persist_embeddings_state(caplog, settings: Settings):
