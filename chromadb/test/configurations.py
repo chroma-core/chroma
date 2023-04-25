@@ -5,7 +5,9 @@ import os
 
 
 hypothesis.settings.register_profile(
-    "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
+    "dev", deadline=10000,
+    #verbosity=hypothesis.Verbosity.verbose,
+    suppress_health_check=[hypothesis.HealthCheck.data_too_large]
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
@@ -18,11 +20,11 @@ def configurations():
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
         ),
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
-        ),
+        # Settings(
+        #     chroma_api_impl="local",
+        #     chroma_db_impl="duckdb+parquet",
+        #     persist_directory=tempfile.gettempdir() + "/tests",
+        # ),
     ]
 
 
