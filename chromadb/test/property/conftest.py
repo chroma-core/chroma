@@ -12,6 +12,6 @@ import shutil
 def api(request) -> Generator[API, None, None]:
     configuration = request.param
     yield Client(configuration)
-    if configuration.persist_directory is not None:
+    if configuration.chroma_db_impl == "duckdb+parquet":
         if os.path.exists(configuration.persist_directory):
             shutil.rmtree(configuration.persist_directory)

@@ -27,6 +27,8 @@ def configurations(persist_only: bool = False):
     ]
     if persist_only:
         return configurations[1:]
+    else:
+        return configurations
 
 
 def persist_old_version_configurations(
