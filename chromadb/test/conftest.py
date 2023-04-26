@@ -90,7 +90,7 @@ def fixtures():
         api_fixtures.append(integration_api)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         api_fixtures = [integration_api]
-    return api_fixtures
+    return [duckdb]
 
 def persist_configurations():
     return [

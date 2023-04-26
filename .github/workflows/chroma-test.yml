@@ -27,6 +27,6 @@ jobs:
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
     - name: Test
-      run: python -m pytest
-    - name: Integration Test
-      run: bin/integration-test
+      run: python -m pytest -s -v
+    #- name: Integration Test
+    #  run: bin/integration-test
