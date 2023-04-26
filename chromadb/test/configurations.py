@@ -50,7 +50,6 @@ def persist_old_version_configurations(
 
     return [
         (
-
             version,
             Settings(
                 chroma_api_impl="local",
