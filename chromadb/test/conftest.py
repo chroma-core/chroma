@@ -1,5 +1,6 @@
 from chromadb.config import Settings
 from chromadb import Client
+from chromadb.api import API
 import chromadb.server.fastapi
 from requests.exceptions import ConnectionError
 import hypothesis
@@ -9,6 +10,7 @@ import uvicorn
 import time
 from multiprocessing import Process
 import pytest
+from typing import Generator
 
 hypothesis.settings.register_profile(
     "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
@@ -38,7 +40,7 @@ def _await_server(api, attempts=0):
             _await_server(api, attempts + 1)
 
 
-def fastapi():
+def fastapi() -> Generator[API, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
     proc = Process(target=_run_server, args=(), daemon=True)
@@ -53,7 +55,7 @@ def fastapi():
     proc.kill()
 
 
-def duckdb():
+def duckdb() -> Generator[API, None, None]:
     """Fixture generator for duckdb"""
     yield Client(
        Settings(
@@ -64,7 +66,7 @@ def duckdb():
     )
 
 
-def duckdb_parquet():
+def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
     yield Client(
         Settings(
@@ -75,7 +77,7 @@ def duckdb_parquet():
     )
 
 
-def integration_api():
+def integration_api() -> Generator[API, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
