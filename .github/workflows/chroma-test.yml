@@ -16,6 +16,12 @@ jobs:
       matrix:
         python: ['3.10']
         platform: [ubuntu-latest]
+        testfile: ["chromadb/test/test_api.py chromadb/test/test_chroma.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -27,6 +33,6 @@ jobs:
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
     - name: Test
-      run: python -m pytest -s -v
+      run: python -m pytest -s -v ${{ matrix.testfile }}
     #- name: Integration Test
     #  run: bin/integration-test
