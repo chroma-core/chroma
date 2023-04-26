@@ -5,7 +5,7 @@ import chromadb
 from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from chromadb.test.fixtures import persist_configurations
+from chromadb.test.conftest import persist_configurations
 
 
 CreatePersistAPI = Callable[[], API]

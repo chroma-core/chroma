@@ -8,6 +8,7 @@ import os
 import uvicorn
 import time
 from multiprocessing import Process
+import pytest
 
 hypothesis.settings.register_profile(
     "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
@@ -97,3 +98,7 @@ def persist_configurations():
             persist_directory=tempfile.gettempdir() + "/tests",
         )
     ]
+
+@pytest.fixture(scope="module", params=fixtures())
+def api(request):
+    yield next(request.param())

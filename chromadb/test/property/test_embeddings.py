@@ -6,7 +6,6 @@ import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.test.fixtures import fixtures
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
@@ -35,11 +34,6 @@ def print_traces():
     global traces
     for key, value in traces.items():
         print(f"{key}: {value}")
-
-
-@pytest.fixture(scope="module", params=fixtures())
-def api(request):
-    yield next(request.param())
 
 
 dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")

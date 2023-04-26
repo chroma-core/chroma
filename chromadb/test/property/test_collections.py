@@ -6,7 +6,6 @@ from typing import List
 import chromadb
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.test.fixtures import fixtures
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
@@ -18,12 +17,6 @@ from hypothesis.stateful import (
     consumes,
     run_state_machine_as_test,
 )
-
-
-@pytest.fixture(scope="module", params=fixtures())
-def api(request):
-    yield next(request.param())
-
 
 class CollectionStateMachine(RuleBasedStateMachine):
     def __init__(self, api):
