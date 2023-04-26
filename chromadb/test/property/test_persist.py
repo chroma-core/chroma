@@ -13,19 +13,6 @@ from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
 )
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
-import os
-import shutil
-
-
-# TODO: fixtures should be common across tests
-@pytest.fixture(scope="module", params=configurations(True))
-def settings(request) -> Generator[Settings, None, None]:
-    configuration = request.param
-    yield configuration
-    save_path = configuration.persist_directory
-    # Remove if it exists
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
 
 
 @given(
