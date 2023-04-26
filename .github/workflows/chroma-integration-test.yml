@@ -1,4 +1,4 @@
-name: Chroma Tests
+name: Chroma Integration Tests
 
 on:
   push:
