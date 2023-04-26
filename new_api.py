@@ -88,21 +88,21 @@ print(collection.count())  # NIT: count count take a where filter too
 assert collection.count() == 9
 
 
-### Test get by ids ###
+# Test get by ids
 get_ids_result = collection.get(
     ids=["id1", "id2"],
 )
 print("\nGET ids\n", get_ids_result)
 assert len(get_ids_result["embeddings"]) == 2
 
-### Test get where clause ###
+# Test get where clause
 get_where_result = collection.get(
     where={"style": "style1", "uri": "img1.png"},
 )
 print("\nGet where\n", get_where_result)
 assert len(get_where_result["ids"]) == 1
 
-### Test get both ###
+# Test get both
 get_both_result = collection.get(
     ids=["id1", "id3"],
     where={"style": "style1"},
@@ -122,19 +122,19 @@ print(
     ),
 )
 
-### Test delete Partial ##
+# Test delete Partial
 collection.delete(  # propagates to the index
     ids=["id1"],
 )
 assert collection.count() == 8
 
-### Test delete Partial ##
+# Test delete Partial
 collection.delete(  # propagates to the index
     where={"style": "style2"},
 )
 assert collection.count() == 7
 
-### Test delete All ##
+# Test delete All
 collection.delete()
 assert collection.count() == 0
 
@@ -178,7 +178,7 @@ assert collection.count() == 9
 # )
 
 
-### TEST UPDATE ###
+# TEST UPDATE
 collection = client.create_collection(
     "test_update", embedding_function=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
 )
@@ -249,7 +249,7 @@ assert item1["embeddings"][0][0] == 0.1
 assert item1["documents"][0] == "cod1"
 collection.delete()
 
-### Test default embedding function ###
+# Test default embedding function
 # Create collection with no embedding function
 client.delete_collection(name="test")
 collection = client.create_collection(name="test")

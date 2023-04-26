@@ -4,6 +4,7 @@ import subprocess
 import os
 import re
 
+
 def b64text(txt):
     """Generate Base 64 encoded CF json for a multiline string, subbing in values where appropriate"""
     lines = []
@@ -28,7 +29,7 @@ with open(f"{path}/../config/chroma_users.xml") as f:
     chroma_users_config = str(f.read())
 
 
-cloud_config_script = f"""
+cloud_config_script = """
 #cloud-config
 cloud_final_modules:
 - [scripts-user, always]
@@ -118,7 +119,11 @@ cf = {
                 "BlockDeviceMappings": [
                     {
                         "DeviceName": {
-                            "Fn::FindInMap": ["Region2AMI", {"Ref": "AWS::Region"}, "RootDeviceName"]
+                            "Fn::FindInMap": [
+                                "Region2AMI",
+                                {"Ref": "AWS::Region"},
+                                "RootDeviceName",
+                            ]
                         },
                         "Ebs": {"VolumeSize": 24},
                     }
@@ -185,4 +190,3 @@ if pattern.match(version):
     )
 else:
     print(f"Version {version} is not a 3-part semver, not uploading to /latest")
-

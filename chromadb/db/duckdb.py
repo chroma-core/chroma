@@ -458,7 +458,7 @@ class PersistentDuckDB(DuckDB):
                 f"INSERT INTO embeddings SELECT * FROM read_parquet('{path}');"
             )
             logger.info(
-                f"""loaded in {self._conn.query(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
+                f"""loaded in {self._conn.query("SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
             )
 
         # load in the collections
@@ -470,7 +470,7 @@ class PersistentDuckDB(DuckDB):
                 f"INSERT INTO collections SELECT * FROM read_parquet('{path}');"
             )
             logger.info(
-                f"""loaded in {self._conn.query(f"SELECT COUNT() FROM collections").fetchall()[0][0]} collections"""
+                f"""loaded in {self._conn.query("SELECT COUNT() FROM collections").fetchall()[0][0]} collections"""
             )
 
     def __del__(self):

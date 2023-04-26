@@ -1,19 +1,18 @@
 {
-  "include": ["src"],
   "compilerOptions": {
     "declaration": true,
     "declarationMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "module": "CommonJS",
+    "moduleResolution": "Node",
     "outDir": "dist/main",
     "sourceMap": true,
-    "target": "ES2017",
-
     "strict": true,
-
-    "esModuleInterop": true,
-    "moduleResolution": "Node",
-
-    "forceConsistentCasingInFileNames": true,
-    "stripInternal": true
-  }
+    "stripInternal": true,
+    "target": "ES2017"
+  },
+  "include": [
+    "src"
+  ]
 }

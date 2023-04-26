@@ -14,14 +14,17 @@ python3 -m venv venv      # Only need to do this once
 source venv/bin/activate  # Do this each time you use a new shell for the project
 pip install -r requirements.txt
 pip install -r requirements_dev.txt
+pre-commit install
 ```
 
-You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`. 
+You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
 ## Running Chroma
 
 Chroma can be run via 3 modes:
+
 1. Standalone and in-memory:
+
 ```python
 import chromadb
 api = chromadb.Client()
@@ -30,19 +33,20 @@ print(api.heartbeat())
 
 2. Standalone and in-memory with persistance:
 
-This by default saves your db and your indexes to a `.chroma` directory and can also load from them. 
+This by default saves your db and your indexes to a `.chroma` directory and can also load from them.
+
 ```python
 import chromadb
 from chromadb.config import Settings
-api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet", 
+api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet",
                       persist_directory="/path/to/persist/directory"))
 print(api.heartbeat())
 ```
 
-
 3. With a persistent backend and a small frontend client
 
 Run `docker-compose up -d --build`
+
 ```python
 import chromadb
 from chromadb.config import Settings

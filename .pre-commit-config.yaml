@@ -1,0 +1,67 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+
+      - id: mixed-line-ending
+
+      - id: end-of-file-fixer
+
+      - id: requirements-txt-fixer
+
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+
+      - id: check-xml
+
+      - id: check-merge-conflict
+
+      - id: check-case-conflict
+
+      - id: check-docstring-first
+
+      - id: mixed-line-ending
+        args: ["--fix=auto"]
+
+  - repo: https://github.com/iamthefij/docker-pre-commit
+    rev: v3.0.1
+    hooks:
+      - id: docker-compose-check
+
+  - repo: https://github.com/pryorda/dockerfilelint-precommit-hooks
+    rev: v0.1.0
+    hooks:
+      - id: dockerfilelint
+
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.7.0
+    hooks:
+      - id: nbqa-pyupgrade
+        args: ["--py37-plus"]
+      - id: nbqa-isort
+        args: ["--float-to-top"]
+      - id: nbqa-flake8
+        args:
+          - "--extend-ignore=E501,W291"
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        args:
+          - "--extend-ignore=E501"
+
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: "v0.0.263"
+    hooks:
+      - id: ruff
+        args: [--fix, --ignore=E501]
+
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: black
+        language: python
+        types_or: [python, pyi]

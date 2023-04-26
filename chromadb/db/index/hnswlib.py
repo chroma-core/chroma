@@ -240,7 +240,9 @@ class Hnswlib(Index):
 
         filter_function = None
         if len(labels) != 0:
-            filter_function = lambda label: label in labels
+
+            def filter_function(label):
+                return label in labels
 
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 
