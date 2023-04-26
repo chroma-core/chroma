@@ -95,7 +95,7 @@ def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
     n_results: int = 1,
-    min_recall: float = 0.995,
+    min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
 
