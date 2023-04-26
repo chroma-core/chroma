@@ -50,9 +50,25 @@ def get_db(settings=__settings):
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
+    elif setting == "sqlite":
+        # require("persist_directory")
+        logger.warning("Using embedded SQLite without persistence: data will be transient")
+        import chromadb.db.sqlite
+
+        return chromadb.db.sqlite.SQLite(settings)
+    
+    elif setting == "sqlite+persist":
+        require("persist_directory")
+        logger.warning(
+            f"Using embedded SQLite with persistence: data will be stored in: {settings.persist_directory}"
+        )
+        import chromadb.db.sqlite
+
+        return chromadb.db.sqlite.PersistentSQLite(settings)
+    
     else:
         raise ValueError(
-            f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, got {setting}"
+            f"Expected chroma_db_impl to be one of clickhouse, duckdb, duckdb+parquet, sqlite, sqlite+persist, got {setting}"
         )
 
 

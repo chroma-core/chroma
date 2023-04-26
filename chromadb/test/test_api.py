@@ -18,7 +18,7 @@ def local_api():
     return chromadb.Client(
         Settings(
             chroma_api_impl="local",
-            chroma_db_impl="duckdb",
+            chroma_db_impl="sqlite",
             persist_directory=tempfile.gettempdir(),
         )
     )
@@ -29,7 +29,7 @@ def local_persist_api():
     return chromadb.Client(
         Settings(
             chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
+            chroma_db_impl="sqlite+persist",
             persist_directory=tempfile.gettempdir() + "/test_server",
         )
     )
@@ -41,7 +41,7 @@ def local_persist_api_cache_bust():
     return chromadb.Client(
         Settings(
             chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
+            chroma_db_impl="sqlite+persist",
             persist_directory=tempfile.gettempdir() + "/test_server",
         )
     )
@@ -68,7 +68,7 @@ def fastapi_api():
 def run_server():
     settings = Settings(
         chroma_api_impl="local",
-        chroma_db_impl="duckdb",
+        chroma_db_impl="sqlite",
         persist_directory=tempfile.gettempdir() + "/test_server",
     )
     server = chromadb.server.fastapi.FastAPI(settings)

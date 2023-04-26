@@ -12,6 +12,13 @@ class GetDBTest(unittest.TestCase):
         chromadb.get_db(chromadb.config.Settings(persist_directory="./foo"))
         assert mock.called
 
+    @patch("chromadb.db.sqlite.PersistentSQLite", autospec=True)
+    def test_persistent_sqlite(self, mock):
+        chromadb.get_db(
+            chromadb.config.Settings(chroma_db_impl="sqlite+persist", persist_directory="./foo")
+        )
+        assert mock.called
+        
     @patch("chromadb.db.duckdb.PersistentDuckDB", autospec=True)
     def test_persistent_duckdb(self, mock):
         chromadb.get_db(
@@ -33,20 +40,52 @@ class GetDBTest(unittest.TestCase):
 
 
 class GetAPITest(unittest.TestCase):
-    @patch("chromadb.db.duckdb.DuckDB", autospec=True)
+    @patch("chromadb.db.sqlite.SQLite", autospec=True)
     @patch("chromadb.api.local.LocalAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
-    def test_local(self, mock_api, mock_db):
-        chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
+    def test_local_sqlite(self, mock_api, mock_db):
+        chromadb.Client(
+            chromadb.config.Settings(
+                chroma_db_impl="sqlite",
+                persist_directory="./foo"
+            )
+        )
         assert mock_api.called
         assert mock_db.called
 
     @patch("chromadb.api.fastapi.FastAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
-    def test_fastapi(self, mock):
+    def test_fastapi_sqlite(self, mock):
         chromadb.Client(
             chromadb.config.Settings(
                 chroma_api_impl="rest",
+                chroma_db_impl="sqlite",
+                persist_directory="./foo",
+                chroma_server_host="foo",
+                chroma_server_http_port="80",
+            )
+        )
+        assert mock.called
+    @patch("chromadb.db.duckdb.DuckDB", autospec=True)
+    @patch("chromadb.api.local.LocalAPI", autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
+    def test_local_duckdb(self, mock_api, mock_db):
+        chromadb.Client(
+            chromadb.config.Settings(
+                chroma_db_impl="duckdb",
+                persist_directory="./foo"
+            )
+        )
+        assert mock_api.called
+        assert mock_db.called
+
+    @patch("chromadb.api.fastapi.FastAPI", autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
+    def test_fastapi_duckdb(self, mock):
+        chromadb.Client(
+            chromadb.config.Settings(
+                chroma_api_impl="rest",
+                chroma_db_impl="duckdb",
                 persist_directory="./foo",
                 chroma_server_host="foo",
                 chroma_server_http_port="80",
