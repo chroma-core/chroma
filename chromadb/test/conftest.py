@@ -10,7 +10,7 @@ import uvicorn
 import time
 from multiprocessing import Process
 import pytest
-from typing import Generator
+from typing import Generator, List, Tuple
 
 hypothesis.settings.register_profile(
     "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
@@ -99,6 +99,25 @@ def persist_configurations():
             chroma_db_impl="duckdb+parquet",
             persist_directory=tempfile.gettempdir() + "/tests",
         )
+    ]
+
+def persist_old_version_configurations(
+    versions: List[str],
+) -> List[Tuple[str, Settings]]:
+    """
+    Only returns configurations that persist to disk at a given path for a version.
+    """
+
+    return [
+        (
+            version,
+            Settings(
+                chroma_api_impl="local",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+            ),
+        )
+        for version in versions
     ]
 
 @pytest.fixture(scope="module", params=fixtures())
