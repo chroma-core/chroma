@@ -1,4 +1,11 @@
-from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
+from chromadb.api.types import (
+    Documents,
+    Embeddings,
+    IDs,
+    Metadatas,
+    Where,
+    WhereDocument,
+)
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.errors import (
@@ -53,7 +60,8 @@ class Clickhouse(DB):
     def _init_conn(self):
         common.set_setting("autogenerate_session_id", False)
         self._conn = clickhouse_connect.get_client(
-            host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
+            host=self._settings.clickhouse_host,
+            port=int(self._settings.clickhouse_port),
         )
         self._create_table_collections(self._conn)
         self._create_table_embeddings(self._conn)
@@ -100,7 +108,9 @@ class Clickhouse(DB):
     #  UTILITY METHODS
     #
     def persist(self):
-        raise NotImplementedError("Clickhouse is a persistent database, this method is not needed")
+        raise NotImplementedError(
+            "Clickhouse is a persistent database, this method is not needed"
+        )
 
     def get_collection_uuid_from_name(self, name: str) -> str:
         res = self._get_conn().query(
@@ -192,7 +202,10 @@ class Clickhouse(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
-        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+        self,
+        current_name: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Dict] = None,
     ):
         if new_name is None:
             new_name = current_name
@@ -244,7 +257,14 @@ class Clickhouse(DB):
             ]
             for i, embedding in enumerate(embeddings)
         ]
-        column_names = ["collection_uuid", "uuid", "embedding", "metadata", "document", "id"]
+        column_names = [
+            "collection_uuid",
+            "uuid",
+            "embedding",
+            "metadata",
+            "document",
+            "id",
+        ]
         self._get_conn().insert("embeddings", data_to_insert, column_names=column_names)
 
         return [x[1] for x in data_to_insert]  # return uuids
@@ -282,7 +302,9 @@ class Clickhouse(DB):
             updates.append(update_statement)
 
         update_clauses = ("").join(updates)
-        self._get_conn().command(f"ALTER TABLE embeddings {update_clauses}", parameters=parameters)
+        self._get_conn().command(
+            f"ALTER TABLE embeddings {update_clauses}", parameters=parameters
+        )
 
     def update(
         self,
@@ -295,7 +317,9 @@ class Clickhouse(DB):
         # Verify all IDs exist
         existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
         if len(existing_items) != len(ids):
-            raise ValueError(f"Could not find {len(ids) - len(existing_items)} items for update")
+            raise ValueError(
+                f"Could not find {len(ids) - len(existing_items)} items for update"
+            )
 
         # Update the db
         self._update(collection_uuid, ids, embeddings, metadatas, documents)
@@ -324,7 +348,9 @@ class Clickhouse(DB):
             if "metadata" in select_columns:
                 metadata_column_index = select_columns.index("metadata")
                 db_metadata = val[i][metadata_column_index]
-                val[i][metadata_column_index] = json.loads(db_metadata) if db_metadata else None
+                val[i][metadata_column_index] = (
+                    json.loads(db_metadata) if db_metadata else None
+                )
         return val
 
     def _format_where(self, where, result):
@@ -340,21 +366,37 @@ class Clickhouse(DB):
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
                 if operator == "$gt":
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') > {operand}")
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') > {operand}"
+                    )
                 elif operator == "$lt":
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') < {operand}")
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') < {operand}"
+                    )
                 elif operator == "$gte":
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') >= {operand}")
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+                    )
                 elif operator == "$lte":
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') <= {operand}")
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+                    )
                 elif operator == "$ne":
                     if type(operand) == str:
-                        return result.append(f" JSONExtractString(metadata,'{key}') != '{operand}'")
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') != {operand}")
+                        return result.append(
+                            f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                        )
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') != {operand}"
+                    )
                 elif operator == "$eq":
                     if type(operand) == str:
-                        return result.append(f" JSONExtractString(metadata,'{key}') = '{operand}'")
-                    return result.append(f" JSONExtractFloat(metadata,'{key}') = {operand}")
+                        return result.append(
+                            f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                        )
+                    return result.append(
+                        f" JSONExtractFloat(metadata,'{key}') = {operand}"
+                    )
                 else:
                     raise ValueError(
                         f"Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got {operator}"
@@ -402,7 +444,9 @@ class Clickhouse(DB):
         columns: Optional[List[str]] = None,
     ) -> Sequence:
         if collection_name is None and collection_uuid is None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+            raise TypeError(
+                "Arguments collection_name and collection_uuid cannot both be None"
+            )
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
@@ -432,7 +476,11 @@ class Clickhouse(DB):
 
     def _count(self, collection_uuid: str):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._get_conn().query(f"SELECT COUNT() FROM embeddings {where_string}").result_rows
+        return (
+            self._get_conn()
+            .query(f"SELECT COUNT() FROM embeddings {where_string}")
+            .result_rows
+        )
 
     def count(self, collection_name: str):
         collection_uuid = self.get_collection_uuid_from_name(collection_name)
@@ -440,7 +488,9 @@ class Clickhouse(DB):
 
     def _delete(self, where_str: Optional[str] = None) -> List:
         deleted_uuids = (
-            self._get_conn().query(f"""SELECT uuid FROM embeddings {where_str}""").result_rows
+            self._get_conn()
+            .query(f"""SELECT uuid FROM embeddings {where_str}""")
+            .result_rows
         )
         self._get_conn().command(
             f"""
@@ -500,17 +550,20 @@ class Clickhouse(DB):
         collection_name=None,
         collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
-
         # Either the collection name or the collection uuid must be provided
         if collection_name is None and collection_uuid is None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+            raise TypeError(
+                "Arguments collection_name and collection_uuid cannot both be None"
+            )
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
-                collection_uuid=collection_uuid, where=where, where_document=where_document
+                collection_uuid=collection_uuid,
+                where=where,
+                where_document=where_document,
             )
 
             if len(results) > 0:

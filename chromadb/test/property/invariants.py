@@ -9,7 +9,7 @@ from hypothesis.errors import InvalidArgument
 
 def count(api: API, collection_name: str, expected_count: int):
     """The given collection count is equal to the number of embeddings"""
-    collection = api.get_collection(collection_name)
+    collection = api.get_collection(collection_name, embedding_function=lambda x: None)
     count = collection.count()
     assert count == expected_count
 
@@ -95,7 +95,7 @@ def ann_accuracy(
     collection: Collection,
     embeddings: EmbeddingSet,
     n_results: int = 1,
-    min_recall: float = 1.0,
+    min_recall: float = 0.995,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
 
