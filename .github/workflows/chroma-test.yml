@@ -12,6 +12,7 @@ on:
 
 jobs:
   test:
+    timeout-minutes: 90
     strategy:
       matrix:
         python: ['3.10']
