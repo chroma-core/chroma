@@ -48,7 +48,7 @@ class RecordSet(TypedDict):
 
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
 # TODO: support empty strings everywhere
-sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./"
+sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 
 safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
@@ -71,10 +71,6 @@ def collection_name(draw) -> str:
 
     return name
 
-
-documents = st.lists(st.text(max_size=32),
-                     min_size=2, max_size=10).map(lambda x: " ".join(x))
-
 collection_metadata = st.one_of(st.none(),
                                 st.dictionaries(safe_text, st.one_of(*safe_values)))
 
@@ -95,12 +91,13 @@ class Collection():
     dimension: int
     dtype: np.dtype
     known_metadata_keys: Dict[str, st.SearchStrategy]
+    known_document_keywords: List[str]
     has_documents: bool = False
     embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
 
 @st.composite
-def collections(draw):
-    """Strategy to generate a Collection object"""
+def collections(draw, add_filterable_data=False):
+    """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
@@ -108,22 +105,52 @@ def collections(draw):
     dtype = draw(st.sampled_from(float_types))
 
     known_metadata_keys = {}
-    while len(known_metadata_keys) < 5:
-        key = draw(safe_text)
-        known_metadata_keys[key] = draw(st.sampled_from(safe_values))
+    if add_filterable_data:
+        while len(known_metadata_keys) < 5:
+            key = draw(safe_text)
+            known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
     has_documents = draw(st.booleans())
+    if has_documents and add_filterable_data:
+        known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
+    else:
+        known_document_keywords = []
 
-    return Collection(name, metadata, dimension, dtype,
-                      known_metadata_keys, has_documents)
+    return Collection(name=name,
+                      metadata=metadata,
+                      dimension=dimension,
+                      dtype=dtype,
+                      known_metadata_keys=known_metadata_keys,
+                      has_documents=has_documents,
+                      known_document_keywords=known_document_keywords)
 
 @st.composite
 def metadata(draw, collection: Collection):
     """Strategy for generating metadata that could be a part of the given collection"""
+    # First draw a random dictionary.
     md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
-    md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
+    # Then, remove keys that overlap with the known keys for the coll
+    # to avoid type errors when comparing.
+    if collection.known_metadata_keys:
+        for key in collection.known_metadata_keys.keys():
+            if key in md:
+                del md[key]
+        # Finally, add in some of the known keys for the collection
+        md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
     return md
 
+@st.composite
+def document(draw, collection: Collection):
+    """Strategy for generating documents that could be a part of the given collection"""
+
+    if collection.known_document_keywords:
+        known_words_st = st.sampled_from(collection.known_document_keywords)
+    else:
+        known_words_st = st.text(min_size=1)
+
+    random_words_st = st.text(min_size=1)
+    words = draw(st.lists(st.one_of(known_words_st, random_words_st)))
+    return " ".join(words)
 
 @st.composite
 def record(draw,
@@ -135,14 +162,14 @@ def record(draw,
     embeddings = create_embeddings(collection.dimension, 1, collection.dtype)
 
     if collection.has_documents:
-        document = draw(documents)
+        doc = draw(document(collection))
     else:
-        document = None
+        doc = None
 
     return {"id": draw(id_strategy),
             "embedding": embeddings[0],
             "metadata": md,
-            "document": document}
+            "document": doc}
 
 
 @st.composite
@@ -219,3 +246,73 @@ class DeterministicRuleStrategy(SearchStrategy):
             if not bundle:
                 return False
         return True
+
+
+@st.composite
+def where_clause(draw, collection):
+    """Generate a filter that could be used in a query against the given collection"""
+
+    known_keys = sorted(collection.known_metadata_keys.keys())
+
+    key = draw(st.sampled_from(known_keys))
+    value = draw(collection.known_metadata_keys[key])
+
+    legal_ops = [None, "$eq", "$ne"]
+    if not isinstance(value, str):
+        legal_ops = ["$gt", "$lt", "$lte", "$gte"] + legal_ops
+
+    op = draw(st.sampled_from(legal_ops))
+
+    if op is None:
+        return {key: value}
+    else:
+        return {key: {op: value}}
+
+@st.composite
+def where_doc_clause(draw, collection):
+    """Generate a where_document filter that could be used against the given collection"""
+    if collection.known_document_keywords:
+        word = draw(st.sampled_from(collection.known_document_keywords))
+    else:
+        word = draw(safe_text)
+    return {"$contains": word}
+
+@st.composite
+def binary_operator_clause(draw, base_st):
+    op = draw(st.sampled_from(["$and", "$or"]))
+    return {op: [draw(base_st), draw(base_st)]}
+
+@st.composite
+def recursive_where_clause(draw, collection):
+    base_st = where_clause(collection)
+    return draw(st.recursive(base_st, binary_operator_clause))
+
+@st.composite
+def recursive_where_doc_clause(draw, collection):
+    base_st = where_doc_clause(collection)
+    return draw(st.recursive(base_st, binary_operator_clause))
+
+class Filter(TypedDict):
+    where: Optional[Dict[str, Union[str, int, float]]]
+    ids: Optional[List[str]]
+    where_document: Optional[types.WhereDocument]
+
+@st.composite
+def filters(draw,
+            collection_st: st.SearchStrategy[Collection],
+            recordset_st: st.SearchStrategy[RecordSet]) -> Filter:
+
+    collection = draw(collection_st)
+    recordset = draw(recordset_st)
+
+    where_clause = draw(st.one_of(st.none(), recursive_where_clause(collection)))
+    where_document_clause = draw(st.one_of(st.none(),
+                                            recursive_where_doc_clause(collection)))
+    ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
+
+    if ids:
+        ids = list(set(ids))
+
+    return {"where": where_clause,
+            "where_document": where_document_clause,
+            "ids": ids}
