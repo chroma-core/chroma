@@ -127,11 +127,15 @@ def collections(draw, add_filterable_data=False):
 @st.composite
 def metadata(draw, collection: Collection):
     """Strategy for generating metadata that could be a part of the given collection"""
+    # First draw a random dictionary.
     md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
-    if collection.known_document_keywords:
+    # Then, remove keys that overlap with the known keys for the coll
+    # to avoid type errors when comparing.
+    if collection.known_metadata_keys:
         for key in collection.known_metadata_keys.keys():
             if key in md:
                 del md[key]
+        # Finally, add in some of the known keys for the collection
         md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
     return md
 

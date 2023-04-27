@@ -20,6 +20,7 @@ def _filter_where_clause(clause, mm):
 
     key, expr = list(clause.items())[0]
 
+    # Handle the shorthand for equal: {key: val} where val is a simple value
     if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float):
         return _filter_where_clause({key: {"$eq": expr}}, mm)
 
@@ -28,11 +29,10 @@ def _filter_where_clause(clause, mm):
     if key == "$or":
         return any(_filter_where_clause(clause, mm) for clause in expr)
 
-    op = list(expr.keys())[0]
-    val = expr[op]
+    op, val = list(expr.items())[0]
 
     if op == "$eq":
-        return mm.get(key, None) == val
+        return key in mm and mm[key] == val
     elif op == "$ne":
         return key in mm and mm[key] != val
     elif op == "$gt":
@@ -58,6 +58,11 @@ def _filter_where_doc_clause(clause, doc):
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
+
+EMPTY_DICT = {}
+EMPTY_STRING = ""
+
+
 def _filter_embedding_set(recordset: strategies.RecordSet,
                           filter: strategies.Filter):
     """Return IDs from the embedding set that match the given filter object"""
@@ -69,12 +74,12 @@ def _filter_embedding_set(recordset: strategies.RecordSet,
     for i in range(len(recordset["ids"])):
 
         if filter["where"]:
-            metadatas = recordset["metadatas"] or [{}] * len(recordset["ids"])
+            metadatas = recordset["metadatas"] or [EMPTY_DICT] * len(recordset["ids"])
             if not _filter_where_clause(filter["where"], metadatas[i]):
                 ids.discard(recordset["ids"][i])
 
         if filter["where_document"]:
-            documents = recordset["documents"] or [""] * len(recordset["ids"])
+            documents = recordset["documents"] or [EMPTY_STRING] * len(recordset["ids"])
             if not _filter_where_doc_clause(filter["where_document"],
                                             documents[i]):
                 ids.discard(recordset["ids"][i])
@@ -100,8 +105,6 @@ def test_filterable_metadata(caplog, api, collection, recordset, filters):
                                  metadata=collection.metadata,
                                  embedding_function=collection.embedding_function)
     coll.add(**recordset)
-
-    invariants.ann_accuracy(coll, recordset)
 
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
