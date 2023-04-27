@@ -1,9 +1,9 @@
 import pytest
 from hypothesis import given, settings
-import chromadb
 from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+
 
 @given(collection=strategies.collections(), embeddings=strategies.embedding_set())
 @settings(deadline=None)

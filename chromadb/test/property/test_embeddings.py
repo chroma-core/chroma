@@ -3,7 +3,6 @@ import logging
 import hypothesis.strategies as st
 from typing import Set
 from dataclasses import dataclass
-import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection

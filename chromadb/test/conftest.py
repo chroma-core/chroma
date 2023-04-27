@@ -11,6 +11,7 @@ import time
 from multiprocessing import Process
 import pytest
 from typing import Generator, List, Tuple
+import shutil
 
 hypothesis.settings.register_profile(
     "dev", deadline=10000, suppress_health_check=[hypothesis.HealthCheck.data_too_large]
@@ -68,13 +69,17 @@ def duckdb() -> Generator[API, None, None]:
 
 def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
+
+    save_path = tempfile.gettempdir() + "/tests"
     yield Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
+            persist_directory=save_path,
         )
     )
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
 
 
 def integration_api() -> Generator[API, None, None]:

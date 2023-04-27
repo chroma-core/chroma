@@ -41,6 +41,25 @@ test_old_versions = versions()
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
 
+# This fixture is not shared with the rest of the tests because it is unique in how it
+# installs the versions of chromadb
+@pytest.fixture(
+    scope="module", params=persist_old_version_configurations(test_old_versions)
+)
+def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
+    configuration = request.param
+    version = configuration[0]
+    install_version(version)
+    yield configuration
+    # Cleanup the installed version
+    path = get_path_to_version_install(version)
+    shutil.rmtree(path)
+    # Cleanup the persisted data
+    data_path = configuration[1].persist_directory
+    if os.path.exists(data_path):
+        shutil.rmtree(data_path)
+
+
 def get_path_to_version_install(version):
     return base_install_dir + "/" + version
 
@@ -98,25 +117,6 @@ def switch_to_version(version):
     assert module.__version__ == version
     sys.modules[module_name] = module
     return module
-
-
-@pytest.fixture(
-    scope="module", params=persist_old_version_configurations(test_old_versions)
-)
-def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
-    configuration = request.param
-    version = configuration[0]
-    install_version(version)
-    yield configuration
-    # Cleanup the installed version
-    path = get_path_to_version_install(version)
-    shutil.rmtree(path)
-    # TODO: Once we share the api fixtures between tests, we can move this cleanup to
-    # the shared fixture
-    # Cleanup the persisted data
-    data_path = configuration[1].persist_directory
-    if os.path.exists(data_path):
-        shutil.rmtree(data_path)
 
 
 def persist_generated_data_with_old_version(
