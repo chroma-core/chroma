@@ -123,3 +123,4 @@ def persist_old_version_configurations(
 @pytest.fixture(scope="module", params=fixtures())
 def api(request):
     yield next(request.param())
+
