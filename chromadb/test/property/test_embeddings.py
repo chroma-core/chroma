@@ -3,7 +3,6 @@ import logging
 import hypothesis.strategies as st
 from typing import Set
 from dataclasses import dataclass
-import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
@@ -36,12 +35,6 @@ def print_traces():
     global traces
     for key, value in traces.items():
         print(f"{key}: {value}")
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
 
 
 dtype_shared_st = st.shared(st.sampled_from(strategies.float_types), key="dtype")

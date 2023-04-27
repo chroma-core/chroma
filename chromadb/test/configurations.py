@@ -11,9 +11,9 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
-def configurations():
+def configurations(persist_only: bool = False):
     """Based on the environment, return a list of API configurations to test."""
-    return [
+    configurations = [
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
@@ -25,17 +25,10 @@ def configurations():
             persist_directory=tempfile.gettempdir() + "/tests",
         ),
     ]
-
-
-def persist_configurations():
-    """Only returns configurations that persist to disk."""
-    return [
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
-        ),
-    ]
+    if persist_only:
+        return configurations[1:]
+    else:
+        return configurations
 
 
 def persist_old_version_configurations(
