@@ -1,11 +1,7 @@
 import pytest
 import logging
-from hypothesis import given, assume, settings
 import hypothesis.strategies as st
-from typing import List
 import chromadb
-from chromadb.api import API
-from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -13,7 +9,6 @@ from hypothesis.stateful import (
     RuleBasedStateMachine,
     rule,
     initialize,
-    precondition,
     multiple,
     consumes,
     run_state_machine_as_test,
@@ -129,7 +124,7 @@ def test_collections(caplog, api):
 def test_upsert_metadata_example(api):
     state = CollectionStateMachine(api)
     state.initialize()
-    v1 = state.create_coll(coll={"name": "E40", "metadata": None})
+    state.create_coll(coll={"name": "E40", "metadata": None})
     state.get_or_create_coll(coll={"name": "E40", "metadata": {"foo": "bar"}})
     state.teardown()
 

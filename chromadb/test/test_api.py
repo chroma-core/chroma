@@ -55,7 +55,9 @@ def fastapi_integration_api():
 def _build_fastapi_api():
     return chromadb.Client(
         Settings(
-            chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="6666"
+            chroma_api_impl="rest",
+            chroma_server_host="localhost",
+            chroma_server_http_port="6666",
         )
     )
 
@@ -162,14 +164,18 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
 
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.get_or_create_collection("test", embedding_function=embedding_function)
+    collection = api.get_or_create_collection(
+        "test", embedding_function=embedding_function
+    )
     collection.add(ids="id1", documents="hello")
 
     api.persist()
     del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_or_create_collection("test", embedding_function=embedding_function)
+    collection = api2.get_or_create_collection(
+        "test", embedding_function=embedding_function
+    )
 
     nn = collection.query(
         query_texts="hello",
@@ -574,7 +580,10 @@ def test_peek(api_fixture, request):
 metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
-    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2}],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {"int_value": 2},
+    ],
 }
 
 
@@ -602,7 +611,9 @@ def test_metadata_add_query_int_float(api_fixture, request):
     collection = api.create_collection("test_int")
     collection.add(**metadata_records)
 
-    items: QueryResult = collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
+    items: QueryResult = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]], n_results=1
+    )
     assert items["metadatas"] is not None
     assert items["metadatas"][0][0]["int_value"] == 1
     assert items["metadatas"][0][0]["float_value"] == 1.001
@@ -659,7 +670,8 @@ def test_metadata_update_get_int_float(api_fixture, request):
     collection.add(**metadata_records)
 
     collection.update(
-        ids=["id1"], metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}]
+        ids=["id1"],
+        metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}],
     )
     items = collection.get(ids=["id1"])
     assert items["metadatas"][0]["int_value"] == 2
@@ -814,10 +826,14 @@ def test_where_valid_operators(api_fixture, request):
         collection.get(where={"$and": {"int_value": {"$lt": 2}}})
 
     with pytest.raises(ValueError):
-        collection.get(where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}})
+        collection.get(
+            where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}}
+        )
 
     with pytest.raises(ValueError):
-        collection.get(where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]})
+        collection.get(
+            where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]}
+        )
 
     with pytest.raises(ValueError):
         collection.get(where={"$or": [{"int_value": {"$lt": 2}}]})
@@ -915,7 +931,9 @@ def test_query_document_valid_operators(api_fixture, request):
         collection.get(where_document={"$and": {"$unsupported": "doc"}})
 
     with pytest.raises(ValueError):
-        collection.get(where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]})
+        collection.get(
+            where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]}
+        )
 
     with pytest.raises(ValueError):
         collection.get(where_document={"$or": [{"$contains": "doc"}]})
@@ -925,7 +943,9 @@ def test_query_document_valid_operators(api_fixture, request):
 
     with pytest.raises(ValueError):
         collection.get(
-            where_document={"$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]}
+            where_document={
+                "$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]
+            }
         )
 
 
@@ -1002,7 +1022,12 @@ def test_delete_where_document(api_fixture, request):
 
 
 logical_operator_records = {
-    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2], [1.3, 2.25, 3.2], [1.4, 2.26, 3.2]],
+    "embeddings": [
+        [1.1, 2.3, 3.2],
+        [1.2, 2.24, 3.2],
+        [1.3, 2.25, 3.2],
+        [1.4, 2.26, 3.2],
+    ],
     "ids": ["id1", "id2", "id3", "id4"],
     "metadatas": [
         {"int_value": 1, "string_value": "one", "float_value": 1.001, "is": "doc"},
@@ -1040,8 +1065,18 @@ def test_where_logical_operators(api_fixture, request):
     items = collection.get(
         where={
             "$or": [
-                {"$and": [{"int_value": {"$eq": 3}}, {"string_value": {"$eq": "three"}}]},
-                {"$and": [{"int_value": {"$eq": 4}}, {"string_value": {"$eq": "four"}}]},
+                {
+                    "$and": [
+                        {"int_value": {"$eq": 3}},
+                        {"string_value": {"$eq": "three"}},
+                    ]
+                },
+                {
+                    "$and": [
+                        {"int_value": {"$eq": 4}},
+                        {"string_value": {"$eq": "four"}},
+                    ]
+                },
             ]
         }
     )
@@ -1050,8 +1085,18 @@ def test_where_logical_operators(api_fixture, request):
     items = collection.get(
         where={
             "$or": [
-                {"$and": [{"int_value": {"$eq": 3}}, {"string_value": {"$eq": "three"}}]},
-                {"$and": [{"int_value": {"$eq": 4}}, {"string_value": {"$eq": "four"}}]},
+                {
+                    "$and": [
+                        {"int_value": {"$eq": 3}},
+                        {"string_value": {"$eq": "three"}},
+                    ]
+                },
+                {
+                    "$and": [
+                        {"int_value": {"$eq": 4}},
+                        {"string_value": {"$eq": "four"}},
+                    ]
+                },
             ],
             "$and": [{"is": "doc"}, {"string_value": "four"}],
         }
@@ -1106,7 +1151,10 @@ def test_where_document_logical_operators(api_fixture, request):
 records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
-    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2}],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {"int_value": 2},
+    ],
     "documents": ["this document is first", "this document is second"],
 }
 
@@ -1120,14 +1168,18 @@ def test_query_include(api_fixture, request):
     collection.add(**records)
 
     items = collection.query(
-        query_embeddings=[0, 0, 0], include=["metadatas", "documents", "distances"], n_results=1
+        query_embeddings=[0, 0, 0],
+        include=["metadatas", "documents", "distances"],
+        n_results=1,
     )
     assert items["embeddings"] is None
     assert items["ids"][0][0] == "id1"
     assert items["metadatas"][0][0]["int_value"] == 1
 
     items = collection.query(
-        query_embeddings=[0, 0, 0], include=["embeddings", "documents", "distances"], n_results=1
+        query_embeddings=[0, 0, 0],
+        include=["embeddings", "documents", "distances"],
+        n_results=1,
     )
     assert items["metadatas"] is None
     assert items["ids"][0][0] == "id1"
@@ -1249,7 +1301,9 @@ def test_index_params(api_fixture, request):
 
     # ip
     api.reset()
-    collection = api.create_collection(name="test_index_params", metadata={"hnsw:space": "ip"})
+    collection = api.create_collection(
+        name="test_index_params", metadata={"hnsw:space": "ip"}
+    )
     collection.add(**records)
     items = collection.query(
         query_embeddings=[0.6, 1.12, 1.6],
@@ -1260,7 +1314,6 @@ def test_index_params(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_invalid_index_params(api_fixture, request):
-
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
 
@@ -1348,7 +1401,6 @@ def test_delete_collection(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_multiple_collections(api_fixture, request):
-
     embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
     embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
     ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
@@ -1375,7 +1427,6 @@ def test_multiple_collections(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_update_query(api_fixture, request):
-
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
     collection = api.create_collection("test_update_query")
@@ -1406,44 +1457,71 @@ def test_update_query(api_fixture, request):
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
     "ids": ["id1", "id2", "id3"],
-    "metadatas": [{"int_value": 1, "string_value": "one", "float_value": 1.001}, {"int_value": 2}, {"string_value": "three"}],
-    "documents": ["this document is first", "this document is second", "this document is third"],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {"int_value": 2},
+        {"string_value": "three"},
+    ],
+    "documents": [
+        "this document is first",
+        "this document is second",
+        "this document is third",
+    ],
 }
 
 new_records = {
     "embeddings": [[3.0, 3.0, 1.1], [3.2, 4.24, 5.2]],
     "ids": ["id1", "id4"],
-    "metadatas": [{"int_value": 1, "string_value": "one_of_one", "float_value": 1.001}, {"int_value": 4}],
-    "documents": ["this document is even more first", "this document is new and fourth"],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one_of_one", "float_value": 1.001},
+        {"int_value": 4},
+    ],
+    "documents": [
+        "this document is even more first",
+        "this document is new and fourth",
+    ],
 }
-    
+
+
 @pytest.mark.parametrize("api_fixture", test_apis)
 def test_upsert(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()
     collection = api.create_collection("test")
-    
+
     collection.add(**initial_records)
     assert collection.count() == 3
 
     collection.upsert(**new_records)
     assert collection.count() == 4
 
-    get_result = collection.get(include=['embeddings', 'metadatas', 'documents'], ids=new_records['ids'][0])
-    assert get_result['embeddings'][0] == new_records['embeddings'][0]
-    assert get_result['metadatas'][0] == new_records['metadatas'][0]
-    assert get_result['documents'][0] == new_records['documents'][0]
+    get_result = collection.get(
+        include=["embeddings", "metadatas", "documents"], ids=new_records["ids"][0]
+    )
+    assert get_result["embeddings"][0] == new_records["embeddings"][0]
+    assert get_result["metadatas"][0] == new_records["metadatas"][0]
+    assert get_result["documents"][0] == new_records["documents"][0]
 
-    query_result = collection.query(query_embeddings=get_result['embeddings'], n_results=1, include=['embeddings', 'metadatas', 'documents'])
-    assert query_result['embeddings'][0][0] == new_records['embeddings'][0]
-    assert query_result['metadatas'][0][0] == new_records['metadatas'][0]
-    assert query_result['documents'][0][0] == new_records['documents'][0]
+    query_result = collection.query(
+        query_embeddings=get_result["embeddings"],
+        n_results=1,
+        include=["embeddings", "metadatas", "documents"],
+    )
+    assert query_result["embeddings"][0][0] == new_records["embeddings"][0]
+    assert query_result["metadatas"][0][0] == new_records["metadatas"][0]
+    assert query_result["documents"][0][0] == new_records["documents"][0]
 
-    collection.delete(ids=initial_records['ids'][2])
-    collection.upsert(ids=initial_records['ids'][2], embeddings=[[1.1, 0.99, 2.21]], metadatas=[{"string_value": "a new string value"}])
+    collection.delete(ids=initial_records["ids"][2])
+    collection.upsert(
+        ids=initial_records["ids"][2],
+        embeddings=[[1.1, 0.99, 2.21]],
+        metadatas=[{"string_value": "a new string value"}],
+    )
     assert collection.count() == 4
 
-    get_result = collection.get(include=['embeddings', 'metadatas', 'documents'], ids=['id3'])
-    assert get_result['embeddings'][0] == [1.1, 0.99, 2.21]
-    assert get_result['metadatas'][0] == {"string_value": "a new string value"}
-    assert get_result['documents'][0] == None
+    get_result = collection.get(
+        include=["embeddings", "metadatas", "documents"], ids=["id3"]
+    )
+    assert get_result["embeddings"][0] == [1.1, 0.99, 2.21]
+    assert get_result["metadatas"][0] == {"string_value": "a new string value"}
+    assert get_result["documents"][0] is None

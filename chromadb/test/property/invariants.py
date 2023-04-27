@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Sequence, Union, cast
+from typing import Callable, Literal, Union
 from chromadb.test.property.strategies import EmbeddingSet
 import numpy as np
 from chromadb.api import API, types

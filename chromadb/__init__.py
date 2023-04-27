@@ -26,7 +26,9 @@ def get_db(settings=__settings):
     setting = settings.chroma_db_impl.lower()
 
     def require(key):
-        assert settings[key], f"Setting '{key}' is required when chroma_db_impl={setting}"
+        assert settings[
+            key
+        ], f"Setting '{key}' is required when chroma_db_impl={setting}"
 
     if setting == "clickhouse":
         require("clickhouse_host")
@@ -46,7 +48,9 @@ def get_db(settings=__settings):
         return chromadb.db.duckdb.PersistentDuckDB(settings)
     elif setting == "duckdb":
         require("persist_directory")
-        logger.warning("Using embedded DuckDB without persistence: data will be transient")
+        logger.warning(
+            "Using embedded DuckDB without persistence: data will be transient"
+        )
         import chromadb.db.duckdb
 
         return chromadb.db.duckdb.DuckDB(settings)
@@ -67,12 +71,16 @@ def Client(settings=__settings):
     telemetry_client.capture(ClientStartEvent())
 
     def require(key):
-        assert settings[key], f"Setting '{key}' is required when chroma_api_impl={setting}"
+        assert settings[
+            key
+        ], f"Setting '{key}' is required when chroma_api_impl={setting}"
 
     if setting == "rest":
         require("chroma_server_host")
         require("chroma_server_http_port")
-        logger.info("Running Chroma in client mode using REST to connect to remote server")
+        logger.info(
+            "Running Chroma in client mode using REST to connect to remote server"
+        )
         import chromadb.api.fastapi
 
         return chromadb.api.fastapi.FastAPI(settings, telemetry_client)
@@ -82,4 +90,6 @@ def Client(settings=__settings):
 
         return chromadb.api.local.LocalAPI(settings, get_db(settings), telemetry_client)
     else:
-        raise ValueError(f"Expected chroma_api_impl to be one of rest, local, got {setting}")
+        raise ValueError(
+            f"Expected chroma_api_impl to be one of rest, local, got {setting}"
+        )

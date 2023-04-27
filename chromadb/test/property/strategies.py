@@ -141,6 +141,7 @@ def metadatas_strategy(count: int) -> st.SearchStrategy[Optional[List[types.Meta
 
 default_id_st = st.text(alphabet=legal_id_characters, min_size=1, max_size=64)
 
+
 @st.composite
 def embedding_set(
     draw,
