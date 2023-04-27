@@ -1,13 +1,11 @@
 import logging
 import multiprocessing
-from typing import Generator
 from hypothesis import given
-import pytest
 import chromadb
+from chromadb.api import API
 from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from chromadb.test.configurations import configurations
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachine,
     EmbeddingStateMachineStates,
@@ -80,10 +78,11 @@ class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
-    def __init__(self, settings: Settings):
-        self.api = chromadb.Client(settings)
+    def __init__(self, api: API, settings: Settings):
+        self.api = api
         self.settings = settings
         self.last_persist_delay = 10
+        self.api.reset()
         super().__init__(self.api)
 
     @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
@@ -117,4 +116,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
 
 def test_persist_embeddings_state(caplog, settings: Settings):
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: PersistEmbeddingsStateMachine(settings))
+    api = chromadb.Client(settings)
+    run_state_machine_as_test(
+        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
+    )
