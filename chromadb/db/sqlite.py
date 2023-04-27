@@ -495,7 +495,7 @@ class SQLite(DB):
         columns = columns + ["uuid"] if columns else ["uuid"]
 
         select_columns = db_schema_to_keys() if columns is None else columns
-        response = self._conn.execute(
+        resp = self._conn.execute(
             f"""
             SELECT
                 {",".join(select_columns)}
@@ -505,6 +505,10 @@ class SQLite(DB):
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
         """
         ).fetchall()
+        if "embedding" in select_columns:
+            response = tuple(tuple(json.loads(item) if i == select_columns.index("embedding") else item for i, item in enumerate(t)) for t in resp)
+        else:
+            response = resp
         # sort db results by the order of the uuids
         response = sorted(response, key=lambda obj: ids.index(uuid.UUID(obj[len(columns) - 1])))
 

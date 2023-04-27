@@ -350,7 +350,7 @@ class LocalAPI(API):
 
             for entry in db_result:
                 if include_embeddings:
-                    embeddings.append(json.loads(entry[column_index["embedding"]]))
+                    embeddings.append(entry[column_index["embedding"]])
                 if include_documents:
                     documents.append(entry[column_index["document"]])
                 if include_metadatas:
