@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,

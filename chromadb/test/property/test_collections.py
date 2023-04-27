@@ -1,8 +1,6 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-import chromadb
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
