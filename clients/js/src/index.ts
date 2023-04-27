@@ -105,14 +105,14 @@ export class Collection {
   }
 
   private async validate(
-    require_embeddings: boolean,
+    require_embeddings_or_documents: boolean, // set to false in the case of Update
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
   ) {
 
-    if (require_embeddings) {
+    if (require_embeddings_or_documents) {
       if ((embeddings === undefined) && (documents === undefined)) {
         throw new Error(
           "embeddings and documents cannot both be undefined",
@@ -190,7 +190,7 @@ export class Collection {
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
-        embeddings: (embeddingsArray as any[]),
+        embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
         documents: documentsArray,
         metadatas: metadatasArray,
         increment_index: increment_index,
@@ -224,7 +224,7 @@ export class Collection {
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
-        embeddings: (embeddingsArray as any[]),
+        embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
         documents: documentsArray,
         metadatas: metadatasArray,
         increment_index: increment_index,
