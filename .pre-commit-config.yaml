@@ -29,7 +29,8 @@ repos:
     hooks:
       - id: flake8
         args:
-          - "--extend-ignore=E501,E302"
+          - "--extend-ignore=E203,E501,E503"
+          - "--max-line-length=88"
 
   - repo: local
     hooks:
