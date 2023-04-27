@@ -45,10 +45,13 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.name in self.existing:
             with pytest.raises(Exception):
                 c = self.api.create_collection(name=coll.name,
-                                               metadata=coll.metadata)
+                                               metadata=coll.metadata,
+                                               embedding_function=coll.embedding_function)
             return multiple()
 
-        c = self.api.create_collection(name=coll.name, metadata=coll.metadata)
+        c = self.api.create_collection(name=coll.name,
+                                       metadata=coll.metadata,
+                                       embedding_function=coll.embedding_function)
         self.existing.add(coll.name)
 
         assert c.name == coll.name
@@ -89,7 +92,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
         coll=st.one_of(consumes(collections), strategies.collections()),
     )
     def get_or_create_coll(self, coll):
-        c = self.api.get_or_create_collection(name=coll.name, metadata=coll.metadata)
+        c = self.api.get_or_create_collection(name=coll.name,
+                                              metadata=coll.metadata,
+                                              embedding_function=coll.embedding_function)
         assert c.name == coll.name
         if coll.metadata is not None:
             assert c.metadata == coll.metadata

@@ -59,6 +59,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     def __init__(self, api = None):
         super().__init__()
+        # For debug only, to run as class-based test
         if not api:
             api = chromadb.Client(configurations()[0])
         self.api = api
@@ -190,7 +191,6 @@ def test_embeddings_state(caplog, api):
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))
     print_traces()
 
-TestEmbeddingsState = EmbeddingStateMachine.TestCase
 
 def test_multi_add(api: API):
     api.reset()

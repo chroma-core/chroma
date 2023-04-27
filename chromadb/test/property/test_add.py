@@ -25,7 +25,9 @@ def test_add(
     api.reset()
 
     # TODO: Generative embedding functions
-    coll = api.create_collection(name=collection.name, metadata=collection.metadata)
+    coll = api.create_collection(name=collection.name,
+                                 metadata=collection.metadata,
+                                 embedding_function=collection.embedding_function)
     coll.add(**embeddings)
 
     invariants.count(
