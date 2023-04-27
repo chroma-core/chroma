@@ -2,18 +2,9 @@
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
-import chromadb
 from chromadb.api import API
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
-
 
 collection_st = st.shared(strategies.collections(), key="coll")
 @given(collection=collection_st,

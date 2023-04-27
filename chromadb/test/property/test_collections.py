@@ -1,29 +1,16 @@
 import pytest
 import logging
-from hypothesis import given, assume, settings
 import hypothesis.strategies as st
-from typing import List
-import chromadb
-from chromadb.api import API
-from chromadb.api.models.Collection import Collection
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
     rule,
     initialize,
-    precondition,
     multiple,
     consumes,
     run_state_machine_as_test,
 )
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
