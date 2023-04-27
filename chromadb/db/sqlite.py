@@ -73,10 +73,8 @@ class SQLite(DB):
         self._create_table_embeddings()
         self._settings = settings
 
-
     def commit(self):
         self._conn.commit()
-
 
     def _create_table_collections(self):
         self._conn.execute(
@@ -92,7 +90,6 @@ class SQLite(DB):
         ) """
         )
         self.commit()
-    
 
     def _index(self, collection_id):
         """Retrieve an HNSW index instance for the given collection"""
@@ -105,13 +102,11 @@ class SQLite(DB):
 
         return self.index_cache[collection_id]
 
-
     def _delete_index(self, collection_id):
         """Delete an index from the cache"""
         index = self._index(collection_id)
         index.delete()
         del self.index_cache[collection_id]
-
     #
     #  UTILITY METHODS
     #
@@ -121,7 +116,6 @@ class SQLite(DB):
             "SELECT uuid FROM collections WHERE name = ?", (name,)
         ).fetchall()[0][0]
 
-# need to verifiy
     def _create_where_clause(
         self,
         collection_uuid: str,
@@ -149,6 +143,7 @@ class SQLite(DB):
     #
     #  COLLECTION METHODS
     #
+
     def create_collection(
         self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
     ) -> Sequence:
@@ -228,6 +223,7 @@ class SQLite(DB):
             ]
             for i, embedding in enumerate(embeddings)
         ]
+        # json.dumps the metadata and embedding
 
         insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
 
@@ -333,6 +329,7 @@ class SQLite(DB):
             if "uuid" in select_columns:
                 uuid_column_index = select_columns.index("uuid")
                 val[i][uuid_column_index] = uuid.UUID(val[i][uuid_column_index])
+            # json.loads the metadata
             if "metadata" in select_columns:
                 metadata_column_index = select_columns.index("metadata")
                 val[i][metadata_column_index] = (
@@ -340,6 +337,7 @@ class SQLite(DB):
                     if val[i][metadata_column_index]
                     else None
                 )
+            # json.loads the embedding
             if "embedding" in select_columns:
                 metadata_column_index = select_columns.index("embedding")
                 val[i][metadata_column_index] = (
@@ -347,11 +345,9 @@ class SQLite(DB):
                     if val[i][metadata_column_index]
                     else None
                 )
-            
 
         return val
 
-# need to verifiy
     def get(
         self,
         where: Where = {},
@@ -393,7 +389,6 @@ class SQLite(DB):
 
         return val
 
-# need to verifiy
     def update(
         self,
         collection_uuid,
@@ -466,7 +461,6 @@ class SQLite(DB):
         self.commit()
         return [uuid.UUID(x[0]) for x in uuids_deleted]
 
-# need to verifiy
     def delete(
         self,
         where: Where = {},
@@ -511,7 +505,6 @@ class SQLite(DB):
                 uuid IN ({','.join([("'" + str(x) + "'") for x in ids])})
         """
         ).fetchall()
-
         # sort db results by the order of the uuids
         response = sorted(response, key=lambda obj: ids.index(uuid.UUID(obj[len(columns) - 1])))
 
@@ -520,7 +513,6 @@ class SQLite(DB):
     def raw_sql(self, sql):
         return self._conn.execute(sql).df()
 
-# need to verifiy
     def get_nearest_neighbors(
         self,
         where: Where,
@@ -557,7 +549,6 @@ class SQLite(DB):
 
         return uuids, distances
 
-# need to verifiy
     def create_index(self, collection_uuid: str):
         """Create an index for a collection_uuid and optionally scoped to a dataset.
         Args:
@@ -574,12 +565,10 @@ class SQLite(DB):
         index = self._index(collection_uuid)
         index.add(uuids, embeddings)
 
-# need to verifiy
     def add_incremental(self, collection_uuid, uuids, embeddings):
         index = self._index(collection_uuid)
         index.add(uuids, embeddings)
 
-# need to verifiy
     def reset_indexes(self):
         delete_all_indexes(self._settings)
         self.index_cache = {}
@@ -659,7 +648,6 @@ class PersistentSQLite(SQLite):
                 f"""loaded in {self._conn.execute(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
             )
             backup_db.close()
-            
 
     def __del__(self):
         logger.info("PersistentSQLite del, about to run persist")
