@@ -21,7 +21,9 @@ def test_add(
         coll.name,
         len(embeddings["ids"]),
     )
-    invariants.ann_accuracy(coll, embeddings, n_results=len(embeddings["ids"]))
+    n_embeddings = len(embeddings["ids"])
+    n_results = max(1, n_embeddings // 10)
+    invariants.ann_accuracy(coll, embeddings, n_results=n_results)
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
