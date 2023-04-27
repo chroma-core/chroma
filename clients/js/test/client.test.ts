@@ -198,7 +198,7 @@ test('wrong code returns an error', async () => {
     expect(results.error).toBe("ValueError('Expected one of $gt, $lt, $gte, $lte, $ne, $eq, got $contains')")
 })
 
-test('it should return an error when inserting duplicate IDs', async () => {
+test('it should return an error when inserting an ID that alreay exists in the Collection', async () => {
     await chroma.reset()
     const collection = await chroma.createCollection('test')
     const ids = ['test1', 'test2', 'test3']
@@ -214,7 +214,7 @@ test('it should return an error when inserting duplicate IDs', async () => {
     expect(results.error).toContain("ValueError")
 })
 
-test('validation errors when inserting duplicate IDs in the same batch', async () => {
+test('It should return an error when inserting duplicate IDs in the same batch', async () => {
     await chroma.reset()
     const collection = await chroma.createCollection('test')
     const ids = ['test1', 'test2', 'test3', 'test1']
