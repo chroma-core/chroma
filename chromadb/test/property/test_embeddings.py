@@ -3,6 +3,7 @@ import logging
 from hypothesis import given
 import hypothesis.strategies as st
 from typing import Set, Optional
+from dataclasses import dataclass
 import chromadb
 import chromadb.errors as errors
 from chromadb.api import API
@@ -51,6 +52,14 @@ dimension_shared_st = st.shared(
 )
 
 
+@dataclass
+class EmbeddingStateMachineStates:
+    initialize = "initialize"
+    add_embeddings = "add_embeddings"
+    delete_by_ids = "delete_by_ids"
+    update_embeddings = "update_embeddings"
+    upsert_embeddings = "upsert_embeddings"
+
 collection_st = st.shared(strategies.collections(), key="coll")
 
 class EmbeddingStateMachine(RuleBasedStateMachine):
@@ -74,6 +83,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             embedding_function=collection.embedding_function
         )
         trace("init")
+        self.on_state_change(EmbeddingStateMachineStates.initialize)
         self.embeddings = {
             "ids": [],
             "embeddings": [],
@@ -85,6 +95,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
           embedding_set=strategies.recordsets(collection_st))
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
+        self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
         if len(self.embeddings["ids"]) > 0:
             trace("add_more_embeddings")
 
@@ -101,7 +112,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
     def delete_by_ids(self, ids):
         trace("remove embeddings")
-
+        self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.embeddings["ids"].index(id) for id in ids]
 
         self.collection.delete(ids=ids)
@@ -116,6 +127,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                                               max_size=5))
     def update_embeddings(self, embedding_set):
         trace("update embeddings")
+        self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
         self.collection.update(**embedding_set)
         self._upsert_embeddings(embedding_set)
 
@@ -127,6 +139,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
               min_size=1, max_size=5))
     def upsert_embeddings(self, embedding_set):
         trace("upsert embeddings")
+        self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
         self.collection.upsert(**embedding_set)
         self._upsert_embeddings(embedding_set)
 
@@ -184,6 +197,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.embeddings["embeddings"][i]
             del self.embeddings["metadatas"][i]
             del self.embeddings["documents"][i]
+
+    def on_state_change(self, new_state):
+        pass
 
 
 def test_embeddings_state(caplog, api):
