@@ -146,7 +146,7 @@ def persist_generated_data_with_old_version(
 
 
 @given(
-    collection_strategy=strategies.collections(),
+    collection_strategy=strategies.collections(with_hnsw_params=True),
     embeddings_strategy=strategies.embedding_set(),
 )
 def test_cycle_versions(

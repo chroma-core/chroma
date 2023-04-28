@@ -14,7 +14,7 @@ from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 
 
 @given(
-    collection_strategy=strategies.collections(),
+    collection_strategy=strategies.collections(with_hnsw_params=True),
     embeddings_strategy=strategies.embedding_set(),
 )
 def test_persist(

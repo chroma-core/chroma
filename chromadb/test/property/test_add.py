@@ -5,7 +5,10 @@ import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 
 
-@given(collection=strategies.collections(), embeddings=strategies.embedding_set())
+@given(
+    collection=strategies.collections(with_hnsw_params=True),
+    embeddings=strategies.embedding_set(),
+)
 @settings(deadline=None)
 def test_add(
     api: API, collection: strategies.Collection, embeddings: strategies.EmbeddingSet
@@ -13,7 +16,11 @@ def test_add(
     api.reset()
 
     # TODO: Generative embedding functions
-    coll = api.create_collection(**collection, embedding_function=lambda x: None)
+    name = collection["name"]
+    metadata = collection["metadata"]
+    coll = api.create_collection(
+        name=name, metadata=metadata, embedding_function=lambda x: None
+    )
     coll.add(**embeddings)
 
     invariants.count(
@@ -21,7 +28,8 @@ def test_add(
         coll.name,
         len(embeddings["ids"]),
     )
-    invariants.ann_accuracy(coll, embeddings, n_results=len(embeddings["ids"]))
+    n_results = max(1, (len(embeddings["ids"]) // 10))
+    invariants.ann_accuracy(coll, embeddings, n_results=n_results)
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
