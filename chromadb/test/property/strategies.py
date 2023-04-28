@@ -30,6 +30,12 @@ _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
 _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
 _two_periods_re = re.compile(r"\.\.")
 
+test_hnsw_config = {
+    "hnsw:construction_ef": 128,
+    "hnsw:search_ef": 128,
+    "hnsw:M": 128,
+}
+
 
 class EmbeddingSet(TypedDict):
     """
@@ -62,9 +68,14 @@ def collection_name(draw) -> Collection:
 
 
 @st.composite
-def collections(draw) -> Collection:
+def collections(draw, with_hnsw_params=False) -> Collection:
     """Strategy to generate a set of collections"""
-    return {"name": draw(collection_name()), "metadata": draw(collection_metadata)}
+    metadata = draw(collection_metadata)
+    if with_hnsw_params:
+        if metadata is None:
+            metadata = {}
+        metadata.update(test_hnsw_config)
+    return {"name": draw(collection_name()), "metadata": metadata}
 
 
 def one_or_both(strategy_a, strategy_b):
@@ -140,6 +151,7 @@ def metadatas_strategy(count: int) -> st.SearchStrategy[Optional[List[types.Meta
 
 
 default_id_st = st.text(alphabet=legal_id_characters, min_size=1, max_size=64)
+
 
 @st.composite
 def embedding_set(

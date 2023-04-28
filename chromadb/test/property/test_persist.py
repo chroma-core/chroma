@@ -29,7 +29,7 @@ def settings(request) -> Generator[Settings, None, None]:
 
 
 @given(
-    collection_strategy=strategies.collections(),
+    collection_strategy=strategies.collections(with_hnsw_params=True),
     embeddings_strategy=strategies.embedding_set(),
 )
 def test_persist(
