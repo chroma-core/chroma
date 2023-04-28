@@ -22,6 +22,7 @@ jobs:
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py"]
     runs-on: ${{ matrix.platform }}
     steps:
