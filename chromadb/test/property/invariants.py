@@ -1,5 +1,5 @@
+from chromadb.test.property.strategies import RecordSet
 from typing import Callable, Literal, Sequence, Union, cast
-from chromadb.test.property.strategies import EmbeddingSet
 import numpy as np
 from chromadb.api import API, types
 from chromadb.api.models.Collection import Collection
@@ -16,7 +16,7 @@ def count(api: API, collection_name: str, expected_count: int):
 
 def _field_matches(
     collection: Collection,
-    embeddings: EmbeddingSet,
+    embeddings: RecordSet,
     field_name: Union[Literal["documents"], Literal["metadatas"]],
 ):
     """
@@ -41,13 +41,13 @@ def _field_matches(
 
     expected_field = embeddings[field_name]
     if expected_field is None:
-        # Since an EmbeddingSet is the user input, we need to convert the documents to
+        # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
         expected_field = [None] * len(embeddings["ids"])
     assert actual_field == expected_field
 
 
-def ids_match(collection: Collection, embeddings: EmbeddingSet):
+def ids_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding ids is equal to the expected ids"""
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
@@ -57,12 +57,12 @@ def ids_match(collection: Collection, embeddings: EmbeddingSet):
     assert actual_ids == embeddings["ids"]
 
 
-def metadatas_match(collection: Collection, embeddings: EmbeddingSet):
+def metadatas_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding metadata is equal to the expected metadata"""
     _field_matches(collection, embeddings, "metadatas")
 
 
-def documents_match(collection: Collection, embeddings: EmbeddingSet):
+def documents_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding documents is equal to the expected documents"""
     _field_matches(collection, embeddings, "documents")
 
@@ -93,7 +93,7 @@ def _exact_distances(
 
 def ann_accuracy(
     collection: Collection,
-    embeddings: EmbeddingSet,
+    embeddings: RecordSet,
     n_results: int = 1,
     min_recall: float = 0.99,
 ):
