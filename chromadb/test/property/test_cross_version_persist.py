@@ -9,9 +9,6 @@ import pytest
 import json
 from urllib import request
 from chromadb.api import API
-from chromadb.test.conftest import (
-    persist_old_version_configurations,
-)
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from importlib.util import spec_from_file_location, module_from_spec
@@ -37,6 +34,20 @@ def versions():
     return [MINIMUM_VERSION, versions[-1]]
 
 
+def configurations(versions):
+    return [
+        (
+            version,
+            Settings(
+                chroma_api_impl="local",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+            ),
+        )
+        for version in versions
+    ]
+
+
 test_old_versions = versions()
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
@@ -44,7 +55,7 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
 @pytest.fixture(
-    scope="module", params=persist_old_version_configurations(test_old_versions)
+    scope="module", params=configurations(test_old_versions)
 )
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param

@@ -7,7 +7,6 @@ from chromadb.api import API
 from chromadb.config import Settings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import persist_configurations
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachine,
     EmbeddingStateMachineStates,
@@ -16,11 +15,19 @@ from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 import os
 import shutil
 import pytest
+import tempfile
 
 CreatePersistAPI = Callable[[], API]
 
+configurations = [
+    Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=tempfile.gettempdir() + "/tests",
+    )]
+
 # TODO: fixtures should be common across tests
-@pytest.fixture(scope="module", params=persist_configurations())
+@pytest.fixture(scope="module", params=configurations)
 def settings(request) -> Generator[Settings, None, None]:
     configuration = request.param
     yield configuration
