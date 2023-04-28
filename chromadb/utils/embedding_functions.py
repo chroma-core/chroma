@@ -106,3 +106,27 @@ class InstructorEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(texts).tolist()
+
+
+class GooglePalmEmbeddingFunction(EmbeddingFunction):
+    # To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a PaLM API key.
+    def __init__(
+        self, api_key: Optional[str] = None, model_name: str = "models/embedding-gecko-001"
+    ):
+        try:
+            import google.generativeai as palm
+        except ImportError:
+            raise ValueError("The Google Generative AI python package is not installed.")
+
+        if api_key is None:
+            raise ValueError("Please provide a PaLM API key.")
+
+        palm.configure(api_key=api_key)
+        self._palm = palm
+        self._model_name = model_name
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        return [
+            self._palm.generate_embeddings(model=self._model_name, text=text)["embedding"]
+            for text in texts
+        ]
