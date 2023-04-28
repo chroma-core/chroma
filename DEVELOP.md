@@ -6,6 +6,8 @@ https://packaging.python.org.
 
 ## Setup
 
+Because of the dependencies it relies one (like `pytorch`), this project does not support Python version >3.10.0.
+
 Set up a virtual environment and install the project's requirements
 and dev requirements:
 
