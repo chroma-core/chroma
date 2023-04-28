@@ -1,16 +1,8 @@
 import pytest
 from hypothesis import given, settings
-import chromadb
 from chromadb.api import API
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
 
 
 @given(
