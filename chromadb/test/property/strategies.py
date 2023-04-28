@@ -40,6 +40,12 @@ test_hnsw_config = {
     "hnsw:M": 128,
 }
 
+test_hnsw_config = {
+    "hnsw:construction_ef": 128,
+    "hnsw:search_ef": 128,
+    "hnsw:M": 128,
+}
+
 
 class RecordSet(TypedDict):
     """
@@ -60,7 +66,6 @@ safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
 safe_floats = st.floats(allow_infinity=False, allow_nan=False)   # TODO: handle infinity and NAN
 safe_values = [safe_text, safe_integers, safe_floats]
-
 
 def one_or_both(strategy_a, strategy_b):
     return st.one_of(
