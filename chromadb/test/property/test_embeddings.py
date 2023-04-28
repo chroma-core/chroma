@@ -60,7 +60,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.api = api
 
     @initialize(
-        collection=strategies.collections(),
+        collection=strategies.collections(with_hnsw_params=True),
         dtype=dtype_shared_st,
         dimension=dimension_shared_st,
     )
