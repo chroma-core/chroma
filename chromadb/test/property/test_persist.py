@@ -26,7 +26,6 @@ configurations = [
             persist_directory=tempfile.gettempdir() + "/tests",
     )]
 
-# TODO: fixtures should be common across tests
 @pytest.fixture(scope="module", params=configurations)
 def settings(request) -> Generator[Settings, None, None]:
     configuration = request.param
