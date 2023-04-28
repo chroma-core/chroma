@@ -34,6 +34,12 @@ np.random.seed(0) # unnecessary, hypothesis does this for us
 # Please make changes to these strategies incrementally, testing to make sure they don't
 # start generating unsatisfiable examples.
 
+test_hnsw_config = {
+    "hnsw:construction_ef": 128,
+    "hnsw:search_ef": 128,
+    "hnsw:M": 128,
+}
+
 
 class RecordSet(TypedDict):
     """
@@ -54,6 +60,20 @@ safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
 safe_floats = st.floats(allow_infinity=False, allow_nan=False)   # TODO: handle infinity and NAN
 safe_values = [safe_text, safe_integers, safe_floats]
+
+
+def one_or_both(strategy_a, strategy_b):
+    return st.one_of(
+        st.tuples(strategy_a, strategy_b),
+        st.tuples(strategy_a, st.none()),
+        st.tuples(st.none(), strategy_b),
+    )
+
+
+# Temporarily generate only these to avoid SQL formatting issues.
+legal_id_characters = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
+)
 
 float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]  # TODO: handle int types
@@ -95,14 +115,20 @@ class Collection():
     has_documents: bool = False
     embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
 
+
 @st.composite
-def collections(draw, add_filterable_data=False):
+def collections(draw, add_filterable_data=False, with_hnsw_params=False):
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
+
+    if with_hnsw_params:
+        if metadata is None:
+            metadata = {}
+        metadata.update(test_hnsw_config)
 
     known_metadata_keys = {}
     if add_filterable_data:

@@ -151,7 +151,7 @@ def persist_generated_data_with_old_version(
     del api
 
 
-collection_st = st.shared(strategies.collections(), key="coll")
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),

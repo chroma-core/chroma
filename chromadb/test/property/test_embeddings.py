@@ -5,6 +5,7 @@ import hypothesis.strategies as st
 from typing import Set, Optional
 from dataclasses import dataclass
 import chromadb.errors as errors
+import chromadb
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.test.configurations import configurations
@@ -53,7 +54,7 @@ class EmbeddingStateMachineStates:
     update_embeddings = "update_embeddings"
     upsert_embeddings = "upsert_embeddings"
 
-collection_st = st.shared(strategies.collections(), key="coll")
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection

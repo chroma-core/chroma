@@ -157,3 +157,7 @@ def ann_accuracy(
         pass  # it's ok if we're running outside hypothesis
 
     assert recall >= min_recall
+
+    # Ensure that the query results are sorted by distance
+    for distance_result in query_results["distances"]:
+        assert np.allclose(np.sort(distance_result), distance_result)

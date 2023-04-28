@@ -15,7 +15,7 @@ from chromadb.test.property.test_embeddings import (
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 
 
-collection_st = st.shared(strategies.collections(), key="coll")
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),

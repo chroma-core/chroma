@@ -6,7 +6,7 @@ from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 
-collection_st = st.shared(strategies.collections(), key="coll")
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 @given(collection=collection_st,
        embeddings=strategies.recordsets(collection_st))
 @settings(deadline=None)
