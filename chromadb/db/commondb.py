@@ -40,7 +40,7 @@ def db_schema_to_keys() -> List[str]:
     return keys
 
 
-class CommonDBHandler(DB):
+class CommonDB(DB):
     #
     #  INIT METHODS
     #

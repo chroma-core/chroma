@@ -6,6 +6,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
+from chromadb.db.commondb import CommonDB
 from typing import List, Optional, Sequence, Dict
 import pandas as pd
 import json
@@ -34,13 +35,9 @@ def clickhouse_to_duckdb_schema(table_schema):
     return table_schema
 
 
-# TODO: inherits ClickHouse for convenience of copying behavior, not
-# because it's logically a subtype. Factoring out the common behavior
-# to a third superclass they both extend would be preferable.
-class DuckDB(Clickhouse):
+class DuckDB(CommonDB):
     # duckdb has a different way of connecting to the database
     def __init__(self, settings):
-
         self._conn = duckdb.connect()
         self._create_table_collections()
         self._create_table_embeddings()
@@ -342,14 +339,9 @@ class DuckDB(Clickhouse):
     def raw_sql(self, sql):
         return self._conn.execute(sql).df()
 
-    # TODO: This method should share logic with clickhouse impl
-    def reset(self):
+    def _reset(self):
         self._conn.execute("DROP TABLE collections")
         self._conn.execute("DROP TABLE embeddings")
-        self._create_table_collections()
-        self._create_table_embeddings()
-
-        self.reset_indexes()
 
     def __del__(self):
         logger.info("Exiting: Cleaning up .chroma directory")
