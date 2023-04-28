@@ -141,7 +141,8 @@ class LocalAPI(API):
             client=self, name=name, embedding_function=embedding_function, metadata=res[0][2]
         )
 
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(self,
+                         embedding_function: Optional[Callable] = None) -> Sequence[Collection]:
         """List all collections.
         Returns:
             A list of collections
@@ -154,7 +155,9 @@ class LocalAPI(API):
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
             collections.append(
-                Collection(client=self, name=db_collection[1], metadata=db_collection[2])
+                Collection(client=self, name=db_collection[1],
+                           metadata=db_collection[2],
+                           embedding_function=embedding_function)
             )
         return collections
 
