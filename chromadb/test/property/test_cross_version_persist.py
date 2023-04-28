@@ -4,7 +4,8 @@ import shutil
 import subprocess
 import tempfile
 from typing import Generator, Tuple
-from hypothesis import given
+from hypothesis import given, settings
+import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
@@ -120,13 +121,18 @@ def switch_to_version(version):
 
 
 def persist_generated_data_with_old_version(
-    version, settings, collection_strategy, embeddings_strategy
+    version,
+    settings,
+    collection_strategy: strategies.Collection,
+    embeddings_strategy: strategies.RecordSet,
 ):
     old_module = switch_to_version(version)
     api: API = old_module.Client(settings)
     api.reset()
     coll = api.create_collection(
-        **collection_strategy, embedding_function=lambda x: None
+        name=collection_strategy.name,
+        metadata=collection_strategy.metadata,
+        embedding_function=collection_strategy.embedding_function
     )
     coll.add(**embeddings_strategy)
     # We can't use the invariants module here because it uses the current version
@@ -134,7 +140,7 @@ def persist_generated_data_with_old_version(
     # version
 
     # Check count
-    assert coll.count() == len(embeddings_strategy["embeddings"])
+    assert coll.count() == len(embeddings_strategy["embeddings"] or [])
     # Check ids
     result = coll.get()
     actual_ids = result["ids"]
@@ -145,14 +151,16 @@ def persist_generated_data_with_old_version(
     del api
 
 
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 @given(
-    collection_strategy=strategies.collections(with_hnsw_params=True),
-    embeddings_strategy=strategies.embedding_set(),
+    collection_strategy=collection_st,
+    embeddings_strategy=strategies.recordsets(collection_st),
 )
+@settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
-    embeddings_strategy: strategies.EmbeddingSet,
+    embeddings_strategy: strategies.RecordSet,
 ):
     # # Test backwards compatibility
     # # For the current version, ensure that we can load a collection from
@@ -164,7 +172,11 @@ def test_cycle_versions(
         COLLECTION_NAME_LOWERCASE_VERSION
     ):
         # Old versions do not support upper case collection names
-        collection_strategy["name"] = collection_strategy["name"].lower()
+        collection_strategy.name = collection_strategy.name.lower()
+
+    # Can't pickle a function, and we won't need them
+    collection_strategy.embedding_function = None
+    collection_strategy.known_metadata_keys = {}
 
     # Run the task in a separate process to avoid polluting the current process
     # with the old version. Using spawn instead of fork to avoid sharing the
@@ -181,7 +193,7 @@ def test_cycle_versions(
     # are preserved for the collection
     api = Client(settings)
     coll = api.get_collection(
-        name=collection_strategy["name"], embedding_function=lambda x: None
+        name=collection_strategy.name, embedding_function=lambda x: None
     )
     invariants.count(
         api,
