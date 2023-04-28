@@ -10,7 +10,7 @@ import uvicorn
 import time
 from multiprocessing import Process
 import pytest
-from typing import Generator, List, Tuple
+from typing import Generator, List, Tuple, Callable
 import shutil
 
 hypothesis.settings.register_profile(
@@ -89,7 +89,7 @@ def integration_api() -> Generator[API, None, None]:
     yield chromadb.Client()
 
 
-def fixtures():
+def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
     api_fixtures = [duckdb, duckdb_parquet, fastapi]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         api_fixtures.append(integration_api)
@@ -98,5 +98,5 @@ def fixtures():
     return api_fixtures
 
 @pytest.fixture(scope="module", params=fixtures())
-def api(request):
+def api(request) -> Generator[API, None, None]:
     yield next(request.param())
