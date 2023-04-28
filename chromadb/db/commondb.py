@@ -13,8 +13,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# with clickhouse datatypes
 COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
 
+# with clickhouse datatypes
 EMBEDDING_TABLE_SCHEMA = [
     {"collection_uuid": "UUID"},
     {"uuid": "UUID"},
@@ -25,7 +27,7 @@ EMBEDDING_TABLE_SCHEMA = [
 ]
 
 
-def db_array_schema_to_clickhouse_schema(table_schema):
+def table_schema_to_sql_schema(table_schema):
     return_str = ""
     for element in table_schema:
         for k, v in element.items():

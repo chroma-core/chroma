@@ -1,12 +1,11 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
-from chromadb.db.clickhouse import (
-    Clickhouse,
-    db_array_schema_to_clickhouse_schema,
+from chromadb.db.commondb import (
+    CommonDB,
+    table_schema_to_sql_schema,
     EMBEDDING_TABLE_SCHEMA,
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from chromadb.db.commondb import CommonDB
 from typing import List, Optional, Sequence, Dict
 import pandas as pd
 import json
@@ -18,7 +17,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def clickhouse_to_duckdb_schema(table_schema):
+def to_duckdb_table_schema(table_schema):
     for item in table_schema:
         if "embedding" in item:
             item["embedding"] = "DOUBLE[]"
@@ -49,7 +48,7 @@ class DuckDB(CommonDB):
     def _create_table_collections(self):
         self._conn.execute(
             f"""CREATE TABLE collections (
-            {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(COLLECTION_TABLE_SCHEMA))}
+            {table_schema_to_sql_schema(to_duckdb_table_schema(COLLECTION_TABLE_SCHEMA))}
         ) """
         )
 
@@ -57,7 +56,7 @@ class DuckDB(CommonDB):
     def _create_table_embeddings(self):
         self._conn.execute(
             f"""CREATE TABLE embeddings (
-            {db_array_schema_to_clickhouse_schema(clickhouse_to_duckdb_schema(EMBEDDING_TABLE_SCHEMA))}
+            {table_schema_to_sql_schema(to_duckdb_table_schema(EMBEDDING_TABLE_SCHEMA))}
         ) """
         )
 

@@ -1,5 +1,11 @@
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
-from chromadb.db import DB
+from chromadb.db.commondb import (
+    CommonDB,
+    table_schema_to_sql_schema,
+    EMBEDDING_TABLE_SCHEMA,
+    db_schema_to_keys,
+    COLLECTION_TABLE_SCHEMA,
+)
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.errors import (
     NoDatapointsException,
@@ -16,32 +22,6 @@ import logging
 from chromadb.db.commondb import CommonDB
 
 logger = logging.getLogger(__name__)
-
-COLLECTION_TABLE_SCHEMA = [{"uuid": "UUID"}, {"name": "String"}, {"metadata": "String"}]
-
-EMBEDDING_TABLE_SCHEMA = [
-    {"collection_uuid": "UUID"},
-    {"uuid": "UUID"},
-    {"embedding": "Array(Float64)"},
-    {"document": "Nullable(String)"},
-    {"id": "Nullable(String)"},
-    {"metadata": "Nullable(String)"},
-]
-
-
-def db_array_schema_to_clickhouse_schema(table_schema):
-    return_str = ""
-    for element in table_schema:
-        for k, v in element.items():
-            return_str += f"{k} {v}, "
-    return return_str
-
-
-def db_schema_to_keys() -> List[str]:
-    keys = []
-    for element in EMBEDDING_TABLE_SCHEMA:
-        keys.append(list(element.keys())[0])
-    return keys
 
 
 class Clickhouse(CommonDB):
@@ -69,7 +49,7 @@ class Clickhouse(CommonDB):
         conn = self._get_conn()
         conn.command(
             f"""CREATE TABLE IF NOT EXISTS collections (
-            {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
+            {table_schema_to_sql_schema(COLLECTION_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY uuid"""
         )
 
@@ -77,7 +57,7 @@ class Clickhouse(CommonDB):
         conn = self._get_conn()
         conn.command(
             f"""CREATE TABLE IF NOT EXISTS embeddings (
-            {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
+            {table_schema_to_sql_schema(EMBEDDING_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY collection_uuid"""
         )
 
