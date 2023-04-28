@@ -55,22 +55,24 @@ class Clickhouse(DB):
         self._conn = clickhouse_connect.get_client(
             host=self._settings.clickhouse_host, port=int(self._settings.clickhouse_port)
         )
-        self._create_table_collections(self._conn)
-        self._create_table_embeddings(self._conn)
+        self._create_table_collections()
+        self._create_table_embeddings()
 
     def _get_conn(self) -> Client:
         if self._conn is None:
             self._init_conn()
         return self._conn  # type: ignore because we know it's not None
 
-    def _create_table_collections(self, conn):
+    def _create_table_collections(self):
+        conn = self._get_conn()
         conn.command(
             f"""CREATE TABLE IF NOT EXISTS collections (
             {db_array_schema_to_clickhouse_schema(COLLECTION_TABLE_SCHEMA)}
         ) ENGINE = MergeTree() ORDER BY uuid"""
         )
 
-    def _create_table_embeddings(self, conn):
+    def _create_table_embeddings(self):
+        conn = self._get_conn()
         conn.command(
             f"""CREATE TABLE IF NOT EXISTS embeddings (
             {db_array_schema_to_clickhouse_schema(EMBEDDING_TABLE_SCHEMA)}
@@ -545,14 +547,10 @@ class Clickhouse(DB):
         delete_all_indexes(self._settings)
         self.index_cache = {}
 
-    def reset(self):
+    def _reset(self):
         conn = self._get_conn()
         conn.command("DROP TABLE collections")
         conn.command("DROP TABLE embeddings")
-        self._create_table_collections(conn)
-        self._create_table_embeddings(conn)
-
-        self.reset_indexes()
 
     def raw_sql(self, sql):
         return self._get_conn().query(sql).result_rows
