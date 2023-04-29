@@ -28,15 +28,6 @@ EMBEDDING_TABLE_SCHEMA = [
 ]
 
 
-def db_array_schema_to_clickhouse_schema(table_schema):
-    return_str = ""
-    for element in table_schema:
-
-        for k, v in element.items():
-            return_str += f"{k} {v}, "
-    return return_str
-
-
 def db_schema_to_keys() -> List[str]:
     keys = []
     for element in EMBEDDING_TABLE_SCHEMA:
@@ -44,24 +35,26 @@ def db_schema_to_keys() -> List[str]:
     return keys
 
 
-def clickhouse_to_sqlite_schema(table_schema):
-    for item in table_schema:
-        if "embedding" in item:
-            item["embedding"] = "TEXT"
-        # capitalize the key
-        item[list(item.keys())[0]] = item[list(item.keys())[0]].upper()
-        if "NULLABLE" in item[list(item.keys())[0]]:
-            item[list(item.keys())[0]] = "TEXT"
-        if "UUID" in item[list(item.keys())[0]]:
-            item[list(item.keys())[0]] = "TEXT"
-        if "FLOAT64" in item[list(item.keys())[0]]:
-            item[list(item.keys())[0]] = "REAL"
-        if "STRING" in item[list(item.keys())[0]]:
-            item[list(item.keys())[0]] = "TEXT"
-        if "ARRAY" in item[list(item.keys())[0]]:
-            item[list(item.keys())[0]] = "TEXT"
+def db_array_schema_to_sqlite_schema(table_schema):
+    schema_list = []
+    for element in table_schema:
+        for k, v in element.items():
+            if "ARRAY" in str(v).upper():
+                v = "text"
+            elif "UUID" in str(v).upper():
+                v = 'text'
+            elif "STRING" in str(v).upper():
+                v = "text"
+            elif "ARRAY" in str(v).upper():
+                v = "text"
+            elif "FLOAT" in str(v).upper():
+                v = "real"
 
-    return table_schema
+            schema_list.append(f"{k} {v}")
+
+    return_str = f'''{', '.join([(str(x)) for x in schema_list])}'''
+
+    return return_str
 
 
 class SQLite(DB):
@@ -131,10 +124,9 @@ class SQLite(DB):
             where_clauses.extend(where_document_clauses)
 
         if ids is not None:
-            if len(ids) == 1:
-                where_clauses.append(f" id = '{ids[0]}'")
-            else:
-                where_clauses.append(f" id IN {tuple(ids)}")
+            where_clauses.append(
+                f""" id IN ({','.join([("'" + str(x) + "'") for x in ids])})"""
+            )
 
         where_clauses.append(f"collection_uuid = '{collection_uuid}'")
         where_str = " AND ".join(where_clauses)
