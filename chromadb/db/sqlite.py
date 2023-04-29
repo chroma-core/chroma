@@ -1,4 +1,11 @@
-from chromadb.api.types import Documents, Embeddings, IDs, Metadatas, Where, WhereDocument
+from chromadb.api.types import (
+    Documents,
+    Embeddings,
+    IDs,
+    Metadatas,
+    Where,
+    WhereDocument
+)
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 from chromadb.db import DB
 from chromadb.errors import (
@@ -71,15 +78,16 @@ class SQLite(DB):
 
     def _create_table_collections(self):
         self._conn.execute(
-            """CREATE TABLE collections (uuid text , name text, metadata text) """
+            f"""CREATE TABLE collections (
+                {db_array_schema_to_sqlite_schema((COLLECTION_TABLE_SCHEMA))}
+            ) """
         )
         self.commit()
 
-    # SQLite has different types, so we want to convert the clickhouse schema to sqlite schema
     def _create_table_embeddings(self):
         self._conn.execute(
-            """CREATE TABLE embeddings (
-            collection_uuid text, uuid text, embedding text, document text, id text, metadata text
+            f"""CREATE TABLE embeddings (
+            {db_array_schema_to_sqlite_schema((EMBEDDING_TABLE_SCHEMA))}
         ) """
         )
         self.commit()
@@ -159,12 +167,16 @@ class SQLite(DB):
         return [[str(collection_uuid), name, metadata]]
 
     def get_collection(self, name: str) -> Sequence:
-        res = self._conn.execute("""SELECT * FROM collections WHERE name = ?""", (name,)).fetchall()
+        res = self._conn.execute(
+            """SELECT * FROM collections WHERE name = ?""", (name,)
+        ).fetchall()
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def get_collection_by_id(self, uuid: str) -> Sequence:
-        res = self._conn.execute("""SELECT * FROM collections WHERE uuid = ?""", (uuid,)).fetchone()
+        res = self._conn.execute(
+            """SELECT * FROM collections WHERE uuid = ?""", (uuid,)
+        ).fetchone()
         return [res[0], res[1], json.loads(res[2])]
 
     def list_collections(self) -> Sequence:
@@ -242,22 +254,36 @@ class SQLite(DB):
         for key, value in where.items():
             # Shortcut for $eq
             if type(value) == str:
-                result.append(f" CAST(json_extract(metadata,'$.{key}') AS TEXT) = '{value}'")
+                result.append(
+                    f" CAST(json_extract(metadata,'$.{key}') AS TEXT) = '{value}'"
+                )
             if type(value) == int:
-                result.append(f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}")
+                result.append(
+                    f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}"
+                )
             if type(value) == float:
-                result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}")
+                result.append(
+                    f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
+                )
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
                 if operator == "$gt":
-                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) > {operand}")
+                    result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) > {operand}"
+                    )
                 elif operator == "$lt":
-                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) < {operand}")
+                    result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) < {operand}"
+                    )
                 elif operator == "$gte":
-                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) >= {operand}")
+                    result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) >= {operand}"
+                    )
                 elif operator == "$lte":
-                    result.append(f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) <= {operand}")
+                    result.append(
+                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) <= {operand}"
+                    )
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
@@ -287,7 +313,9 @@ class SQLite(DB):
                 elif key == "$and":
                     result.append(f"({' AND '.join(all_subresults)})")
                 else:
-                    raise ValueError(f"Operator {key} not supported with a list of where clauses")
+                    raise ValueError(
+                        f"Operator {key} not supported with a list of where clauses"
+                    )
 
     def _format_where_document(self, where_document, results):
         operator = list(where_document.keys())[0]
@@ -353,7 +381,9 @@ class SQLite(DB):
         columns: Optional[List[str]] = None,
     ) -> Sequence:
         if collection_name is None and collection_uuid is None:
-            raise TypeError("Arguments collection_name and collection_uuid cannot both be None")
+            raise TypeError(
+                "Arguments collection_name and collection_uuid cannot both be None"
+            )
 
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
@@ -498,7 +528,16 @@ class SQLite(DB):
         """
         ).fetchall()
         if "embedding" in select_columns:
-            response = tuple(tuple(json.loads(item) if i == select_columns.index("embedding") else item for i, item in enumerate(t)) for t in resp)
+            response = (
+                tuple(
+                    tuple(
+                        json.loads(item)
+                        if i == select_columns.index("embedding") else item
+                        for i, item in enumerate(t)
+                    )
+                    for t in resp
+                )
+            )
         else:
             response = resp
         # sort db results by the order of the uuids
@@ -528,7 +567,9 @@ class SQLite(DB):
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
-                collection_uuid=collection_uuid, where=where, where_document=where_document
+                collection_uuid=collection_uuid,
+                where=where,
+                where_document=where_document
             )
 
             if len(results) > 0:
@@ -611,7 +652,9 @@ class PersistentSQLite(SQLite):
         """
         Persist the database to disk
         """
-        logger.info(f"Persisting DB to disk, putting it in the save folder: {self._save_folder}")
+        logger.info(
+            f"Persisting DB to disk, putting it in the save folder: {self._save_folder}"
+        )
         if self._conn is None:
             return
 
@@ -622,7 +665,10 @@ class PersistentSQLite(SQLite):
         if self._conn.execute("SELECT COUNT() FROM embeddings") == 0:
             return
 
-        backup_db = sqlite3.connect(f'{self._save_folder}/sqlite_backup.db', check_same_thread=False)
+        backup_db = sqlite3.connect(
+            f'{self._save_folder}/sqlite_backup.db',
+            check_same_thread=False
+        )
         self._conn.backup(backup_db)
         # return
         # backup_db.close()
@@ -641,7 +687,10 @@ class PersistentSQLite(SQLite):
             backup_db = sqlite3.connect(f'{self._save_folder}/sqlite_backup.db')
             backup_db.backup(self._conn)
             logger.info(
-                f"""loaded in {self._conn.execute(f"SELECT COUNT() FROM embeddings").fetchall()[0][0]} embeddings"""
+                f"""loaded in {
+                    self._conn.execute(f"SELECT COUNT() FROM embeddings")
+                    .fetchall()[0][0]
+                } embeddings"""
             )
             backup_db.close()
 
