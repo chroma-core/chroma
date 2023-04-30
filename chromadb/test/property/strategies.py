@@ -63,6 +63,10 @@ class RecordSet(TypedDict):
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 
+# Workaround for FastAPI json encoding peculiarities
+# https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
+safe_text = safe_text.filter(lambda s: not s.startswith("_sa"))
+
 safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
 safe_floats = st.floats(allow_infinity=False, allow_nan=False)   # TODO: handle infinity and NAN
 safe_values = [safe_text, safe_integers, safe_floats]
