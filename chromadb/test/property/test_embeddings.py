@@ -2,7 +2,7 @@ import pytest
 import logging
 from hypothesis import given
 import hypothesis.strategies as st
-from typing import Set, Optional
+from typing import Set, List, Optional, cast
 from dataclasses import dataclass
 import chromadb.errors as errors
 import chromadb
@@ -89,10 +89,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
-        if len(self.embeddings["ids"]) > 0:
+
+        ids = invariants.maybe_wrap(embedding_set["ids"])
+        ids = cast(List[str], ids)
+
+        if len(ids) > 0:
             trace("add_more_embeddings")
 
-        if set(embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
+        if set(ids).intersection(set(self.embeddings["ids"])):
             with pytest.raises(errors.IDAlreadyExistsError):
                 self.collection.add(**embedding_set)
             return multiple()
@@ -151,6 +155,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         )
 
     def _upsert_embeddings(self, embeddings: strategies.RecordSet):
+        embeddings = invariants.wrap_all(embeddings)
         for idx, id in enumerate(embeddings["ids"]):
             if id in self.embeddings["ids"]:
                 target_idx = self.embeddings["ids"].index(id)

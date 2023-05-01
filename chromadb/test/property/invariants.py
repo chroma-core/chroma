@@ -9,7 +9,7 @@ from hypothesis.errors import InvalidArgument
 T = types.TypeVar
 
 
-def _maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
+def maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
     """Wrap a value in a list if it is not a list"""
     if value is None:
         return None
@@ -19,7 +19,7 @@ def _maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
         return [value]
 
 
-def _wrap_all(embeddings: RecordSet) -> RecordSet:
+def wrap_all(embeddings: RecordSet) -> RecordSet:
     """Ensure that an embedding set has lists for all its values"""
 
     if embeddings["embeddings"] is None:
@@ -36,9 +36,9 @@ def _wrap_all(embeddings: RecordSet) -> RecordSet:
         raise InvalidArgument("embeddings must be a list, list of lists, or None")
 
     return {
-        "ids": _maybe_wrap(embeddings["ids"]),             # type: ignore
-        "documents": _maybe_wrap(embeddings["documents"]), # type: ignore
-        "metadatas": _maybe_wrap(embeddings["metadatas"]), # type: ignore
+        "ids": maybe_wrap(embeddings["ids"]),             # type: ignore
+        "documents": maybe_wrap(embeddings["documents"]), # type: ignore
+        "metadatas": maybe_wrap(embeddings["metadatas"]), # type: ignore
         "embeddings": embedding_list
     }
 
@@ -46,7 +46,7 @@ def _wrap_all(embeddings: RecordSet) -> RecordSet:
 def count(collection: Collection, embeddings: RecordSet):
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
-    embeddings = _wrap_all(embeddings)
+    embeddings = wrap_all(embeddings)
     assert count == len(embeddings["ids"])
 
 
@@ -59,7 +59,6 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    embeddings = _wrap_all(embeddings)
     result = collection.get(ids=embeddings["ids"], include=[field_name])
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
@@ -86,7 +85,7 @@ def _field_matches(
 
 def ids_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding ids is equal to the expected ids"""
-    embeddings = _wrap_all(embeddings)
+    embeddings = wrap_all(embeddings)
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
@@ -97,13 +96,13 @@ def ids_match(collection: Collection, embeddings: RecordSet):
 
 def metadatas_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding metadata is equal to the expected metadata"""
-    embeddings = _wrap_all(embeddings)
+    embeddings = wrap_all(embeddings)
     _field_matches(collection, embeddings, "metadatas")
 
 
 def documents_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding documents is equal to the expected documents"""
-    embeddings = _wrap_all(embeddings)
+    embeddings = wrap_all(embeddings)
     _field_matches(collection, embeddings, "documents")
 
 
@@ -138,7 +137,7 @@ def ann_accuracy(
     min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
-    embeddings = _wrap_all(embeddings)
+    embeddings = wrap_all(embeddings)
 
     if len(embeddings["ids"]) == 0:
         return  # nothing to test here

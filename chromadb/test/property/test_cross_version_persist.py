@@ -150,14 +150,15 @@ def persist_generated_data_with_old_version(
     # Just use some basic checks for sanity and manual testing where you break the new
     # version
 
+    check_embeddings = invariants.wrap_all(embeddings_strategy)
     # Check count
-    assert coll.count() == len(embeddings_strategy["embeddings"] or [])
+    assert coll.count() == len(check_embeddings["embeddings"] or [])
     # Check ids
     result = coll.get()
     actual_ids = result["ids"]
-    embedding_id_to_index = {id: i for i, id in enumerate(embeddings_strategy["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
     actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
-    assert actual_ids == embeddings_strategy["ids"]
+    assert actual_ids == check_embeddings["ids"]
     api.persist()
     del api
 
