@@ -24,6 +24,34 @@ COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
+def _patch_uppercase_coll_name(collection: strategies.Collection,
+                               embeddings: strategies.RecordSet):
+    """Old versions didn't handle uppercase characters in collection names"""
+    collection.name = collection.name.lower()
+
+
+def _patch_empty_dict_metadata(collection: strategies.Collection,
+                               embeddings: strategies.RecordSet):
+    """Old versions do the wrong thing when metadata is a single empty dict"""
+    if embeddings["metadatas"] == {}:
+        embeddings["metadatas"] = None
+
+
+version_patches = [("0.3.21", _patch_uppercase_coll_name),
+                   ("0.3.21", _patch_empty_dict_metadata)]
+
+
+def patch_for_version(version,
+                      collection: strategies.Collection,
+                      embeddings: strategies.RecordSet):
+    """Override aspects of the collection and embeddings, before testing, to account for
+    breaking changes in old versions."""
+
+    for patch_version, patch in version_patches:
+        if packaging_version.Version(version) <= packaging_version.Version(patch_version):
+            patch(collection, embeddings)
+
+
 def versions():
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
@@ -179,12 +207,7 @@ def test_cycle_versions(
     # # the previous versions
     version, settings = version_settings
 
-    # Add data with an old version + check the invariants are preserved in that version
-    if packaging_version.Version(version) <= packaging_version.Version(
-        COLLECTION_NAME_LOWERCASE_VERSION
-    ):
-        # Old versions do not support upper case collection names
-        collection_strategy.name = collection_strategy.name.lower()
+    patch_for_version(version, collection_strategy, embeddings_strategy)
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
