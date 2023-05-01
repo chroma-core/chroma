@@ -382,6 +382,7 @@ class Clickhouse(DB):
                         f" JSONExtractFloat(metadata,'{key}') <= {operand}"
                     )
                 elif operator == "$ne":
+                    result.append(f" JSONHas(metadata,'{key}') = 1 ")
                     if type(operand) == str:
                         return result.append(
                             f" JSONExtractString(metadata,'{key}') != '{operand}'"
