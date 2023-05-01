@@ -162,7 +162,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @pytest.mark.skipif(
     sys.version_info.major < 3
     or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
-    reason="The mininum supported versions of chroma do not work with python <3.7",
+    reason="The mininum supported versions of chroma do not work with python < 3.7",
 )
 @settings(deadline=None)
 def test_cycle_versions(
