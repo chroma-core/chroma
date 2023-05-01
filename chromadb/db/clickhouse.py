@@ -355,6 +355,7 @@ class Clickhouse(DB):
 
     def _format_where(self, where, result):
         for key, value in where.items():
+            result.append(f" JSONHas(metadata,'{key}') = 1 ")
             # Shortcut for $eq
             if type(value) == str:
                 result.append(f" JSONExtractString(metadata,'{key}') = '{value}'")
@@ -365,7 +366,6 @@ class Clickhouse(DB):
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
-                result.append(f" JSONHas(metadata,'{key}') = 1 ")
                 if operator == "$gt":
                     return result.append(
                         f" JSONExtractFloat(metadata,'{key}') > {operand}"
