@@ -1,6 +1,7 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, TypedDict, Callable, List, Dict, Union, cast, TypeVar
+from typing import Optional, Callable, List, Dict, Union
+from typing_extensions import TypedDict
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
@@ -12,7 +13,7 @@ from hypothesis.errors import InvalidArgument, InvalidDefinition
 from dataclasses import dataclass
 
 # Set the random seed for reproducibility
-np.random.seed(0) # unnecessary, hypothesis does this for us
+np.random.seed(0)  # unnecessary, hypothesis does this for us
 
 # See Hypothesis documentation for creating strategies at
 # https://hypothesis.readthedocs.io/en/latest/data.html
@@ -52,6 +53,7 @@ class RecordSet(TypedDict):
     A generated set of embeddings, ids, metadatas, and documents that
     represent what a user would pass to the API.
     """
+
     ids: types.IDs
     embeddings: Optional[types.Embeddings]
     metadatas: Optional[List[types.Metadata]]
@@ -63,9 +65,14 @@ class RecordSet(TypedDict):
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 
-safe_integers = st.integers(min_value=-2**31, max_value=2**31-1) # TODO: handle longs
-safe_floats = st.floats(allow_infinity=False, allow_nan=False)   # TODO: handle infinity and NAN
+safe_integers = st.integers(
+    min_value=-(2**31), max_value=2**31 - 1
+)  # TODO: handle longs
+safe_floats = st.floats(
+    allow_infinity=False, allow_nan=False
+)  # TODO: handle infinity and NAN
 safe_values = [safe_text, safe_integers, safe_floats]
+
 
 def one_or_both(strategy_a, strategy_b):
     return st.one_of(
@@ -96,21 +103,28 @@ def collection_name(draw) -> str:
 
     return name
 
-collection_metadata = st.one_of(st.none(),
-                                st.dictionaries(safe_text, st.one_of(*safe_values)))
+
+collection_metadata = st.one_of(
+    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values))
+)
+
 
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
 def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings:
-    return np.random.uniform(
-        low=-1.0,
-        high=1.0,
-        size=(count, dim),
-    ).astype(dtype).tolist()
+    return (
+        np.random.uniform(
+            low=-1.0,
+            high=1.0,
+            size=(count, dim),
+        )
+        .astype(dtype)
+        .tolist()
+    )
 
 
 @dataclass
-class Collection():
+class Collection:
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
@@ -147,13 +161,16 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
     else:
         known_document_keywords = []
 
-    return Collection(name=name,
-                      metadata=metadata,
-                      dimension=dimension,
-                      dtype=dtype,
-                      known_metadata_keys=known_metadata_keys,
-                      has_documents=has_documents,
-                      known_document_keywords=known_document_keywords)
+    return Collection(
+        name=name,
+        metadata=metadata,
+        dimension=dimension,
+        dtype=dtype,
+        known_metadata_keys=known_metadata_keys,
+        has_documents=has_documents,
+        known_document_keywords=known_document_keywords,
+    )
+
 
 @st.composite
 def metadata(draw, collection: Collection):
@@ -167,8 +184,11 @@ def metadata(draw, collection: Collection):
             if key in md:
                 del md[key]
         # Finally, add in some of the known keys for the collection
-        md.update(draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys)))
+        md.update(
+            draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys))
+        )
     return md
+
 
 @st.composite
 def document(draw, collection: Collection):
@@ -183,11 +203,9 @@ def document(draw, collection: Collection):
     words = draw(st.lists(st.one_of(known_words_st, random_words_st)))
     return " ".join(words)
 
-@st.composite
-def record(draw,
-           collection: Collection,
-           id_strategy=safe_text):
 
+@st.composite
+def record(draw, collection: Collection, id_strategy=safe_text):
     md = draw(metadata(collection))
 
     embeddings = create_embeddings(collection.dimension, 1, collection.dtype)
@@ -197,23 +215,27 @@ def record(draw,
     else:
         doc = None
 
-    return {"id": draw(id_strategy),
-            "embedding": embeddings[0],
-            "metadata": md,
-            "document": doc}
+    return {
+        "id": draw(id_strategy),
+        "embedding": embeddings[0],
+        "metadata": md,
+        "document": doc,
+    }
 
 
 @st.composite
-def recordsets(draw,
-               collection_strategy=collections(),
-               id_strategy=safe_text,
-               min_size=1,
-               max_size=50) -> RecordSet:
-
+def recordsets(
+    draw,
+    collection_strategy=collections(),
+    id_strategy=safe_text,
+    min_size=1,
+    max_size=50,
+) -> RecordSet:
     collection = draw(collection_strategy)
 
-    records = draw(st.lists(record(collection, id_strategy),
-                            min_size=min_size, max_size=max_size))
+    records = draw(
+        st.lists(record(collection, id_strategy), min_size=min_size, max_size=max_size)
+    )
 
     records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
@@ -221,7 +243,9 @@ def recordsets(draw,
         "ids": [r["id"] for r in records],
         "embeddings": [r["embedding"] for r in records],
         "metadatas": [r["metadata"] for r in records],
-        "documents": [r["document"] for r in records] if collection.has_documents else None,
+        "documents": [r["document"] for r in records]
+        if collection.has_documents
+        else None,
     }
 
 
@@ -262,9 +286,7 @@ class DeterministicRuleStrategy(SearchStrategy):
             msg = f"No progress can be made from state {self.machine!r}"
             raise InvalidDefinition(msg) from None
 
-        rule = data.draw(
-            st.sampled_from([r for r in self.rules if self.is_valid(r)])
-        )
+        rule = data.draw(st.sampled_from([r for r in self.rules if self.is_valid(r)]))
         argdata = data.draw(rule.arguments_strategy)
         return (rule, argdata)
 
@@ -299,6 +321,7 @@ def where_clause(draw, collection):
     else:
         return {key: {op: value}}
 
+
 @st.composite
 def where_doc_clause(draw, collection):
     """Generate a where_document filter that could be used against the given collection"""
@@ -308,42 +331,47 @@ def where_doc_clause(draw, collection):
         word = draw(safe_text)
     return {"$contains": word}
 
+
 @st.composite
 def binary_operator_clause(draw, base_st):
     op = draw(st.sampled_from(["$and", "$or"]))
     return {op: [draw(base_st), draw(base_st)]}
+
 
 @st.composite
 def recursive_where_clause(draw, collection):
     base_st = where_clause(collection)
     return draw(st.recursive(base_st, binary_operator_clause))
 
+
 @st.composite
 def recursive_where_doc_clause(draw, collection):
     base_st = where_doc_clause(collection)
     return draw(st.recursive(base_st, binary_operator_clause))
+
 
 class Filter(TypedDict):
     where: Optional[Dict[str, Union[str, int, float]]]
     ids: Optional[List[str]]
     where_document: Optional[types.WhereDocument]
 
-@st.composite
-def filters(draw,
-            collection_st: st.SearchStrategy[Collection],
-            recordset_st: st.SearchStrategy[RecordSet]) -> Filter:
 
+@st.composite
+def filters(
+    draw,
+    collection_st: st.SearchStrategy[Collection],
+    recordset_st: st.SearchStrategy[RecordSet],
+) -> Filter:
     collection = draw(collection_st)
     recordset = draw(recordset_st)
 
     where_clause = draw(st.one_of(st.none(), recursive_where_clause(collection)))
-    where_document_clause = draw(st.one_of(st.none(),
-                                            recursive_where_doc_clause(collection)))
+    where_document_clause = draw(
+        st.one_of(st.none(), recursive_where_doc_clause(collection))
+    )
     ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
 
     if ids:
         ids = list(set(ids))
 
-    return {"where": where_clause,
-            "where_document": where_document_clause,
-            "ids": ids}
+    return {"where": where_clause, "where_document": where_document_clause, "ids": ids}
