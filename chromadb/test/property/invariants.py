@@ -1,5 +1,6 @@
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Literal, Sequence, Union, cast
+from typing import Callable, Union
+from typing_extensions import Literal
 import numpy as np
 from chromadb.api import API, types
 from chromadb.api.models.Collection import Collection
