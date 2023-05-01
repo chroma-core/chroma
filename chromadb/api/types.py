@@ -1,5 +1,5 @@
-from typing import Optional, Union, Dict, Sequence, Protocol, TypeVar, List
-from typing_extensions import Literal, TypedDict
+from typing import Optional, Union, Dict, Sequence, TypeVar, List
+from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 
 ID = str
