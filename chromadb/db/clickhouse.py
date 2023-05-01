@@ -365,6 +365,7 @@ class Clickhouse(DB):
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
+                result.append(f" JSONHas(metadata,'{key}') = 1 ")
                 if operator == "$gt":
                     return result.append(
                         f" JSONExtractFloat(metadata,'{key}') > {operand}"
@@ -382,7 +383,6 @@ class Clickhouse(DB):
                         f" JSONExtractFloat(metadata,'{key}') <= {operand}"
                     )
                 elif operator == "$ne":
-                    result.append(f" JSONHas(metadata,'{key}') = 1 ")
                     if type(operand) == str:
                         return result.append(
                             f" JSONExtractString(metadata,'{key}') != '{operand}'"
