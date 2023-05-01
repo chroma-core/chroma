@@ -21,6 +21,7 @@ import re
 import multiprocessing
 from chromadb import Client
 from chromadb.config import Settings
+import sys
 
 MINIMUM_VERSION = "0.3.20"
 COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
@@ -132,7 +133,7 @@ def persist_generated_data_with_old_version(
     coll = api.create_collection(
         name=collection_strategy.name,
         metadata=collection_strategy.metadata,
-        embedding_function=collection_strategy.embedding_function
+        embedding_function=collection_strategy.embedding_function,
     )
     coll.add(**embeddings_strategy)
     # We can't use the invariants module here because it uses the current version
@@ -152,9 +153,16 @@ def persist_generated_data_with_old_version(
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
+)
+@pytest.mark.skipif(
+    sys.version_info.major < 3
+    or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
+    reason="The mininum supported versions of chroma do not work with python <3.7",
 )
 @settings(deadline=None)
 def test_cycle_versions(
