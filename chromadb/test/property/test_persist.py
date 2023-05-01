@@ -56,11 +56,7 @@ def test_persist(
 
     coll.add(**embeddings_strategy)
 
-    invariants.count(
-        api_1,
-        coll.name,
-        len(embeddings_strategy["ids"]),
-    )
+    invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
@@ -73,11 +69,7 @@ def test_persist(
     coll = api_2.get_collection(
         name=collection_strategy.name, embedding_function=lambda x: None
     )
-    invariants.count(
-        api_2,
-        coll.name,
-        len(embeddings_strategy["ids"]),
-    )
+    invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
@@ -90,7 +82,7 @@ def load_and_check(settings: Settings, collection_name: str, embeddings_set, con
         coll = api.get_collection(
             name=collection_name, embedding_function=lambda x: None
         )
-        invariants.count(api, coll.name, len(embeddings_set["ids"]))
+        invariants.count(coll, embeddings_set)
         invariants.metadatas_match(coll, embeddings_set)
         invariants.documents_match(coll, embeddings_set)
         invariants.ids_match(coll, embeddings_set)

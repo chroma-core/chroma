@@ -206,11 +206,7 @@ def test_cycle_versions(
     coll = api.get_collection(
         name=collection_strategy.name, embedding_function=lambda x: None
     )
-    invariants.count(
-        api,
-        coll.name,
-        len(embeddings_strategy["ids"]),
-    )
+    invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)

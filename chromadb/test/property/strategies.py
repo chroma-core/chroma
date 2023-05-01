@@ -53,9 +53,9 @@ class RecordSet(TypedDict):
     represent what a user would pass to the API.
     """
     ids: types.IDs
-    embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
-    documents: Optional[List[types.Document]]
+    embeddings: Optional[Union[types.Embeddings, types.Embedding]]
+    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
+    documents: Optional[Union[List[types.Document], types.Document]]
 
 
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
@@ -221,11 +221,26 @@ def recordsets(draw,
 
     records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
+    ids = [r["id"] for r in records]
+    embeddings = [r["embedding"] for r in records]
+    metadatas = [r["metadata"] for r in records]
+    documents = [r["document"] for r in records] if collection.has_documents else None
+
+    # in the case where we have a single record, sometimes exercise
+    # the code that handles individual values rather than lists
+    if len(records) == 1:
+        if draw(st.booleans()):
+            ids = ids[0]
+        if draw(st.booleans()):
+            embeddings = embeddings[0]
+        if draw(st.booleans()):
+            metadatas = metadatas[0]
+
     return {
-        "ids": [r["id"] for r in records],
-        "embeddings": [r["embedding"] for r in records],
-        "metadatas": [r["metadata"] for r in records],
-        "documents": [r["document"] for r in records] if collection.has_documents else None,
+        "ids": ids,
+        "embeddings": embeddings,
+        "metadatas": metadatas,
+        "documents": documents
     }
 
 

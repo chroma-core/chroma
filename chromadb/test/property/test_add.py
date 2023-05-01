@@ -21,11 +21,7 @@ def test_add(
                                  embedding_function=collection.embedding_function)
     coll.add(**embeddings)
 
-    invariants.count(
-        api,
-        coll.name,
-        len(embeddings["ids"]),
-    )
+    invariants.count(coll, embeddings)
     n_results = max(1, (len(embeddings["ids"]) // 10))
     invariants.ann_accuracy(coll, embeddings, n_results=n_results)
 

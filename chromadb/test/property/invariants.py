@@ -1,17 +1,53 @@
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Literal, Sequence, Union, cast
+from typing import Callable, Literal, Sequence, Union, List, cast
 import numpy as np
 from chromadb.api import API, types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
 
+T = types.TypeVar
 
-def count(api: API, collection_name: str, expected_count: int):
+
+def _maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
+    """Wrap a value in a list if it is not a list"""
+    if value is None:
+        return None
+    elif isinstance(value, List):
+        return value
+    else:
+        return [value]
+
+
+def _wrap_all(embeddings: RecordSet) -> RecordSet:
+    """Ensure that an embedding set has lists for all its values"""
+
+    if embeddings["embeddings"] is None:
+        embedding_list = None
+    elif isinstance(embeddings["embeddings"], list):
+        if len(embeddings["embeddings"]) > 0:
+            if isinstance(embeddings["embeddings"][0], list):
+                embedding_list = embeddings["embeddings"]
+            else:
+                embedding_list = [embeddings["embeddings"]]
+        else:
+            embedding_list = []
+    else:
+        raise InvalidArgument("embeddings must be a list, list of lists, or None")
+
+    return {
+        "ids": _maybe_wrap(embeddings["ids"]),             # type: ignore
+        "documents": _maybe_wrap(embeddings["documents"]), # type: ignore
+        "metadatas": _maybe_wrap(embeddings["metadatas"]), # type: ignore
+        "embeddings": embedding_list
+    }
+
+
+def count(collection: Collection, embeddings: RecordSet):
     """The given collection count is equal to the number of embeddings"""
-    collection = api.get_collection(collection_name, embedding_function=lambda x: None)
     count = collection.count()
-    assert count == expected_count
+    embeddings = _wrap_all(embeddings)
+    assert count == len(embeddings["ids"])
 
 
 def _field_matches(
@@ -23,6 +59,7 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
+    embeddings = _wrap_all(embeddings)
     result = collection.get(ids=embeddings["ids"], include=[field_name])
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
@@ -49,6 +86,7 @@ def _field_matches(
 
 def ids_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding ids is equal to the expected ids"""
+    embeddings = _wrap_all(embeddings)
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
@@ -59,11 +97,13 @@ def ids_match(collection: Collection, embeddings: RecordSet):
 
 def metadatas_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding metadata is equal to the expected metadata"""
+    embeddings = _wrap_all(embeddings)
     _field_matches(collection, embeddings, "metadatas")
 
 
 def documents_match(collection: Collection, embeddings: RecordSet):
     """The actual embedding documents is equal to the expected documents"""
+    embeddings = _wrap_all(embeddings)
     _field_matches(collection, embeddings, "documents")
 
 
@@ -98,6 +138,7 @@ def ann_accuracy(
     min_recall: float = 0.99,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
+    embeddings = _wrap_all(embeddings)
 
     if len(embeddings["ids"]) == 0:
         return  # nothing to test here

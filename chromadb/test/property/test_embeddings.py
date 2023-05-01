@@ -138,7 +138,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @invariant()
     def count(self):
-        invariants.count(self.api, self.collection.name, len(self.embeddings["ids"]))
+        invariants.count(self.collection, self.embeddings) #type: ignore
 
     @invariant()
     def no_duplicates(self):
