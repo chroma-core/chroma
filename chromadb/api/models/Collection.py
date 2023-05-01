@@ -298,11 +298,11 @@ class Collection(BaseModel):
         Optional[List[Document]],
     ]:
         ids = validate_ids(maybe_cast_one_to_many(ids))
-        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
+        embeddings = maybe_cast_one_to_many(embeddings) if embeddings is not None else None
         metadatas = (
-            validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
+            validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas is not None else None
         )
-        documents = maybe_cast_one_to_many(documents) if documents else None
+        documents = maybe_cast_one_to_many(documents) if documents is not None else None
 
         # Check that one of embeddings or documents is provided
         if require_embeddings_or_documents:
