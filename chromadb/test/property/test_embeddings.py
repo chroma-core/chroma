@@ -90,20 +90,19 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
-        ids = invariants.maybe_wrap(embedding_set["ids"])
-        ids = cast(List[str], ids)
+        normalized_embedding_set = invariants.wrap_all(embedding_set)
 
-        if len(ids) > 0:
+        if len(normalized_embedding_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if set(ids).intersection(set(self.embeddings["ids"])):
+        if set(normalized_embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
             with pytest.raises(errors.IDAlreadyExistsError):
                 self.collection.add(**embedding_set)
             return multiple()
         else:
             self.collection.add(**embedding_set)
             self._upsert_embeddings(embedding_set)
-            return multiple(*embedding_set["ids"])
+            return multiple(*normalized_embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
