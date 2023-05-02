@@ -355,48 +355,51 @@ class Clickhouse(DB):
 
     def _format_where(self, where, result):
         for key, value in where.items():
+
+            def has_key_and(clause):
+                return f"(JSONHas(metadata,'{key}') = 1 AND {clause})"
+
             # Shortcut for $eq
             if type(value) == str:
-                result.append(f" JSONExtractString(metadata,'{key}') = '{value}'")
+                result.append(has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'"))
             elif type(value) == int:
-                result.append(f" JSONExtractInt(metadata,'{key}') = {value}")
+                result.append(has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}"))
             elif type(value) == float:
-                result.append(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                result.append(has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}"))
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
                 if operator == "$gt":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') > {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') > {operand}")
                     )
                 elif operator == "$lt":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') < {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') < {operand}")
                     )
                 elif operator == "$gte":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') >= {operand}")
                     )
                 elif operator == "$lte":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') <= {operand}")
                     )
                 elif operator == "$ne":
-                    result.append(f" JSONHas(metadata,'{key}') = 1 ")
                     if type(operand) == str:
                         return result.append(
-                            f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                            has_key_and(f" JSONExtractString(metadata,'{key}') != '{operand}'")
                         )
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') != {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') != {operand}")
                     )
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                            has_key_and(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                         )
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') = {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                     )
                 else:
                     raise ValueError(
