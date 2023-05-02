@@ -3,6 +3,7 @@ from hypothesis import given, settings, HealthCheck
 import chromadb
 from chromadb.api import API
 from chromadb.errors import NoDatapointsException
+from chromadb.test.property import invariants
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
