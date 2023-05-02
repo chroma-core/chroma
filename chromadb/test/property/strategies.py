@@ -121,6 +121,29 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
     )
 
 
+class hashing_embedding_function(types.EmbeddingFunction):
+    def __init__(self, dim: int, dtype: np.dtype) -> None:
+        self.dim = dim
+        self.dtype = dtype
+
+    def __call__(self, texts: types.Documents) -> types.Embeddings:
+        # Hash the texts and convert to hex strings
+        hashed_texts = [
+            list(hashlib.sha256(text.encode("utf-8")).hexdigest()) for text in texts
+        ]
+        # Pad with repetition, or truncate the hex strings to the desired dimension
+        padded_texts = [
+            text * (self.dim // len(text)) + text[: self.dim % len(text)]
+            for text in hashed_texts
+        ]
+
+        # Convert the hex strings to dtype
+        return np.array(
+            [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
+            dtype=self.dtype,
+        ).tolist()
+
+
 @dataclass
 class Collection:
     name: str
