@@ -218,11 +218,11 @@ class Clickhouse(DB):
          ALTER TABLE
             collections
          UPDATE
-            metadata = '{json.dumps(new_metadata)}',
-            name = '{new_name}'
+            metadata = %s,
+            name = %s
          WHERE
-            name = '{current_name}'
-         """
+            name = %s
+         """, [json.dumps(new_metadata), new_name, current_name]
         )
 
     def delete_collection(self, name: str):
@@ -283,20 +283,20 @@ class Clickhouse(DB):
             update_fields = []
             parameters[f"i{i}"] = ids[i]
             if embeddings is not None:
-                update_fields.append(f"embedding = {{e{i}:Array(Float64)}}")
+                update_fields.append(f"embedding = %(e{i})s")
                 parameters[f"e{i}"] = embeddings[i]
             if metadatas is not None:
-                update_fields.append(f"metadata = {{m{i}:String}}")
+                update_fields.append(f"metadata = %(m{i})s")
                 parameters[f"m{i}"] = json.dumps(metadatas[i])
             if documents is not None:
-                update_fields.append(f"document = {{d{i}:String}}")
+                update_fields.append(f"document = %(d{i})s")
                 parameters[f"d{i}"] = documents[i]
 
             update_statement = f"""
             UPDATE
                 {",".join(update_fields)}
             WHERE
-                id = {{i{i}:String}} AND
+                id = %(i{i})s AND
                 collection_uuid = '{collection_uuid}'{"" if i == len(ids) - 1 else ","}
             """
             updates.append(update_statement)
@@ -355,47 +355,51 @@ class Clickhouse(DB):
 
     def _format_where(self, where, result):
         for key, value in where.items():
+
+            def has_key_and(clause):
+                return f"(JSONHas(metadata,'{key}') = 1 AND {clause})"
+
             # Shortcut for $eq
             if type(value) == str:
-                result.append(f" JSONExtractString(metadata,'{key}') = '{value}'")
+                result.append(has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'"))
             elif type(value) == int:
-                result.append(f" JSONExtractInt(metadata,'{key}') = {value}")
+                result.append(has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}"))
             elif type(value) == float:
-                result.append(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                result.append(has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}"))
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
                 if operator == "$gt":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') > {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') > {operand}")
                     )
                 elif operator == "$lt":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') < {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') < {operand}")
                     )
                 elif operator == "$gte":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') >= {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') >= {operand}")
                     )
                 elif operator == "$lte":
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') <= {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') <= {operand}")
                     )
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
-                            f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                            has_key_and(f" JSONExtractString(metadata,'{key}') != '{operand}'")
                         )
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') != {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') != {operand}")
                     )
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                            has_key_and(f" JSONExtractString(metadata,'{key}') = '{operand}'")
                         )
                     return result.append(
-                        f" JSONExtractFloat(metadata,'{key}') = {operand}"
+                        has_key_and(f" JSONExtractFloat(metadata,'{key}') = {operand}")
                     )
                 else:
                     raise ValueError(

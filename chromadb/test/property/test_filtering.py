@@ -3,17 +3,10 @@ from hypothesis import given, settings, HealthCheck
 import chromadb
 from chromadb.api import API
 from chromadb.errors import NoDatapointsException
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
 
 
 def _filter_where_clause(clause, mm):
@@ -66,6 +59,9 @@ EMPTY_STRING = ""
 
 def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Filter):
     """Return IDs from the embedding set that match the given filter object"""
+
+    recordset = invariants.wrap_all(recordset)
+
     ids = set(recordset["ids"])
 
     if filter["ids"]:

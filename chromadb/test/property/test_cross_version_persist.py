@@ -10,9 +10,6 @@ import pytest
 import json
 from urllib import request
 from chromadb.api import API
-from chromadb.test.configurations import (
-    persist_old_version_configurations,
-)
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from importlib.util import spec_from_file_location, module_from_spec
@@ -27,6 +24,34 @@ COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
+def _patch_uppercase_coll_name(collection: strategies.Collection,
+                               embeddings: strategies.RecordSet):
+    """Old versions didn't handle uppercase characters in collection names"""
+    collection.name = collection.name.lower()
+
+
+def _patch_empty_dict_metadata(collection: strategies.Collection,
+                               embeddings: strategies.RecordSet):
+    """Old versions do the wrong thing when metadata is a single empty dict"""
+    if embeddings["metadatas"] == {}:
+        embeddings["metadatas"] = None
+
+
+version_patches = [("0.3.21", _patch_uppercase_coll_name),
+                   ("0.3.21", _patch_empty_dict_metadata)]
+
+
+def patch_for_version(version,
+                      collection: strategies.Collection,
+                      embeddings: strategies.RecordSet):
+    """Override aspects of the collection and embeddings, before testing, to account for
+    breaking changes in old versions."""
+
+    for patch_version, patch in version_patches:
+        if packaging_version.Version(version) <= packaging_version.Version(patch_version):
+            patch(collection, embeddings)
+
+
 def versions():
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
@@ -38,6 +63,20 @@ def versions():
     return [MINIMUM_VERSION, versions[-1]]
 
 
+def configurations(versions):
+    return [
+        (
+            version,
+            Settings(
+                chroma_api_impl="local",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+            ),
+        )
+        for version in versions
+    ]
+
+
 test_old_versions = versions()
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
@@ -45,7 +84,7 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
 @pytest.fixture(
-    scope="module", params=persist_old_version_configurations(test_old_versions)
+    scope="module", params=configurations(test_old_versions)
 )
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
@@ -139,14 +178,15 @@ def persist_generated_data_with_old_version(
     # Just use some basic checks for sanity and manual testing where you break the new
     # version
 
+    check_embeddings = invariants.wrap_all(embeddings_strategy)
     # Check count
-    assert coll.count() == len(embeddings_strategy["embeddings"] or [])
+    assert coll.count() == len(check_embeddings["embeddings"] or [])
     # Check ids
     result = coll.get()
     actual_ids = result["ids"]
-    embedding_id_to_index = {id: i for i, id in enumerate(embeddings_strategy["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
     actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
-    assert actual_ids == embeddings_strategy["ids"]
+    assert actual_ids == check_embeddings["ids"]
     api.persist()
     del api
 
@@ -167,12 +207,7 @@ def test_cycle_versions(
     # # the previous versions
     version, settings = version_settings
 
-    # Add data with an old version + check the invariants are preserved in that version
-    if packaging_version.Version(version) <= packaging_version.Version(
-        COLLECTION_NAME_LOWERCASE_VERSION
-    ):
-        # Old versions do not support upper case collection names
-        collection_strategy.name = collection_strategy.name.lower()
+    patch_for_version(version, collection_strategy, embeddings_strategy)
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -195,11 +230,7 @@ def test_cycle_versions(
     coll = api.get_collection(
         name=collection_strategy.name, embedding_function=lambda x: None
     )
-    invariants.count(
-        api,
-        coll.name,
-        len(embeddings_strategy["ids"]),
-    )
+    invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)

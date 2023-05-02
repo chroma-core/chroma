@@ -48,9 +48,9 @@ class RecordSet(TypedDict):
     """
 
     ids: types.IDs
-    embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
-    documents: Optional[List[types.Document]]
+    embeddings: Optional[Union[types.Embeddings, types.Embedding]]
+    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
+    documents: Optional[Union[List[types.Document], types.Document]]
 
 
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
@@ -58,12 +58,17 @@ class RecordSet(TypedDict):
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
 
+# Workaround for FastAPI json encoding peculiarities
+# https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
+safe_text = safe_text.filter(lambda s: not s.startswith("_sa"))
+
 safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
 safe_floats = st.floats(
-    allow_infinity=False, allow_nan=False
+    allow_infinity=False, allow_nan=False, allow_subnormal=False
 )  # TODO: handle infinity and NAN
+
 safe_values = [safe_text, safe_integers, safe_floats]
 
 
@@ -232,13 +237,26 @@ def recordsets(
 
     records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
+    ids = [r["id"] for r in records]
+    embeddings = [r["embedding"] for r in records]
+    metadatas = [r["metadata"] for r in records]
+    documents = [r["document"] for r in records] if collection.has_documents else None
+
+    # in the case where we have a single record, sometimes exercise
+    # the code that handles individual values rather than lists
+    if len(records) == 1:
+        if draw(st.booleans()):
+            ids = ids[0]
+        if draw(st.booleans()):
+            embeddings = embeddings[0]
+        if draw(st.booleans()):
+            metadatas = metadatas[0]
+
     return {
-        "ids": [r["id"] for r in records],
-        "embeddings": [r["embedding"] for r in records],
-        "metadatas": [r["metadata"] for r in records],
-        "documents": [r["document"] for r in records]
-        if collection.has_documents
-        else None,
+        "ids": ids,
+        "embeddings": embeddings,
+        "metadatas": metadatas,
+        "documents": documents
     }
 
 
