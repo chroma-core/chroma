@@ -42,7 +42,6 @@ class Collection(BaseModel):
         embedding_function: Optional[EmbeddingFunction] = None,
         metadata: Optional[Dict] = None,
     ):
-
         self._client = client
         if embedding_function is not None:
             self._embedding_function = embedding_function
@@ -83,7 +82,9 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents
         )
 
-        self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
+        self._client._add(
+            ids, self.name, embeddings, metadatas, documents, increment_index
+        )
 
     def get(
         self,
@@ -106,7 +107,9 @@ class Collection(BaseModel):
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents". Ids are always included. Defaults to ["metadatas", "documents"]. Optional.
         """
         where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
@@ -148,8 +151,12 @@ class Collection(BaseModel):
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
         """
         where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
-        query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+        query_embeddings = (
+            maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
+        )
         query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
         include = validate_include(include, allow_distances=True)
 
@@ -164,9 +171,13 @@ class Collection(BaseModel):
         # If query_embeddings are not provided, we need to compute them from the query_texts
         if query_embeddings is None:
             if self._embedding_function is None:
-                raise ValueError("You must provide embeddings or a function to compute them")
+                raise ValueError(
+                    "You must provide embeddings or a function to compute them"
+                )
             # We know query texts is not None at this point, cast for the typechecker
-            query_embeddings = self._embedding_function(cast(List[Document], query_texts))
+            query_embeddings = self._embedding_function(
+                cast(List[Document], query_texts)
+            )
 
         if where is None:
             where = {}
@@ -190,7 +201,9 @@ class Collection(BaseModel):
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
         """
-        self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        self._client._modify(
+            current_name=self.name, new_name=name, new_metadata=metadata
+        )
         if name:
             self.name = name
         if metadata:
@@ -263,25 +276,40 @@ class Collection(BaseModel):
         """
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
         return self._client._delete(self.name, ids, where, where_document)
 
     def create_index(self):
         self._client.create_index(self.name)
 
     def _validate_embedding_set(
-        self, ids, embeddings, metadatas, documents, require_embeddings_or_documents=True
-    ) -> Tuple[IDs, Optional[List[Embedding]], Optional[List[Metadata]], Optional[List[Document]]]:
-
+        self,
+        ids,
+        embeddings,
+        metadatas,
+        documents,
+        require_embeddings_or_documents=True,
+    ) -> Tuple[
+        IDs,
+        Optional[List[Embedding]],
+        Optional[List[Metadata]],
+        Optional[List[Document]],
+    ]:
         ids = validate_ids(maybe_cast_one_to_many(ids))
-        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
-        documents = maybe_cast_one_to_many(documents) if documents else None
+        embeddings = maybe_cast_one_to_many(embeddings) if embeddings is not None else None
+        metadatas = (
+            validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas is not None else None
+        )
+        documents = maybe_cast_one_to_many(documents) if documents is not None else None
 
         # Check that one of embeddings or documents is provided
         if require_embeddings_or_documents:
             if embeddings is None and documents is None:
-                raise ValueError("You must provide either embeddings or documents, or both")
+                raise ValueError(
+                    "You must provide either embeddings or documents, or both"
+                )
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
         if embeddings is not None and len(embeddings) != len(ids):
@@ -300,7 +328,9 @@ class Collection(BaseModel):
         # If document embeddings are not provided, we need to compute them
         if embeddings is None and documents is not None:
             if self._embedding_function is None:
-                raise ValueError("You must provide embeddings or a function to compute them")
+                raise ValueError(
+                    "You must provide embeddings or a function to compute them"
+                )
             embeddings = self._embedding_function(documents)
 
         return ids, embeddings, metadatas, documents

@@ -1,34 +1,30 @@
+
 import pytest
-from hypothesis import given
-import chromadb
+import hypothesis.strategies as st
+from hypothesis import given, settings
 from chromadb.api import API
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
-
-
-@given(collection=strategies.collections(), embeddings=strategies.embedding_set())
+collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+@given(collection=collection_st,
+       embeddings=strategies.recordsets(collection_st))
+@settings(deadline=None)
 def test_add(
-    api: API, collection: strategies.Collection, embeddings: strategies.EmbeddingSet
+    api: API, collection: strategies.Collection, embeddings: strategies.RecordSet
 ):
     api.reset()
 
     # TODO: Generative embedding functions
-    coll = api.create_collection(**collection, embedding_function=lambda x: None)
+    coll = api.create_collection(name=collection.name,
+                                 metadata=collection.metadata,
+                                 embedding_function=collection.embedding_function)
     coll.add(**embeddings)
 
-    invariants.count(
-        api,
-        coll.name,
-        len(embeddings["ids"]),
-    )
-    invariants.ann_accuracy(coll, embeddings)
+    embeddings = invariants.wrap_all(embeddings)
+    invariants.count(coll, embeddings)
+    n_results = max(1, (len(embeddings["ids"]) // 10))
+    invariants.ann_accuracy(coll, embeddings, n_results=n_results)
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
