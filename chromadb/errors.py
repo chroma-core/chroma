@@ -1,26 +1,66 @@
-class NoDatapointsException(Exception):
-    pass
+from abc import ABCMeta, abstractmethod
 
 
-class NoIndexException(Exception):
-    pass
+class ChromaError(Exception):
+
+    def code(self):
+        """Return an appropriate HTTP response code for this error"""
+        return 400 # Bad Request
+
+    def message(self):
+        return ", ".join(self.args)
+
+    @classmethod
+    @abstractmethod
+    def name(self):
+        """Return the error name"""
+        pass
 
 
-class InvalidDimensionException(Exception):
-    pass
+class NoDatapointsException(ChromaError):
+    @classmethod
+    def name(cls):
+        return "NoDatapoints"
 
 
-class NotEnoughElementsException(Exception):
-    pass
+class NoIndexException(ChromaError):
+    @classmethod
+    def name(cls):
+        return "NoIndex"
 
 
-class IDAlreadyExistsError(ValueError):
-    """ID already exists in the collection."""
+class InvalidDimensionException(ChromaError):
+    @classmethod
+    def name(cls):
+        return "InvalidDimension"
 
-    pass
+
+class NotEnoughElementsException(ChromaError):
+    @classmethod
+    def name(cls):
+        return "NotEnoughElements"
 
 
-class DuplicateIDError(ValueError):
-    """Duplicate IDs in an operation."""
+class IDAlreadyExistsError(ChromaError):
 
-    pass
+    def code(self):
+        return 409 # Conflict
+
+    @classmethod
+    def name(cls):
+        return "IDAlreadyExists"
+
+
+class DuplicateIDError(ChromaError):
+    @classmethod
+    def name(cls):
+        return "DuplicateID"
+
+error_types = {
+    "NoDatapoints": NoDatapointsException,
+    "NoIndex": NoIndexException,
+    "InvalidDimension": InvalidDimensionException,
+    "NotEnoughElements": NotEnoughElementsException,
+    "IDAlreadyExists": IDAlreadyExistsError,
+    "DuplicateID": DuplicateIDError,
+}
