@@ -2,7 +2,7 @@ import pytest
 import logging
 from hypothesis import given
 import hypothesis.strategies as st
-from typing import Set, Optional
+from typing import Set, List, Optional, cast
 from dataclasses import dataclass
 import chromadb.errors as errors
 import chromadb
@@ -89,17 +89,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
-        if len(self.embeddings["ids"]) > 0:
+
+        normalized_embedding_set = invariants.wrap_all(embedding_set)
+
+        if len(normalized_embedding_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if set(embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
+        if set(normalized_embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
             with pytest.raises(errors.IDAlreadyExistsError):
                 self.collection.add(**embedding_set)
             return multiple()
         else:
             self.collection.add(**embedding_set)
             self._upsert_embeddings(embedding_set)
-            return multiple(*embedding_set["ids"])
+            return multiple(*normalized_embedding_set["ids"])
 
     @precondition(lambda self: len(self.embeddings["ids"]) > 20)
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
@@ -138,7 +141,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @invariant()
     def count(self):
-        invariants.count(self.api, self.collection.name, len(self.embeddings["ids"]))
+        invariants.count(self.collection, self.embeddings) #type: ignore
 
     @invariant()
     def no_duplicates(self):
@@ -151,6 +154,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         )
 
     def _upsert_embeddings(self, embeddings: strategies.RecordSet):
+        embeddings = invariants.wrap_all(embeddings)
         for idx, id in enumerate(embeddings["ids"]):
             if id in self.embeddings["ids"]:
                 target_idx = self.embeddings["ids"].index(id)

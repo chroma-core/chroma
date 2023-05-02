@@ -59,6 +59,9 @@ EMPTY_STRING = ""
 def _filter_embedding_set(recordset: strategies.RecordSet,
                           filter: strategies.Filter):
     """Return IDs from the embedding set that match the given filter object"""
+
+    recordset = invariants.wrap_all(recordset)
+
     ids = set(recordset["ids"])
 
     if filter["ids"]:
