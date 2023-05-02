@@ -354,6 +354,7 @@ def filters(
     draw,
     collection_st: st.SearchStrategy[Collection],
     recordset_st: st.SearchStrategy[RecordSet],
+    include_all_ids=False,
 ) -> Filter:
     collection = draw(collection_st)
     recordset = draw(recordset_st)
@@ -362,7 +363,11 @@ def filters(
     where_document_clause = draw(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
-    ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
+
+    if include_all_ids:
+        ids = recordset["ids"]
+    else:
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
 
     if ids:
         ids = list(set(ids))
