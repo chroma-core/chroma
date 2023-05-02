@@ -1,3 +1,4 @@
+import hashlib
 import hypothesis
 import hypothesis.strategies as st
 from typing import Optional, Callable, List, Dict, Union
@@ -144,6 +145,12 @@ class hashing_embedding_function(types.EmbeddingFunction):
         ).tolist()
 
 
+def embedding_function_strategy(
+    dim: int, dtype: np.dtype
+) -> st.SearchStrategy[types.EmbeddingFunction]:
+    return st.just(hashing_embedding_function(dim, dtype))
+
+
 @dataclass
 class Collection:
     name: str
@@ -153,7 +160,7 @@ class Collection:
     known_metadata_keys: Dict[str, st.SearchStrategy]
     known_document_keywords: List[str]
     has_documents: bool = False
-    embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
+    embedding_function: Optional[types.EmbeddingFunction] = None
 
 
 @st.composite
@@ -187,6 +194,8 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
     else:
         known_document_keywords = []
 
+    embedding_function = draw(embedding_function_strategy(dimension, dtype))ß
+
     return Collection(
         name=name,
         metadata=metadata,
@@ -195,6 +204,7 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
         known_metadata_keys=known_metadata_keys,
         has_documents=has_documents,
         known_document_keywords=known_document_keywords,
+        embedding_function=embedding_function,
     )
 
 
