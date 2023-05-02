@@ -1,4 +1,4 @@
-name: Chroma Tests
+name: Chroma Integration Tests
 
 on:
   push:
@@ -12,7 +12,6 @@ on:
 
 jobs:
   test:
-    timeout-minutes: 90
     strategy:
       matrix:
         python: ['3.10']
@@ -34,5 +33,5 @@ jobs:
         python-version: ${{ matrix.python }}
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
-    - name: Test
-      run: python -m pytest ${{ matrix.testfile }}
+    - name: Integration Test
+      run: bin/integration-test ${{ matrix.testfile }}

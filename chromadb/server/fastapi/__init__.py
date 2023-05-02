@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 import chromadb
 import chromadb.server
 from chromadb.errors import (
+    ChromaError,
     NoDatapointsException,
     InvalidDimensionException,
     NotEnoughElementsException,
@@ -45,6 +46,10 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
+    except ChromaError as e:
+        return JSONResponse(content={"error": e.name(),
+                                     "message": e.message()},
+                            status_code=e.code())
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
@@ -84,6 +89,9 @@ class FastAPI(chromadb.server.Server):
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/update", self.update, methods=["POST"]
+        )
+        self.router.add_api_route(
+            "/api/v1/collections/{collection_name}/upsert", self.upsert, methods=["POST"]
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/get", self.get, methods=["POST"]
@@ -176,6 +184,16 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
+    def upsert(self, collection_name: str, upsert: AddEmbedding):        
+        return self._api._upsert(
+            collection_name=collection_name,
+            ids=upsert.ids,
+            embeddings=upsert.embeddings,
+            documents=upsert.documents,
+            metadatas=upsert.metadatas,
+            increment_index=upsert.increment_index,
+        )
+
     def get(self, collection_name, get: GetEmbedding):
         return self._api._get(
             collection_name=collection_name,
@@ -203,22 +221,15 @@ class FastAPI(chromadb.server.Server):
         return self._api.reset()
 
     def get_nearest_neighbors(self, collection_name, query: QueryEmbedding):
-        try:
-            nnresult = self._api._query(
-                collection_name=collection_name,
-                where=query.where,
-                where_document=query.where_document,
-                query_embeddings=query.query_embeddings,
-                n_results=query.n_results,
-                include=query.include,
-            )
-            return nnresult
-        except NoDatapointsException as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        except InvalidDimensionException as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        except NotEnoughElementsException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        nnresult = self._api._query(
+            collection_name=collection_name,
+            where=query.where,
+            where_document=query.where_document,
+            query_embeddings=query.query_embeddings,
+            n_results=query.n_results,
+            include=query.include,
+        )
+        return nnresult
 
     def raw_sql(self, raw_sql: RawSql):
         return self._api.raw_sql(raw_sql.raw_sql)
