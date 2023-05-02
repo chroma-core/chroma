@@ -13,7 +13,6 @@ from chromadb.errors import (
 )
 import uuid
 import numpy.typing as npt
-import numpy
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
@@ -370,10 +369,6 @@ class Clickhouse(DB):
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
-
-                if isinstance(operand, float):
-                    operand = numpy.float32(operand)
-
                 if operator == "$gt":
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') > {operand}")
