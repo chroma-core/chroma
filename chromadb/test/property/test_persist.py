@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
 import pytest
@@ -13,6 +14,28 @@ from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
 )
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
+import os
+import shutil
+import pytest
+import tempfile
+
+CreatePersistAPI = Callable[[], API]
+
+configurations = [
+    Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=tempfile.gettempdir() + "/tests",
+    )]
+
+@pytest.fixture(scope="module", params=configurations)
+def settings(request) -> Generator[Settings, None, None]:
+    configuration = request.param
+    yield configuration
+    save_path = configuration.persist_directory
+    # Remove if it exists
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")

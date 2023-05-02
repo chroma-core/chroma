@@ -2,17 +2,10 @@ import pytest
 from hypothesis import given, example, settings, HealthCheck
 import chromadb
 from chromadb.api import API
-from chromadb.test.configurations import configurations
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 import hypothesis.strategies as st
 import logging
-
-
-@pytest.fixture(scope="module", params=configurations())
-def api(request):
-    configuration = request.param
-    return chromadb.Client(configuration)
 
 
 def _filter_where_clause(clause, mm):
@@ -87,7 +80,8 @@ def _filter_embedding_set(recordset: strategies.RecordSet,
     return list(ids)
 
 
-collection_st = st.shared(strategies.collections(add_filterable_data=True), key="coll")
+collection_st = st.shared(strategies.collections(add_filterable_data=True,
+                                                 with_hnsw_params=True), key="coll")
 recordset_st = st.shared(strategies.recordsets(collection_st,
                                                 max_size=1000), key="recordset")
 
