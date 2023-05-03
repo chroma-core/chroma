@@ -104,18 +104,23 @@ export class Collection {
       this.embeddingFunction = embeddingFunction;
   }
 
-  public async add(
+  private async validate(
+    require_embeddings_or_documents: boolean, // set to false in the case of Update
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
   ) {
-    if ((embeddings === undefined) && (documents === undefined)) {
-      throw new Error(
-        "embeddings and documents cannot both be undefined",
-      );
-    } else if ((embeddings === undefined) && (documents !== undefined)) {
+
+    if (require_embeddings_or_documents) {
+      if ((embeddings === undefined) && (documents === undefined)) {
+        throw new Error(
+          "embeddings and documents cannot both be undefined",
+        );
+      }
+    }
+
+    if ((embeddings === undefined) && (documents !== undefined)) {
       const documentsArray = toArray(documents);
       if (this.embeddingFunction !== undefined) {
         embeddings = await this.embeddingFunction.generate(documentsArray)
@@ -162,11 +167,30 @@ export class Collection {
       );
     }
 
+    return [idsArray, embeddingsArray, metadatasArray, documentsArray]
+  }
+
+  public async add(
+    ids: string | string[],
+    embeddings: number[] | number[][] | undefined,
+    metadatas?: object | object[],
+    documents?: string | string[],
+    increment_index: boolean = true,
+  ) {
+
+    const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
+      true,
+      ids,
+      embeddings,
+      metadatas,
+      documents
+    )
+    
     const response = await this.api.add({
       collectionName: this.name,
       addEmbedding: {
         ids: idsArray,
-        embeddings: embeddingsArray,
+        embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
         documents: documentsArray,
         metadatas: metadatasArray,
         increment_index: increment_index,
@@ -179,6 +203,42 @@ export class Collection {
 
     return response
   }
+
+  public async upsert(
+    ids: string | string[],
+    embeddings: number[] | number[][] | undefined,
+    metadatas?: object | object[],
+    documents?: string | string[],
+    increment_index: boolean = true,
+  ) {
+
+    const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
+      true,
+      ids,
+      embeddings,
+      metadatas,
+      documents
+    )
+
+    const response = await this.api.upsert({
+      collectionName: this.name,
+      addEmbedding: {
+        ids: idsArray,
+        embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
+        documents: documentsArray,
+        metadatas: metadatasArray,
+        increment_index: increment_index,
+      },
+    }).then(function (response) {
+      return response.data;
+    }).catch(function ({ response }) {
+      return response.data;
+    });
+
+    return response
+
+  }
+
 
   public async count() {
     const response = await this.api.count({ collectionName: this.name });
