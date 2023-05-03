@@ -14,9 +14,9 @@ jobs:
   test:
     strategy:
       matrix:
-        python: ['3.10']
+        python: ['3.7']
         platform: [ubuntu-latest]
-        testfile: ["--ignore-glob chromadb/test/property/*",
+        testfile: ["--ignore-glob 'chromadb/test/property/*'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
