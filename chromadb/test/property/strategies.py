@@ -122,6 +122,15 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
     )
 
 
+class random_embedding_function(types.EmbeddingFunction):
+    def __init__(self, dim: int, dtype: np.dtype) -> None:
+        self.dim = dim
+        self.dtype = dtype
+
+    def __call__(self, texts: types.Documents) -> types.Embeddings:
+        return create_embeddings(self.dim, len(texts), self.dtype)
+
+
 class hashing_embedding_function(types.EmbeddingFunction):
     def __init__(self, dim: int, dtype: np.dtype) -> None:
         self.dim = dim
@@ -148,7 +157,7 @@ class hashing_embedding_function(types.EmbeddingFunction):
 def embedding_function_strategy(
     dim: int, dtype: np.dtype
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
-    return st.just(hashing_embedding_function(dim, dtype))
+    return st.just(random_embedding_function(dim, dtype))
 
 
 @dataclass
@@ -160,6 +169,7 @@ class Collection:
     known_metadata_keys: Dict[str, st.SearchStrategy]
     known_document_keywords: List[str]
     has_documents: bool = False
+    has_embeddings: bool = False
     embedding_function: Optional[types.EmbeddingFunction] = None
 
 
@@ -194,7 +204,12 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
     else:
         known_document_keywords = []
 
-    embedding_function = draw(embedding_function_strategy(dimension, dtype))ß
+    if not has_documents:
+        has_embeddings = True
+    else:
+        has_embeddings = draw(st.booleans())
+
+    embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
     return Collection(
         name=name,
@@ -204,6 +219,7 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
         known_metadata_keys=known_metadata_keys,
         has_documents=has_documents,
         known_document_keywords=known_document_keywords,
+        has_embeddings=has_embeddings,
         embedding_function=embedding_function,
     )
 
@@ -236,7 +252,9 @@ def document(draw, collection: Collection):
         known_words_st = st.text(min_size=1)
 
     random_words_st = st.text(min_size=1)
-    words = draw(st.lists(st.one_of(known_words_st, random_words_st)))
+    words = draw(
+        st.lists(st.one_of(known_words_st, random_words_st), unique=True, min_size=1)
+    )
     return " ".join(words)
 
 
@@ -244,8 +262,10 @@ def document(draw, collection: Collection):
 def record(draw, collection: Collection, id_strategy=safe_text):
     md = draw(metadata(collection))
 
-    embeddings = create_embeddings(collection.dimension, 1, collection.dtype)
-
+    if collection.has_embeddings:
+        embedding = create_embeddings(collection.dimension, 1, collection.dtype)[0]
+    else:
+        embedding = None
     if collection.has_documents:
         doc = draw(document(collection))
     else:
@@ -253,7 +273,7 @@ def record(draw, collection: Collection, id_strategy=safe_text):
 
     return {
         "id": draw(id_strategy),
-        "embedding": embeddings[0],
+        "embedding": embedding,
         "metadata": md,
         "document": doc,
     }
