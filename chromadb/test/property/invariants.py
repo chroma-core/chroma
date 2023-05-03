@@ -112,6 +112,13 @@ def no_duplicates(collection: Collection):
     assert len(ids) == len(set(ids))
 
 
+distance_functions = {
+    "l2": lambda x, y: np.linalg.norm(x - y) ** 2,
+    "cosine": lambda x, y: 1 - np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y)),
+    "ip": lambda x, y: 1 - np.dot(x, y),
+}
+
+
 def _exact_distances(
     query: types.Embeddings,
     targets: types.Embeddings,
@@ -148,9 +155,20 @@ def ann_accuracy(
         # If we don't have embeddings, we can't do an ANN search
         return
 
+    # l2 is the default distance function
+    distance_function = distance_functions["l2"]
+    if "hnsw:space" in collection.metadata:
+        space = collection.metadata["hnsw:space"]
+        if space == "cosine":
+            distance_function = distance_functions["cosine"]
+        if space == "ip":
+            distance_function = distance_functions["ip"]
+
     # Perform exact distance computation
     indices, distances = _exact_distances(
-        embeddings["embeddings"], embeddings["embeddings"]
+        embeddings["embeddings"],
+        embeddings["embeddings"],
+        distance_fn=distance_function,
     )
 
     query_results = collection.query(
@@ -176,7 +194,9 @@ def ann_accuracy(
             if id not in expected_ids:
                 continue
             index = id_to_index[id]
-            assert np.allclose(distances_i[index], query_results["distances"][i][j])
+            assert np.allclose(
+                distances_i[index], query_results["distances"][i][j], atol=1e-5
+            )
             assert np.allclose(
                 embeddings["embeddings"][index], query_results["embeddings"][i][j]
             )
