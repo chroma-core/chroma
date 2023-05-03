@@ -1,11 +1,13 @@
 import pytest
-from hypothesis import given, example, settings, HealthCheck
+from hypothesis import given, settings, HealthCheck
 import chromadb
 from chromadb.api import API
+from chromadb.errors import NoDatapointsException
+from chromadb.test.property import invariants
 import chromadb.test.property.strategies as strategies
-import chromadb.test.property.invariants as invariants
 import hypothesis.strategies as st
 import logging
+import random
 
 
 def _filter_where_clause(clause, mm):
@@ -39,8 +41,8 @@ def _filter_where_clause(clause, mm):
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
-def _filter_where_doc_clause(clause, doc):
 
+def _filter_where_doc_clause(clause, doc):
     key, expr = list(clause.items())[0]
     if key == "$and":
         return all(_filter_where_doc_clause(clause, doc) for clause in expr)
@@ -56,19 +58,22 @@ EMPTY_DICT = {}
 EMPTY_STRING = ""
 
 
-def _filter_embedding_set(recordset: strategies.RecordSet,
-                          filter: strategies.Filter):
+def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Filter):
     """Return IDs from the embedding set that match the given filter object"""
 
     recordset = invariants.wrap_all(recordset)
 
     ids = set(recordset["ids"])
 
-    if filter["ids"]:
-        ids = ids.intersection(filter["ids"])
+    filter_ids = filter["ids"]
+    if filter_ids is not None:
+        filter_ids = invariants.maybe_wrap(filter_ids)
+        assert filter_ids is not None
+        # If the filter ids is an empty list then we treat that as get all
+        if len(filter_ids) != 0:
+            ids = ids.intersection(filter_ids)
 
     for i in range(len(recordset["ids"])):
-
         if filter["where"]:
             metadatas = recordset["metadatas"] or [EMPTY_DICT] * len(recordset["ids"])
             if not _filter_where_clause(filter["where"], metadatas[i]):
@@ -76,31 +81,40 @@ def _filter_embedding_set(recordset: strategies.RecordSet,
 
         if filter["where_document"]:
             documents = recordset["documents"] or [EMPTY_STRING] * len(recordset["ids"])
-            if not _filter_where_doc_clause(filter["where_document"],
-                                            documents[i]):
+            if not _filter_where_doc_clause(filter["where_document"], documents[i]):
                 ids.discard(recordset["ids"][i])
 
     return list(ids)
 
 
-collection_st = st.shared(strategies.collections(add_filterable_data=True,
-                                                 with_hnsw_params=True), key="coll")
-recordset_st = st.shared(strategies.recordsets(collection_st,
-                                                max_size=1000), key="recordset")
+collection_st = st.shared(
+    strategies.collections(add_filterable_data=True, with_hnsw_params=True), key="coll"
+)
+recordset_st = st.shared(
+    strategies.recordsets(collection_st, max_size=1000), key="recordset"
+)
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture,
-                                 HealthCheck.large_base_example])
-@given(collection=collection_st,
-       recordset=recordset_st,
-       filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1))
-def test_filterable_metadata(caplog, api, collection, recordset, filters):
+@settings(
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+    ]
+)
+@given(
+    collection=collection_st,
+    recordset=recordset_st,
+    filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
+)
+def test_filterable_metadata_get(caplog, api: API, collection, recordset, filters):
     caplog.set_level(logging.ERROR)
 
     api.reset()
-    coll = api.create_collection(name=collection.name,
-                                 metadata=collection.metadata,
-                                 embedding_function=collection.embedding_function)
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,
+        embedding_function=collection.embedding_function,
+    )
     coll.add(**recordset)
 
     for filter in filters:
@@ -108,3 +122,54 @@ def test_filterable_metadata(caplog, api, collection, recordset, filters):
         expected_ids = _filter_embedding_set(recordset, filter)
         assert sorted(result_ids) == sorted(expected_ids)
 
+
+@settings(
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+    ]
+)
+@given(
+    collection=collection_st,
+    recordset=recordset_st,
+    filters=st.lists(
+        strategies.filters(collection_st, recordset_st, include_all_ids=True),
+        min_size=1,
+    ),
+)
+def test_filterable_metadata_query(
+    caplog,
+    api: API,
+    collection: strategies.Collection,
+    recordset: strategies.RecordSet,
+    filters,
+):
+    caplog.set_level(logging.ERROR)
+
+    api.reset()
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,
+        embedding_function=collection.embedding_function,
+    )
+    coll.add(**recordset)
+    recordset = invariants.wrap_all(recordset)
+    total_count = len(recordset["ids"])
+    # Pick a random vector
+    embeddings = recordset["embeddings"]
+    assert embeddings is not None
+    random_embedding = embeddings[random.randint(0, total_count - 1)]
+    for filter in filters:
+        try:
+            result_ids = set(
+                coll.query(
+                    query_embeddings=random_embedding,
+                    n_results=total_count,
+                    where=filter["where"],
+                    where_document=filter["where_document"],
+                )["ids"][0]
+            )
+        except NoDatapointsException:
+            result_ids = set()
+        expected_ids = set(_filter_embedding_set(recordset, filter))
+        assert len(result_ids.intersection(expected_ids)) == len(result_ids)

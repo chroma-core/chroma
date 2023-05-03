@@ -1,5 +1,5 @@
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Union, List
+from typing import Callable, Union, List, TypeVar
 from typing_extensions import Literal
 import numpy as np
 from chromadb.api import types
@@ -7,7 +7,7 @@ from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
 
-T = types.TypeVar
+T = TypeVar("T")
 
 
 def maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
