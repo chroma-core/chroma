@@ -154,6 +154,14 @@ export class Collection {
       );
     }
 
+    const uniqueIds = new Set(idsArray);
+    if (uniqueIds.size !== idsArray.length) {
+      const duplicateIds = idsArray.filter((item, index) => idsArray.indexOf(item) !== index);
+      throw new Error(
+        `Expected IDs to be unique, found duplicates for: ${duplicateIds}`,
+      );
+    }
+
     const response = await this.api.add({
       collectionName: this.name,
       addEmbedding: {
