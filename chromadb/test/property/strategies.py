@@ -8,7 +8,6 @@ import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.strategies._internal.featureflags import FeatureStrategy
 from hypothesis.errors import InvalidArgument, InvalidDefinition
-
 from dataclasses import dataclass
 
 # Set the random seed for reproducibility
@@ -47,7 +46,7 @@ class RecordSet(TypedDict):
     represent what a user would pass to the API.
     """
 
-    ids: types.IDs
+    ids: Union[types.ID, List[types.ID]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
     metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
@@ -256,7 +255,7 @@ def recordsets(
         "ids": ids,
         "embeddings": embeddings,
         "metadatas": metadatas,
-        "documents": documents
+        "documents": documents,
     }
 
 
@@ -363,7 +362,7 @@ def recursive_where_doc_clause(draw, collection):
 
 class Filter(TypedDict):
     where: Optional[Dict[str, Union[str, int, float]]]
-    ids: Optional[List[str]]
+    ids: Optional[Union[str, List[str]]]
     where_document: Optional[types.WhereDocument]
 
 
@@ -382,12 +381,19 @@ def filters(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
 
-    if include_all_ids:
-        ids = recordset["ids"]
-    else:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(recordset["ids"]))))
+    ids = recordset["ids"]
+    # Record sets can be a value instead of a list of values if there is only one record
+    if isinstance(ids, str):
+        ids = [ids]
 
-    if ids:
-        ids = list(set(ids))
+    if not include_all_ids:
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
+        if ids is not None:
+            # Remove duplicates since hypothesis samples with replacement
+            ids = list(set(ids))
+
+    # Test both the single value list and the unwrapped single value case
+    if ids is not None and len(ids) == 1 and draw(st.booleans()):
+        ids = ids[0]
 
     return {"where": where_clause, "where_document": where_document_clause, "ids": ids}

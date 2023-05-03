@@ -65,8 +65,13 @@ def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Fi
 
     ids = set(recordset["ids"])
 
-    if filter["ids"]:
-        ids = ids.intersection(filter["ids"])
+    filter_ids = filter["ids"]
+    if filter_ids is not None:
+        filter_ids = invariants.maybe_wrap(filter_ids)
+        assert filter_ids is not None
+        # If the filter ids is an empty list then we treat that as get all
+        if len(filter_ids) != 0:
+            ids = ids.intersection(filter_ids)
 
     for i in range(len(recordset["ids"])):
         if filter["where"]:
@@ -148,7 +153,7 @@ def test_filterable_metadata_query(
         embedding_function=collection.embedding_function,
     )
     coll.add(**recordset)
-
+    recordset = invariants.wrap_all(recordset)
     total_count = len(recordset["ids"])
     # Pick a random vector
     embeddings = recordset["embeddings"]
