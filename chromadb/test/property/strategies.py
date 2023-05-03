@@ -146,6 +146,8 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
+        # Select a space at random
+        metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
     known_metadata_keys = {}
     if add_filterable_data:
