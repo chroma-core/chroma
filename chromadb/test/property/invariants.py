@@ -1,7 +1,8 @@
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Literal, Sequence, Union, List, cast
+from typing import Callable, Union, List
+from typing_extensions import Literal
 import numpy as np
-from chromadb.api import API, types
+from chromadb.api import types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
@@ -36,10 +37,10 @@ def wrap_all(embeddings: RecordSet) -> RecordSet:
         raise InvalidArgument("embeddings must be a list, list of lists, or None")
 
     return {
-        "ids": maybe_wrap(embeddings["ids"]),             # type: ignore
-        "documents": maybe_wrap(embeddings["documents"]), # type: ignore
-        "metadatas": maybe_wrap(embeddings["metadatas"]), # type: ignore
-        "embeddings": embedding_list
+        "ids": maybe_wrap(embeddings["ids"]),  # type: ignore
+        "documents": maybe_wrap(embeddings["documents"]),  # type: ignore
+        "metadatas": maybe_wrap(embeddings["metadatas"]),  # type: ignore
+        "embeddings": embedding_list,
     }
 
 

@@ -1,13 +1,13 @@
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, TypedDict, Callable, List, Dict, Union, cast, TypeVar
+from typing import Optional, Callable, List, Dict, Union
+from typing_extensions import TypedDict
 import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
-from hypothesis.strategies._internal.featureflags import FeatureStrategy
-from hypothesis.errors import InvalidArgument, InvalidDefinition
+from hypothesis.errors import InvalidDefinition
 
 from dataclasses import dataclass
 
@@ -256,7 +256,7 @@ def recordsets(
         "ids": ids,
         "embeddings": embeddings,
         "metadatas": metadatas,
-        "documents": documents
+        "documents": documents,
     }
 
 
