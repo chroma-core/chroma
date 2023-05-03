@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        python: ['3.10']
+        python: ['3.7', '3.8', '3.9', '3.10']
         platform: [ubuntu-latest]
         testfile: ["--ignore-glob 'chromadb/test/property/*'",
                    "chromadb/test/property/test_add.py",

@@ -185,7 +185,7 @@ export class Collection {
       metadatas,
       documents
     )
-
+    
     const response = await this.api.add({
       collectionName: this.name,
       addEmbedding: {
