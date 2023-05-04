@@ -25,31 +25,37 @@ COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
-def _patch_uppercase_coll_name(collection: strategies.Collection,
-                               embeddings: strategies.RecordSet):
+def _patch_uppercase_coll_name(
+    collection: strategies.Collection, embeddings: strategies.RecordSet
+):
     """Old versions didn't handle uppercase characters in collection names"""
     collection.name = collection.name.lower()
 
 
-def _patch_empty_dict_metadata(collection: strategies.Collection,
-                               embeddings: strategies.RecordSet):
+def _patch_empty_dict_metadata(
+    collection: strategies.Collection, embeddings: strategies.RecordSet
+):
     """Old versions do the wrong thing when metadata is a single empty dict"""
     if embeddings["metadatas"] == {}:
         embeddings["metadatas"] = None
 
 
-version_patches = [("0.3.21", _patch_uppercase_coll_name),
-                   ("0.3.21", _patch_empty_dict_metadata)]
+version_patches = [
+    ("0.3.21", _patch_uppercase_coll_name),
+    ("0.3.21", _patch_empty_dict_metadata),
+]
 
 
-def patch_for_version(version,
-                      collection: strategies.Collection,
-                      embeddings: strategies.RecordSet):
+def patch_for_version(
+    version, collection: strategies.Collection, embeddings: strategies.RecordSet
+):
     """Override aspects of the collection and embeddings, before testing, to account for
     breaking changes in old versions."""
 
     for patch_version, patch in version_patches:
-        if packaging_version.Version(version) <= packaging_version.Version(patch_version):
+        if packaging_version.Version(version) <= packaging_version.Version(
+            patch_version
+        ):
             patch(collection, embeddings)
 
 
@@ -84,9 +90,7 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
-@pytest.fixture(
-    scope="module", params=configurations(test_old_versions)
-)
+@pytest.fixture(scope="module", params=configurations(test_old_versions))
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
@@ -172,7 +176,7 @@ def persist_generated_data_with_old_version(
     coll = api.create_collection(
         name=collection_strategy.name,
         metadata=collection_strategy.metadata,
-        embedding_function=collection_strategy.embedding_function,
+        embedding_function=lambda x: None,
     )
     coll.add(**embeddings_strategy)
     # We can't use the invariants module here because it uses the current version
