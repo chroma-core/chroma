@@ -112,6 +112,7 @@ def no_duplicates(collection: Collection):
     assert len(ids) == len(set(ids))
 
 
+# These match what the spec of hnswlib is
 distance_functions = {
     "l2": lambda x, y: np.linalg.norm(x - y) ** 2,
     "cosine": lambda x, y: 1 - np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y)),
@@ -194,6 +195,7 @@ def ann_accuracy(
             if id not in expected_ids:
                 continue
             index = id_to_index[id]
+            # TODO: IP distance is resulting in more noise than expected so atol=1e-5
             assert np.allclose(
                 distances_i[index], query_results["distances"][i][j], atol=1e-5
             )
