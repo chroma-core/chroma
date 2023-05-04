@@ -75,7 +75,7 @@ class Hnswlib(Index):
     _index_metadata: IndexMetadata
     _params: HnswParams
     _id_to_label: Dict[str, int]
-    _label_to_id: Dict[int, str]
+    _label_to_id: Dict[int, UUID]
 
     def __init__(self, id, settings, metadata):
         self._save_folder = settings.persist_directory + "/index"
