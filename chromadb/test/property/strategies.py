@@ -146,6 +146,11 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
+        # Sometimes, select a space at random
+        if draw(st.booleans()):
+            # TODO: pull the distance functions from a source of truth that lives not
+            # in tests once https://github.com/chroma-core/issues/issues/61 lands
+            metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
     known_metadata_keys = {}
     if add_filterable_data:

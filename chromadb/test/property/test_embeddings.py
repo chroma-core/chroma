@@ -53,13 +53,15 @@ class EmbeddingStateMachineStates:
     update_embeddings = "update_embeddings"
     upsert_embeddings = "upsert_embeddings"
 
+
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
 
 class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle = Bundle("embedding_ids")
 
-    def __init__(self, api = None):
+    def __init__(self, api=None):
         super().__init__()
         # For debug only, to run as class-based test
         if not api:
@@ -73,7 +75,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         self.collection = self.api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
-            embedding_function=collection.embedding_function
+            embedding_function=collection.embedding_function,
         )
         trace("init")
         self.on_state_change(EmbeddingStateMachineStates.initialize)
@@ -84,8 +86,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             "documents": [],
         }
 
-    @rule(target=embedding_ids,
-          embedding_set=strategies.recordsets(collection_st))
+    @rule(target=embedding_ids, embedding_set=strategies.recordsets(collection_st))
     def add_embeddings(self, embedding_set):
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
@@ -95,7 +96,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(normalized_embedding_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if set(normalized_embedding_set["ids"]).intersection(set(self.embeddings["ids"])):
+        if set(normalized_embedding_set["ids"]).intersection(
+            set(self.embeddings["ids"])
+        ):
             with pytest.raises(errors.IDAlreadyExistsError):
                 self.collection.add(**embedding_set)
             return multiple()
@@ -117,10 +120,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
     @precondition(lambda self: len(self.embeddings["ids"]) >= 5)
-    @rule(embedding_set=strategies.recordsets(collection_strategy=collection_st,
-                                              id_strategy=embedding_ids,
-                                              min_size=1,
-                                              max_size=5))
+    @rule(
+        embedding_set=strategies.recordsets(
+            collection_strategy=collection_st,
+            id_strategy=embedding_ids,
+            min_size=1,
+            max_size=5,
+        )
+    )
     def update_embeddings(self, embedding_set):
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
@@ -129,10 +136,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
     @precondition(lambda self: len(self.embeddings["ids"]) >= 3)
-    @rule(embedding_set=strategies.recordsets(
-              collection_strategy=collection_st,
-              id_strategy=st.one_of(embedding_ids, strategies.safe_text),
-              min_size=1, max_size=5))
+    @rule(
+        embedding_set=strategies.recordsets(
+            collection_strategy=collection_st,
+            id_strategy=st.one_of(embedding_ids, strategies.safe_text),
+            min_size=1,
+            max_size=5,
+        )
+    )
     def upsert_embeddings(self, embedding_set):
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
@@ -141,7 +152,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
     @invariant()
     def count(self):
-        invariants.count(self.collection, self.embeddings) #type: ignore
+        invariants.count(self.collection, self.embeddings)  # type: ignore
 
     @invariant()
     def no_duplicates(self):
@@ -150,7 +161,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @invariant()
     def ann_accuracy(self):
         invariants.ann_accuracy(
-            collection=self.collection, embeddings=self.embeddings, min_recall=0.95  #type: ignore
+            collection=self.collection, embeddings=self.embeddings, min_recall=0.95  # type: ignore
         )
 
     def _upsert_embeddings(self, embeddings: strategies.RecordSet):
