@@ -1,0 +1,26 @@
+name: "Pull request checklist"
+on:
+  pull_request_target:
+    types:
+      - opened
+jobs:
+  pull_request_info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF})"
+        id: extract_branch
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Show checklist
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: PR Review checklist
+          message: |
+            - [ ] This code is sufficiently tested
+            - [ ] Checklist item 2
