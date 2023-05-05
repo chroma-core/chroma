@@ -153,7 +153,6 @@ def ann_accuracy(
     if len(record_set["ids"]) == 0:
         return  # nothing to test here
 
-    # TODO Remove once we support querying by documents in tests
     embeddings = record_set["embeddings"]
     have_embeddings = embeddings is not None and len(embeddings) > 0
     if not have_embeddings:
