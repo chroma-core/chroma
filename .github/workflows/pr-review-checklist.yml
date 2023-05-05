@@ -1,16 +1,23 @@
-name: PR Review Checklist
+name: PR Comment
+
 on:
   pull_request_target:
-    types: [ opened, reopened ]
+    types: 
+      - opened
+      - reopened
 
 jobs:
-  tests:
+  PR-Comment:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
-    name: Comment Checklist
     steps:
-      - uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          message: "TEST!"
+    - name: PR Comment
+      uses: actions/github-script@v2
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          github.issues.createComment({
+            issue_number: ${{ github.event.number }},
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: 'test test test'
+          })
