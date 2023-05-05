@@ -28,7 +28,7 @@ api = chromadb.Client()
 print(api.heartbeat())
 ```
 
-2. Standalone and in-memory with persistance:
+2. Standalone and in-memory with persistence:
 
 This by default saves your db and your indexes to a `.chroma` directory and can also load from them. 
 ```python

@@ -28,7 +28,7 @@ pip install chromadb # python client
 # for client-server mode, docker-compose up -d --build
 ```
 
-The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)):
+The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
 
 ```python
 import chromadb
@@ -84,7 +84,7 @@ Embeddings databases (also known as **vector databases**) store embeddings and a
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x)
-- [Review the roadmap and contribute your ideas](https://github.com/chroma-core/chroma/wiki/Roadmap)
+- [Review the roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues)
 
 ## License
