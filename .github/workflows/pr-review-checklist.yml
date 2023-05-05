@@ -1,10 +1,9 @@
-name: PR Comment
+name: PR Review Checklist
 
 on:
   pull_request_target:
     types: 
       - opened
-      - reopened
 
 jobs:
   PR-Comment:
@@ -19,5 +18,7 @@ jobs:
             issue_number: ${{ github.event.number }},
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: 'test test test'
+            body: ' - [ ] This code is sufficiently tested \
+                    - [ ] This code is artisanal
+            '
           })
