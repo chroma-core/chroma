@@ -194,7 +194,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                     self.embeddings["embeddings"].append(embeddings["embeddings"][idx])
                 else:
                     self.embeddings["embeddings"].append(
-                        self.embedding_function(embeddings["documents"][idx])[0]
+                        self.embedding_function([embeddings["documents"][idx]])[0]
                     )
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
                     self.embeddings["metadatas"].append(embeddings["metadatas"][idx])
