@@ -235,7 +235,9 @@ def ann_accuracy(
     recall = (size - missing) / size
 
     try:
-        note(f"recall: {recall}, missing {missing} out of {size}")
+        note(
+            f"recall: {recall}, missing {missing} out of {size}, accuracy threshold {accuracy_threshold}"
+        )
     except InvalidArgument:
         pass  # it's ok if we're running outside hypothesis
 
