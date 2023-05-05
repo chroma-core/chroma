@@ -174,8 +174,7 @@ def collections(
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
-    if has_embeddings is not None and has_documents is not None:
-        assert has_embeddings or has_documents
+    assert not ((has_embeddings is False) and (has_documents is False))
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
@@ -254,9 +253,7 @@ def document(draw, collection: Collection):
         known_words_st = st.text(min_size=1)
 
     random_words_st = st.text(min_size=1)
-    words = draw(
-        st.lists(st.one_of(known_words_st, random_words_st), unique=True, min_size=1)
-    )
+    words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
 
 
