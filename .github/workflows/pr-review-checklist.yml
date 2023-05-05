@@ -1,26 +1,18 @@
 name: "Pull request checklist"
-on:
-  pull_request_target:
-    types:
-      - opened
+
+on: [pull_request]
+
 jobs:
-  pull_request_info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Extract branch name
-        shell: bash
-        run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF})"
-        id: extract_branch
+    build:
+        name: Comment a pull_request
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v2
 
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Show checklist
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: PR Review checklist
-          message: |
-            - [ ] This code is sufficiently tested
-            - [ ] Checklist item 2
+            - name: Comment a pull_request
+              uses: mb2dev/github-action-comment-pull-request@1.0.0
+              with:
+                message: "Hello, It's my first comment with Github action !"
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                reactions: "+1 | -1 | laugh | hooray | confused | heart | rocket | eyes"
