@@ -18,7 +18,7 @@ jobs:
             issue_number: ${{ github.event.number }},
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: ' - [ ] This code is sufficiently tested \
-                    - [ ] This code is artisanal
-            '
+            body: `# Reviewer Checklist
+              - [ ] This code is sufficiently tested 
+              - [ ] This code is artisanal`
           })
