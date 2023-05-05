@@ -1,18 +1,19 @@
-name: "Pull request checklist"
-
-on: [pull_request]
+name: PR Review Checklist
+on:
+  pull_request_target:
+  push:
+    branches:
+      - main
+      - team/hypothesis-tests
 
 jobs:
-    build:
-        name: Comment a pull_request
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v2
-
-            - name: Comment a pull_request
-              uses: mb2dev/github-action-comment-pull-request@1.0.0
-              with:
-                message: "Hello, It's my first comment with Github action !"
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                reactions: "+1 | -1 | laugh | hooray | confused | heart | rocket | eyes"
+  tests:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    name: Comment Checklist
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          message: "TEST!"
