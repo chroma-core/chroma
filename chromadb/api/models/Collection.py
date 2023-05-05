@@ -298,9 +298,13 @@ class Collection(BaseModel):
         Optional[List[Document]],
     ]:
         ids = validate_ids(maybe_cast_one_to_many(ids))
-        embeddings = maybe_cast_one_to_many(embeddings) if embeddings is not None else None
+        embeddings = (
+            maybe_cast_one_to_many(embeddings) if embeddings is not None else None
+        )
         metadatas = (
-            validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas is not None else None
+            validate_metadatas(maybe_cast_one_to_many(metadatas))
+            if metadatas is not None
+            else None
         )
         documents = maybe_cast_one_to_many(documents) if documents is not None else None
 
@@ -334,3 +338,6 @@ class Collection(BaseModel):
             embeddings = self._embedding_function(documents)
 
         return ids, embeddings, metadatas, documents
+
+
+# RANDOM
