@@ -267,7 +267,7 @@ def test_escape_chars_in_ids(api: API):
     assert coll.count() == 0
 
 
-@pytest.mark.xfail(reason="This causes bad graphs in hnsw ?")
+# @pytest.mark.xfail(reason="This causes bad graphs in hnsw ?")
 def test_bad_graph(api: API):
     state = EmbeddingStateMachine(api=api)
     state.initialize(
