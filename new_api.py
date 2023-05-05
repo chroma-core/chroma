@@ -10,7 +10,9 @@ if USE_LOCAL:
 else:
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000"
+            chroma_api_impl="rest",
+            chroma_server_host="localhost",
+            chroma_server_http_port="8000",
         )
     )
 # print(client)
@@ -40,6 +42,7 @@ collection2 = client.create_collection(name="test2")
 assert len(client.list_collections()) == 2
 client.delete_collection(name="test2")
 assert len(client.list_collections()) == 1
+# RANDOm
 client.create_collection(name="test2")
 client.delete_collection(name="test2")
 assert len(client.list_collections()) == 1
@@ -163,7 +166,9 @@ collection.add(
 )
 
 # Add single doc without embeddings (call emb function)
-collection.add(metadatas={"uri": "img9.png", "style": "style1"}, documents="doc9", ids="id9")
+collection.add(
+    metadatas={"uri": "img9.png", "style": "style1"}, documents="doc9", ids="id9"
+)
 
 print(collection.peek(5))
 assert collection.count() == 9
@@ -180,7 +185,8 @@ assert collection.count() == 9
 
 ### TEST UPDATE ###
 collection = client.create_collection(
-    "test_update", embedding_function=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents))
+    "test_update",
+    embedding_function=(lambda documents: [[0.1, 1.1, 1.2]] * len(documents)),
 )
 assert collection.count() == 0
 
