@@ -3,7 +3,6 @@ import pickle
 import time
 from typing import Dict
 
-import numpy as np
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index

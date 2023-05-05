@@ -193,11 +193,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 if "embeddings" in embeddings and embeddings["embeddings"] is not None:
                     self.embeddings["embeddings"].append(embeddings["embeddings"][idx])
                 else:
-                    document_to_embed = embeddings["documents"][idx]
-                    if isinstance(document_to_embed, str):
-                        document_to_embed = [document_to_embed]
                     self.embeddings["embeddings"].append(
-                        self.embedding_function(document_to_embed)[0]
+                        self.embedding_function(embeddings["documents"][idx])[0]
                     )
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
                     self.embeddings["metadatas"].append(embeddings["metadatas"][idx])

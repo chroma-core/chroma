@@ -1,6 +1,4 @@
-import pytest
 from hypothesis import given, settings, HealthCheck
-import chromadb
 from chromadb.api import API
 from chromadb.errors import NoDatapointsException
 from chromadb.test.property import invariants
@@ -88,9 +86,7 @@ def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Fi
 
 
 collection_st = st.shared(
-    strategies.collections(
-        add_filterable_data=True, with_hnsw_params=True, has_embeddings=True
-    ),
+    strategies.collections(add_filterable_data=True, with_hnsw_params=True),
     key="coll",
 )
 recordset_st = st.shared(
@@ -159,14 +155,17 @@ def test_filterable_metadata_query(
     recordset = invariants.wrap_all(recordset)
     total_count = len(recordset["ids"])
     # Pick a random vector
-    embeddings = recordset["embeddings"]
-    assert embeddings is not None
-    random_embedding = embeddings[random.randint(0, total_count - 1)]
+    if collection.has_embeddings:
+        random_query = recordset["embeddings"][random.randint(0, total_count - 1)]
+    else:
+        random_query = collection.embedding_function(
+            recordset["documents"][random.randint(0, total_count - 1)]
+        )
     for filter in filters:
         try:
             result_ids = set(
                 coll.query(
-                    query_embeddings=random_embedding,
+                    query_embeddings=random_query,
                     n_results=total_count,
                     where=filter["where"],
                     where_document=filter["where_document"],

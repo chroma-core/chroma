@@ -196,6 +196,7 @@ def persist_generated_data_with_old_version(
     del api
 
 
+# Since we can't pickle the embedding function, we always generate record sets with embeddings
 collection_st = st.shared(
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )

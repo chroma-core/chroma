@@ -122,15 +122,6 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
     )
 
 
-class random_embedding_function(types.EmbeddingFunction):
-    def __init__(self, dim: int, dtype: np.dtype) -> None:
-        self.dim = dim
-        self.dtype = dtype
-
-    def __call__(self, texts: types.Documents) -> types.Embeddings:
-        return create_embeddings(self.dim, len(texts), self.dtype)
-
-
 class hashing_embedding_function(types.EmbeddingFunction):
     def __init__(self, dim: int, dtype: np.dtype) -> None:
         self.dim = dim
@@ -182,6 +173,9 @@ def collections(
     has_documents: Optional[bool] = None,
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
+
+    if has_embeddings is not None and has_documents is not None:
+        assert has_embeddings or has_documents
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
@@ -312,15 +306,14 @@ def recordsets(
 
     # in the case where we have a single record, sometimes exercise
     # the code that handles individual values rather than lists
-    single_record = draw(st.booleans())
     if len(records) == 1:
         if draw(st.booleans()):
             ids = ids[0]
-        if collection.has_embeddings and single_record:
+        if collection.has_embeddings and draw(st.booleans()):
             embeddings = embeddings[0]
         if draw(st.booleans()):
             metadatas = metadatas[0]
-        if collection.has_documents and single_record:
+        if collection.has_documents and draw(st.booleans()):
             documents = documents[0]
 
     return {
