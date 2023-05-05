@@ -1,5 +1,8 @@
-import { DefaultApi } from "./generated/api";
-import { Configuration } from "./generated/configuration";
+import {
+  IncludeEnum,
+} from "./types";
+import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
+import Count200Response = Api.Count200Response;
 
 // a function to convert a non-Array object to an Array
 function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -19,6 +22,51 @@ function toArrayOfArrays<T>(obj: Array<Array<T>> | Array<T>): Array<Array<T>> {
   }
 }
 
+// we need to override constructors to make it work with jest
+// https://stackoverflow.com/questions/76007003/jest-tobeinstanceof-expected-constructor-array-received-constructor-array
+function repack(value: unknown): any {
+  if (Boolean(value) && typeof value === "object") {
+    if (Array.isArray(value)) {
+      return new Array(...value);
+    } else {
+      return { ...value };
+    }
+  } else {
+    return value;
+  }
+}
+
+async function handleError(error: unknown) {
+  if (error instanceof Response) {
+    try {
+      const res = await error.json();
+      if ("error" in res) {
+        return { error: res.error };
+      }
+    } catch (e: unknown) {
+      return {
+        //@ts-ignore
+        error:
+          e && typeof e === "object" && "message" in e
+            ? e.message
+            : "unknown error",
+      };
+    }
+  }
+  return { error };
+}
+
+async function handleSuccess(response: Response | string | Count200Response) {
+  switch (true) {
+    case response instanceof Response:
+      return repack(await (response as Response).json());
+    case typeof response === "string":
+      return repack((response as string)); // currently version is the only thing that return non-JSON
+    default:
+      return repack(response);
+  }
+}
+
 class EmbeddingFunction { }
 
 let OpenAIApi: any;
@@ -28,13 +76,17 @@ export class OpenAIEmbeddingFunction {
   private org_id: string;
   private model: string;
 
-  constructor(openai_api_key: string, openai_model?: string, openai_organization_id?: string) {
+  constructor(
+    openai_api_key: string,
+    openai_model?: string,
+    openai_organization_id?: string
+  ) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       OpenAIApi = require("openai");
     } catch {
       throw new Error(
-        "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
+        "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`"
       );
     }
     this.api_key = openai_api_key;
@@ -50,12 +102,12 @@ export class OpenAIEmbeddingFunction {
     const openai = new OpenAIApi.OpenAIApi(configuration);
     const embeddings = [];
     const response = await openai.createEmbedding({
-      model: "text-embedding-ada-002",
+      model: this.model,
       input: texts,
     });
-    const data = response.data['data'];
+    const data = response.data["data"];
     for (let i = 0; i < data.length; i += 1) {
-      embeddings.push(data[i]['embedding']);
+      embeddings.push(data[i]["embedding"]);
     }
     return embeddings;
   }
@@ -72,7 +124,7 @@ export class CohereEmbeddingFunction {
       CohereAiApi = require("cohere-ai");
     } catch {
       throw new Error(
-        "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`",
+        "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`"
       );
     }
     this.api_key = cohere_api_key;
@@ -94,14 +146,28 @@ type CallableFunction = {
 
 export class Collection {
   public name: string;
+  public metadata: object | undefined;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
-  constructor(name: string, api: DefaultApi, embeddingFunction?: CallableFunction) {
+  constructor(
+    name: string,
+    api: DefaultApi,
+    metadata?: object,
+    embeddingFunction?: CallableFunction
+  ) {
     this.name = name;
+    this.metadata = metadata;
     this.api = api;
     if (embeddingFunction !== undefined)
       this.embeddingFunction = embeddingFunction;
+  }
+
+  private setName(name: string) {
+    this.name = name;
+  }
+  private setMetadata(metadata: object | undefined) {
+    this.metadata = metadata;
   }
 
   private async validate(
@@ -123,39 +189,43 @@ export class Collection {
     if ((embeddings === undefined) && (documents !== undefined)) {
       const documentsArray = toArray(documents);
       if (this.embeddingFunction !== undefined) {
-        embeddings = await this.embeddingFunction.generate(documentsArray)
+        embeddings = await this.embeddingFunction.generate(documentsArray);
       } else {
         throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function",
+          "embeddingFunction is undefined. Please configure an embedding function"
         );
       }
     }
-    if (embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
+    if (embeddings === undefined)
+      throw new Error("embeddings is undefined but shouldnt be");
 
     const idsArray = toArray(ids);
     const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
 
     let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
-      metadatasArray = undefined
+      metadatasArray = undefined;
     } else {
       metadatasArray = toArray(metadatas);
     }
 
     let documentsArray: (string | undefined)[] | undefined;
     if (documents === undefined) {
-      documentsArray = undefined
+      documentsArray = undefined;
     } else {
       documentsArray = toArray(documents);
     }
 
     if (
-      ((embeddingsArray !== undefined) && idsArray.length !== embeddingsArray.length) ||
-      ((metadatasArray !== undefined) && idsArray.length !== metadatasArray.length) ||
-      ((documentsArray !== undefined) && idsArray.length !== documentsArray.length)
+      (embeddingsArray !== undefined &&
+        idsArray.length !== embeddingsArray.length) ||
+      (metadatasArray !== undefined &&
+        idsArray.length !== metadatasArray.length) ||
+      (documentsArray !== undefined &&
+        idsArray.length !== documentsArray.length)
     ) {
       throw new Error(
-        "ids, embeddings, metadatas, and documents must all be the same length",
+        "ids, embeddings, metadatas, and documents must all be the same length"
       );
     }
 
@@ -185,21 +255,19 @@ export class Collection {
       metadatas,
       documents
     )
-    
-    const response = await this.api.add({
-      collectionName: this.name,
-      addEmbedding: {
+
+    const response = await this.api.add(this.name,
+      {
+        // @ts-ignore
         ids: idsArray,
         embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
+        // @ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        increment_index: increment_index,
-      },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
+        incrementIndex: increment_index,
+      })
+      .then(handleSuccess)
+      .catch(handleError);
 
     return response
   }
@@ -220,20 +288,19 @@ export class Collection {
       documents
     )
 
-    const response = await this.api.upsert({
-      collectionName: this.name,
-      addEmbedding: {
+    const response = await this.api.upsert(this.name,
+      {
+        //@ts-ignore
         ids: idsArray,
         embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
+        //@ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
         increment_index: increment_index,
       },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
+    )
+      .then(handleSuccess)
+      .catch(handleError);
 
     return response
 
@@ -241,8 +308,26 @@ export class Collection {
 
 
   public async count() {
-    const response = await this.api.count({ collectionName: this.name });
-    return response.data;
+    const response = await this.api.count(this.name);
+    return handleSuccess(response);
+  }
+
+  public async modify(name?: string, metadata?: object) {
+    const response = await this.api
+      .updateCollection(
+        this.name,
+        {
+          new_name: name,
+          new_metadata: metadata,
+        },
+      )
+      .then(handleSuccess)
+      .catch(handleError);
+
+    this.setName(name || this.name);
+    this.setMetadata(metadata || this.metadata);
+
+    return response;
   }
 
   public async get(
@@ -250,93 +335,121 @@ export class Collection {
     where?: object,
     limit?: number,
     offset?: number,
+    include?: IncludeEnum[],
+    where_document?: object
   ) {
-    let idsArray = undefined
+    let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
 
-    var resp = await this.api.get({
-      collectionName: this.name,
-      getEmbedding: {
+    return await this.api
+      .aGet(this.name, {
         ids: idsArray,
         where,
         limit,
         offset,
-      },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
+        include,
+      })
+      .then(handleSuccess)
+      .catch(handleError);
+  }
 
-    return resp
+  public async update(
+    ids: string | string[],
+    embeddings?: number[] | number[][],
+    metadatas?: object | object[],
+    documents?: string | string[]
+  ) {
+    if (
+      embeddings === undefined &&
+      documents === undefined &&
+      metadatas === undefined
+    ) {
+      throw new Error(
+        "embeddings, documents, and metadatas cannot all be undefined"
+      );
+    } else if (embeddings === undefined && documents !== undefined) {
+      const documentsArray = toArray(documents);
+      if (this.embeddingFunction !== undefined) {
+        embeddings = await this.embeddingFunction.generate(documentsArray);
+      } else {
+        throw new Error(
+          "embeddingFunction is undefined. Please configure an embedding function"
+        );
+      }
+    }
 
+    var resp = await this.api
+      .update(
+        this.name,
+        {
+          ids: toArray(ids),
+          embeddings: embeddings ? toArrayOfArrays(embeddings) : undefined,
+          documents: documents, //TODO: this was toArray(documents) but that was wrong?
+          metadatas: toArray(metadatas),
+        },
+      )
+      .then(handleSuccess)
+      .catch(handleError);
+
+    return resp;
   }
 
   public async query(
     query_embeddings: number[] | number[][] | undefined,
     n_results: number = 10,
     where?: object,
-    query_text?: string | string[],
+    query_text?: string | string[], // TODO: should be named query_texts to match python API
+    where_document?: object, // {"$contains":"search_string"}
+    include?: IncludeEnum[] // ["metadata", "document"]
   ) {
-    if ((query_embeddings === undefined) && (query_text === undefined)) {
+    if (query_embeddings === undefined && query_text === undefined) {
       throw new Error(
-        "query_embeddings and query_text cannot both be undefined",
+        "query_embeddings and query_text cannot both be undefined"
       );
-    } else if ((query_embeddings === undefined) && (query_text !== undefined)) {
+    } else if (query_embeddings === undefined && query_text !== undefined) {
       const query_texts = toArray(query_text);
       if (this.embeddingFunction !== undefined) {
-        query_embeddings = await this.embeddingFunction.generate(query_texts)
+        query_embeddings = await this.embeddingFunction.generate(query_texts);
       } else {
         throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function",
+          "embeddingFunction is undefined. Please configure an embedding function"
         );
       }
     }
-    if (query_embeddings === undefined) throw new Error("embeddings is undefined but shouldnt be")
+    if (query_embeddings === undefined)
+      throw new Error("embeddings is undefined but shouldnt be");
 
     const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
-    const response = await this.api.getNearestNeighbors({
-      collectionName: this.name,
-      queryEmbedding: {
+    return await this.api
+      .getNearestNeighbors(this.name, {
         query_embeddings: query_embeddingsArray,
         where,
-        n_results,
-      },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
-
-    return response;
+        n_results: n_results,
+        where_document: where_document,
+        include: include,
+      })
+      .then(handleSuccess)
+      .catch(handleError);
   }
 
   public async peek(limit: number = 10) {
-    const response = await this.api.get({
-      collectionName: this.name,
-      getEmbedding: { limit: limit },
+    const response = await this.api.aGet(this.name, {
+      limit: limit,
     });
-    return response.data;
+    return handleSuccess(response);
   }
 
   public async createIndex() {
-    return await this.api.createIndex({ collectionName: this.name });
+    return await this.api.createIndex(this.name);
   }
 
-  public async delete(ids?: string[], where?: object) {
-    var response = await this.api._delete({
-      collectionName: this.name,
-      deleteEmbedding: { ids: ids, where: where },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
-
-    return response
+  public async delete(ids?: string[], where?: object, where_document?: object) {
+    return await this.api
+      .aDelete(this.name, { ids: ids, where: where, where_document: where_document })
+      .then(handleSuccess)
+      .catch(handleError);
   }
-
 }
 
 export class ChromaClient {
@@ -354,39 +467,93 @@ export class ChromaClient {
     return await this.api.reset();
   }
 
-  public async createCollection(name: string, metadata?: object, embeddingFunction?: CallableFunction) {
-    const newCollection = await this.api.createCollection({
-      createCollection: { name, metadata },
-    }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
+  public async version() {
+    const response = await this.api.version();
+    return await handleSuccess(response);
+  }
+
+  public async heartbeat() {
+    const response = await this.api.heartbeat();
+    let ret = await handleSuccess(response);
+    return ret["nanosecond heartbeat"]
+  }
+
+  public async persist() {
+    throw new Error("Not implemented in JS client");
+  }
+
+  public async createCollection(
+    name: string,
+    metadata?: object,
+    embeddingFunction?: CallableFunction
+  ) {
+    const newCollection = await this.api
+      .createCollection({
+        name,
+        metadata,
+      })
+      .then(handleSuccess)
+      .catch(handleError);
 
     if (newCollection.error) {
       throw new Error(newCollection.error);
     }
 
-    return new Collection(name, this.api, embeddingFunction);
+    return new Collection(name, this.api, metadata, embeddingFunction);
+  }
+
+  public async getOrCreateCollection(
+    name: string,
+    metadata?: object,
+    embeddingFunction?: CallableFunction
+  ) {
+    const newCollection = await this.api
+      .createCollection({
+        name,
+        metadata,
+        'get_or_create': true
+      })
+      .then(handleSuccess)
+      .catch(handleError);
+
+    if (newCollection.error) {
+      throw new Error(newCollection.error);
+    }
+
+    return new Collection(
+      name,
+      this.api,
+      newCollection.metadata,
+      embeddingFunction
+    );
   }
 
   public async listCollections() {
     const response = await this.api.listCollections();
-    return response.data;
+    return handleSuccess(response);
   }
 
-  public async getCollection(name: string, embeddingFunction?: CallableFunction) {
-    return new Collection(name, this.api, embeddingFunction);
+  public async getCollection(
+    name: string,
+    embeddingFunction?: CallableFunction
+  ) {
+    const response = await this.api
+      .getCollection(name)
+      .then(handleSuccess)
+      .catch(handleError);
+
+    return new Collection(
+      response.name,
+      this.api,
+      response.metadata,
+      embeddingFunction
+    );
   }
 
   public async deleteCollection(name: string) {
-    const response = await this.api.deleteCollection({ collectionName: name }).then(function (response) {
-      return response.data;
-    }).catch(function ({ response }) {
-      return response.data;
-    });
-
-    return response
+    return await this.api
+      .deleteCollection(name)
+      .then(handleSuccess)
+      .catch(handleError);
   }
-
 }

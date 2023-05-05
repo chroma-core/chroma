@@ -1,7 +1,6 @@
 import { expect, test } from '@jest/globals';
 import chroma from './initClient'
 import { DOCUMENTS, EMBEDDINGS, IDS } from './data';
-import { GetEmbeddingIncludeEnum } from '../src/generated';
 import { METADATAS } from './data';
 
 

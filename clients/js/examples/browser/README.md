@@ -1,6 +1,6 @@
-## Demo in browser 
+## Demo in browser
 
-Update your settings to add `localhost:3000` to `chroma_server_cors_allow_origins`. 
+Update your settings to add `localhost:3000` to `chroma_server_cors_allow_origins`.
 
 For example:
 
@@ -11,5 +11,5 @@ client = chromadb.Client(
 
 ```
 
-1. `yarn dev` 
+1. `yarn dev`
 2. visit `localhost:3000`

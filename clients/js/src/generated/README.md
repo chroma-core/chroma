@@ -1,6 +1,6 @@
-## chromadb@0.1.0
+## API
 
-This generator creates TypeScript/JavaScript client that utilizes [axios](https://github.com/axios/axios). The generated Node module can be used in the following environments:
+This generator creates TypeScript/JavaScript client that utilizes [Fetch API](https://fetch.spec.whatwg.org/). The generated Node module can be used in the following environments:
 
 Environment
 * Node.js
@@ -19,7 +19,7 @@ It can be used in both TypeScript and JavaScript. In TypeScript, the definition 
 
 ### Building
 
-To build and compile the typescript sources to javascript use:
+To build an compile the typescript sources to javascript use:
 ```
 npm install
 npm run build
@@ -31,15 +31,8 @@ First build the package then run ```npm publish```
 
 ### Consuming
 
-navigate to the folder of your consuming project and run one of the following commands.
+Navigate to the folder of your consuming project and run one of the following commands:
 
-_published:_
-
-```
-npm install chromadb@0.1.0 --save
-```
-
-_unPublished (not recommended):_
-
-```
+```shell
 npm install PATH_TO_GENERATED_PACKAGE --save
+```
