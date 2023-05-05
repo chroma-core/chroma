@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import logging
 from hypothesis import given
@@ -77,6 +78,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             metadata=collection.metadata,
             embedding_function=collection.embedding_function,
         )
+        self.embedding_function = collection.embedding_function
         trace("init")
         self.on_state_change(EmbeddingStateMachineStates.initialize)
         self.embeddings = {
@@ -161,7 +163,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     @invariant()
     def ann_accuracy(self):
         invariants.ann_accuracy(
-            collection=self.collection, embeddings=self.embeddings, min_recall=0.95  # type: ignore
+            collection=self.collection, record_set=self.embeddings, min_recall=0.95, embedding_function=self.embedding_function  # type: ignore
         )
 
     def _upsert_embeddings(self, embeddings: strategies.RecordSet):
@@ -173,6 +175,10 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                     self.embeddings["embeddings"][target_idx] = embeddings[
                         "embeddings"
                     ][idx]
+                else:
+                    self.embeddings["embeddings"][target_idx] = self.embedding_function(
+                        [embeddings["documents"][idx]]
+                    )[0]
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
                     self.embeddings["metadatas"][target_idx] = embeddings["metadatas"][
                         idx
@@ -182,11 +188,14 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                         idx
                     ]
             else:
+                # Add path
                 self.embeddings["ids"].append(id)
                 if "embeddings" in embeddings and embeddings["embeddings"] is not None:
                     self.embeddings["embeddings"].append(embeddings["embeddings"][idx])
                 else:
-                    self.embeddings["embeddings"].append(None)
+                    self.embeddings["embeddings"].append(
+                        self.embedding_function([embeddings["documents"][idx]])[0]
+                    )
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
                     self.embeddings["metadatas"].append(embeddings["metadatas"][idx])
                 else:

@@ -1,3 +1,4 @@
+import hashlib
 import hypothesis
 import hypothesis.strategies as st
 from typing import Optional, Callable, List, Dict, Union
@@ -121,6 +122,35 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
     )
 
 
+class hashing_embedding_function(types.EmbeddingFunction):
+    def __init__(self, dim: int, dtype: np.dtype) -> None:
+        self.dim = dim
+        self.dtype = dtype
+
+    def __call__(self, texts: types.Documents) -> types.Embeddings:
+        # Hash the texts and convert to hex strings
+        hashed_texts = [
+            list(hashlib.sha256(text.encode("utf-8")).hexdigest()) for text in texts
+        ]
+        # Pad with repetition, or truncate the hex strings to the desired dimension
+        padded_texts = [
+            text * (self.dim // len(text)) + text[: self.dim % len(text)]
+            for text in hashed_texts
+        ]
+
+        # Convert the hex strings to dtype
+        return np.array(
+            [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
+            dtype=self.dtype,
+        ).tolist()
+
+
+def embedding_function_strategy(
+    dim: int, dtype: np.dtype
+) -> st.SearchStrategy[types.EmbeddingFunction]:
+    return st.just(hashing_embedding_function(dim, dtype))
+
+
 @dataclass
 class Collection:
     name: str
@@ -130,12 +160,21 @@ class Collection:
     known_metadata_keys: Dict[str, st.SearchStrategy]
     known_document_keywords: List[str]
     has_documents: bool = False
-    embedding_function: Optional[Callable[[str], types.Embedding]] = lambda x: []
+    has_embeddings: bool = False
+    embedding_function: Optional[types.EmbeddingFunction] = None
 
 
 @st.composite
-def collections(draw, add_filterable_data=False, with_hnsw_params=False):
+def collections(
+    draw,
+    add_filterable_data=False,
+    with_hnsw_params=False,
+    has_embeddings: Optional[bool] = None,
+    has_documents: Optional[bool] = None,
+) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
+
+    assert not ((has_embeddings is False) and (has_documents is False))
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
@@ -158,11 +197,20 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
             key = draw(safe_text)
             known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
-    has_documents = draw(st.booleans())
+    if has_documents is None:
+        has_documents = draw(st.booleans())
     if has_documents and add_filterable_data:
         known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
     else:
         known_document_keywords = []
+
+    if not has_documents:
+        has_embeddings = True
+    else:
+        if has_embeddings is None:
+            has_embeddings = draw(st.booleans())
+
+    embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
     return Collection(
         name=name,
@@ -172,6 +220,8 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
         known_metadata_keys=known_metadata_keys,
         has_documents=has_documents,
         known_document_keywords=known_document_keywords,
+        has_embeddings=has_embeddings,
+        embedding_function=embedding_function,
     )
 
 
@@ -203,7 +253,7 @@ def document(draw, collection: Collection):
         known_words_st = st.text(min_size=1)
 
     random_words_st = st.text(min_size=1)
-    words = draw(st.lists(st.one_of(known_words_st, random_words_st)))
+    words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
 
 
@@ -211,8 +261,10 @@ def document(draw, collection: Collection):
 def record(draw, collection: Collection, id_strategy=safe_text):
     md = draw(metadata(collection))
 
-    embeddings = create_embeddings(collection.dimension, 1, collection.dtype)
-
+    if collection.has_embeddings:
+        embedding = create_embeddings(collection.dimension, 1, collection.dtype)[0]
+    else:
+        embedding = None
     if collection.has_documents:
         doc = draw(document(collection))
     else:
@@ -220,7 +272,7 @@ def record(draw, collection: Collection, id_strategy=safe_text):
 
     return {
         "id": draw(id_strategy),
-        "embedding": embeddings[0],
+        "embedding": embedding,
         "metadata": md,
         "document": doc,
     }
@@ -243,7 +295,9 @@ def recordsets(
     records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
     ids = [r["id"] for r in records]
-    embeddings = [r["embedding"] for r in records]
+    embeddings = (
+        [r["embedding"] for r in records] if collection.has_embeddings else None
+    )
     metadatas = [r["metadata"] for r in records]
     documents = [r["document"] for r in records] if collection.has_documents else None
 
@@ -252,10 +306,12 @@ def recordsets(
     if len(records) == 1:
         if draw(st.booleans()):
             ids = ids[0]
-        if draw(st.booleans()):
+        if collection.has_embeddings and draw(st.booleans()):
             embeddings = embeddings[0]
         if draw(st.booleans()):
             metadatas = metadatas[0]
+        if collection.has_documents and draw(st.booleans()):
+            documents = documents[0]
 
     return {
         "ids": ids,

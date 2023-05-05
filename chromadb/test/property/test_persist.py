@@ -23,10 +23,12 @@ CreatePersistAPI = Callable[[], API]
 
 configurations = [
     Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/tests",
-    )]
+        chroma_api_impl="local",
+        chroma_db_impl="duckdb+parquet",
+        persist_directory=tempfile.gettempdir() + "/tests",
+    )
+]
+
 
 @pytest.fixture(scope="module", params=configurations)
 def settings(request) -> Generator[Settings, None, None]:
@@ -39,6 +41,8 @@ def settings(request) -> Generator[Settings, None, None]:
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
@@ -50,9 +54,11 @@ def test_persist(
 ):
     api_1 = chromadb.Client(settings)
     api_1.reset()
-    coll = api_1.create_collection(name=collection_strategy.name,
-                                   metadata=collection_strategy.metadata,
-                                   embedding_function=lambda x: None)
+    coll = api_1.create_collection(
+        name=collection_strategy.name,
+        metadata=collection_strategy.metadata,
+        embedding_function=collection_strategy.embedding_function,
+    )
 
     coll.add(**embeddings_strategy)
 
@@ -60,20 +66,29 @@ def test_persist(
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
-    invariants.ann_accuracy(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        embedding_function=collection_strategy.embedding_function,
+    )
 
     api_1.persist()
     del api_1
 
     api_2 = chromadb.Client(settings)
     coll = api_2.get_collection(
-        name=collection_strategy.name, embedding_function=lambda x: None
+        name=collection_strategy.name,
+        embedding_function=collection_strategy.embedding_function,
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
-    invariants.ann_accuracy(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        embedding_function=collection_strategy.embedding_function,
+    )
 
 
 def load_and_check(settings: Settings, collection_name: str, embeddings_set, conn):
