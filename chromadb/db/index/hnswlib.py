@@ -2,6 +2,8 @@ import os
 import pickle
 import time
 from typing import Dict
+
+import numpy as np
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index
@@ -250,11 +252,20 @@ class Hnswlib(Index):
         if len(labels) != 0:
             filter_function = lambda label: label in labels
 
+        preprocessed_query = query
+        # HNSW does not normalize the query when using cosine distance. This causes incorrect distances
+        # returned, especially for queries with large dimensionality.
+        if self._index.space == "cosine":
+            preprocessed_query = (
+                preprocessed_query
+                / np.linalg.norm(preprocessed_query, axis=1)[:, np.newaxis]
+            )
+
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 
         s3 = time.time()
         database_labels, distances = self._index.knn_query(
-            query, k=k, filter=filter_function
+            preprocessed_query, k=k, filter=filter_function
         )
         logger.debug(f"time to run knn query: {time.time() - s3}")
 

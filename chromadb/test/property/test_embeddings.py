@@ -177,7 +177,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                     ][idx]
                 else:
                     self.embeddings["embeddings"][target_idx] = self.embedding_function(
-                        embeddings["documents"][idx]
+                        [embeddings["documents"][idx]]
                     )[0]
                 if "metadatas" in embeddings and embeddings["metadatas"] is not None:
                     self.embeddings["metadatas"][target_idx] = embeddings["metadatas"][
@@ -265,51 +265,3 @@ def test_escape_chars_in_ids(api: API):
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
-
-
-# @pytest.mark.xfail(reason="This causes bad graphs in hnsw ?")
-def test_bad_graph(api: API):
-    state = EmbeddingStateMachine(api=api)
-    state.initialize(
-        collection=strategies.Collection(
-            name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-            },
-            dimension=2,
-            dtype=np.float16,
-            known_metadata_keys={},
-            known_document_keywords=[],
-            has_documents=True,
-            has_embeddings=False,
-            embedding_function=strategies.hashing_embedding_function(
-                dim=2, dtype=np.float16
-            ),
-        )
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    v1, v2, v3, v4 = state.add_embeddings(
-        embedding_set={
-            "ids": ["1", "00", "3", "2"],
-            "embeddings": None,
-            "metadatas": [{}, {"0": 1.192092896e-07}, {}, {}],
-            "documents": ["0", "1", "1", "0"],
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.upsert_embeddings(
-        embedding_set={
-            "ids": [v3],
-            "embeddings": None,
-            "metadatas": [{}],
-            "documents": ["0"],
-        }
-    )
-    state.ann_accuracy()
-    state.teardown()

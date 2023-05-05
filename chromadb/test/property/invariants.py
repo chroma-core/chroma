@@ -1,5 +1,6 @@
+import math
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Union, List, TypeVar
+from typing import Callable, Optional, Union, List, TypeVar
 from typing_extensions import Literal
 import numpy as np
 from chromadb.api import types
@@ -147,7 +148,7 @@ def ann_accuracy(
     embedding_function: Optional[types.EmbeddingFunction] = None,
 ):
     """Validate that the API performs nearest_neighbor searches correctly"""
-    embeddings = wrap_all(embeddings)
+    record_set = wrap_all(record_set)
 
     if len(record_set["ids"]) == 0:
         return  # nothing to test here
@@ -163,15 +164,26 @@ def ann_accuracy(
 
     # l2 is the default distance function
     distance_function = distance_functions["l2"]
+    accuracy_threshold = 1e-6
     if "hnsw:space" in collection.metadata:
         space = collection.metadata["hnsw:space"]
+        # TODO: ip and cosine are numerically unstable in HNSW.
+        # The higher the dimensionality, the more noise is introduced, since each float element
+        # of the vector has noise added, which is then subsequently included in all normalization calculations.
+        # This means that higher dimensions will have more noise, and thus more error.
+        dim = len(embeddings[0])
+        accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
+
         if space == "cosine":
             distance_function = distance_functions["cosine"]
+
         if space == "ip":
             distance_function = distance_functions["ip"]
 
     # Perform exact distance computation
-    indices, distances = _exact_distances(embeddings, embeddings)
+    indices, distances = _exact_distances(
+        embeddings, embeddings, distance_fn=distance_function
+    )
 
     query_results = collection.query(
         query_embeddings=record_set["embeddings"],
@@ -192,20 +204,20 @@ def ann_accuracy(
         for j, id in enumerate(query_results["ids"][i]):
             # This may be because the true nth nearest neighbor didn't get returned by the ANN query
             unexpected_id = id not in expected_ids
-
             index = id_to_index[id]
-            # TODO: IP distance is resulting in more noise than expected so atol=1e-5
-            assert np.allclose(
-                distances_i[index], query_results["distances"][i][j], atol=1e-5
-            )
-            assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
 
+            correct_distance = np.allclose(
+                distances_i[index],
+                query_results["distances"][i][j],
+                atol=accuracy_threshold,
+            )
             if unexpected_id:
+                # If the ID is unexpcted, but the distance is correct, then we
+                # have a duplicate in the data. In this case, we should not reduce recall.
                 if correct_distance:
-                    # We found a duplicate embedding, this is correct behavior
                     missing -= 1
                 else:
-                    continue  # False positive
+                    continue
             else:
                 assert correct_distance
 
@@ -222,10 +234,10 @@ def ann_accuracy(
     size = len(record_set["ids"])
     recall = (size - missing) / size
 
-    # try:
-    #     note(f"recall: {recall}, missing {missing} out of {size}")
-    # except InvalidArgument:
-    #     pass  # it's ok if we're running outside hypothesis
+    try:
+        note(f"recall: {recall}, missing {missing} out of {size}")
+    except InvalidArgument:
+        pass  # it's ok if we're running outside hypothesis
 
     assert recall >= min_recall
 

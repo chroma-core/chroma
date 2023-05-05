@@ -157,7 +157,7 @@ class hashing_embedding_function(types.EmbeddingFunction):
 def embedding_function_strategy(
     dim: int, dtype: np.dtype
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
-    return st.just(random_embedding_function(dim, dtype))
+    return st.just(hashing_embedding_function(dim, dtype))
 
 
 @dataclass
@@ -174,7 +174,13 @@ class Collection:
 
 
 @st.composite
-def collections(draw, add_filterable_data=False, with_hnsw_params=False):
+def collections(
+    draw,
+    add_filterable_data=False,
+    with_hnsw_params=False,
+    has_embeddings: Optional[bool] = None,
+    has_documents: Optional[bool] = None,
+) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
     name = draw(collection_name())
@@ -198,7 +204,8 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
             key = draw(safe_text)
             known_metadata_keys[key] = draw(st.sampled_from(safe_values))
 
-    has_documents = draw(st.booleans())
+    if has_documents is None:
+        has_documents = draw(st.booleans())
     if has_documents and add_filterable_data:
         known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
     else:
@@ -207,7 +214,8 @@ def collections(draw, add_filterable_data=False, with_hnsw_params=False):
     if not has_documents:
         has_embeddings = True
     else:
-        has_embeddings = draw(st.booleans())
+        if has_embeddings is None:
+            has_embeddings = draw(st.booleans())
 
     embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
@@ -296,19 +304,24 @@ def recordsets(
     records = {r["id"]: r for r in records}.values()  # Remove duplicates
 
     ids = [r["id"] for r in records]
-    embeddings = [r["embedding"] for r in records]
+    embeddings = (
+        [r["embedding"] for r in records] if collection.has_embeddings else None
+    )
     metadatas = [r["metadata"] for r in records]
     documents = [r["document"] for r in records] if collection.has_documents else None
 
     # in the case where we have a single record, sometimes exercise
     # the code that handles individual values rather than lists
+    single_record = draw(st.booleans())
     if len(records) == 1:
         if draw(st.booleans()):
             ids = ids[0]
-        if draw(st.booleans()):
+        if collection.has_embeddings and single_record:
             embeddings = embeddings[0]
         if draw(st.booleans()):
             metadatas = metadatas[0]
+        if collection.has_documents and single_record:
+            documents = documents[0]
 
     return {
         "ids": ids,
