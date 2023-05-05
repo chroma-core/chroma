@@ -39,6 +39,7 @@ api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet",
 print(api.heartbeat())
 ```
 
+RANDOM CHANGE
 
 3. With a persistent backend and a small frontend client
 
