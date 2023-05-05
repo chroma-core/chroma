@@ -1,10 +1,7 @@
 name: PR Review Checklist
 on:
   pull_request_target:
-  push:
-    branches:
-      - main
-      - team/hypothesis-tests
+    types: [ opened ]
 
 jobs:
   tests:
