@@ -19,6 +19,6 @@ jobs:
             owner: context.repo.owner,
             repo: context.repo.repo,
             body: `# Reviewer Checklist
-              - [ ] This code is sufficiently tested 
-              - [ ] This code is artisanal`
+            - [ ] This code is sufficiently tested 
+            - [ ] This code is artisanal`
           })
