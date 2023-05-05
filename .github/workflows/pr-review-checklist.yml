@@ -28,9 +28,10 @@ jobs:
             - [ ] Should any logging, debugging, tracing information be added or removed?
             - [ ] Are error messages user-friendly?
             - [ ] Have all documentation changes needed been made?
+            - [ ] Have all non-obvious changes been commented?
             ## System Compatibility
             - [ ] Are there any potential impacts on other parts of the system or backward compatibility?
             - [ ] Does this change intersect with any items on our roadmap, and if so, is there a plan for fitting them together?
             ## Quality
-            - [ ] Is this code of a remarkably high quality (Readbility, Modularity, Intuitiveness)
+            - [ ] Is this code of a unexpectedly high quality (Readbility, Modularity, Intuitiveness)
           })
