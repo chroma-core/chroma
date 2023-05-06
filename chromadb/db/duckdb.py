@@ -474,8 +474,8 @@ class PersistentDuckDB(DuckDB):
             )
 
     def __del__(self):
-        logger.info("PersistentDuckDB del, about to run persist")
         # No-op for duckdb with persistence since the base class will delete the indexes
+        pass
 
     def reset(self):
         super().reset()
