@@ -24,4 +24,3 @@ cd clients/js
 yarn
 yarn test:run
 cd ../..
-
