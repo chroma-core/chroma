@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 networks:
   net:
@@ -31,13 +31,15 @@ services:
       - CLICKHOUSE_TCP_PORT=9000
       - CLICKHOUSE_HTTP_PORT=8123
     ports:
-      - '8123:8123'
-      - '9000:9000'
+      - "8123:8123"
+      - "9000:9000"
     volumes:
       - clickhouse_data:/bitnami/clickhouse
       - backups:/backups
-      - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
-      - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
+      - ./config/ch_data:/var/lib/clickhouse/
+      - ./config/ch_logs:/var/log/clickhouse-server/
+      # - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
+      # - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
     networks:
       - net
 
