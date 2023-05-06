@@ -1,4 +1,6 @@
-from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from typing import Optional, Union, Dict, Sequence, TypeVar, List
+from typing_extensions import Literal, TypedDict, Protocol
+import chromadb.errors as errors
 
 ID = str
 IDs = List[ID]
@@ -26,7 +28,9 @@ LogicalOperator = Literal["$and", "$or"]
 WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
 OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
-Where = Dict[Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]]
+Where = Dict[
+    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
+]
 
 WhereDocumentOperator = Literal["$contains", LogicalOperator]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
@@ -84,6 +88,11 @@ def validate_ids(ids: IDs) -> IDs:
     for id in ids:
         if not isinstance(id, str):
             raise ValueError(f"Expected ID to be a str, got {id}")
+    if len(ids) != len(set(ids)):
+        dups = set([x for x in ids if ids.count(x) > 1])
+        raise errors.DuplicateIDError(
+            f"Expected IDs to be unique, found duplicates for: {dups}"
+        )
     return ids
 
 
@@ -95,7 +104,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
         if not isinstance(value, (str, int, float)):
-            raise ValueError(f"Expected metadata value to be a str, int, or float, got {value}")
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value}"
+            )
     return metadata
 
 
@@ -118,7 +129,11 @@ def validate_where(where: Where) -> Where:
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
-        if key != "$and" and key != "$or" and not isinstance(value, (str, int, float, dict)):
+        if (
+            key != "$and"
+            and key != "$or"
+            and not isinstance(value, (str, int, float, dict))
+        ):
             raise ValueError(
                 f"Expected where value to be a str, int, float, or operator expression, got {value}"
             )
@@ -167,7 +182,9 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     a list of where_document expressions
     """
     if not isinstance(where_document, dict):
-        raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
+        raise ValueError(
+            f"Expected where document to be a dictionary, got {where_document}"
+        )
     if len(where_document) != 1:
         raise ValueError(
             f"Expected where document to have exactly one operator, got {where_document}"

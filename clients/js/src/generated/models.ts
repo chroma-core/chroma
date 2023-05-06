@@ -315,6 +315,9 @@ export namespace Api {
 	
 	}
 
+	export interface Upsert200Response {
+	}
+
 	export interface ValidationError {
 		loc: (string | number)[];
 		msg: string;

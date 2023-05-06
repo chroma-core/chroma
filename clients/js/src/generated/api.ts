@@ -615,6 +615,49 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			};
 		},
 		/**
+		 * @summary Upsert
+		 * @param {string} collectionName
+		 * @param {Api.AddEmbedding} request
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		upsert(collectionName: string, request: Api.AddEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionName' is not null or undefined
+			if (collectionName === null || collectionName === undefined) {
+				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling upsert.');
+			}
+			// verify required parameter 'request' is not null or undefined
+			if (request === null || request === undefined) {
+				throw new RequiredError('request', 'Required parameter request was null or undefined when calling upsert.');
+			}
+			let localVarPath = `/api/v1/collections/{collection_name}/upsert`
+				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			const localVarPathQueryStart = localVarPath.indexOf("?");
+			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
+			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
+			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+			if (localVarPathQueryStart !== -1) {
+				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			localVarHeaderParameter.set('Content-Type', 'application/json');
+
+			localVarRequestOptions.headers = localVarHeaderParameter;
+	
+			if (request !== undefined) {
+				localVarRequestOptions.body = JSON.stringify(request || {});
+			}
+
+			const localVarQueryParameterString = localVarQueryParameter.toString();
+			if (localVarQueryParameterString) {
+				localVarPath += "?" + localVarQueryParameterString;
+			}
+			return {
+				url: localVarPath,
+				options: localVarRequestOptions,
+			};
+		},
+		/**
 		 * @summary Version
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
@@ -1114,6 +1157,36 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
+		 * @summary Upsert
+		 * @param {string} collectionName
+		 * @param {Api.AddEmbedding} request
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		upsert(collectionName: string, request: Api.AddEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Upsert200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).upsert(collectionName, request, options);
+			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+					const contentType = response.headers.get('Content-Type');
+					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+					
+					if (response.status === 200) {
+						if (mimeType === 'application/json') {
+							return response.json() as any;
+						}
+						throw response;
+					}
+					if (response.status === 422) {
+						if (mimeType === 'application/json') {
+							throw response;
+						}
+						throw response;
+					}
+					throw response;
+				});
+			};
+		},
+		/**
 		 * @summary Version
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
@@ -1322,6 +1395,17 @@ export class ApiApi extends BaseAPI {
 	 */
 	public updateCollection(collectionName: string, request: Api.UpdateCollection, options?: RequestInit) {
 		return ApiApiFp(this.configuration).updateCollection(collectionName, request, options)(this.fetch, this.basePath);
+	}
+
+	/**
+	 * @summary Upsert
+	 * @param {string} collectionName
+	 * @param {Api.AddEmbedding} request
+	 * @param {RequestInit} [options] Override http request option.
+	 * @throws {RequiredError}
+	 */
+	public upsert(collectionName: string, request: Api.AddEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).upsert(collectionName, request, options)(this.fetch, this.basePath);
 	}
 
 	/**

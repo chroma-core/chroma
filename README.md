@@ -13,10 +13,10 @@
   </a> |
   <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
       <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
-  </a> | 
+  </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
       Docs
-  </a> | 
+  </a> |
   <a href="https://www.trychroma.com/" target="_blank">
       Homepage
   </a>
@@ -30,19 +30,19 @@ pip install chromadb # python client
 
 The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
 
-```python 
+```python
 import chromadb
 # setup Chroma in-memory, for easy prototyping. Can add persistence easily!
 client = chromadb.Client()
 
 # Create collection. get_collection, get_or_create_collection, delete_collection also available!
-collection = client.create_collection("all-my-documents") 
+collection = client.create_collection("all-my-documents")
 
 # Add docs to the collection. Can also update and delete. Row-based API coming soon!
 collection.add(
     documents=["This is document1", "This is document2"], # we handle tokenization, embedding, and indexing automatically. You can skip that and add your own embeddings as well
     metadatas=[{"source": "notion"}, {"source": "google-docs"}], # filter on these!
-    ids=["doc1", "doc2"], # unique for each doc 
+    ids=["doc1", "doc2"], # unique for each doc
 )
 
 # Query/search 2 most similar results. You can also .get by id
@@ -66,15 +66,15 @@ results = collection.query(
 For example, the `"Chat your data"` use case:
 1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
-3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis. 
+3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis.
 
 ## Embeddings?
 
 What are embeddings?
 
 - [Read the guide from OpenAI](https://platform.openai.com/docs/guides/embeddings/what-are-embeddings)
-- __Literal__: Embedding something turns it from image/text/audio into a list of numbers. 🖼️ or 📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model. 
-- __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find. 
+- __Literal__: Embedding something turns it from image/text/audio into a list of numbers. 🖼️ or 📄 => `[1.2, 2.1, ....]`. This process makes documents "understandable" to a machine learning model.
+- __By analogy__: An embedding represents the essence of a document. This enables documents and queries with the same essence to be "near" each other and therefore easy to find.
 - __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
 - __A small example__: If you search your photos for "famous bridge in San Francisco". By embedding this query and comparing it to the embeddings of your photos and their metadata - it should return photos of the Golden Gate Bridge.
 
@@ -82,7 +82,7 @@ Embeddings databases (also known as **vector databases**) store embeddings and a
 
 ## Get involved
 
-Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project. 
+Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x)
 - [Review the roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues)
