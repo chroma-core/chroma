@@ -384,7 +384,7 @@ export class Collection {
 
     var resp = await this.api
       .update(
-        this.name,
+        this.id,
         {
           ids: toArray(ids),
           embeddings: embeddings ? toArrayOfArrays(embeddings) : undefined,
