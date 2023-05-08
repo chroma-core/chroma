@@ -1339,3 +1339,45 @@ def test_upsert(api):
     assert get_result['embeddings'][0] == [1.1, 0.99, 2.21]
     assert get_result['metadatas'][0] == {"string_value": "a new string value"}
     assert get_result['documents'][0] == None
+
+
+# test to make sure add, query, update, upsert error on invalid embeddings input
+
+def test_invalid_embeddings(api):
+    api.reset()
+    collection = api.create_collection("test_invalid_embeddings")
+
+    # Add with string embeddings
+    invalid_records = {
+        "embeddings": [['0', '0', '0'], ['1.2', '2.24', '3.2']],
+        "ids": ["id1", "id2"],
+    }
+    with pytest.raises(ValueError) as e:
+        collection.add(**invalid_records)
+    assert "embeddings" in str(e.value)
+
+    # Query with invalid embeddings
+    with pytest.raises(ValueError) as e:
+        collection.query(
+            query_embeddings=[['1.1', '2.3', '3.2']],
+            n_results=1,
+        )
+    assert "embeddings" in str(e.value)
+
+    # Update with invalid embeddings
+    invalid_records = {
+        "embeddings": [[[0], [0], [0]], [[1.2], [2.24], [3.2]]],
+        "ids": ["id1", "id2"],
+    }
+    with pytest.raises(ValueError) as e:
+        collection.update(**invalid_records)
+    assert "embeddings" in str(e.value)
+
+    # Upsert with invalid embeddings
+    invalid_records = {
+        "embeddings": [[[1.1, 2.3, 3.2]], [[1.2, 2.24, 3.2]]],
+        "ids": ["id1", "id2"],
+    }
+    with pytest.raises(ValueError) as e:
+        collection.upsert(**invalid_records)
+    assert "embeddings" in str(e.value)
