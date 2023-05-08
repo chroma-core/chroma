@@ -20,10 +20,12 @@ from uuid import UUID
 
 
 class FastAPI(API):
-    def __init__(self, settings, telemetry_client: Telemetry):
+    def __init__(self, settings):
         url_prefix = "https" if settings.chroma_server_ssl_enabled else "http"
+        settings.validate("chroma_server_host")
+        settings.validate("chroma_server_http_port")
         self._api_url = f"{url_prefix}://{settings.chroma_server_host}:{settings.chroma_server_http_port}/api/v1"
-        self._telemetry_client = telemetry_client
+        self._telemetry_client = settings.get_component("chroma_telemetry_impl")
 
     def heartbeat(self):
         """Returns the current server time in nanoseconds to check if the server is alive"""

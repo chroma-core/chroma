@@ -18,6 +18,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.api.models.Collection import Collection
+import chromadb.config
 
 import re
 
@@ -47,9 +48,13 @@ def check_index_name(index_name):
 
 
 class LocalAPI(API):
-    def __init__(self, settings, db: DB, telemetry_client: Telemetry):
-        self._db = db
-        self._telemetry_client = telemetry_client
+
+    _db: DB
+    _telemetry_client: Telemetry
+
+    def __init__(self, settings: chromadb.config.Settings):
+        self._db = settings.get_component("chroma_db_impl")
+        self._telemetry_client = settings.get_component("chroma_telemetry_impl")
 
     def heartbeat(self):
         """Ping the database to ensure it is alive"""
