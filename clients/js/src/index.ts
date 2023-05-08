@@ -318,7 +318,7 @@ export class Collection {
   public async modify(name?: string, metadata?: object) {
     const response = await this.api
       .updateCollection(
-        this.name,
+        this.id,
         {
           new_name: name,
           new_metadata: metadata,
