@@ -146,7 +146,7 @@ class API(ABC):
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_ids (Union[UUID, Sequence[UUID]]): The collection(s) to add the embeddings to
+            collection_ids (UUID): The collection to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
             metadata (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
             documents (Optional[Union[str, Sequence[str]]], optional): The documents to associate with the embeddings. Defaults to None.
@@ -167,13 +167,12 @@ class API(ABC):
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_id (UUID): The collection(s) to add the embeddings to
+            collection_id (UUID): The collection to add the embeddings to
             embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
         """
         pass
 
     @abstractmethod
-
     def _upsert(
         self,
         collection_id: UUID,
