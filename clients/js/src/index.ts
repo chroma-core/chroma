@@ -157,7 +157,7 @@ type CallableFunction = {
 
 export class Collection {
   public name: string;
-  public metadata: object | undefined;
+  public metadata: Metadata | undefined;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
@@ -183,10 +183,10 @@ export class Collection {
 
   private async validate(
     require_embeddings_or_documents: boolean, // set to false in the case of Update
-    ids: IDs,
-    embeddings: Embeddings,
-    metadatas?: Metadatas,
-    documents?: Documents,
+    ids: ID | IDs,
+    embeddings?: Embedding | Embeddings,
+    metadatas?: Metadata | Metadatas,
+    documents?: Document | Documents,
   ) {
 
     if (require_embeddings_or_documents) {
@@ -211,7 +211,7 @@ export class Collection {
       throw new Error("embeddings is undefined but shouldnt be");
 
     const idsArray = toArray(ids);
-    const embeddingsArray: Embedding[][] = toArrayOfArrays(embeddings);
+    const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
 
     let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
@@ -252,10 +252,10 @@ export class Collection {
   }
 
   public async add(
-    ids: IDs,
-    embeddings: Embeddings,
-    metadatas?: Metadatas,
-    documents?: Documents,
+    ids: ID | IDs,
+    embeddings?: Embedding | Embeddings,
+    metadatas?: Metadata | Metadatas,
+    documents?: Document | Documents,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -282,10 +282,10 @@ export class Collection {
   }
 
   public async upsert(
-    ids: IDs,
-    embeddings: Embeddings,
-    metadatas?: Metadatas,
-    documents?: Documents,
+    ids: ID | IDs,
+    embeddings: Embedding | Embeddings,
+    metadatas?: Metadata | Metadatas,
+    documents?: Document | Documents,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -337,7 +337,7 @@ export class Collection {
   }
 
   public async get(
-    ids?: IDs,
+    ids?: ID | IDs,
     where?: Where,
     limit?: PositiveInteger,
     offset?: PositiveInteger,
@@ -354,16 +354,17 @@ export class Collection {
         limit,
         offset,
         include,
+        where_document,
       })
       .then(handleSuccess)
       .catch(handleError);
   }
 
   public async update(
-    ids: IDs,
-    embeddings?: Embeddings,
-    metadatas?: Metadatas,
-    documents?: Documents
+    ids: ID | IDs,
+    embeddings?: Embedding | Embeddings,
+    metadatas?: Metadata | Metadatas,
+    documents?: Document | Documents,
   ) {
     if (
       embeddings === undefined &&
@@ -401,7 +402,7 @@ export class Collection {
   }
 
   public async query(
-    query_embeddings: Embeddings,
+    query_embeddings: Embeddings | Embeddings | undefined,
     n_results: PositiveInteger = 10,
     where?: Where,
     query_text?: string | string[], // TODO: should be named query_texts to match python API
@@ -446,9 +447,12 @@ export class Collection {
     return handleSuccess(response);
   }
 
-  public async delete(ids?: IDs, where?: Where, where_document?: WhereDocument) {
+  public async delete(ids?: ID | IDs, where?: Where, where_document?: WhereDocument) {
+    let idsArray = undefined;
+    if (ids !== undefined) idsArray = toArray(ids);
+
     return await this.api
-      .aDelete(this.name, { ids: ids, where: where, where_document: where_document })
+      .aDelete(this.name, { ids: idsArray, where: where, where_document: where_document })
       .then(handleSuccess)
       .catch(handleError);
   }

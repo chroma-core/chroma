@@ -7,15 +7,13 @@ export enum IncludeEnum {
 
 type Number = number;
 export type Embedding = Array<Number>;
-export type Embeddings = Array<Embedding> | undefined;
+export type Embeddings = Array<Embedding>;
 
 export type Metadata = Record<string, string | number | boolean>;
 export type Metadatas = Array<Metadata>;
 
 export type Document = string;
 export type Documents = Array<Document>;
-
-export type Include = Array<"documents" | "embeddings" | "metadatas" | "distances">;
 
 export type ID = string;
 export type IDs = ID[];
