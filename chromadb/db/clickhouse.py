@@ -213,7 +213,7 @@ class Clickhouse(DB):
 
         if new_metadata is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE metadata = $(new_metadata)s WHERE uuid = $(uuid)s",
+                f"ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
                 parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 
