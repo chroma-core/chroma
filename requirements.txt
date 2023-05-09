@@ -10,3 +10,4 @@ requests==2.28.1
 sentence-transformers==2.2.2
 typing_extensions==4.5.0
 uvicorn[standard]==0.18.3
+pypika==0.48.9
