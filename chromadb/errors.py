@@ -2,10 +2,9 @@ from abc import ABCMeta, abstractmethod
 
 
 class ChromaError(Exception):
-
     def code(self):
         """Return an appropriate HTTP response code for this error"""
-        return 400 # Bad Request
+        return 400  # Bad Request
 
     def message(self):
         return ", ".join(self.args)
@@ -42,9 +41,8 @@ class NotEnoughElementsException(ChromaError):
 
 
 class IDAlreadyExistsError(ChromaError):
-
     def code(self):
-        return 409 # Conflict
+        return 409  # Conflict
 
     @classmethod
     def name(cls):
@@ -56,6 +54,13 @@ class DuplicateIDError(ChromaError):
     def name(cls):
         return "DuplicateID"
 
+
+class InvalidUUIDError(ChromaError):
+    @classmethod
+    def name(cls):
+        return "InvalidUUID"
+
+
 error_types = {
     "NoDatapoints": NoDatapointsException,
     "NoIndex": NoIndexException,
@@ -63,4 +68,5 @@ error_types = {
     "NotEnoughElements": NotEnoughElementsException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
+    "InvalidUUID": InvalidUUIDError,
 }

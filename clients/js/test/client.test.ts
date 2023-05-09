@@ -59,6 +59,9 @@ test('it should get a collection', async () => {
     expect(collection).toHaveProperty('name')
     expect(collection2).toHaveProperty('name')
     expect(collection.name).toBe(collection2.name)
+    expect(collection).toHaveProperty('id')
+    expect(collection2).toHaveProperty('id')
+    expect(collection.id).toBe(collection2.id)
 })
 
 test('it should delete a collection', async () => {

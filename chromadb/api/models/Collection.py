@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional, cast, List, Dict, Tuple
 from pydantic import BaseModel, PrivateAttr
+from uuid import UUID
 
 from chromadb.api.types import (
     Embedding,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
 class Collection(BaseModel):
     name: str
+    id: UUID
     metadata: Optional[Dict] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
@@ -40,6 +42,7 @@ class Collection(BaseModel):
         self,
         client: "API",
         name: str,
+        id: UUID,
         embedding_function: Optional[EmbeddingFunction] = None,
         metadata: Optional[Dict] = None,
     ):
@@ -53,7 +56,7 @@ class Collection(BaseModel):
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-        super().__init__(name=name, metadata=metadata)
+        super().__init__(name=name, metadata=metadata, id=id)
 
     def __repr__(self):
         return f"Collection(name={self.name})"
@@ -65,7 +68,7 @@ class Collection(BaseModel):
             int: The total number of embeddings added to the database
 
         """
-        return self._client._count(collection_name=self.name)
+        return self._client._count(collection_id=self.id)
 
     def add(
         self,
@@ -100,7 +103,7 @@ class Collection(BaseModel):
         )
 
         self._client._add(
-            ids, self.name, embeddings, metadatas, documents, increment_index
+            ids, self.id, embeddings, metadatas, documents, increment_index
         )
 
     def get(
@@ -134,7 +137,7 @@ class Collection(BaseModel):
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
-            self.name,
+            self.id,
             ids,
             where,
             None,
@@ -153,7 +156,7 @@ class Collection(BaseModel):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._client._peek(self.name, limit)
+        return self._client._peek(self.id, limit)
 
     def query(
         self,
@@ -220,7 +223,7 @@ class Collection(BaseModel):
             where_document = {}
 
         return self._client._query(
-            collection_name=self.name,
+            collection_id=self.id,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
@@ -238,9 +241,7 @@ class Collection(BaseModel):
         Returns:
             None
         """
-        self._client._modify(
-            current_name=self.name, new_name=name, new_metadata=metadata
-        )
+        self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
         if metadata:
@@ -269,7 +270,7 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents, require_embeddings_or_documents=False
         )
 
-        self._client._update(self.name, ids, embeddings, metadatas, documents)
+        self._client._update(self.id, ids, embeddings, metadatas, documents)
 
     def upsert(
         self,
@@ -293,7 +294,7 @@ class Collection(BaseModel):
         )
 
         self._client._upsert(
-            collection_name=self.name,
+            collection_id=self.id,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -322,7 +323,7 @@ class Collection(BaseModel):
         where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        return self._client._delete(self.name, ids, where, where_document)
+        return self._client._delete(self.id, ids, where, where_document)
 
     def create_index(self):
         self._client.create_index(self.name)
