@@ -1,5 +1,16 @@
 import {
   IncludeEnum,
+  Metadata,
+  Metadatas,
+  Embedding,
+  Embeddings,
+  Document,
+  Documents,
+  Where,
+  WhereDocument,
+  ID,
+  IDs,
+  PositiveInteger
 } from "./types";
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import Count200Response = Api.Count200Response;
@@ -163,19 +174,19 @@ export class Collection {
       this.embeddingFunction = embeddingFunction;
   }
 
-  private setName(name: string) {
+  private setName(name: string): void {
     this.name = name;
   }
-  private setMetadata(metadata: object | undefined) {
+  private setMetadata(metadata: object | undefined): void {
     this.metadata = metadata;
   }
 
   private async validate(
     require_embeddings_or_documents: boolean, // set to false in the case of Update
-    ids: string | string[],
-    embeddings: number[] | number[][] | undefined,
-    metadatas?: object | object[],
-    documents?: string | string[],
+    ids: IDs,
+    embeddings: Embeddings,
+    metadatas?: Metadatas,
+    documents?: Documents,
   ) {
 
     if (require_embeddings_or_documents) {
@@ -200,7 +211,7 @@ export class Collection {
       throw new Error("embeddings is undefined but shouldnt be");
 
     const idsArray = toArray(ids);
-    const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
+    const embeddingsArray: Embedding[][] = toArrayOfArrays(embeddings);
 
     let metadatasArray: object[] | undefined;
     if (metadatas === undefined) {
@@ -241,11 +252,10 @@ export class Collection {
   }
 
   public async add(
-    ids: string | string[],
-    embeddings: number[] | number[][] | undefined,
-    metadatas?: object | object[],
-    documents?: string | string[],
-    increment_index: boolean = true,
+    ids: IDs,
+    embeddings: Embeddings,
+    metadatas?: Metadatas,
+    documents?: Documents,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -264,7 +274,6 @@ export class Collection {
         // @ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        incrementIndex: increment_index,
       })
       .then(handleSuccess)
       .catch(handleError);
@@ -273,11 +282,10 @@ export class Collection {
   }
 
   public async upsert(
-    ids: string | string[],
-    embeddings: number[] | number[][] | undefined,
-    metadatas?: object | object[],
-    documents?: string | string[],
-    increment_index: boolean = true,
+    ids: IDs,
+    embeddings: Embeddings,
+    metadatas?: Metadatas,
+    documents?: Documents,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -296,7 +304,6 @@ export class Collection {
         //@ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        increment_index: increment_index,
       },
     )
       .then(handleSuccess)
@@ -306,13 +313,12 @@ export class Collection {
 
   }
 
-
   public async count() {
     const response = await this.api.count(this.name);
     return handleSuccess(response);
   }
 
-  public async modify(name?: string, metadata?: object) {
+  public async modify(name?: string, metadata?: Metadata) {
     const response = await this.api
       .updateCollection(
         this.name,
@@ -331,12 +337,12 @@ export class Collection {
   }
 
   public async get(
-    ids?: string[],
-    where?: object,
-    limit?: number,
-    offset?: number,
+    ids?: IDs,
+    where?: Where,
+    limit?: PositiveInteger,
+    offset?: PositiveInteger,
     include?: IncludeEnum[],
-    where_document?: object
+    where_document?: WhereDocument
   ) {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
@@ -354,10 +360,10 @@ export class Collection {
   }
 
   public async update(
-    ids: string | string[],
-    embeddings?: number[] | number[][],
-    metadatas?: object | object[],
-    documents?: string | string[]
+    ids: IDs,
+    embeddings?: Embeddings,
+    metadatas?: Metadatas,
+    documents?: Documents
   ) {
     if (
       embeddings === undefined &&
@@ -395,11 +401,11 @@ export class Collection {
   }
 
   public async query(
-    query_embeddings: number[] | number[][] | undefined,
-    n_results: number = 10,
-    where?: object,
+    query_embeddings: Embeddings,
+    n_results: PositiveInteger = 10,
+    where?: Where,
     query_text?: string | string[], // TODO: should be named query_texts to match python API
-    where_document?: object, // {"$contains":"search_string"}
+    where_document?: WhereDocument, // {"$contains":"search_string"}
     include?: IncludeEnum[] // ["metadata", "document"]
   ) {
     if (query_embeddings === undefined && query_text === undefined) {
@@ -419,7 +425,7 @@ export class Collection {
     if (query_embeddings === undefined)
       throw new Error("embeddings is undefined but shouldnt be");
 
-    const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
+    const query_embeddingsArray: Embedding[][] = toArrayOfArrays(query_embeddings);
 
     return await this.api
       .getNearestNeighbors(this.name, {
@@ -433,24 +439,21 @@ export class Collection {
       .catch(handleError);
   }
 
-  public async peek(limit: number = 10) {
+  public async peek(limit: PositiveInteger = 10) {
     const response = await this.api.aGet(this.name, {
       limit: limit,
     });
     return handleSuccess(response);
   }
 
-  public async createIndex() {
-    return await this.api.createIndex(this.name);
-  }
-
-  public async delete(ids?: string[], where?: object, where_document?: object) {
+  public async delete(ids?: IDs, where?: Where, where_document?: WhereDocument) {
     return await this.api
       .aDelete(this.name, { ids: ids, where: where, where_document: where_document })
       .then(handleSuccess)
       .catch(handleError);
   }
 }
+
 
 export class ChromaClient {
   private api: DefaultApi;
@@ -467,26 +470,26 @@ export class ChromaClient {
     return await this.api.reset();
   }
 
-  public async version() {
+  public async version(): Promise<string> {
     const response = await this.api.version();
     return await handleSuccess(response);
   }
 
-  public async heartbeat() {
+  public async heartbeat(): Promise<number> {
     const response = await this.api.heartbeat();
     let ret = await handleSuccess(response);
     return ret["nanosecond heartbeat"]
   }
 
-  public async persist() {
+  public async persist(): Promise<never> {
     throw new Error("Not implemented in JS client");
   }
 
   public async createCollection(
     name: string,
-    metadata?: object,
+    metadata?: Metadata,
     embeddingFunction?: CallableFunction
-  ) {
+  ): Promise<Collection> {
     const newCollection = await this.api
       .createCollection({
         name,
@@ -504,9 +507,9 @@ export class ChromaClient {
 
   public async getOrCreateCollection(
     name: string,
-    metadata?: object,
+    metadata?: Metadata,
     embeddingFunction?: CallableFunction
-  ) {
+  ): Promise<Collection> {
     const newCollection = await this.api
       .createCollection({
         name,
@@ -528,7 +531,7 @@ export class ChromaClient {
     );
   }
 
-  public async listCollections() {
+  public async listCollections(): Promise<string[]> {
     const response = await this.api.listCollections();
     return handleSuccess(response);
   }
@@ -536,7 +539,7 @@ export class ChromaClient {
   public async getCollection(
     name: string,
     embeddingFunction?: CallableFunction
-  ) {
+  ): Promise<Collection> {
     const response = await this.api
       .getCollection(name)
       .then(handleSuccess)
