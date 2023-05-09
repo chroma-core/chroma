@@ -283,7 +283,7 @@ export class Collection {
 
   public async upsert(
     ids: ID | IDs,
-    embeddings: Embedding | Embeddings,
+    embeddings: Embedding | Embeddings | undefined,
     metadatas?: Metadata | Metadatas,
     documents?: Document | Documents,
   ) {
