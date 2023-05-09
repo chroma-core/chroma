@@ -1,3 +1,9 @@
 venv
 .git
 examples
+clients
+.hypothesis
+__pycache__
+.vscode
+*.egg-info
+.pytest_cache

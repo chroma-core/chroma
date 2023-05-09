@@ -8,3 +8,4 @@ clickhouse-connect==0.5.7
 pydantic==1.9.0
 sentence-transformers==2.2.2 
 posthog==2.4.0
+typing_extensions==4.5.0

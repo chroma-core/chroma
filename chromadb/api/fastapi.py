@@ -15,6 +15,7 @@ import json
 from typing import Sequence
 from chromadb.api.models.Collection import Collection
 from chromadb.telemetry import Telemetry
+import chromadb.errors as errors
 
 
 class FastAPI(API):
@@ -26,13 +27,13 @@ class FastAPI(API):
     def heartbeat(self):
         """Returns the current server time in nanoseconds to check if the server is alive"""
         resp = requests.get(self._api_url)
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return int(resp.json()["nanosecond heartbeat"])
 
     def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = requests.get(self._api_url + "/collections")
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         json_collections = resp.json()
         collections = []
         for json_collection in json_collections:
@@ -52,7 +53,7 @@ class FastAPI(API):
             self._api_url + "/collections",
             data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         resp_json = resp.json()
         return Collection(
             client=self,
@@ -68,7 +69,7 @@ class FastAPI(API):
     ) -> Collection:
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         resp_json = resp.json()
         return Collection(
             client=self,
@@ -93,18 +94,18 @@ class FastAPI(API):
             self._api_url + "/collections/" + current_name,
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json()
 
     def delete_collection(self, name: str):
         """Deletes a collection"""
         resp = requests.delete(self._api_url + "/collections/" + name)
-        resp.raise_for_status()
+        raise_chroma_error(resp)
 
     def _count(self, collection_name: str):
         """Returns the number of embeddings in the database"""
         resp = requests.get(self._api_url + "/collections/" + collection_name + "/count")
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json()
 
     def _peek(self, collection_name, limit=10):
@@ -147,7 +148,7 @@ class FastAPI(API):
             ),
         )
 
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json()
 
     def _delete(self, collection_name, ids=None, where={}, where_document={}):
@@ -158,7 +159,7 @@ class FastAPI(API):
             data=json.dumps({"where": where, "ids": ids, "where_document": where_document}),
         )
 
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json()
 
     def _add(
@@ -180,20 +181,16 @@ class FastAPI(API):
             self._api_url + "/collections/" + collection_name + "/add",
             data=json.dumps(
                 {
+                    "ids": ids,
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "ids": ids,
                     "increment_index": increment_index,
                 }
             ),
         )
 
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            raise (Exception(resp.text))
-
+        raise_chroma_error(resp)
         return True
 
     def _update(
@@ -217,6 +214,36 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
+                }
+            ),
+        )
+
+        resp.raise_for_status()
+        return True
+
+    def _upsert(
+        self,
+        collection_name: str,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ):
+        """
+        Updates a batch of embeddings in the database
+        - pass in column oriented data lists
+        """
+
+        resp = requests.post(
+            self._api_url + "/collections/" + collection_name + "/upsert",
+            data=json.dumps(
+                {
+                    "ids": ids,
+                    "embeddings": embeddings,
+                    "metadatas": metadatas,
+                    "documents": documents,
+                    "increment_index": increment_index,
                 }
             ),
         )
@@ -248,43 +275,60 @@ class FastAPI(API):
             ),
         )
 
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            raise (Exception(resp.text))
-
+        raise_chroma_error(resp)
         body = resp.json()
         return body
 
     def reset(self):
         """Resets the database"""
         resp = requests.post(self._api_url + "/reset")
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json
 
     def persist(self):
         """Persists the database"""
         resp = requests.post(self._api_url + "/persist")
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json
 
     def raw_sql(self, sql):
         """Runs a raw SQL query against the database"""
         resp = requests.post(self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql}))
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return pd.DataFrame.from_dict(resp.json())
 
     def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
         resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            raise (Exception(resp.text))
+        raise_chroma_error(resp)
         return resp.json()
 
     def get_version(self):
         """Returns the version of the server"""
         resp = requests.get(self._api_url + "/version")
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return resp.json()
+
+
+def raise_chroma_error(resp):
+    """Raises an error if the response is not ok, using a ChromaError if possible"""
+    if resp.ok:
+        return
+
+    chroma_error = None
+    try:
+        body = resp.json()
+        if "error" in body:
+            if body["error"] in errors.error_types:
+                chroma_error = errors.error_types[body["error"]](body["message"])
+
+    except BaseException:
+        pass
+
+    if chroma_error:
+        raise chroma_error
+
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError:
+        raise (Exception(resp.text))
