@@ -1350,6 +1350,7 @@ def local_api():
         )
     )
 
+@patch('chromadb.utils.embedding_functions.SentenceTransformerEmbeddingFunction.models', {})
 def test_default_embedding_function(local_api):
     api = local_api
     api.reset()
