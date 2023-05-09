@@ -16,6 +16,7 @@ from typing import Sequence
 from chromadb.api.models.Collection import Collection
 from chromadb.telemetry import Telemetry
 import chromadb.errors as errors
+from uuid import UUID
 
 
 class FastAPI(API):
@@ -57,6 +58,7 @@ class FastAPI(API):
         resp_json = resp.json()
         return Collection(
             client=self,
+            id=resp_json["id"],
             name=resp_json["name"],
             embedding_function=embedding_function,
             metadata=resp_json["metadata"],
@@ -74,6 +76,7 @@ class FastAPI(API):
         return Collection(
             client=self,
             name=resp_json["name"],
+            id=resp_json["id"],
             embedding_function=embedding_function,
             metadata=resp_json["metadata"],
         )
@@ -88,10 +91,10 @@ class FastAPI(API):
 
         return self.create_collection(name, metadata, embedding_function, get_or_create=True)
 
-    def _modify(self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None):
+    def _modify(self, id: UUID, new_name: str, new_metadata: Optional[Dict] = None):
         """Updates a collection"""
         resp = requests.put(
-            self._api_url + "/collections/" + current_name,
+            self._api_url + "/collections/" + str(id),
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
         raise_chroma_error(resp)
@@ -102,22 +105,22 @@ class FastAPI(API):
         resp = requests.delete(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
 
-    def _count(self, collection_name: str):
+    def _count(self, collection_id: UUID):
         """Returns the number of embeddings in the database"""
-        resp = requests.get(self._api_url + "/collections/" + collection_name + "/count")
+        resp = requests.get(self._api_url + "/collections/" + str(collection_id) + "/count")
         raise_chroma_error(resp)
         return resp.json()
 
-    def _peek(self, collection_name, limit=10):
+    def _peek(self, collection_id, limit=10):
         return self._get(
-            collection_name,
+            collection_id,
             limit=limit,
             include=["embeddings", "documents", "metadatas"],
         )
 
     def _get(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         sort: Optional[str] = None,
@@ -134,7 +137,7 @@ class FastAPI(API):
             limit = page_size
 
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/get",
+            self._api_url + "/collections/" + str(collection_id) + "/get",
             data=json.dumps(
                 {
                     "ids": ids,
@@ -151,11 +154,11 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return resp.json()
 
-    def _delete(self, collection_name, ids=None, where={}, where_document={}):
+    def _delete(self, collection_id: UUID, ids=None, where={}, where_document={}):
         """Deletes embeddings from the database"""
 
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/delete",
+            self._api_url + "/collections/" + str(collection_id) + "/delete",
             data=json.dumps({"where": where, "ids": ids, "where_document": where_document}),
         )
 
@@ -165,7 +168,7 @@ class FastAPI(API):
     def _add(
         self,
         ids,
-        collection_name,
+        collection_id: UUID,
         embeddings,
         metadatas=None,
         documents=None,
@@ -178,7 +181,7 @@ class FastAPI(API):
         -     and then manually create the index yourself with collection.create_index()
         """
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/add",
+            self._api_url + "/collections/" + str(collection_id) + "/add",
             data=json.dumps(
                 {
                     "ids": ids,
@@ -195,7 +198,7 @@ class FastAPI(API):
 
     def _update(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
@@ -207,7 +210,7 @@ class FastAPI(API):
         """
 
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/update",
+            self._api_url + "/collections/" + str(collection_id) + "/update",
             data=json.dumps(
                 {
                     "ids": ids,
@@ -223,7 +226,7 @@ class FastAPI(API):
 
     def _upsert(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
@@ -236,7 +239,7 @@ class FastAPI(API):
         """
 
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/upsert",
+            self._api_url + "/collections/" + str(collection_id) + "/upsert",
             data=json.dumps(
                 {
                     "ids": ids,
@@ -253,7 +256,7 @@ class FastAPI(API):
 
     def _query(
         self,
-        collection_name,
+        collection_id: UUID,
         query_embeddings,
         n_results=10,
         where={},
@@ -263,7 +266,7 @@ class FastAPI(API):
         """Gets the nearest neighbors of a single embedding"""
 
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/query",
+            self._api_url + "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
                 {
                     "query_embeddings": query_embeddings,
