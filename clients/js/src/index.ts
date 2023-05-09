@@ -71,11 +71,20 @@ class EmbeddingFunction { }
 
 let OpenAIApi: any;
 
+/**
+ * Class for generating embeddings using OpenAI API.
+ */
 export class OpenAIEmbeddingFunction {
   private api_key: string;
   private org_id: string;
   private model: string;
 
+  /**
+   * Creates an instance of OpenAIEmbeddingFunction.
+   * @param openai_api_key - The API key for OpenAI.
+   * @param openai_model - (Optional) The model to use for generating embeddings. Defaults to 'text-embedding-ada-002'.
+   * @param openai_organization_id - (Optional) The organization ID for the OpenAI service.
+   */
   constructor(
     openai_api_key: string,
     openai_model?: string,
@@ -94,6 +103,11 @@ export class OpenAIEmbeddingFunction {
     this.model = openai_model || "text-embedding-ada-002";
   }
 
+  /**
+   * Generates embeddings for the given texts using the OpenAI API.
+   * @param texts - An array of texts to generate embeddings for.
+   * @returns A Promise that resolves with the embeddings.
+   */
   public async generate(texts: string[]): Promise<number[][]> {
     const configuration = new OpenAIApi.Configuration({
       organization: this.org_id,
@@ -115,9 +129,16 @@ export class OpenAIEmbeddingFunction {
 
 let CohereAiApi: any;
 
+/**
+ * Class for generating embeddings using Cohere API.
+ */
 export class CohereEmbeddingFunction {
   private api_key: string;
 
+  /**
+   * Creates an instance of CohereEmbeddingFunction.
+   * @param cohere_api_key - The API key for Cohere.
+   */
   constructor(cohere_api_key: string) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
@@ -130,6 +151,11 @@ export class CohereEmbeddingFunction {
     this.api_key = cohere_api_key;
   }
 
+  /**
+   * Generates embeddings for the given texts using the Cohere API.
+   * @param texts - An array of texts to generate embeddings for.
+   * @returns A Promise that resolves with the embeddings.
+   */
   public async generate(texts: string[]) {
     const cohere = CohereAiApi.init(this.api_key);
     const embeddings = [];
@@ -144,12 +170,22 @@ type CallableFunction = {
   generate(texts: string[]): Promise<number[][]>;
 };
 
+/**
+ * Represents a collection of embeddings.
+ */
 export class Collection {
   public name: string;
   public metadata: object | undefined;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
+  /**
+   * Creates a new Collection instance.
+   * @param name - The name of the collection.
+   * @param api - The API instance for the collection.
+   * @param metadata - (Optional) Metadata for the collection.
+   * @param embeddingFunction - (Optional) A callable function for generating embeddings.
+   */
   constructor(
     name: string,
     api: DefaultApi,
@@ -240,12 +276,19 @@ export class Collection {
     return [idsArray, embeddingsArray, metadatasArray, documentsArray]
   }
 
+  /**
+   * Adds items to the collection.
+   * @param ids - A single ID or an array of IDs for the items to be added.
+   * @param embeddings - A single embedding or an array of embeddings. If undefined, embeddings will be generated from documents.
+   * @param metadatas - (Optional) A single metadata object or an array of metadata objects associated with the items.
+   * @param documents - (Optional) A single document or an array of documents to store and generate embeddings for, if embeddings are not provided.
+   * @returns A Promise that resolves to a Boolean indicating whether the items were added successfully.
+   */
   public async add(
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -264,7 +307,6 @@ export class Collection {
         // @ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        incrementIndex: increment_index,
       })
       .then(handleSuccess)
       .catch(handleError);
@@ -272,12 +314,20 @@ export class Collection {
     return response
   }
 
+  /**
+   * Upserts items in the collection.
+   * @param ids - A single ID or an array of IDs for the items to be upserted.
+   * @param embeddings - A single embedding or an array of embeddings. If undefined, embeddings will be generated from documents.
+   * @param metadatas - (Optional) A single metadata object or an array of metadata objects associated with the items.
+   * @param documents - (Optional) A single document or an array of documents to store and generate embeddings for, if embeddings are not provided.
+   * @returns A Promise that resolves to a Boolean indicating whether the items were upserted successfully.
+   * @remarks Upsert is a combination of add and update. If an item with the same ID already exists, it will be updated. Otherwise, it will be added.
+  */
   public async upsert(
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
   ) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
@@ -296,7 +346,6 @@ export class Collection {
         //@ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        increment_index: increment_index,
       },
     )
       .then(handleSuccess)
@@ -306,12 +355,22 @@ export class Collection {
 
   }
 
-
+  /**
+   * Returns the number of items in the collection.
+   * @returns A Promise that resolves to the number of items in the collection.
+   */
   public async count() {
     const response = await this.api.count(this.name);
     return handleSuccess(response);
   }
 
+  /**
+   * Change the name or metadata of the collection.
+   * @param name - (Optional) The new name for the collection.
+   * @param metadata - (Optional) The new metadata for the collection.
+   * @returns A Promise that resolves to a Boolean indicating whether the collection was modified successfully.
+   * @remarks If the name or metadata is not provided, the existing name or metadata will be used.
+  */
   public async modify(name?: string, metadata?: object) {
     const response = await this.api
       .updateCollection(
@@ -330,6 +389,16 @@ export class Collection {
     return response;
   }
 
+  /**
+   * Retrieves items from the collection.
+   * @param ids - (Optional) An array of IDs of the items to be retrieved.
+   * @param where - (Optional) An object specifying filtering conditions.
+   * @param limit - (Optional) A number indicating the maximum number of items to retrieve.
+   * @param offset - (Optional) A number indicating the offset for pagination.
+   * @param include - (Optional) An array of strings specifying which fields to include in the response.
+   * @param where_document - (Optional) An object specifying filtering conditions for the document field.
+   * @returns A Promise that resolves to the retrieved items.
+   */
   public async get(
     ids?: string[],
     where?: object,
@@ -348,11 +417,20 @@ export class Collection {
         limit,
         offset,
         include,
+        where_document
       })
       .then(handleSuccess)
       .catch(handleError);
   }
 
+  /**
+   * Updates items in the collection.
+   * @param ids - A single ID or an array of IDs for the items to be updated.
+   * @param embeddings - (Optional) A single embedding or an array of embeddings. If undefined, embeddings will be generated from documents.
+   * @param metadatas - (Optional) A single metadata object or an array of metadata objects associated with the items.
+   * @param documents - (Optional) A single document or an array of documents to store and generate embeddings for, if embeddings are not provided.
+   * @returns A Promise that resolves to a Boolean indicating whether the items were updated successfully.
+   */
   public async update(
     ids: string | string[],
     embeddings?: number[] | number[][],
@@ -394,6 +472,16 @@ export class Collection {
     return resp;
   }
 
+  /**
+   * Queries the collection for the nearest neighbors of the provided query embeddings or query texts.
+   * @param query_embeddings - A single query embedding or an array of query embeddings. If undefined, embeddings will be generated from query_text.
+   * @param n_results - (Optional) The number of nearest neighbors to return. Default is 10.
+   * @param where - (Optional) An object specifying filtering conditions.
+   * @param query_text - (Optional) A single query text or an array of query texts to generate embeddings for, if query_embeddings are not provided.
+   * @param where_document - (Optional) An object specifying filtering conditions for the document field.
+   * @param include - (Optional) An array of strings specifying which fields to include in the response.
+   * @returns A Promise that resolves to the nearest neighbors of the query embeddings or query texts.
+   */
   public async query(
     query_embeddings: number[] | number[][] | undefined,
     n_results: number = 10,
@@ -433,6 +521,11 @@ export class Collection {
       .catch(handleError);
   }
 
+  /**
+   * Retrieves a limited number of items from the collection.
+   * @param limit - (Optional) The maximum number of items to retrieve. Default is 10.
+   * @returns A Promise that resolves to the retrieved items.
+   */
   public async peek(limit: number = 10) {
     const response = await this.api.aGet(this.name, {
       limit: limit,
@@ -444,6 +537,13 @@ export class Collection {
     return await this.api.createIndex(this.name);
   }
 
+  /**
+   * Deletes items from the collection.
+   * @param ids - (Optional) An array of IDs of the items to be deleted.
+   * @param where - (Optional) An object specifying filtering conditions for deletion.
+   * @param where_document - (Optional) An object specifying filtering conditions for the document field.
+   * @returns A Promise that resolves to the result of the deletion operation.
+   */
   public async delete(ids?: string[], where?: object, where_document?: object) {
     return await this.api
       .aDelete(this.name, { ids: ids, where: where, where_document: where_document })
@@ -452,9 +552,16 @@ export class Collection {
   }
 }
 
+/**
+ * Represents a ChromaClient for managing collections of embeddings.
+ */
 export class ChromaClient {
   private api: DefaultApi;
 
+  /**
+   * Creates a new ChromaClient instance.
+   * @param basePath - (Optional) The base URL of the Chroma API. Default is "http://localhost:8000".
+   */
   constructor(basePath?: string) {
     if (basePath === undefined) basePath = "http://localhost:8000";
     const apiConfig: Configuration = new Configuration({
@@ -463,15 +570,27 @@ export class ChromaClient {
     this.api = new DefaultApi(apiConfig);
   }
 
+  /**
+   * Resets the ChromaClient state.
+   * @returns A Promise that resolves when the ChromaClient state is reset.
+   */
   public async reset() {
     return await this.api.reset();
   }
 
+  /**
+   * Returns the version of the Chroma API.
+   * @returns A Promise that resolves to the version of the Chroma API.
+  */
   public async version() {
     const response = await this.api.version();
     return await handleSuccess(response);
   }
 
+  /**
+   * Returns the heartbeat of the Chroma API.
+   * @returns A Promise that resolves to the heartbeat of the Chroma API.
+  */
   public async heartbeat() {
     const response = await this.api.heartbeat();
     let ret = await handleSuccess(response);
@@ -482,6 +601,13 @@ export class ChromaClient {
     throw new Error("Not implemented in JS client");
   }
 
+  /**
+   * Creates a new collection.
+   * @param name - The name of the new collection.
+   * @param metadata - (Optional) An object containing metadata for the new collection.
+   * @param embeddingFunction - (Optional) A callable function for generating embeddings.
+   * @returns A Promise that resolves to the created Collection instance.
+   */
   public async createCollection(
     name: string,
     metadata?: object,
@@ -502,6 +628,14 @@ export class ChromaClient {
     return new Collection(name, this.api, metadata, embeddingFunction);
   }
 
+  /**
+   * Retrieves an existing collection or creates a new one if it does not exist.
+   * @param name - The name of the collection to be retrieved or created.
+   * @param metadata - (Optional) An object containing metadata for the new collection.
+   * @param embeddingFunction - (Optional) A callable function for generating embeddings.
+   * @returns A Promise that resolves to the retrieved or created Collection instance.
+   * @remarks This method is useful for ensuring that a collection exists before attempting to add items to it.
+  */
   public async getOrCreateCollection(
     name: string,
     metadata?: object,
@@ -528,11 +662,21 @@ export class ChromaClient {
     );
   }
 
+  /**
+   * Lists all collections.
+   * @returns A Promise that resolves to an array of collections.
+   */
   public async listCollections() {
     const response = await this.api.listCollections();
     return handleSuccess(response);
   }
 
+  /**
+   * Retrieves an existing collection.
+   * @param name - The name of the collection to be retrieved.
+   * @param embeddingFunction - (Optional) A callable function for generating embeddings.
+   * @returns A Collection instance representing the retrieved collection.
+   */
   public async getCollection(
     name: string,
     embeddingFunction?: CallableFunction
@@ -550,6 +694,11 @@ export class ChromaClient {
     );
   }
 
+  /**
+   * Deletes a collection.
+   * @param name - The name of the collection to be deleted.
+   * @returns A Promise that resolves to the result of the deletion operation.
+   */
   public async deleteCollection(name: string) {
     return await this.api
       .deleteCollection(name)
