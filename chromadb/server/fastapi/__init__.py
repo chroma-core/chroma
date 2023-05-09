@@ -47,9 +47,9 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except ChromaError as e:
-        return JSONResponse(content={"error": e.name(),
-                                     "message": e.message()},
-                            status_code=e.code())
+        return JSONResponse(
+            content={"error": e.name(), "message": e.message()}, status_code=e.code()
+        )
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
@@ -79,8 +79,12 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
-        self.router.add_api_route("/api/v1/collections", self.list_collections, methods=["GET"])
-        self.router.add_api_route("/api/v1/collections", self.create_collection, methods=["POST"])
+        self.router.add_api_route(
+            "/api/v1/collections", self.list_collections, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/collections", self.create_collection, methods=["POST"]
+        )
 
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/add",
@@ -89,16 +93,22 @@ class FastAPI(chromadb.server.Server):
             status_code=status.HTTP_201_CREATED,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}/update", self.update, methods=["POST"]
+            "/api/v1/collections/{collection_name}/update",
+            self.update,
+            methods=["POST"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}/upsert", self.upsert, methods=["POST"]
+            "/api/v1/collections/{collection_name}/upsert",
+            self.upsert,
+            methods=["POST"],
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/get", self.get, methods=["POST"]
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}/delete", self.delete, methods=["POST"]
+            "/api/v1/collections/{collection_name}/delete",
+            self.delete,
+            methods=["POST"],
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/count", self.count, methods=["GET"]
@@ -114,13 +124,19 @@ class FastAPI(chromadb.server.Server):
             methods=["POST"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}", self.get_collection, methods=["GET"]
+            "/api/v1/collections/{collection_name}",
+            self.get_collection,
+            methods=["GET"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}", self.update_collection, methods=["PUT"]
+            "/api/v1/collections/{collection_name}",
+            self.update_collection,
+            methods=["PUT"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}", self.delete_collection, methods=["DELETE"]
+            "/api/v1/collections/{collection_name}",
+            self.delete_collection,
+            methods=["DELETE"],
         )
 
         self._app.include_router(self.router)
@@ -173,7 +189,6 @@ class FastAPI(chromadb.server.Server):
                 metadatas=add.metadatas,
                 documents=add.documents,
                 ids=add.ids,
-                increment_index=add.increment_index,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -188,14 +203,13 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
-    def upsert(self, collection_name: str, upsert: AddEmbedding):        
+    def upsert(self, collection_name: str, upsert: AddEmbedding):
         return self._api._upsert(
             collection_name=collection_name,
             ids=upsert.ids,
             embeddings=upsert.embeddings,
             documents=upsert.documents,
             metadatas=upsert.metadatas,
-            increment_index=upsert.increment_index,
         )
 
     def get(self, collection_name, get: GetEmbedding):

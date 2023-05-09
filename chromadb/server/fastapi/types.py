@@ -9,7 +9,6 @@ class AddEmbedding(BaseModel):
     metadatas: Union[List, dict] = None
     documents: Union[str, List] = None
     ids: Union[str, List] = None
-    increment_index: bool = True
 
 
 class UpdateEmbedding(BaseModel):
@@ -17,7 +16,6 @@ class UpdateEmbedding(BaseModel):
     metadatas: Union[List, dict] = None
     documents: Union[str, List] = None
     ids: Union[str, List] = None
-    increment_index: bool = True
 
 
 class QueryEmbedding(BaseModel):
