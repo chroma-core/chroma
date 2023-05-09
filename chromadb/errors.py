@@ -1,11 +1,10 @@
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 
 
 class ChromaError(Exception):
-
     def code(self):
         """Return an appropriate HTTP response code for this error"""
-        return 400 # Bad Request
+        return 400  # Bad Request
 
     def message(self):
         return ", ".join(self.args)
@@ -42,9 +41,8 @@ class NotEnoughElementsException(ChromaError):
 
 
 class IDAlreadyExistsError(ChromaError):
-
     def code(self):
-        return 409 # Conflict
+        return 409  # Conflict
 
     @classmethod
     def name(cls):
@@ -55,6 +53,7 @@ class DuplicateIDError(ChromaError):
     @classmethod
     def name(cls):
         return "DuplicateID"
+
 
 error_types = {
     "NoDatapoints": NoDatapointsException,

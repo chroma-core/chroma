@@ -31,7 +31,7 @@
     <img src="https://github.com/chroma-core/chroma/actions/workflows/chroma-test.yml/badge.svg?branch=main" alt="Tests">
   </a>
 </p>
-        
+
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
@@ -100,4 +100,3 @@ Chroma is a rapidly developing project. We welcome PR contributors and ideas for
 ## License
 
 [Apache 2.0](./LICENSE)
-

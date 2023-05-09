@@ -3,7 +3,6 @@ from typing import Optional
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
-
     models = {}
 
     # If you have a beefier machine, try "gtr-t5-large".
@@ -24,7 +23,9 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"):
+    def __init__(
+        self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"
+    ):
         try:
             import openai
         except ImportError:
@@ -72,21 +73,22 @@ class CohereEmbeddingFunction(EmbeddingFunction):
     def __call__(self, texts: Documents) -> Embeddings:
         # Call Cohere Embedding API for each document.
         return [
-            embeddings for embeddings in self._client.embed(texts=texts, model=self._model_name)
+            embeddings
+            for embeddings in self._client.embed(texts=texts, model=self._model_name)
         ]
 
 
 class HuggingFaceEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    ):
         try:
             import requests
         except ImportError:
             raise ValueError(
                 "The requests python package is not installed. Please install it with `pip install requests`"
             )
-        self._api_url = (
-            f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        )
+        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 

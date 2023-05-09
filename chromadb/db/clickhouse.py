@@ -213,7 +213,7 @@ class Clickhouse(DB):
             new_metadata = self.get_collection(current_name)[0][2]
 
         return self._get_conn().command(
-            f"""
+            """
 
          ALTER TABLE
             collections
@@ -222,7 +222,8 @@ class Clickhouse(DB):
             name = %s
          WHERE
             name = %s
-         """, [json.dumps(new_metadata), new_name, current_name]
+         """,
+            [json.dumps(new_metadata), new_name, current_name],
         )
 
     def delete_collection(self, name: str):
@@ -361,11 +362,17 @@ class Clickhouse(DB):
 
             # Shortcut for $eq
             if type(value) == str:
-                result.append(has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'"))
+                result.append(
+                    has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'")
+                )
             elif type(value) == int:
-                result.append(has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}")
+                )
             elif type(value) == float:
-                result.append(has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                )
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
@@ -388,7 +395,9 @@ class Clickhouse(DB):
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') != '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') != {operand}")
@@ -396,7 +405,9 @@ class Clickhouse(DB):
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') = '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') = {operand}")
