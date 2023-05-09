@@ -43,15 +43,13 @@ class Collection(BaseModel):
         metadata: Optional[Dict] = None,
     ):
         self._client = client
-        if embedding_function is not None:
-            self._embedding_function = embedding_function
-        else:
-            import chromadb.utils.embedding_functions as ef
 
+        if embedding_function is None:
             logger.warning(
-                "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
+                "No embedding_function provided. If you do not supply your own embedding vectors, the default SentenceTransformerEmbeddingFunction will be used."
             )
-            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
+
+        self._embedding_function = embedding_function
         super().__init__(name=name, metadata=metadata)
 
     def __repr__(self):
@@ -202,9 +200,7 @@ class Collection(BaseModel):
         # If query_embeddings are not provided, we need to compute them from the query_texts
         if query_embeddings is None:
             if self._embedding_function is None:
-                raise ValueError(
-                    "You must provide embeddings or a function to compute them"
-                )
+                self._embedding_function = _init_default_embedding_function()
             # We know query texts is not None at this point, cast for the typechecker
             query_embeddings = self._embedding_function(
                 cast(List[Document], query_texts)
@@ -372,9 +368,13 @@ class Collection(BaseModel):
         # If document embeddings are not provided, we need to compute them
         if embeddings is None and documents is not None:
             if self._embedding_function is None:
-                raise ValueError(
-                    "You must provide embeddings or a function to compute them"
-                )
+                self._embedding_function = _init_default_embedding_function()
+
             embeddings = self._embedding_function(documents)
 
         return ids, embeddings, metadatas, documents
+
+
+def _init_default_embedding_function():
+    import chromadb.utils.embedding_functions as ef
+    return ef.SentenceTransformerEmbeddingFunction()
