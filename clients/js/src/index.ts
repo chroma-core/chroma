@@ -146,17 +146,20 @@ type CallableFunction = {
 
 export class Collection {
   public name: string;
+  public id: string;
   public metadata: object | undefined;
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
   constructor(
     name: string,
+    id: string,
     api: DefaultApi,
     metadata?: object,
     embeddingFunction?: CallableFunction
   ) {
     this.name = name;
+    this.id = id;
     this.metadata = metadata;
     this.api = api;
     if (embeddingFunction !== undefined)
@@ -256,7 +259,7 @@ export class Collection {
       documents
     )
 
-    const response = await this.api.add(this.name,
+    const response = await this.api.add(this.id,
       {
         // @ts-ignore
         ids: idsArray,
@@ -288,7 +291,7 @@ export class Collection {
       documents
     )
 
-    const response = await this.api.upsert(this.name,
+    const response = await this.api.upsert(this.id,
       {
         //@ts-ignore
         ids: idsArray,
@@ -308,14 +311,14 @@ export class Collection {
 
 
   public async count() {
-    const response = await this.api.count(this.name);
+    const response = await this.api.count(this.id);
     return handleSuccess(response);
   }
 
   public async modify(name?: string, metadata?: object) {
     const response = await this.api
       .updateCollection(
-        this.name,
+        this.id,
         {
           new_name: name,
           new_metadata: metadata,
@@ -328,6 +331,7 @@ export class Collection {
     this.setMetadata(metadata || this.metadata);
 
     return response;
+
   }
 
   public async get(
@@ -342,7 +346,7 @@ export class Collection {
     if (ids !== undefined) idsArray = toArray(ids);
 
     return await this.api
-      .aGet(this.name, {
+      .aGet(this.id, {
         ids: idsArray,
         where,
         limit,
@@ -380,7 +384,7 @@ export class Collection {
 
     var resp = await this.api
       .update(
-        this.name,
+        this.id,
         {
           ids: toArray(ids),
           embeddings: embeddings ? toArrayOfArrays(embeddings) : undefined,
@@ -422,7 +426,7 @@ export class Collection {
     const query_embeddingsArray: number[][] = toArrayOfArrays(query_embeddings);
 
     return await this.api
-      .getNearestNeighbors(this.name, {
+      .getNearestNeighbors(this.id, {
         query_embeddings: query_embeddingsArray,
         where,
         n_results: n_results,
@@ -434,7 +438,7 @@ export class Collection {
   }
 
   public async peek(limit: number = 10) {
-    const response = await this.api.aGet(this.name, {
+    const response = await this.api.aGet(this.id, {
       limit: limit,
     });
     return handleSuccess(response);
@@ -446,7 +450,7 @@ export class Collection {
 
   public async delete(ids?: string[], where?: object, where_document?: object) {
     return await this.api
-      .aDelete(this.name, { ids: ids, where: where, where_document: where_document })
+      .aDelete(this.id, { ids: ids, where: where, where_document: where_document })
       .then(handleSuccess)
       .catch(handleError);
   }
@@ -499,7 +503,7 @@ export class ChromaClient {
       throw new Error(newCollection.error);
     }
 
-    return new Collection(name, this.api, metadata, embeddingFunction);
+    return new Collection(name, newCollection.id, this.api, metadata, embeddingFunction);
   }
 
   public async getOrCreateCollection(
@@ -522,6 +526,7 @@ export class ChromaClient {
 
     return new Collection(
       name,
+      newCollection.id,
       this.api,
       newCollection.metadata,
       embeddingFunction
@@ -544,6 +549,7 @@ export class ChromaClient {
 
     return new Collection(
       response.name,
+      response.id,
       this.api,
       response.metadata,
       embeddingFunction

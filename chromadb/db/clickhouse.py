@@ -19,6 +19,7 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
 import logging
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ class Clickhouse(DB):
             "Clickhouse is a persistent database, this method is not needed"
         )
 
-    def get_collection_uuid_from_name(self, name: str) -> str:
+    def get_collection_uuid_from_name(self, name: str) -> UUID:
         res = self._get_conn().query(
             f"""
             SELECT uuid FROM collections WHERE name = '{name}'
@@ -154,7 +155,9 @@ class Clickhouse(DB):
         if len(dupe_check) > 0:
             if get_or_create:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
                 logger.info(
                     f"collection with name {name} already exists, returning existing collection"
@@ -203,32 +206,25 @@ class Clickhouse(DB):
 
     def update_collection(
         self,
-        current_name: str,
+        id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[Dict] = None,
     ):
-        if new_name is None:
-            new_name = current_name
-        else:
+        if new_name is not None:
             dupe_check = self.get_collection(new_name)
-
             if len(dupe_check) > 0:
                 raise ValueError(f"Collection with name {new_name} already exists")
-        if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0][2]
 
-        return self._get_conn().command(
-            f"""
+            self._get_conn().command(
+                f"ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
+                parameters={"new_name": new_name, "uuid": id},
+            )
 
-         ALTER TABLE
-            collections
-         UPDATE
-            metadata = %s,
-            name = %s
-         WHERE
-            name = %s
-         """, [json.dumps(new_metadata), new_name, current_name]
-        )
+        if new_metadata is not None:
+            self._get_conn().command(
+                f"ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
+                parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
+            )
 
     def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
@@ -366,11 +362,17 @@ class Clickhouse(DB):
 
             # Shortcut for $eq
             if type(value) == str:
-                result.append(has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'"))
+                result.append(
+                    has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'")
+                )
             elif type(value) == int:
-                result.append(has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}")
+                )
             elif type(value) == float:
-                result.append(has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                )
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
@@ -393,7 +395,9 @@ class Clickhouse(DB):
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') != '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') != {operand}")
@@ -401,7 +405,9 @@ class Clickhouse(DB):
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') = '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') = {operand}")
@@ -444,7 +450,7 @@ class Clickhouse(DB):
         self,
         where: Where = {},
         collection_name: Optional[str] = None,
-        collection_uuid: Optional[str] = None,
+        collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
@@ -483,17 +489,13 @@ class Clickhouse(DB):
 
         return val
 
-    def _count(self, collection_uuid: str):
+    def count(self, collection_uuid: UUID):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return (
             self._get_conn()
             .query(f"SELECT COUNT() FROM embeddings {where_string}")
-            .result_rows
+            .result_rows[0][0]
         )
-
-    def count(self, collection_name: str):
-        collection_uuid = self.get_collection_uuid_from_name(collection_name)
-        return self._count(collection_uuid=collection_uuid)[0][0]
 
     def _delete(self, where_str: Optional[str] = None) -> List:
         deleted_uuids = (
@@ -552,21 +554,15 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(
         self,
+        collection_uuid: UUID,
         where: Where,
         where_document: WhereDocument,
         embeddings: Embeddings,
         n_results: int,
-        collection_name=None,
-        collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
         # Either the collection name or the collection uuid must be provided
-        if collection_name is None and collection_uuid is None:
-            raise TypeError(
-                "Arguments collection_name and collection_uuid cannot both be None"
-            )
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
+        if collection_uuid is None:
+            raise TypeError("Argument collection_uuid cannot be None")
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
