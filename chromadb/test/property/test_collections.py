@@ -88,11 +88,11 @@ class CollectionStateMachine(RuleBasedStateMachine):
         coll=st.one_of(consumes(collections), strategies.collections()),
     )
     def get_or_create_coll(self, coll, new_metadata):
+        # TODO: Test get_or_create with new metadata = None as this is not tested
+
         if new_metadata is not None:
             coll.metadata = new_metadata
 
-        # Passing none to metadata for an existing collection should not change the
-        # metadata
         c = self.api.get_or_create_collection(
             name=coll.name,
             metadata=coll.metadata,
