@@ -1176,7 +1176,7 @@ def test_persist_index_loading_params(api, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
     collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
-    collection.add(ids="id1", documents="hello")
+    collection.add(ids="id1", embeddings=[1.1, 2.2, 3.3])
 
     api.persist()
     del api
@@ -1187,7 +1187,7 @@ def test_persist_index_loading_params(api, request):
     assert collection.metadata["hnsw:space"] == "ip"
 
     nn = collection.query(
-        query_texts="hello",
+        query_embeddings=[1.1, 2.2, 3.3],
         n_results=1,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
