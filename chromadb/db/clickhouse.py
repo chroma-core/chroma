@@ -116,7 +116,7 @@ class Clickhouse(DB):
             "Clickhouse is a persistent database, this method is not needed"
         )
 
-    def get_collection_uuid_from_name(self, name: str) -> str:
+    def get_collection_uuid_from_name(self, name: str) -> UUID:
         res = self._get_conn().query(
             f"""
             SELECT uuid FROM collections WHERE name = '{name}'
@@ -210,12 +210,14 @@ class Clickhouse(DB):
     ):
         if new_name is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE name = '{new_name}' WHERE uuid = '{id}'",
+                f"ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
+                parameters={"new_name": new_name, "uuid": id},
             )
 
         if new_metadata is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE metadata = '{json.dumps(new_metadata)}' WHERE uuid = '{id}'"
+                f"ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
+                parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 
     def delete_collection(self, name: str):
@@ -432,7 +434,7 @@ class Clickhouse(DB):
         self,
         where: Where = {},
         collection_name: Optional[str] = None,
-        collection_uuid: Optional[str] = None,
+        collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
@@ -471,7 +473,7 @@ class Clickhouse(DB):
 
         return val
 
-    def count(self, collection_uuid: str):
+    def count(self, collection_uuid: UUID):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return (
             self._get_conn()
@@ -536,21 +538,17 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(
         self,
+        collection_uuid: UUID,
         where: Where,
         where_document: WhereDocument,
         embeddings: Embeddings,
         n_results: int,
-        collection_name=None,
-        collection_uuid=None,
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
         # Either the collection name or the collection uuid must be provided
-        if collection_name is None and collection_uuid is None:
+        if collection_uuid is None:
             raise TypeError(
-                "Arguments collection_name and collection_uuid cannot both be None"
+                "Argument collection_uuid cannot be None"
             )
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
