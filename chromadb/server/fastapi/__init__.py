@@ -12,6 +12,7 @@ import chromadb.server
 import chromadb.api
 from chromadb.errors import (
     ChromaError,
+    InvalidUUIDError,
     NoDatapointsException,
     InvalidDimensionException,
     NotEnoughElementsException,
@@ -49,12 +50,19 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except ChromaError as e:
-        return JSONResponse(content={"error": e.name(),
-                                     "message": e.message()},
-                            status_code=e.code())
+        return JSONResponse(
+            content={"error": e.name(), "message": e.message()}, status_code=e.code()
+        )
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
+
+
+def _uuid(uuid_str: str):
+    try:
+        return UUID(uuid_str)
+    except ValueError:
+        raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
 class FastAPI(chromadb.server.Server):
@@ -81,8 +89,12 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
         self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
-        self.router.add_api_route("/api/v1/collections", self.list_collections, methods=["GET"])
-        self.router.add_api_route("/api/v1/collections", self.create_collection, methods=["POST"])
+        self.router.add_api_route(
+            "/api/v1/collections", self.list_collections, methods=["GET"]
+        )
+        self.router.add_api_route(
+            "/api/v1/collections", self.create_collection, methods=["POST"]
+        )
 
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/add",
@@ -116,13 +128,19 @@ class FastAPI(chromadb.server.Server):
             methods=["POST"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}", self.get_collection, methods=["GET"]
+            "/api/v1/collections/{collection_name}",
+            self.get_collection,
+            methods=["GET"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}", self.update_collection, methods=["PUT"]
+            "/api/v1/collections/{collection_id}",
+            self.update_collection,
+            methods=["PUT"],
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_name}", self.delete_collection, methods=["DELETE"]
+            "/api/v1/collections/{collection_name}",
+            self.delete_collection,
+            methods=["DELETE"],
         )
 
         self._app.include_router(self.router)
@@ -159,7 +177,7 @@ class FastAPI(chromadb.server.Server):
 
     def update_collection(self, collection_id: str, collection: UpdateCollection):
         return self._api._modify(
-            id=UUID(collection_id),
+            id=_uuid(collection_id),
             new_name=collection.new_name,
             new_metadata=collection.new_metadata,
         )
@@ -170,7 +188,7 @@ class FastAPI(chromadb.server.Server):
     def add(self, collection_id: str, add: AddEmbedding):
         try:
             result = self._api._add(
-                collection_id=UUID(collection_id),
+                collection_id=_uuid(collection_id),
                 embeddings=add.embeddings,
                 metadatas=add.metadatas,
                 documents=add.documents,
@@ -184,7 +202,7 @@ class FastAPI(chromadb.server.Server):
     def update(self, collection_id: str, add: UpdateEmbedding):
         return self._api._update(
             ids=add.ids,
-            collection_id=UUID(collection_id),
+            collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
             documents=add.documents,
             metadatas=add.metadatas,
@@ -192,7 +210,7 @@ class FastAPI(chromadb.server.Server):
 
     def upsert(self, collection_id: str, upsert: AddEmbedding):
         return self._api._upsert(
-            collection_id=UUID(collection_id),
+            collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,
             documents=upsert.documents,
@@ -202,7 +220,7 @@ class FastAPI(chromadb.server.Server):
 
     def get(self, collection_id: str, get: GetEmbedding):
         return self._api._get(
-            collection_id=UUID(collection_id),
+            collection_id=_uuid(collection_id),
             ids=get.ids,
             where=get.where,
             where_document=get.where_document,
@@ -216,19 +234,19 @@ class FastAPI(chromadb.server.Server):
         return self._api._delete(
             where=delete.where,
             ids=delete.ids,
-            collection_id=UUID(collection_id),
+            collection_id=_uuid(collection_id),
             where_document=delete.where_document,
         )
 
     def count(self, collection_id: str):
-        return self._api._count(UUID(collection_id))
+        return self._api._count(_uuid(collection_id))
 
     def reset(self):
         return self._api.reset()
 
     def get_nearest_neighbors(self, collection_id: str, query: QueryEmbedding):
         nnresult = self._api._query(
-            collection_id=UUID(collection_id),
+            collection_id=_uuid(collection_id),
             where=query.where,
             where_document=query.where_document,
             query_embeddings=query.query_embeddings,
