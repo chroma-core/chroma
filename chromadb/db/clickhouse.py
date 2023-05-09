@@ -207,12 +207,14 @@ class Clickhouse(DB):
     ):
         if new_name is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE name = '{new_name}' WHERE uuid = '{id}'",
+                f"ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
+                parameters={"new_name": new_name, "uuid": id},
             )
 
         if new_metadata is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE metadata = '{json.dumps(new_metadata)}' WHERE uuid = '{id}'"
+                f"ALTER TABLE collections UPDATE metadata = $(new_metadata)s WHERE uuid = $(uuid)s",
+                parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 
     def delete_collection(self, name: str):
@@ -468,7 +470,7 @@ class Clickhouse(DB):
 
         return val
 
-    def count(self, collection_uuid: str):
+    def count(self, collection_uuid: UUID):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return (
             self._get_conn()
@@ -533,7 +535,7 @@ class Clickhouse(DB):
 
     def get_nearest_neighbors(
         self,
-        collection_uuid: uuid.UUID,
+        collection_uuid: UUID,
         where: Where,
         where_document: WhereDocument,
         embeddings: Embeddings,
