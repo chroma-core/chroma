@@ -83,7 +83,9 @@ class DuckDB(Clickhouse):
         if len(dupe_check) > 0:
             if get_or_create is True:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
 
                 logger.info(
@@ -126,8 +128,9 @@ class DuckDB(Clickhouse):
         self._delete_index(collection_uuid)
         self._conn.execute("""DELETE FROM collections WHERE name = ?""", [name])
 
-    def update_collection(self, id: uuid.UUID, new_name: str, new_metadata: Optional[Dict] = None):
-
+    def update_collection(
+        self, id: uuid.UUID, new_name: str, new_metadata: Optional[Dict] = None
+    ):
         if new_name is not None:
             self._conn.execute(
                 """UPDATE collections SET name = ? WHERE uuid = ?""",
@@ -169,7 +172,9 @@ class DuckDB(Clickhouse):
 
     def count(self, collection_uuid):
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}").fetchall()[0][0]
+        return self._conn.query(
+            f"SELECT COUNT() FROM embeddings {where_string}"
+        ).fetchall()[0][0]
 
     def _format_where(self, where, result):
         for key, value in where.items():

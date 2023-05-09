@@ -35,14 +35,18 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def create_coll(self, coll):
         if coll.name in self.existing:
             with pytest.raises(Exception):
-                c = self.api.create_collection(name=coll.name,
-                                               metadata=coll.metadata,
-                                               embedding_function=coll.embedding_function)
+                c = self.api.create_collection(
+                    name=coll.name,
+                    metadata=coll.metadata,
+                    embedding_function=coll.embedding_function,
+                )
             return multiple()
 
-        c = self.api.create_collection(name=coll.name,
-                                       metadata=coll.metadata,
-                                       embedding_function=coll.embedding_function)
+        c = self.api.create_collection(
+            name=coll.name,
+            metadata=coll.metadata,
+            embedding_function=coll.embedding_function,
+        )
         self.existing.add(coll.name)
 
         assert c.name == coll.name
@@ -80,12 +84,20 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     @rule(
         target=collections,
+        new_metadata=st.one_of(st.none(), strategies.collection_metadata),
         coll=st.one_of(consumes(collections), strategies.collections()),
     )
-    def get_or_create_coll(self, coll):
-        c = self.api.get_or_create_collection(name=coll.name,
-                                              metadata=coll.metadata,
-                                              embedding_function=coll.embedding_function)
+    def get_or_create_coll(self, coll, new_metadata):
+        if new_metadata is not None:
+            coll.metadata = new_metadata
+
+        # Passing none to metadata for an existing collection should not change the
+        # metadata
+        c = self.api.get_or_create_collection(
+            name=coll.name,
+            metadata=coll.metadata,
+            embedding_function=coll.embedding_function,
+        )
         assert c.name == coll.name
         if coll.metadata is not None:
             assert c.metadata == coll.metadata
