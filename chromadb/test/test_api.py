@@ -11,7 +11,7 @@ from multiprocessing import Process
 import uvicorn
 from requests.exceptions import ConnectionError
 import numpy as np
-
+from unittest.mock import patch
 
 @pytest.fixture
 def local_persist_api():
@@ -1339,3 +1339,33 @@ def test_upsert(api):
     assert get_result['embeddings'][0] == [1.1, 0.99, 2.21]
     assert get_result['metadatas'][0] == {"string_value": "a new string value"}
     assert get_result['documents'][0] == None
+
+@pytest.fixture
+def local_api():
+    return chromadb.Client(
+        Settings(
+            chroma_api_impl="local",
+            chroma_db_impl="duckdb",
+            persist_directory=tempfile.gettempdir() + "/test_server",
+        )
+    )
+
+def test_default_embedding_function(local_api):
+    api = local_api
+    api.reset()
+
+    with patch('sentence_transformers.SentenceTransformer') as cls:
+
+        instance = cls.return_value
+        instance.encode.return_value = np.array([[0, 0, 0]])
+
+        collection = api.create_collection("test")
+
+        cls.assert_not_called()
+        collection.add(ids="id1", embeddings=[0,0,0])
+        cls.assert_not_called()
+
+        collection.add(ids="id2", documents="hello")
+
+        cls.assert_called_once()
+        instance.encode.assert_called_once()
