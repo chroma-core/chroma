@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Sequence, Optional, Dict
+from typing import Callable, Sequence, Optional, Dict
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
@@ -146,7 +146,7 @@ class API(ABC):
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_ids: The collection to add the embeddings to
+            collection_id: The collection to add the embeddings to
             embedding: The sequence of embeddings to add
             metadata: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.

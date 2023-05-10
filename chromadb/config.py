@@ -1,5 +1,5 @@
 from pydantic import BaseSettings
-from typing import Optional, Literal, List
+from typing import Optional, List
 import importlib
 import logging
 
@@ -8,7 +8,6 @@ TELEMETRY_WHITELISTED_SETTINGS = [
     "chroma_api_impl",
     "chroma_server_ssl_enabled",
 ]
-
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +21,7 @@ _legacy_config_values = {
 
 
 _impls = {}
+
 
 class Settings(BaseSettings):
     environment: str = ""

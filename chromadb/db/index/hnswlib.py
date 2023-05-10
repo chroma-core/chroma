@@ -249,7 +249,7 @@ class Hnswlib(Index):
 
         filter_function = None
         if len(labels) != 0:
-            filter_function = lambda label: label in labels
+            filter_function = lambda label: label in labels  # NOQA: E731
 
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 

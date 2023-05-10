@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 __settings = chromadb.config.Settings()
 
-__version__ = "0.3.21"
+__version__ = "0.3.22"
 
 
 def configure(**kwargs):
@@ -32,5 +32,6 @@ def Client(settings=__settings):
 
     # Submit event for client start
     telemetry_client.capture(ClientStartEvent())
+
 
     return settings.get_component("chroma_api_impl")
