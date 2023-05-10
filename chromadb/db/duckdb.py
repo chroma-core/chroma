@@ -1,3 +1,4 @@
+# type: ignore
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db.clickhouse import (
     Clickhouse,
@@ -133,7 +134,8 @@ class DuckDB(Clickhouse):
     ):
         if new_name is not None:
             dupe_check = self.get_collection(new_name)
-            if len(dupe_check) > 0:
+            # If the name is already taken by a different collection, raise an error
+            if len(dupe_check) > 0 and dupe_check[0][0] != str(id):
                 raise ValueError(f"Collection with name {new_name} already exists")
 
             self._conn.execute(

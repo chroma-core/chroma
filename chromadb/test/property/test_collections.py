@@ -1,3 +1,4 @@
+import random
 import pytest
 import logging
 import hypothesis.strategies as st
@@ -124,6 +125,13 @@ class CollectionStateMachine(RuleBasedStateMachine):
         assert c.name == coll.name
         assert c.metadata == coll.metadata
         return coll
+
+    @rule(coll=consumes(collections))
+    def modify_coll_to_existing_name(self, coll):
+        # Pick a random existing name
+        existing_name = list(self.existing)[random.randint(0, len(self.existing) - 1)]
+        with pytest.raises(Exception):
+            coll.modify(name=existing_name)
 
 
 def test_collections(caplog, api):
