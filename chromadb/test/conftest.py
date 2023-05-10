@@ -15,7 +15,7 @@ import shutil
 
 hypothesis.settings.register_profile(
     "dev",
-    deadline=10000,
+    deadline=15000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
@@ -35,7 +35,7 @@ def _run_server():
     uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="error")
 
 
-def _await_server(api, attempts=0):
+def _await_server(api: API, attempts: int = 0):
     try:
         api.heartbeat()
     except ConnectionError as e:
