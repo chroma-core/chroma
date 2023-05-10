@@ -1,5 +1,5 @@
 from pydantic import BaseSettings
-from typing import Optional, Literal, List
+from typing import Optional, List
 import importlib
 import logging
 
@@ -22,6 +22,7 @@ _legacy_config_values = {
 
 
 _impls = {}
+
 
 class Settings(BaseSettings):
     environment: str = ""
