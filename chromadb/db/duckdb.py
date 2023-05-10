@@ -83,7 +83,9 @@ class DuckDB(Clickhouse):
         if len(dupe_check) > 0:
             if get_or_create is True:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
 
                 logger.info(
