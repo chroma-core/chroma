@@ -76,11 +76,15 @@ export class OpenAIEmbeddingFunction {
   private org_id: string;
   private model: string;
 
-  constructor(
+  constructor({
+    openai_api_key,
+    openai_model,
+    openai_organization_id,
+  }: {
     openai_api_key: string,
     openai_model?: string,
     openai_organization_id?: string
-  ) {
+  }) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       OpenAIApi = require("openai");
@@ -118,7 +122,7 @@ let CohereAiApi: any;
 export class CohereEmbeddingFunction {
   private api_key: string;
 
-  constructor(cohere_api_key: string) {
+  constructor({ cohere_api_key }: { cohere_api_key: string }) {
     try {
       // eslint-disable-next-line global-require,import/no-extraneous-dependencies
       CohereAiApi = require("cohere-ai");
@@ -243,13 +247,17 @@ export class Collection {
     return [idsArray, embeddingsArray, metadatasArray, documentsArray]
   }
 
-  public async add(
+  public async add({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+  }: {
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
-  ) {
+  }) {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
       true,
@@ -267,7 +275,6 @@ export class Collection {
         // @ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        incrementIndex: increment_index,
       })
       .then(handleSuccess)
       .catch(handleError);
@@ -275,14 +282,17 @@ export class Collection {
     return response
   }
 
-  public async upsert(
+  public async upsert({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+  }: {
     ids: string | string[],
     embeddings: number[] | number[][] | undefined,
     metadatas?: object | object[],
     documents?: string | string[],
-    increment_index: boolean = true,
-  ) {
-
+  }) {
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
       true,
       ids,
@@ -299,7 +309,6 @@ export class Collection {
         //@ts-ignore
         documents: documentsArray,
         metadatas: metadatasArray,
-        increment_index: increment_index,
       },
     )
       .then(handleSuccess)
@@ -309,13 +318,18 @@ export class Collection {
 
   }
 
-
   public async count() {
     const response = await this.api.count(this.id);
     return handleSuccess(response);
   }
 
-  public async modify(name?: string, metadata?: object) {
+  public async modify({
+    name,
+    metadata
+  }: {
+    name?: string,
+    metadata?: object
+  } = {}) {
     const response = await this.api
       .updateCollection(
         this.id,
@@ -334,14 +348,20 @@ export class Collection {
 
   }
 
-  public async get(
+  public async get({
+    ids,
+    where,
+    limit,
+    offset,
+    include,
+  }: {
     ids?: string[],
     where?: object,
     limit?: number,
     offset?: number,
     include?: IncludeEnum[],
     where_document?: object
-  ) {
+  } = {}) {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
 
@@ -357,12 +377,17 @@ export class Collection {
       .catch(handleError);
   }
 
-  public async update(
+  public async update({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+  }: {
     ids: string | string[],
     embeddings?: number[] | number[][],
     metadatas?: object | object[],
     documents?: string | string[]
-  ) {
+  }) {
     if (
       embeddings === undefined &&
       documents === undefined &&
@@ -398,14 +423,22 @@ export class Collection {
     return resp;
   }
 
-  public async query(
+  public async query({
+    query_embeddings,
+    n_results,
+    where,
+    query_text,
+    where_document,
+    include,
+  }: {
     query_embeddings: number[] | number[][] | undefined,
-    n_results: number = 10,
+    n_results: number,
     where?: object,
     query_text?: string | string[], // TODO: should be named query_texts to match python API
     where_document?: object, // {"$contains":"search_string"}
     include?: IncludeEnum[] // ["metadata", "document"]
-  ) {
+  }) {
+    if (n_results === undefined) n_results = 10
     if (query_embeddings === undefined && query_text === undefined) {
       throw new Error(
         "query_embeddings and query_text cannot both be undefined"
@@ -437,7 +470,8 @@ export class Collection {
       .catch(handleError);
   }
 
-  public async peek(limit: number = 10) {
+  public async peek({ limit }: { limit?: number } = {}) {
+    if (limit === undefined) limit = 10;
     const response = await this.api.aGet(this.id, {
       limit: limit,
     });
@@ -448,7 +482,15 @@ export class Collection {
     return await this.api.createIndex(this.name);
   }
 
-  public async delete(ids?: string[], where?: object, where_document?: object) {
+  public async delete({
+    ids,
+    where,
+    where_document
+  }: {
+    ids?: string[],
+    where?: object,
+    where_document?: object
+  } = {}) {
     return await this.api
       .aDelete(this.id, { ids: ids, where: where, where_document: where_document })
       .then(handleSuccess)
@@ -459,10 +501,10 @@ export class Collection {
 export class ChromaClient {
   private api: DefaultApi;
 
-  constructor(basePath?: string) {
-    if (basePath === undefined) basePath = "http://localhost:8000";
+  constructor({ path }: { path?: string } = {}) {
+    if (path === undefined) path = "http://localhost:8000";
     const apiConfig: Configuration = new Configuration({
-      basePath,
+      basePath: path,
     });
     this.api = new DefaultApi(apiConfig);
   }
@@ -486,11 +528,15 @@ export class ChromaClient {
     throw new Error("Not implemented in JS client");
   }
 
-  public async createCollection(
+  public async createCollection({
+    name,
+    metadata,
+    embeddingFunction
+  }: {
     name: string,
     metadata?: object,
     embeddingFunction?: CallableFunction
-  ) {
+  }) {
     const newCollection = await this.api
       .createCollection({
         name,
@@ -506,11 +552,15 @@ export class ChromaClient {
     return new Collection(name, newCollection.id, this.api, metadata, embeddingFunction);
   }
 
-  public async getOrCreateCollection(
+  public async getOrCreateCollection({
+    name,
+    metadata,
+    embeddingFunction
+  }: {
     name: string,
     metadata?: object,
     embeddingFunction?: CallableFunction
-  ) {
+  }) {
     const newCollection = await this.api
       .createCollection({
         name,
@@ -538,10 +588,13 @@ export class ChromaClient {
     return handleSuccess(response);
   }
 
-  public async getCollection(
-    name: string,
+  public async getCollection({
+    name,
+    embeddingFunction
+  }: {
+    name: string;
     embeddingFunction?: CallableFunction
-  ) {
+  }) {
     const response = await this.api
       .getCollection(name)
       .then(handleSuccess)
@@ -556,7 +609,11 @@ export class ChromaClient {
     );
   }
 
-  public async deleteCollection(name: string) {
+  public async deleteCollection({
+    name
+  }: {
+    name: string
+  }) {
     return await this.api
       .deleteCollection(name)
       .then(handleSuccess)
