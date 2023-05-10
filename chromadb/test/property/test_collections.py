@@ -2,6 +2,8 @@ import pytest
 import logging
 import hypothesis.strategies as st
 import chromadb.test.property.strategies as strategies
+from chromadb.api import API
+import chromadb.api.types as types
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -10,25 +12,31 @@ from hypothesis.stateful import (
     multiple,
     consumes,
     run_state_machine_as_test,
+    MultipleResults,
 )
+from typing import Optional
 
 
-class CollectionStateMachine(RuleBasedStateMachine):
-    def __init__(self, api):
-        super().__init__()
-        self.existing = set()
-        self.model = {}
-        self.api = api
+class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
+    collections: Bundle
+    existing: set[str]
 
     collections = Bundle("collections")
 
-    @initialize()
-    def initialize(self):
+    def __init__(self, api: API):
+        super().__init__()
+        self.existing = set()
+        self.api = api
+
+    @initialize()  # type: ignore
+    def initialize(self) -> None:
         self.api.reset()
         self.existing = set()
 
-    @rule(target=collections, coll=strategies.collections())
-    def create_coll(self, coll):
+    @rule(target=collections, coll=strategies.collections())  # type: ignore
+    def create_coll(
+        self, coll: strategies.Collection
+    ) -> MultipleResults[strategies.Collection]:
         if coll.name in self.existing:
             with pytest.raises(Exception):
                 c = self.api.create_collection(
@@ -47,10 +55,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         assert c.name == coll.name
         assert c.metadata == coll.metadata
-        return coll
+        return multiple(coll)
 
-    @rule(coll=collections)
-    def get_coll(self, coll):
+    @rule(coll=collections)  # type: ignore
+    def get_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.existing:
             c = self.api.get_collection(name=coll.name)
             assert c.name == coll.name
@@ -59,8 +67,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 self.api.get_collection(name=coll.name)
 
-    @rule(coll=consumes(collections))
-    def delete_coll(self, coll):
+    @rule(coll=consumes(collections))  # type: ignore
+    def delete_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.existing:
             self.api.delete_collection(name=coll.name)
             self.existing.remove(coll.name)
@@ -71,8 +79,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
         with pytest.raises(Exception):
             self.api.get_collection(name=coll.name)
 
-    @rule()
-    def list_collections(self):
+    @rule()  # type: ignore
+    def list_collections(self) -> None:
         colls = self.api.list_collections()
         assert len(colls) == len(self.existing)
         for c in colls:
@@ -81,8 +89,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule(
         target=collections,
         coll=st.one_of(consumes(collections), strategies.collections()),
-    )
-    def get_or_create_coll(self, coll):
+    )  # type: ignore
+    def get_or_create_coll(
+        self, coll: strategies.Collection
+    ) -> MultipleResults[strategies.Collection]:
         c = self.api.get_or_create_collection(
             name=coll.name,
             metadata=coll.metadata,
@@ -92,15 +102,25 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.metadata is not None:
             assert c.metadata == coll.metadata
         self.existing.add(coll.name)
-        return coll
+        return multiple(coll)
 
     @rule(
         target=collections,
         coll=consumes(collections),
         new_metadata=strategies.collection_metadata,
         new_name=st.one_of(st.none(), strategies.collection_name()),
-    )
-    def modify_coll(self, coll, new_metadata, new_name):
+    )  # type: ignore
+    def modify_coll(
+        self,
+        coll: strategies.Collection,
+        new_metadata: types.Metadata,
+        new_name: Optional[str],
+    ) -> MultipleResults[strategies.Collection]:
+        if coll.name not in self.existing:
+            with pytest.raises(Exception):
+                c = self.api.get_collection(name=coll.name)
+            return multiple()
+
         c = self.api.get_collection(name=coll.name)
 
         if new_metadata is not None:
@@ -116,9 +136,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         assert c.name == coll.name
         assert c.metadata == coll.metadata
-        return coll
+        return multiple(coll)
 
 
-def test_collections(caplog, api):
+def test_collections(caplog: pytest.LogCaptureFixture, api: API) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))
