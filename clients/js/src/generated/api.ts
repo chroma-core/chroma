@@ -26,22 +26,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 	return {
 		/**
 		 * @summary Add
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.AddEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		add(collectionName: string, request: Api.AddEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling add.');
+		add(collectionId: string, request: Api.AddEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling add.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling add.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/add`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/add`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -69,22 +69,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Delete
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.DeleteEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		aDelete(collectionName: string, request: Api.DeleteEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling aDelete.');
+		aDelete(collectionId: string, request: Api.DeleteEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling aDelete.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling aDelete.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/delete`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/delete`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -112,22 +112,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Get
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.GetEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		aGet(collectionName: string, request: Api.GetEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling aGet.');
+		aGet(collectionId: string, request: Api.GetEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling aGet.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling aGet.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/get`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/get`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -155,17 +155,17 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Count
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		count(collectionName: string, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling count.');
+		count(collectionId: string, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling count.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/count`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/count`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -320,22 +320,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Get Nearest Neighbors
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.QueryEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getNearestNeighbors(collectionName: string, request: Api.QueryEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling getNearestNeighbors.');
+		getNearestNeighbors(collectionId: string, request: Api.QueryEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling getNearestNeighbors.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling getNearestNeighbors.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/query`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/query`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -530,22 +530,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Update
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.UpdateEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		update(collectionName: string, request: Api.UpdateEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling update.');
+		update(collectionId: string, request: Api.UpdateEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling update.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling update.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/update`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/update`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -573,22 +573,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Update Collection
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.UpdateCollection} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		updateCollection(collectionName: string, request: Api.UpdateCollection, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling updateCollection.');
+		updateCollection(collectionId: string, request: Api.UpdateCollection, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling updateCollection.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling updateCollection.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'PUT' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -616,22 +616,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Upsert
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.AddEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		upsert(collectionName: string, request: Api.AddEmbedding, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'collectionName' is not null or undefined
-			if (collectionName === null || collectionName === undefined) {
-				throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling upsert.');
+		upsert(collectionId: string, request: Api.AddEmbedding, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'collectionId' is not null or undefined
+			if (collectionId === null || collectionId === undefined) {
+				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling upsert.');
 			}
 			// verify required parameter 'request' is not null or undefined
 			if (request === null || request === undefined) {
 				throw new RequiredError('request', 'Required parameter request was null or undefined when calling upsert.');
 			}
-			let localVarPath = `/api/v1/collections/{collection_name}/upsert`
-				.replace('{collection_name}', encodeURIComponent(String(collectionName)));
+			let localVarPath = `/api/v1/collections/{collection_id}/upsert`
+				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -694,13 +694,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 	return {
 		/**
 		 * @summary Add
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.AddEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		add(collectionName: string, request: Api.AddEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Add201Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).add(collectionName, request, options);
+		add(collectionId: string, request: Api.AddEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Add201Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).add(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -724,13 +724,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Delete
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.DeleteEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		aDelete(collectionName: string, request: Api.DeleteEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ADelete200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).aDelete(collectionName, request, options);
+		aDelete(collectionId: string, request: Api.DeleteEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ADelete200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).aDelete(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -754,13 +754,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Get
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.GetEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		aGet(collectionName: string, request: Api.GetEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.AGet200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).aGet(collectionName, request, options);
+		aGet(collectionId: string, request: Api.GetEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.AGet200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).aGet(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -784,12 +784,12 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Count
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		count(collectionName: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Count200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).count(collectionName, options);
+		count(collectionId: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Count200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).count(collectionId, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -929,13 +929,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Get Nearest Neighbors
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.QueryEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getNearestNeighbors(collectionName: string, request: Api.QueryEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetNearestNeighbors200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getNearestNeighbors(collectionName, request, options);
+		getNearestNeighbors(collectionId: string, request: Api.QueryEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetNearestNeighbors200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getNearestNeighbors(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1098,13 +1098,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Update
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.UpdateEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		update(collectionName: string, request: Api.UpdateEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Update200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).update(collectionName, request, options);
+		update(collectionId: string, request: Api.UpdateEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Update200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).update(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1128,13 +1128,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Update Collection
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.UpdateCollection} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		updateCollection(collectionName: string, request: Api.UpdateCollection, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.UpdateCollection200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateCollection(collectionName, request, options);
+		updateCollection(collectionId: string, request: Api.UpdateCollection, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.UpdateCollection200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateCollection(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1158,13 +1158,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Upsert
-		 * @param {string} collectionName
+		 * @param {string} collectionId
 		 * @param {Api.AddEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		upsert(collectionName: string, request: Api.AddEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Upsert200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).upsert(collectionName, request, options);
+		upsert(collectionId: string, request: Api.AddEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Upsert200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).upsert(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1228,45 +1228,45 @@ export const ApiApiFactory: FactoryFunction<ApiApi> = function (configuration?: 
 export class ApiApi extends BaseAPI {
 	/**
 	 * @summary Add
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.AddEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public add(collectionName: string, request: Api.AddEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).add(collectionName, request, options)(this.fetch, this.basePath);
+	public add(collectionId: string, request: Api.AddEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).add(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Delete
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.DeleteEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public aDelete(collectionName: string, request: Api.DeleteEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).aDelete(collectionName, request, options)(this.fetch, this.basePath);
+	public aDelete(collectionId: string, request: Api.DeleteEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).aDelete(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Get
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.GetEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public aGet(collectionName: string, request: Api.GetEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).aGet(collectionName, request, options)(this.fetch, this.basePath);
+	public aGet(collectionId: string, request: Api.GetEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).aGet(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Count
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public count(collectionName: string, options?: RequestInit) {
-		return ApiApiFp(this.configuration).count(collectionName, options)(this.fetch, this.basePath);
+	public count(collectionId: string, options?: RequestInit) {
+		return ApiApiFp(this.configuration).count(collectionId, options)(this.fetch, this.basePath);
 	}
 
 	/**
@@ -1311,13 +1311,13 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary Get Nearest Neighbors
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.QueryEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public getNearestNeighbors(collectionName: string, request: Api.QueryEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).getNearestNeighbors(collectionName, request, options)(this.fetch, this.basePath);
+	public getNearestNeighbors(collectionId: string, request: Api.QueryEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).getNearestNeighbors(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
@@ -1377,35 +1377,35 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary Update
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.UpdateEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public update(collectionName: string, request: Api.UpdateEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).update(collectionName, request, options)(this.fetch, this.basePath);
+	public update(collectionId: string, request: Api.UpdateEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).update(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Update Collection
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.UpdateCollection} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public updateCollection(collectionName: string, request: Api.UpdateCollection, options?: RequestInit) {
-		return ApiApiFp(this.configuration).updateCollection(collectionName, request, options)(this.fetch, this.basePath);
+	public updateCollection(collectionId: string, request: Api.UpdateCollection, options?: RequestInit) {
+		return ApiApiFp(this.configuration).updateCollection(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Upsert
-	 * @param {string} collectionName
+	 * @param {string} collectionId
 	 * @param {Api.AddEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public upsert(collectionName: string, request: Api.AddEmbedding, options?: RequestInit) {
-		return ApiApiFp(this.configuration).upsert(collectionName, request, options)(this.fetch, this.basePath);
+	public upsert(collectionId: string, request: Api.AddEmbedding, options?: RequestInit) {
+		return ApiApiFp(this.configuration).upsert(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**

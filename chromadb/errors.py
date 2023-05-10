@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABCMeta, abstractmethod
 
 
 class ChromaError(Exception):
@@ -55,6 +55,12 @@ class DuplicateIDError(ChromaError):
         return "DuplicateID"
 
 
+class InvalidUUIDError(ChromaError):
+    @classmethod
+    def name(cls):
+        return "InvalidUUID"
+
+
 error_types = {
     "NoDatapoints": NoDatapointsException,
     "NoIndex": NoIndexException,
@@ -62,4 +68,5 @@ error_types = {
     "NotEnoughElements": NotEnoughElementsException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
+    "InvalidUUID": InvalidUUIDError,
 }
