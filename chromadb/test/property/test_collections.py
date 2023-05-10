@@ -92,9 +92,10 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         coll=st.one_of(consumes(collections), strategies.collections()),
     )  # type: ignore
     def get_or_create_coll(
-        self, coll: strategies.Collection
+        self,
+        coll: strategies.Collection,
+        new_metadata: Optional[types.Metadata],
     ) -> MultipleResults[strategies.Collection]:
-
         # In our current system, you can create with None but not update with None
         # An update with none is a no-op for the update of that field
         if coll.name not in self.existing:
