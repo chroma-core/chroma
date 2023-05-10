@@ -14,6 +14,7 @@ from chromadb.errors import (
 import logging
 import re
 from uuid import UUID
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,9 @@ class HnswParams:
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
         self.search_ef = int(metadata.get("hnsw:search_ef", 10))
         self.M = int(metadata.get("hnsw:M", 16))
-        self.num_threads = int(metadata.get("hnsw:num_threads", 4))
+        self.num_threads = int(
+            metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
+        )
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
 
