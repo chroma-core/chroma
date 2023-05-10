@@ -1,3 +1,4 @@
+# type: ignore
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -70,7 +71,7 @@ class Clickhouse(DB):
     def _get_conn(self) -> Client:
         if self._conn is None:
             self._init_conn()
-        return self._conn  # type: ignore because we know it's not None
+        return self._conn
 
     def _create_table_collections(self, conn):
         conn.command(
