@@ -1,12 +1,9 @@
-import numpy as np
 import pytest
 import logging
-from hypothesis import given
 import hypothesis.strategies as st
-from typing import Set, List, Optional, cast
+from typing import Set
 from dataclasses import dataclass
 import chromadb.errors as errors
-import chromadb
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
@@ -23,7 +20,6 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-import hypothesis
 
 
 traces = defaultdict(lambda: 0)
@@ -62,11 +58,8 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle = Bundle("embedding_ids")
 
-    def __init__(self, api=None):
+    def __init__(self, api: API):
         super().__init__()
-        # For debug only, to run as class-based test
-        if not api:
-            api = chromadb.Client(configurations()[0])
         self.api = api
         self._rules_strategy = strategies.DeterministicRuleStrategy(self)
 

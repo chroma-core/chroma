@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Sequence, Optional, Dict
+from typing import Callable, Sequence, Optional, Dict
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection

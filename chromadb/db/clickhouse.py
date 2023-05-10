@@ -216,13 +216,13 @@ class Clickhouse(DB):
                 raise ValueError(f"Collection with name {new_name} already exists")
 
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
+                "ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
                 parameters={"new_name": new_name, "uuid": id},
             )
 
         if new_metadata is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
+                "ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
                 parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 

@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      - id: end-of-file-fixer
+      - id: requirements-txt-fixer
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-docstring-first
+
+
+  - repo: https://github.com/psf/black
+    # https://github.com/psf/black/issues/2493
+    rev: 'refs/tags/23.3.0:refs/tags/23.3.0'
+    hooks:
+      - id: black
+
+
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        args:
+          - "--extend-ignore=E203,E501,E503"
+          - "--max-line-length=88"
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: 'v1.2.0'
+    hooks:
+    -   id: mypy
+        args: [--strict, --ignore-missing-imports, --follow-imports=silent]
+        additional_dependencies: ["types-requests"]
