@@ -16,7 +16,6 @@ from chromadb.test.property.test_embeddings import (
 from hypothesis.stateful import run_state_machine_as_test, rule, precondition
 import os
 import shutil
-import pytest
 import tempfile
 
 CreatePersistAPI = Callable[[], API]

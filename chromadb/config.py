@@ -9,7 +9,6 @@ TELEMETRY_WHITELISTED_SETTINGS = [
     "chroma_server_ssl_enabled",
 ]
 
-
 logger = logging.getLogger(__name__)
 
 _legacy_config_values = {

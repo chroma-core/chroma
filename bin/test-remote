@@ -14,5 +14,3 @@ export CHROMA_API_IMPL=rest
 export CHROMA_SERVER_HTTP_PORT=8000
 
 python -m pytest
-
-

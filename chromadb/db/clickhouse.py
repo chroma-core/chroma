@@ -158,7 +158,9 @@ class Clickhouse(DB):
         if len(dupe_check) > 0:
             if get_or_create:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(dupe_check[0][0], new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
                 logger.info(
                     f"collection with name {name} already exists, returning existing collection"
@@ -206,17 +208,20 @@ class Clickhouse(DB):
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
     def update_collection(
-        self, id: UUID, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Dict] = None,
     ):
         if new_name is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
+                "ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
                 parameters={"new_name": new_name, "uuid": id},
             )
 
         if new_metadata is not None:
             self._get_conn().command(
-                f"ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
+                "ALTER TABLE collections UPDATE metadata = %(new_metadata)s WHERE uuid = %(uuid)s",
                 parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 
@@ -356,11 +361,17 @@ class Clickhouse(DB):
 
             # Shortcut for $eq
             if type(value) == str:
-                result.append(has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'"))
+                result.append(
+                    has_key_and(f" JSONExtractString(metadata,'{key}') = '{value}'")
+                )
             elif type(value) == int:
-                result.append(has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractInt(metadata,'{key}') = {value}")
+                )
             elif type(value) == float:
-                result.append(has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}"))
+                result.append(
+                    has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                )
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
@@ -383,7 +394,9 @@ class Clickhouse(DB):
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') != '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') != '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') != {operand}")
@@ -391,7 +404,9 @@ class Clickhouse(DB):
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            has_key_and(f" JSONExtractString(metadata,'{key}') = '{operand}'")
+                            has_key_and(
+                                f" JSONExtractString(metadata,'{key}') = '{operand}'"
+                            )
                         )
                     return result.append(
                         has_key_and(f" JSONExtractFloat(metadata,'{key}') = {operand}")
@@ -546,9 +561,7 @@ class Clickhouse(DB):
     ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
         # Either the collection name or the collection uuid must be provided
         if collection_uuid is None:
-            raise TypeError(
-                "Argument collection_uuid cannot be None"
-            )
+            raise TypeError("Argument collection_uuid cannot be None")
 
         if len(where) != 0 or len(where_document) != 0:
             results = self.get(
