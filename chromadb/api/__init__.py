@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Sequence, Optional, Dict
+from typing import Callable, Sequence, Optional, Dict, List
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
@@ -251,12 +251,15 @@ class API(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ):
+    ) -> List[UUID]:
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
         Args:
             where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+
+        Returns:
+            List: The list of ids of the deleted embeddings
         """
         pass
 
