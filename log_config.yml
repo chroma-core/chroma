@@ -21,4 +21,3 @@ loggers:
     level: DEBUG
   uvicorn:
     level: INFO
-

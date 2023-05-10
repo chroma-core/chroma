@@ -194,7 +194,9 @@ class Collection(BaseModel):
             if query_embeddings is not None
             else None
         )
-        query_texts = maybe_cast_one_to_many(query_texts) if query_texts is not None else None
+        query_texts = (
+            maybe_cast_one_to_many(query_texts) if query_texts is not None else None
+        )
         include = validate_include(include, allow_distances=True)
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error

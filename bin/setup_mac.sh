@@ -2,7 +2,7 @@
 # - docker
 # - pip
 
-# get the code 
+# get the code
 git clone https://oauth2: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@github.com/chroma-core/chroma.git
 
 #checkout the right branch
