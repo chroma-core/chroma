@@ -26,6 +26,7 @@ test("wrong code returns an error", async () => {
   await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS });
   const results = await collection.get({
     where: {
+      //@ts-ignore supposed to fail
       test: { $contains: "hello" },
     }
   });
