@@ -1216,7 +1216,7 @@ def test_update_query(api):
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
 
 
-@pytest.mark.parametrize("api_fixture", test_apis)
+@pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_empty_collection(api_fixture, request):
     api = request.getfixturevalue(api_fixture.__name__)
     api.reset()

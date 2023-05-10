@@ -423,7 +423,7 @@ class LocalAPI(API):
             distances=[] if include_distances else None,
         )
 
-        if self._db.count(collection_name=collection_name) == 0 :
+        if self._db.count(collection_id) == 0 :
             return query_result
 
         uuids, distances = self._db.get_nearest_neighbors(
