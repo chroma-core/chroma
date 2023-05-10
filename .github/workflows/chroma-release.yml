@@ -121,4 +121,3 @@ jobs:
         artifacts: "dist/chroma-${{steps.version.outputs.version}}.tar.gz"
         allowUpdates: true
         prerelease: true
-

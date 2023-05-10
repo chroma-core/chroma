@@ -1,9 +1,8 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, Callable, List, Dict, Union
+from typing import Optional, List, Dict, Union
 from typing_extensions import TypedDict
-import hypothesis.extra.numpy as npst
 import numpy as np
 import chromadb.api.types as types
 import re

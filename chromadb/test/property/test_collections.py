@@ -1,10 +1,6 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import List
-import chromadb
-from chromadb.api import API
-from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,

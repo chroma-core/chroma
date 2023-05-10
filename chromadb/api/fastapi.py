@@ -52,7 +52,9 @@ class FastAPI(API):
         """Creates a collection"""
         resp = requests.post(
             self._api_url + "/collections",
-            data=json.dumps({"name": name, "metadata": metadata, "get_or_create": get_or_create}),
+            data=json.dumps(
+                {"name": name, "metadata": metadata, "get_or_create": get_or_create}
+            ),
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
@@ -89,7 +91,9 @@ class FastAPI(API):
     ) -> Collection:
         """Get a collection, or return it if it exists"""
 
-        return self.create_collection(name, metadata, embedding_function, get_or_create=True)
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True
+        )
 
     def _modify(self, id: UUID, new_name: str, new_metadata: Optional[Dict] = None):
         """Updates a collection"""
@@ -107,7 +111,9 @@ class FastAPI(API):
 
     def _count(self, collection_id: UUID):
         """Returns the number of embeddings in the database"""
-        resp = requests.get(self._api_url + "/collections/" + str(collection_id) + "/count")
+        resp = requests.get(
+            self._api_url + "/collections/" + str(collection_id) + "/count"
+        )
         raise_chroma_error(resp)
         return resp.json()
 
@@ -159,7 +165,9 @@ class FastAPI(API):
 
         resp = requests.post(
             self._api_url + "/collections/" + str(collection_id) + "/delete",
-            data=json.dumps({"where": where, "ids": ids, "where_document": where_document}),
+            data=json.dumps(
+                {"where": where, "ids": ids, "where_document": where_document}
+            ),
         )
 
         raise_chroma_error(resp)
@@ -296,13 +304,17 @@ class FastAPI(API):
 
     def raw_sql(self, sql):
         """Runs a raw SQL query against the database"""
-        resp = requests.post(self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql}))
+        resp = requests.post(
+            self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql})
+        )
         raise_chroma_error(resp)
         return pd.DataFrame.from_dict(resp.json())
 
     def create_index(self, collection_name: str):
         """Creates an index for the given space key"""
-        resp = requests.post(self._api_url + "/collections/" + collection_name + "/create_index")
+        resp = requests.post(
+            self._api_url + "/collections/" + collection_name + "/create_index"
+        )
         raise_chroma_error(resp)
         return resp.json()
 

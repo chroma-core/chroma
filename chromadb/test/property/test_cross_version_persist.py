@@ -18,7 +18,6 @@ import re
 import multiprocessing
 from chromadb import Client
 from chromadb.config import Settings
-import sys
 
 MINIMUM_VERSION = "0.3.20"
 COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
