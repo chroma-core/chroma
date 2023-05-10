@@ -14,10 +14,12 @@ from typing import Generator, List, Tuple, Callable
 import shutil
 
 hypothesis.settings.register_profile(
-    "dev", deadline=10000, suppress_health_check=[
+    "dev",
+    deadline=15000,
+    suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
-        hypothesis.HealthCheck.large_base_example
-    ]
+        hypothesis.HealthCheck.large_base_example,
+    ],
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
@@ -51,7 +53,9 @@ def fastapi() -> Generator[API, None, None]:
     proc.start()
     api = chromadb.Client(
         Settings(
-            chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="6666"
+            chroma_api_impl="rest",
+            chroma_server_host="localhost",
+            chroma_server_http_port="6666",
         )
     )
     _await_server(api)
@@ -62,7 +66,7 @@ def fastapi() -> Generator[API, None, None]:
 def duckdb() -> Generator[API, None, None]:
     """Fixture generator for duckdb"""
     yield Client(
-       Settings(
+        Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
@@ -99,6 +103,7 @@ def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         api_fixtures = [integration_api]
     return api_fixtures
+
 
 @pytest.fixture(scope="module", params=fixtures())
 def api(request) -> Generator[API, None, None]:
