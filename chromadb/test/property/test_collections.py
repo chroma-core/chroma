@@ -14,12 +14,12 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from typing import Optional
+from typing import Optional, Set
 
 
 class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
     collections: Bundle
-    existing: set[str]
+    existing: Set[str]
 
     collections = Bundle("collections")
 
