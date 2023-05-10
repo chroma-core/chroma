@@ -88,19 +88,27 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
 
     @rule(
         target=collections,
+        new_metadata=st.one_of(st.none(), strategies.collection_metadata),
         coll=st.one_of(consumes(collections), strategies.collections()),
     )  # type: ignore
     def get_or_create_coll(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
+
+        # In our current system, you can create with None but not update with None
+        # An update with none is a no-op for the update of that field
+        if coll.name not in self.existing:
+            coll.metadata = new_metadata
+        else:
+            coll.metadata = new_metadata if new_metadata is not None else coll.metadata
+
         c = self.api.get_or_create_collection(
             name=coll.name,
-            metadata=coll.metadata,
+            metadata=new_metadata,
             embedding_function=coll.embedding_function,
         )
         assert c.name == coll.name
-        if coll.metadata is not None:
-            assert c.metadata == coll.metadata
+        assert c.metadata == coll.metadata
         self.existing.add(coll.name)
         return multiple(coll)
 
