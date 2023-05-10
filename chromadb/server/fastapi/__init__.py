@@ -13,9 +13,7 @@ import chromadb.api
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
-    NoDatapointsException,
     InvalidDimensionException,
-    NotEnoughElementsException,
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,

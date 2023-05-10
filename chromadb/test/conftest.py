@@ -10,7 +10,7 @@ import uvicorn
 import time
 from multiprocessing import Process
 import pytest
-from typing import Generator, List, Tuple, Callable
+from typing import Generator, List, Callable
 import shutil
 
 hypothesis.settings.register_profile(
@@ -35,7 +35,7 @@ def _run_server():
     uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="error")
 
 
-def _await_server(api, attempts=0):
+def _await_server(api: API, attempts: int = 0):
     try:
         api.heartbeat()
     except ConnectionError as e:
