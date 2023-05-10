@@ -24,7 +24,10 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"):
+    def __init__(self, api_key: Optional[str] = None,
+                 api_base: Optional[str] = None,
+                 api_type: Optional[str] = None,
+                 model_name: str = "text-embedding-ada-002"):
         try:
             import openai
         except ImportError:
@@ -39,6 +42,12 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
             raise ValueError(
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
+
+        if api_base is not None:
+            openai.api_base = api_base
+
+        if api_type is not None:
+            openai.api_type = api_type
 
         self._client = openai.Embedding
         self._model_name = model_name
