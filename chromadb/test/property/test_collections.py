@@ -106,7 +106,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         c = self.api.get_or_create_collection(
             name=coll.name,
             metadata=new_metadata,
-            embedding_function=coll.embedding_function,
+            embedding_function=coll.embedding_function,  # type: ignore
         )
         assert c.name == coll.name
         assert c.metadata == coll.metadata
@@ -136,6 +136,11 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
             coll.metadata = new_metadata
 
         if new_name is not None:
+            if new_name in self.existing:
+                with pytest.raises(Exception):
+                    c.modify(metadata=new_metadata, name=new_name)
+                return multiple()
+
             self.existing.remove(coll.name)
             self.existing.add(new_name)
             coll.name = new_name
