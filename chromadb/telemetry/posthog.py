@@ -24,7 +24,9 @@ class Posthog(Telemetry):
     def capture(self, event: TelemetryEvent):
         try:
             posthog.capture(
-                self.user_id, event.name, {**(event.properties), "chroma_context": self.context}
+                self.user_id,
+                event.name,
+                {**(event.properties), "chroma_context": self.context},
             )
         except Exception as e:
             logger.error(f"Failed to send telemetry event {event.name}: {e}")
