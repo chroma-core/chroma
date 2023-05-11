@@ -21,6 +21,7 @@ from chromadb.api.types import (
     validate_metadatas,
     validate_where,
     validate_where_document,
+    validate_embeddings,
 )
 import logging
 
@@ -189,7 +190,7 @@ class Collection(BaseModel):
             validate_where_document(where_document) if where_document else None
         )
         query_embeddings = (
-            maybe_cast_one_to_many(query_embeddings)
+            validate_embeddings(maybe_cast_one_to_many(query_embeddings))
             if query_embeddings is not None
             else None
         )
@@ -344,7 +345,9 @@ class Collection(BaseModel):
     ]:
         ids = validate_ids(maybe_cast_one_to_many(ids))
         embeddings = (
-            maybe_cast_one_to_many(embeddings) if embeddings is not None else None
+            validate_embeddings(maybe_cast_one_to_many(embeddings))
+            if embeddings is not None
+            else None
         )
         metadatas = (
             validate_metadatas(maybe_cast_one_to_many(metadatas))

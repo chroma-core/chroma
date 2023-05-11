@@ -230,3 +230,16 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
                 f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"
             )
     return include
+
+
+def validate_embeddings(embeddings: Embeddings) -> Embeddings:
+    """Validates embeddings to ensure it is a list of list of ints, or floats"""
+    if not isinstance(embeddings, list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if not isinstance(embeddings[0], list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    for embedding in embeddings:
+        for value in embedding:
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"Expected embeddings to be a int, float, got {embeddings}")
+    return embeddings
