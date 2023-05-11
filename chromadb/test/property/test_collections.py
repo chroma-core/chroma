@@ -136,7 +136,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
             coll.metadata = new_metadata
 
         if new_name is not None:
-            if new_name in self.existing:
+            if new_name in self.existing and new_name != coll.name:
                 with pytest.raises(Exception):
                     c.modify(metadata=new_metadata, name=new_name)
                 return multiple()

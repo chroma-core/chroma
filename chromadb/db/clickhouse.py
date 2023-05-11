@@ -216,7 +216,7 @@ class Clickhouse(DB):
     ):
         if new_name is not None:
             dupe_check = self.get_collection(new_name)
-            if len(dupe_check) > 0:
+            if len(dupe_check) > 0 and dupe_check[0][0] != id:
                 raise ValueError(f"Collection with name {new_name} already exists")
 
             self._get_conn().command(
