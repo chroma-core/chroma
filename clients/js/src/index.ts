@@ -166,6 +166,9 @@ export class Collection {
   private api: DefaultApi;
   public embeddingFunction: CallableFunction | undefined;
 
+  /**
+   * @ignore
+   */
   constructor(
     name: string,
     id: string,
@@ -181,13 +184,22 @@ export class Collection {
       this.embeddingFunction = embeddingFunction;
   }
 
+  /**
+   * @ignore
+   */
   private setName(name: string): void {
     this.name = name;
   }
+  /**
+   * @ignore
+   */
   private setMetadata(metadata: Metadata | undefined): void {
     this.metadata = metadata;
   }
 
+  /**
+   * @ignore
+   */
   private async validate(
     require_embeddings_or_documents: boolean, // set to false in the case of Update
     ids: string | string[],
@@ -434,6 +446,39 @@ export class Collection {
     return resp;
   }
 
+  /**
+   * Performs a query on the collection using the specified parameters.
+   *
+   * @param {Object} params - The parameters for the query.
+   * @param {Embedding | Embeddings} [params.query_embeddings] - Optional query embeddings to use for the search.
+   * @param {PositiveInteger} [params.n_results] - Optional number of results to return (default is 10).
+   * @param {Where} [params.where] - Optional query condition to filter results based on metadata values.
+   * @param {string | string[]} [params.query_text] - Optional query text(s) to search for in the collection (renamed to 'query_texts' in the future).
+   * @param {WhereDocument} [params.where_document] - Optional query condition to filter results based on document content.
+   * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
+   *
+   * @returns {Promise<any>} A promise that resolves to the query results.
+   * @throws {Error} If there is an issue executing the query.
+   * @example
+   * // Query the collection using embeddings
+   * const results = await collection.query({
+   *   query_embeddings: [[0.1, 0.2, ...], ...],
+   *   n_results: 10,
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   include: ["metadata", "document"]
+   * });
+   * @example
+   * ```js
+   * // Query the collection using query text
+   * const results = await collection.query({
+   *   query_text: "some text",
+   *   n_results: 10,
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   include: ["metadata", "document"]
+   * });
+   * ```
+   *
+   */
   public async query({
     query_embeddings,
     n_results,
@@ -522,6 +567,12 @@ export class ChromaClient {
     this.api = new DefaultApi(apiConfig);
   }
 
+  /**
+   * Resets the state of the object by making an API call to the reset endpoint.
+   *
+   * @returns {Promise<void>} A promise that resolves when the reset operation is complete.
+   * @throws {Error} If there is an issue resetting the state.
+   */
   public async reset() {
     return await this.api.reset();
   }
@@ -541,6 +592,17 @@ export class ChromaClient {
     throw new Error("Not implemented in JS client");
   }
 
+  /**
+   * Creates a new collection with the specified properties.
+   *
+   * @param {Object} params - The parameters for creating a new collection.
+   * @param {string} params.name - The name of the collection.
+   * @param {Metadata} [params.metadata] - Optional metadata associated with the collection.
+   * @param {CallableFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+   *
+   * @returns {Promise<Collection>} A promise that resolves to the created collection.
+   * @throws {Error} If there is an issue creating the collection.
+   */
   public async createCollection({
     name,
     metadata,
