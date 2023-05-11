@@ -15,7 +15,9 @@ class GetDBTest(unittest.TestCase):
     @patch("chromadb.db.duckdb.PersistentDuckDB", autospec=True)
     def test_persistent_duckdb(self, mock):
         chromadb.get_db(
-            chromadb.config.Settings(chroma_db_impl="duckdb+parquet", persist_directory="./foo")
+            chromadb.config.Settings(
+                chroma_db_impl="duckdb+parquet", persist_directory="./foo"
+            )
         )
         assert mock.called
 

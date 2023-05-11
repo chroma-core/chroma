@@ -1,0 +1,37 @@
+name: Chroma Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - team/hypothesis-tests
+  pull_request:
+    branches:
+      - main
+      - team/hypothesis-tests
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python: ['3.7']
+        platform: [ubuntu-latest]
+        testfile: ["--ignore-glob 'chromadb/test/property/*'",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_persist.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install test dependencies
+      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+    - name: Integration Test
+      run: bin/integration-test ${{ matrix.testfile }}

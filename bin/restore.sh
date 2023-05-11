@@ -25,7 +25,7 @@
 #     exit 1
 # fi
 
-# echo $backup_name 
+# echo $backup_name
 
 # # change file permissions to -rw-r-----
 # chmod 440 ../backups/$backup_name/$backup_name.zip
