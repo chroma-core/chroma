@@ -50,10 +50,6 @@ class RawSql(BaseModel):  # type: ignore
     raw_sql: str
 
 
-class SpaceKeyInput(BaseModel):  # type: ignore
-    collection_name: str
-
-
 class DeleteEmbedding(BaseModel):  # type: ignore
     ids: Optional[IDs] = None
     where: Optional[Where] = None
