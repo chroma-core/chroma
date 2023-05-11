@@ -212,6 +212,10 @@ class Clickhouse(DB):
         new_metadata: Optional[Dict] = None,
     ):
         if new_name is not None:
+            dupe_check = self.get_collection(new_name)
+            if len(dupe_check) > 0:
+                raise ValueError(f"Collection with name {new_name} already exists")
+
             self._get_conn().command(
                 "ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
                 parameters={"new_name": new_name, "uuid": id},
