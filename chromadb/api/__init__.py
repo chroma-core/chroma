@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Sequence, Optional, Dict
+from typing import List, Sequence, Optional
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    CollectionMetadata,
     Documents,
+    EmbeddingFunction,
     Embeddings,
     IDs,
     Include,
@@ -53,9 +55,9 @@ class API(ABC):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
-        embedding_function: Optional[Callable] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
@@ -76,7 +78,7 @@ class API(ABC):
     def delete_collection(
         self,
         name: str,
-    ):
+    ) -> None:
         """Deletes a collection from the database
 
         Args:
@@ -85,7 +87,10 @@ class API(ABC):
 
     @abstractmethod
     def get_or_create_collection(
-        self, name: str, metadata: Optional[Dict] = None
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Calls create_collection with get_or_create=True.
            If the collection exists, but with different metadata, the metadata will be replaced.
@@ -93,6 +98,7 @@ class API(ABC):
         Args:
             name: The name of the collection to create. The name must be unique.
             metadata: A dictionary of metadata to associate with the collection. Defaults to None.
+            embedding_function: A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
         Returns:
             the created collection
 
@@ -103,7 +109,7 @@ class API(ABC):
     def get_collection(
         self,
         name: Optional[str] = None,
-        embedding_function: Optional[Callable] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
@@ -121,8 +127,8 @@ class API(ABC):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-    ):
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
         """Modify a collection in the database - can update the name and/or metadata
 
         Args:
@@ -141,7 +147,7 @@ class API(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
+    ) -> None:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
@@ -162,7 +168,7 @@ class API(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> None:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
@@ -181,7 +187,7 @@ class API(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
+    ) -> None:
         """Add or update entries in the embedding store.
         If an entry with the same id already exists, it will be updated, otherwise it will be added.
 
@@ -251,12 +257,15 @@ class API(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ):
+    ) -> List[UUID]:
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
         Args:
             where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+
+        Returns:
+            List: The list of internal UUIDs of the deleted embeddings
         """
         pass
 
@@ -320,6 +329,6 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def persist(self):
+    def persist(self) -> None:
         """Persist the database to disk"""
         pass
