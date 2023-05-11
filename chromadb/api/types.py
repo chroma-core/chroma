@@ -1,4 +1,4 @@
-from typing import Any, Callable, Optional, Union, Dict, Sequence, TypeVar, List
+from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 
@@ -62,9 +62,6 @@ class IndexMetadata(TypedDict):
 class EmbeddingFunction(Protocol):
     def __call__(self, texts: Documents) -> Embeddings:
         ...
-
-
-EmbeddingFunctionType = Callable[[Documents], Embeddings]
 
 
 def maybe_cast_one_to_many(
