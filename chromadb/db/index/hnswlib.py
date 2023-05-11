@@ -29,8 +29,6 @@ valid_params = {
     "hnsw:resize_factor": r"^\d+(\.\d+)?$",
 }
 
-# Trigger hooks
-
 
 class HnswParams:
     space: str
