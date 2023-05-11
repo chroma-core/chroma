@@ -38,8 +38,6 @@ from chromadb.telemetry import ServerContext, Telemetry
 
 logger = logging.getLogger(__name__)
 
-# Trigger hook
-
 
 def use_route_names_as_operation_ids(app: _FastAPI) -> None:
     """
