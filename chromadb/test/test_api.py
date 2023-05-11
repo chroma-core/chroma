@@ -1,3 +1,4 @@
+# type: ignore
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
@@ -284,6 +285,16 @@ def test_modify(api):
 
     # collection name is modify
     assert collection.name == "testspace2"
+
+
+def test_modify_error_on_existing_name(api):
+    api.reset()
+
+    api.create_collection("testspace")
+    c2 = api.create_collection("testspace2")
+
+    with pytest.raises(Exception):
+        c2.modify(name="testspace")
 
 
 def test_metadata_cru(api):

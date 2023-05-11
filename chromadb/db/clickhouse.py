@@ -1,3 +1,4 @@
+# type: ignore
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -70,7 +71,7 @@ class Clickhouse(DB):
     def _get_conn(self) -> Client:
         if self._conn is None:
             self._init_conn()
-        return self._conn  # type: ignore because we know it's not None
+        return self._conn
 
     def _create_table_collections(self, conn):
         conn.command(
@@ -211,6 +212,10 @@ class Clickhouse(DB):
         new_metadata: Optional[Dict] = None,
     ):
         if new_name is not None:
+            dupe_check = self.get_collection(new_name)
+            if len(dupe_check) > 0 and dupe_check[0][0] != id:
+                raise ValueError(f"Collection with name {new_name} already exists")
+
             self._get_conn().command(
                 "ALTER TABLE collections UPDATE name = %(new_name)s WHERE uuid = %(uuid)s",
                 parameters={"new_name": new_name, "uuid": id},

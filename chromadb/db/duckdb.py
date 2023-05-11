@@ -1,3 +1,4 @@
+# type: ignore
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db.clickhouse import (
     Clickhouse,
@@ -83,7 +84,9 @@ class DuckDB(Clickhouse):
         if len(dupe_check) > 0:
             if get_or_create is True:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
 
                 logger.info(
@@ -130,6 +133,10 @@ class DuckDB(Clickhouse):
         self, id: uuid.UUID, new_name: str, new_metadata: Optional[Dict] = None
     ):
         if new_name is not None:
+            dupe_check = self.get_collection(new_name)
+            if len(dupe_check) > 0 and dupe_check[0][0] != str(id):
+                raise ValueError(f"Collection with name {new_name} already exists")
+
             self._conn.execute(
                 """UPDATE collections SET name = ? WHERE uuid = ?""",
                 [new_name, id],
