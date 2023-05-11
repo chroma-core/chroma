@@ -18,7 +18,7 @@ services:
       - CLICKHOUSE_HOST=test_clickhouse
       - CLICKHOUSE_PORT=8123
     ports:
-      - 8000:8000
+      - ${CHROMA_PORT}:8000
     depends_on:
       - test_clickhouse
     networks:

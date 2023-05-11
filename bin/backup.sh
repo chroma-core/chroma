@@ -25,7 +25,7 @@
 #   shift
 # done
 
-# echo $backup_name 
+# echo $backup_name
 
 # # create a folder at ../backup to store the backup
 # mkdir -p ../backups
@@ -42,5 +42,5 @@
 # # remove the backup from teh clickhouse container
 # docker exec -u 0 -it chroma-private-clickhouse-1 rm /etc/clickhouse-server/$backup_name.zip
 
-# # copy the entire contents of 
+# # copy the entire contents of
 # docker cp chroma-private-server-1:/index_data ../backups/$backup_name

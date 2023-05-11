@@ -2,13 +2,19 @@ import os
 import pickle
 import time
 from typing import Dict
+
 from chromadb.api.types import IndexMetadata
 import hnswlib
 from chromadb.db.index import Index
-from chromadb.errors import NoIndexException, InvalidDimensionException, NotEnoughElementsException
+from chromadb.errors import (
+    NoIndexException,
+    InvalidDimensionException,
+    NotEnoughElementsException,
+)
 import logging
 import re
 from uuid import UUID
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +30,6 @@ valid_params = {
 
 
 class HnswParams:
-
     space: str
     construction_ef: int
     search_ef: int
@@ -33,7 +38,6 @@ class HnswParams:
     resize_factor: float
 
     def __init__(self, metadata):
-
         metadata = metadata or {}
 
         # Convert all values to strings for future compatibility.
@@ -44,13 +48,17 @@ class HnswParams:
                 if param not in valid_params:
                     raise ValueError(f"Unknown HNSW parameter: {param}")
                 if not re.match(valid_params[param], value):
-                    raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+                    raise ValueError(
+                        f"Invalid value for HNSW parameter: {param} = {value}"
+                    )
 
         self.space = metadata.get("hnsw:space", "l2")
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
         self.search_ef = int(metadata.get("hnsw:search_ef", 10))
         self.M = int(metadata.get("hnsw:M", 16))
-        self.num_threads = int(metadata.get("hnsw:num_threads", 4))
+        self.num_threads = int(
+            metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
+        )
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
 
@@ -71,7 +79,7 @@ class Hnswlib(Index):
     _index_metadata: IndexMetadata
     _params: HnswParams
     _id_to_label: Dict[str, int]
-    _label_to_id: Dict[int, str]
+    _label_to_id: Dict[int, UUID]
 
     def __init__(self, id, settings, metadata):
         self._save_folder = settings.persist_directory + "/index"
@@ -128,7 +136,7 @@ class Hnswlib(Index):
 
         labels = []
         for id in ids:
-            if id in self._id_to_label:
+            if hexid(id) in self._id_to_label:
                 if update:
                     labels.append(self._id_to_label[hexid(id)])
                 else:
@@ -141,7 +149,9 @@ class Hnswlib(Index):
                 labels.append(next_label)
 
         if self._index_metadata["elements"] > self._index.get_max_elements():
-            new_size = max(self._index_metadata["elements"] * self._params.resize_factor, 1000)
+            new_size = max(
+                self._index_metadata["elements"] * self._params.resize_factor, 1000
+            )
             self._index.resize_index(int(new_size))
 
         self._index.add_items(embeddings, labels)
@@ -196,7 +206,6 @@ class Hnswlib(Index):
         return
 
     def _load(self):
-
         if not os.path.exists(f"{self._save_folder}/index_{self._id}.bin"):
             return
 
@@ -208,7 +217,9 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
-        p = hnswlib.Index(space=self._params.space, dim=self._index_metadata["dimensionality"])
+        p = hnswlib.Index(
+            space=self._params.space, dim=self._index_metadata["dimensionality"]
+        )
         self._index = p
         self._index.load_index(
             f"{self._save_folder}/index_{self._id}.bin",
@@ -218,9 +229,10 @@ class Hnswlib(Index):
         self._index.set_num_threads(self._params.num_threads)
 
     def get_nearest_neighbors(self, query, k, ids=None):
-
         if self._index is None:
-            raise NoIndexException("Index not found, please create an instance before querying")
+            raise NoIndexException(
+                "Index not found, please create an instance before querying"
+            )
 
         # Check dimensionality
         self._check_dimensionality(query)
@@ -240,13 +252,17 @@ class Hnswlib(Index):
 
         filter_function = None
         if len(labels) != 0:
-            filter_function = lambda label: label in labels
+            filter_function = lambda label: label in labels  # NOQA: E731
 
         logger.debug(f"time to pre process our knn query: {time.time() - s2}")
 
         s3 = time.time()
-        database_labels, distances = self._index.knn_query(query, k=k, filter=filter_function)
+        database_labels, distances = self._index.knn_query(
+            query, k=k, filter=filter_function
+        )
         logger.debug(f"time to run knn query: {time.time() - s3}")
 
-        ids = [[self._label_to_id[label] for label in labels] for labels in database_labels]
+        ids = [
+            [self._label_to_id[label] for label in labels] for labels in database_labels
+        ]
         return ids, distances

@@ -1,24 +1,32 @@
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from typing import Optional
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
+    models = {}
+
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            raise ValueError(
-                "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
-            )
-        self._model = SentenceTransformer(model_name, device=device)
+        if model_name not in self.models:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError:
+                raise ValueError(
+                    "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
+                )
+            self.models[model_name] = SentenceTransformer(model_name, device=device)
+        self._model = self.models[model_name]
+
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(list(texts), convert_to_numpy=True).tolist()
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: str, model_name: str = "text-embedding-ada-002"):
+    def __init__(
+        self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"
+    ):
         try:
             import openai
         except ImportError:
@@ -26,21 +34,29 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        openai.api_key = api_key
+        if api_key is not None:
+            openai.api_key = api_key
+        # If the api key is still not set, raise an error
+        elif openai.api_key is None:
+            raise ValueError(
+                "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
+            )
+
         self._client = openai.Embedding
         self._model_name = model_name
 
     def __call__(self, texts: Documents) -> Embeddings:
         # replace newlines, which can negatively affect performance.
         texts = [t.replace("\n", " ") for t in texts]
-        # Call the OpenAI Embedding API in parallel for each document
-        return [
-            result["embedding"]
-            for result in self._client.create(
-                input=texts,
-                engine=self._model_name,
-            )["data"]
-        ]
+
+        # Call the OpenAI Embedding API
+        embeddings = self._client.create(input=texts, engine=self._model_name)["data"]
+
+        # Sort resulting embeddings by index
+        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
+
+        # Return just the embeddings
+        return [result["embedding"] for result in sorted_embeddings]
 
 
 class CohereEmbeddingFunction(EmbeddingFunction):
@@ -58,21 +74,22 @@ class CohereEmbeddingFunction(EmbeddingFunction):
     def __call__(self, texts: Documents) -> Embeddings:
         # Call Cohere Embedding API for each document.
         return [
-            embeddings for embeddings in self._client.embed(texts=texts, model=self._model_name)
+            embeddings
+            for embeddings in self._client.embed(texts=texts, model=self._model_name)
         ]
 
 
 class HuggingFaceEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    ):
         try:
             import requests
         except ImportError:
             raise ValueError(
                 "The requests python package is not installed. Please install it with `pip install requests`"
             )
-        self._api_url = (
-            f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        )
+        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
@@ -97,3 +114,33 @@ class InstructorEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(texts).tolist()
+
+
+class GooglePalmEmbeddingFunction(EmbeddingFunction):
+    """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a PaLM API key."""
+
+    def __init__(self, api_key: str, model_name: str = "models/embedding-gecko-001"):
+        if not api_key:
+            raise ValueError("Please provide a PaLM API key.")
+
+        if not model_name:
+            raise ValueError("Please provide the model name.")
+
+        try:
+            import google.generativeai as palm
+        except ImportError:
+            raise ValueError(
+                "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
+            )
+
+        palm.configure(api_key=api_key)
+        self._palm = palm
+        self._model_name = model_name
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        return [
+            self._palm.generate_embeddings(model=self._model_name, text=text)[
+                "embedding"
+            ]
+            for text in texts
+        ]
