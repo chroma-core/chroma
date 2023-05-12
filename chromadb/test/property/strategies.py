@@ -8,6 +8,7 @@ import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.errors import InvalidDefinition
+from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
@@ -53,6 +54,17 @@ class RecordSet(TypedDict):
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
+class Record(TypedDict):
+    """
+    A single generated record.
+    """
+
+    id: types.ID
+    embedding: Optional[types.Embedding]
+    metadata: Optional[types.Metadata]
+    document: Optional[types.Document]
+
+
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
 # TODO: support empty strings everywhere
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
@@ -72,7 +84,9 @@ safe_floats = st.floats(
 safe_values = [safe_text, safe_integers, safe_floats]
 
 
-def one_or_both(strategy_a, strategy_b):
+def one_or_both(
+    strategy_a: st.SearchStrategy, strategy_b: st.SearchStrategy
+) -> st.SearchStrategy:
     return st.one_of(
         st.tuples(strategy_a, strategy_b),
         st.tuples(strategy_a, st.none()),
@@ -89,13 +103,13 @@ float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]  # TODO: handle int types
 
 
-@st.composite
-def collection_name(draw) -> str:
+@st.composite  # type: ignore
+def collection_name(draw: st.DrawFn) -> str:
     _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
     _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
     _two_periods_re = re.compile(r"\.\.")
 
-    name = draw(st.from_regex(_collection_name_re))
+    name: str = draw(st.from_regex(_collection_name_re))
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
 
@@ -110,7 +124,7 @@ collection_metadata = st.one_of(
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
 def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings:
-    return (
+    embeddings: types.Embeddings = (
         np.random.uniform(
             low=-1.0,
             high=1.0,
@@ -119,6 +133,8 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
         .astype(dtype)
         .tolist()
     )
+
+    return embeddings
 
 
 class hashing_embedding_function(types.EmbeddingFunction):
@@ -138,10 +154,12 @@ class hashing_embedding_function(types.EmbeddingFunction):
         ]
 
         # Convert the hex strings to dtype
-        return np.array(
+        embeddings: types.Embeddings = np.array(
             [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
             dtype=self.dtype,
         ).tolist()
+
+        return embeddings
 
 
 def embedding_function_strategy(
@@ -163,7 +181,7 @@ class Collection:
     embedding_function: Optional[types.EmbeddingFunction] = None
 
 
-@st.composite
+@st.composite  # type: ignore
 def collections(
     draw,
     add_filterable_data=False,
@@ -190,7 +208,7 @@ def collections(
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
             metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
-    known_metadata_keys = {}
+    known_metadata_keys: Dict[str, str] = {}
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
@@ -224,11 +242,11 @@ def collections(
     )
 
 
-@st.composite
-def metadata(draw, collection: Collection):
+@st.composite  # type: ignore
+def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
-    md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    md: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
     if collection.known_metadata_keys:
@@ -242,8 +260,8 @@ def metadata(draw, collection: Collection):
     return md
 
 
-@st.composite
-def document(draw, collection: Collection):
+@st.composite  # type: ignore
+def document(draw, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
 
     if collection.known_document_keywords:
@@ -256,8 +274,8 @@ def document(draw, collection: Collection):
     return " ".join(words)
 
 
-@st.composite
-def record(draw, collection: Collection, id_strategy=safe_text):
+@st.composite  # type: ignore
+def record(draw, collection: Collection, id_strategy=safe_text) -> Record:
     md = draw(metadata(collection))
 
     if collection.has_embeddings:
@@ -277,7 +295,7 @@ def record(draw, collection: Collection, id_strategy=safe_text):
     }
 
 
-@st.composite
+@st.composite  # type: ignore
 def recordsets(
     draw,
     collection_strategy=collections(),
@@ -306,10 +324,12 @@ def recordsets(
         if draw(st.booleans()):
             ids = ids[0]
         if collection.has_embeddings and draw(st.booleans()):
+            assert embeddings is not None
             embeddings = embeddings[0]
         if draw(st.booleans()):
             metadatas = metadatas[0]
         if collection.has_documents and draw(st.booleans()):
+            assert documents is not None
             documents = documents[0]
 
     return {
@@ -325,8 +345,8 @@ def recordsets(
 # enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
 # combined with the complexity of our other strategies, leads to an
 # unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
-class DeterministicRuleStrategy(SearchStrategy):
-    def __init__(self, machine):
+class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
+    def __init__(self, machine: RuleBasedStateMachine) -> None:
         super().__init__()
         self.machine = machine
         self.rules = list(machine.rules())
@@ -346,13 +366,13 @@ class DeterministicRuleStrategy(SearchStrategy):
             )
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{}(machine={}({{...}}))".format(
             self.__class__.__name__,
             self.machine.__class__.__name__,
         )
 
-    def do_draw(self, data):
+    def do_draw(self, data):  # type: ignore
         if not any(self.is_valid(rule) for rule in self.rules):
             msg = f"No progress can be made from state {self.machine!r}"
             raise InvalidDefinition(msg) from None
@@ -361,7 +381,7 @@ class DeterministicRuleStrategy(SearchStrategy):
         argdata = data.draw(rule.arguments_strategy)
         return (rule, argdata)
 
-    def is_valid(self, rule):
+    def is_valid(self, rule) -> bool:  # type: ignore
         if not all(precond(self.machine) for precond in rule.preconditions):
             return False
 
@@ -372,8 +392,8 @@ class DeterministicRuleStrategy(SearchStrategy):
         return True
 
 
-@st.composite
-def where_clause(draw, collection):
+@st.composite  # type: ignore
+def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
 
     known_keys = sorted(collection.known_metadata_keys.keys())
@@ -381,9 +401,9 @@ def where_clause(draw, collection):
     key = draw(st.sampled_from(known_keys))
     value = draw(collection.known_metadata_keys[key])
 
-    legal_ops = [None, "$eq", "$ne"]
+    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
     if not isinstance(value, str):
-        legal_ops = ["$gt", "$lt", "$lte", "$gte"] + legal_ops
+        legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
 
     op = draw(st.sampled_from(legal_ops))
 
@@ -393,8 +413,8 @@ def where_clause(draw, collection):
         return {key: {op: value}}
 
 
-@st.composite
-def where_doc_clause(draw, collection):
+@st.composite  # type: ignore
+def where_doc_clause(draw, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
     if collection.known_document_keywords:
         word = draw(st.sampled_from(collection.known_document_keywords))
@@ -403,22 +423,26 @@ def where_doc_clause(draw, collection):
     return {"$contains": word}
 
 
-@st.composite
-def binary_operator_clause(draw, base_st):
+@st.composite  # type: ignore
+def binary_operator_clause(draw: st.DrawFn, base_st: st.SearchStrategy) -> types.Where:
     op = draw(st.sampled_from(["$and", "$or"]))
     return {op: [draw(base_st), draw(base_st)]}
 
 
-@st.composite
-def recursive_where_clause(draw, collection):
+@st.composite  # type: ignore
+def recursive_where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     base_st = where_clause(collection)
-    return draw(st.recursive(base_st, binary_operator_clause))
+    where: types.Where = draw(st.recursive(base_st, binary_operator_clause))
+    return where
 
 
-@st.composite
-def recursive_where_doc_clause(draw, collection):
+@st.composite  # type: ignore
+def recursive_where_doc_clause(
+    draw: st.DrawFn, collection: Collection
+) -> types.WhereDocument:
     base_st = where_doc_clause(collection)
-    return draw(st.recursive(base_st, binary_operator_clause))
+    where: types.WhereDocument = draw(st.recursive(base_st, binary_operator_clause))
+    return where
 
 
 class Filter(TypedDict):
@@ -427,9 +451,9 @@ class Filter(TypedDict):
     where_document: Optional[types.WhereDocument]
 
 
-@st.composite
+@st.composite  # type: ignore
 def filters(
-    draw,
+    draw: st.DrawFn,
     collection_st: st.SearchStrategy[Collection],
     recordset_st: st.SearchStrategy[RecordSet],
     include_all_ids=False,
