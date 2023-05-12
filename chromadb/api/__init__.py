@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Sequence, Optional, Dict
+from typing import List, Sequence, Optional
 import pandas as pd
+from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    CollectionMetadata,
     Documents,
+    EmbeddingFunction,
     Embeddings,
     IDs,
     Include,
@@ -52,17 +55,18 @@ class API(ABC):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
-        embedding_function: Optional[Callable] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Creates a new collection in the database
 
         Args:
-            name (str): The name of the collection to create. The name must be unique.
-            metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
-            get_or_create (bool, optional): If True, will return the collection if it already exists. Defaults to False.
-            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Defaults to None.
+            name  The name of the collection to create. The name must be unique.
+            metadata: A dictionary of metadata to associate with the collection. Defaults to None.
+            get_or_create: If True, will return the collection if it already exists,
+                and update the metadata (if applicable). Defaults to False.
+            embedding_function: A function that takes documents and returns an embedding. Defaults to None.
 
         Returns:
             dict: the created collection
@@ -74,22 +78,29 @@ class API(ABC):
     def delete_collection(
         self,
         name: str,
-    ):
+    ) -> None:
         """Deletes a collection from the database
 
         Args:
-            name (str): The name of the collection to delete
+            name: The name of the collection to delete
         """
 
     @abstractmethod
-    def get_or_create_collection(self, name: str, metadata: Optional[Dict] = None) -> Collection:
-        """Calls create_collection with get_or_create=True
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
+    ) -> Collection:
+        """Calls create_collection with get_or_create=True.
+           If the collection exists, but with different metadata, the metadata will be replaced.
 
         Args:
-            name (str): The name of the collection to create. The name must be unique.
-            metadata (Optional[Dict], optional): A dictionary of metadata to associate with the collection. Defaults to None.
+            name: The name of the collection to create. The name must be unique.
+            metadata: A dictionary of metadata to associate with the collection. Defaults to None.
+            embedding_function: A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
         Returns:
-            dict: the created collection
+            the created collection
 
         """
         pass
@@ -98,13 +109,13 @@ class API(ABC):
     def get_collection(
         self,
         name: Optional[str] = None,
-        embedding_function: Optional[Callable] = None,
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
         Args:
-            name (Optional[str]): The name of the collection to get. Defaults to None.
-            embedding_function (Optional[Callable], optional): A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
+            name: The name of the collection to get. Defaults to None.
+            embedding_function: A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
 
         Returns:
             dict: the requested collection
@@ -114,16 +125,16 @@ class API(ABC):
 
     def _modify(
         self,
-        current_name: str,
+        id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-    ):
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
         """Modify a collection in the database - can update the name and/or metadata
 
         Args:
-            current_name (str): The name of the collection to modify
-            new_name (Optional[str], optional): The new name of the collection. Defaults to None.
-            new_metadata (Optional[Dict], optional): The new metadata to associate with the collection. Defaults to None.
+            current_name: The name of the collection to modify
+            new_name: The new name of the collection. Defaults to None.
+            new_metadata: The new metadata to associate with the collection. Defaults to None.
         """
         pass
 
@@ -131,48 +142,72 @@ class API(ABC):
     def _add(
         self,
         ids: IDs,
-        collection_name: Union[str, Sequence[str]],
-        embedding: Optional[Embeddings],
-        metadata: Optional[Metadatas] = None,
+        collection_id: UUID,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
+    ) -> None:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_name (Union[str, Sequence[str]]): The model space(s) to add the embeddings to
-            embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
-            metadata (Optional[Union[Dict, Sequence[Dict]]], optional): The metadata to associate with the embeddings. Defaults to None.
-            documents (Optional[Union[str, Sequence[str]]], optional): The documents to associate with the embeddings. Defaults to None.
-            ids (Optional[Union[str, Sequence[str]]], optional): The ids to associate with the embeddings. Defaults to None.
+            collection_id: The collection to add the embeddings to
+            embedding: The sequence of embeddings to add
+            metadata: The metadata to associate with the embeddings. Defaults to None.
+            documents: The documents to associate with the embeddings. Defaults to None.
+            ids: The ids to associate with the embeddings. Defaults to None.
         """
         pass
 
     @abstractmethod
     def _update(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> None:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
         Args:
-            collection_name (Union[str, Sequence[str]]): The model space(s) to add the embeddings to
-            embedding (Sequence[Sequence[float]]): The sequence of embeddings to add
+            collection_id: The collection to add the embeddings to
+            embedding: The sequence of embeddings to add
         """
         pass
 
     @abstractmethod
-    def _count(self, collection_name: str) -> int:
+    def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ) -> None:
+        """Add or update entries in the embedding store.
+        If an entry with the same id already exists, it will be updated, otherwise it will be added.
+
+        Args:
+            collection_id: The collection to add the embeddings to
+            ids: The ids to associate with the embeddings. Defaults to None.
+            embeddings: The sequence of embeddings to add
+            metadatas: The metadata to associate with the embeddings. Defaults to None.
+            documents: The documents to associate with the embeddings. Defaults to None.
+            increment_index: If True, will incrementally add to the ANN index of the collection. Defaults to True.
+        """
+        pass
+
+    @abstractmethod
+    def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database
 
         Args:
-            collection_name (str): The model space to count the embeddings in.
+            collection_id: The collection to count the embeddings in.
+
 
         Returns:
             int: The number of embeddings in the collection
@@ -181,13 +216,13 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def _peek(self, collection_name: str, n: int = 10) -> GetResult:
+    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         pass
 
     @abstractmethod
     def _get(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         sort: Optional[str] = None,
@@ -202,12 +237,12 @@ class API(ABC):
         ⚠️ This method should not be used directly.
 
         Args:
-            where (Optional[Dict[str, str]], optional): A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
-            sort (Optional[str], optional): The column to sort the embeddings by. Defaults to None.
-            limit (Optional[int], optional): The maximum number of embeddings to return. Defaults to None.
-            offset (Optional[int], optional): The number of embeddings to skip before returning. Defaults to None.
-            page (Optional[int], optional): The page number to return. Defaults to None.
-            page_size (Optional[int], optional): The number of embeddings to return per page. Defaults to None.
+            where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+            sort: The column to sort the embeddings by. Defaults to None.
+            limit: The maximum number of embeddings to return. Defaults to None.
+            offset: The number of embeddings to skip before returning. Defaults to None.
+            page: The page number to return. Defaults to None.
+            page_size: The number of embeddings to return per page. Defaults to None.
 
         Returns:
             pd.DataFrame: A pandas dataframe containing the embeddings and metadata
@@ -218,23 +253,26 @@ class API(ABC):
     @abstractmethod
     def _delete(
         self,
-        collection_name: str,
+        collection_id: UUID,
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ):
+    ) -> List[UUID]:
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
         Args:
-            where (Optional[Dict[str, str]], optional): A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+            where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+
+        Returns:
+            List: The list of internal UUIDs of the deleted embeddings
         """
         pass
 
     @abstractmethod
     def _query(
         self,
-        collection_name: str,
+        collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
         where: Where = {},
@@ -245,9 +283,9 @@ class API(ABC):
         ⚠️ This method should not be used directly.
 
         Args:
-            embedding (Sequence[float]): The embedding to find the nearest neighbors of
-            n_results (int, optional): The number of nearest neighbors to return. Defaults to 10.
-            where (Dict[str, str], optional): A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
+            embedding: The embedding to find the nearest neighbors of
+            n_results: The number of nearest neighbors to return. Defaults to 10.
+            where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
         """
         pass
 
@@ -259,7 +297,7 @@ class API(ABC):
             None
 
         Returns:
-            bool: True if the reset was successful
+            True if the reset was successful
         """
         pass
 
@@ -269,7 +307,7 @@ class API(ABC):
         ⚠️ This method should not be used directly.
 
         Args:
-            sql (str): The SQL query to run
+            sql: The SQL query to run
 
         Returns:
             pd.DataFrame: A pandas dataframe containing the results of the query
@@ -278,14 +316,29 @@ class API(ABC):
 
     @abstractmethod
     def create_index(self, collection_name: Optional[str] = None) -> bool:
-        """Creates an index for the given model space
+        """Creates an index for the given collection
         ⚠️ This method should not be used directly.
 
         Args:
-            collection_name (Optional[str], optional): The model space to create the index for. Uses the client's model space if None. Defaults to None.
+            collection_name: The collection to create the index for. Uses the client's collection if None. Defaults to None.
 
         Returns:
             bool: True if the index was created successfully
+
+        """
+        pass
+
+    @abstractmethod
+    def persist(self) -> None:
+        """Persist the database to disk"""
+        pass
+
+    @abstractmethod
+    def get_version(self) -> str:
+        """Get the version of Chroma.
+
+        Returns:
+            str: The version of Chroma
 
         """
         pass

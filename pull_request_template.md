@@ -1,6 +1,6 @@
 ## Description of changes
 
-*Summarize the changes made by this PR.* 
+*Summarize the changes made by this PR.*
  - Improvements & Bug fixes
 	 - ...
  - New functionality

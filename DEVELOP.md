@@ -6,6 +6,8 @@ https://packaging.python.org.
 
 ## Setup
 
+Because of the dependencies it relies on (like `pytorch`), this project does not support Python version >3.10.0.
+
 Set up a virtual environment and install the project's requirements
 and dev requirements:
 
@@ -14,9 +16,10 @@ python3 -m venv venv      # Only need to do this once
 source venv/bin/activate  # Do this each time you use a new shell for the project
 pip install -r requirements.txt
 pip install -r requirements_dev.txt
+pre-commit install # install the precommit hooks
 ```
 
-You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`. 
+You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
 ## Running Chroma
 
@@ -30,11 +33,11 @@ print(api.heartbeat())
 
 2. Standalone and in-memory with persistence:
 
-This by default saves your db and your indexes to a `.chroma` directory and can also load from them. 
+This by default saves your db and your indexes to a `.chroma` directory and can also load from them.
 ```python
 import chromadb
 from chromadb.config import Settings
-api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet", 
+api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet",
                       persist_directory="/path/to/persist/directory"))
 print(api.heartbeat())
 ```
