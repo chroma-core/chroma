@@ -1,7 +1,9 @@
-from typing import TYPE_CHECKING, Optional, cast, List, Dict
+from typing import TYPE_CHECKING, Optional, cast, List, Tuple
 from pydantic import BaseModel, PrivateAttr
+from uuid import UUID
 
 from chromadb.api.types import (
+    CollectionMetadata,
     Embedding,
     Include,
     Metadata,
@@ -12,7 +14,6 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     ID,
-    N_results,
     OneOrMany,
     WhereDocument,
     maybe_cast_one_to_many,
@@ -22,6 +23,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_n_results,
+    validate_embeddings,
 )
 import logging
 
@@ -31,9 +33,10 @@ if TYPE_CHECKING:
     from chromadb.api import API
 
 
-class Collection(BaseModel):
+class Collection(BaseModel):  # type: ignore
     name: str
-    metadata: Optional[Dict] = None
+    id: UUID
+    metadata: Optional[CollectionMetadata] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -41,10 +44,10 @@ class Collection(BaseModel):
         self,
         client: "API",
         name: str,
+        id: UUID,
         embedding_function: Optional[EmbeddingFunction] = None,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[CollectionMetadata] = None,
     ):
-
         self._client = client
         if embedding_function is not None:
             self._embedding_function = embedding_function
@@ -55,9 +58,9 @@ class Collection(BaseModel):
                 "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
             )
             self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
-        super().__init__(name=name, metadata=metadata)
+        super().__init__(name=name, metadata=metadata, id=id)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Collection(name={self.name})"
 
     def count(self) -> int:
@@ -67,7 +70,7 @@ class Collection(BaseModel):
             int: The total number of embeddings added to the database
 
         """
-        return self._client._count(collection_name=self.name)
+        return self._client._count(collection_id=self.id)
 
     def add(
         self,
@@ -76,7 +79,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         increment_index: bool = True,
-    ):
+    ) -> None:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
@@ -97,36 +100,13 @@ class Collection(BaseModel):
 
         """
 
-        ids = validate_ids(maybe_cast_one_to_many(ids))
-        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
-        documents = maybe_cast_one_to_many(documents) if documents else None
+        ids, embeddings, metadatas, documents = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents
+        )
 
-        # Check that one of embeddings or documents is provided
-        if embeddings is None and documents is None:
-            raise ValueError("You must provide either embeddings or documents, or both")
-
-        # Check that, if they're provided, the lengths of the arrays match the length of ids
-        if embeddings is not None and len(embeddings) != len(ids):
-            raise ValueError(
-                f"Number of embeddings {len(embeddings)} must match number of ids {len(ids)}"
-            )
-        if metadatas is not None and len(metadatas) != len(ids):
-            raise ValueError(
-                f"Number of metadatas {len(metadatas)} must match number of ids {len(ids)}"
-            )
-        if documents is not None and len(documents) != len(ids):
-            raise ValueError(
-                f"Number of documents {len(documents)} must match number of ids {len(ids)}"
-            )
-
-        # If document embeddings are not provided, we need to compute them
-        if embeddings is None and documents is not None:
-            if self._embedding_function is None:
-                raise ValueError("You must provide embeddings or a function to compute them")
-            embeddings = self._embedding_function(documents)
-
-        self._client._add(ids, self.name, embeddings, metadatas, documents, increment_index)
+        self._client._add(
+            ids, self.id, embeddings, metadatas, documents, increment_index
+        )
 
     def get(
         self,
@@ -153,11 +133,13 @@ class Collection(BaseModel):
 
         """
         where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
-            self.name,
+            self.id,
             ids,
             where,
             None,
@@ -176,13 +158,13 @@ class Collection(BaseModel):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._client._peek(self.name, limit)
+        return self._client._peek(self.id, limit)
 
     def query(
         self,
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
-        n_results: Optional[N_results] = 10,
+        n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],
@@ -206,9 +188,17 @@ class Collection(BaseModel):
 
         """
         where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
-        query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
-        query_texts = maybe_cast_one_to_many(query_texts) if query_texts else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+        query_embeddings = (
+            validate_embeddings(maybe_cast_one_to_many(query_embeddings))
+            if query_embeddings is not None
+            else None
+        )
+        query_texts = (
+            maybe_cast_one_to_many(query_texts) if query_texts is not None else None
+        )
         include = validate_include(include, allow_distances=True)
         n_results = validate_n_results(n_results)
 
@@ -223,9 +213,13 @@ class Collection(BaseModel):
         # If query_embeddings are not provided, we need to compute them from the query_texts
         if query_embeddings is None:
             if self._embedding_function is None:
-                raise ValueError("You must provide embeddings or a function to compute them")
+                raise ValueError(
+                    "You must provide embeddings or a function to compute them"
+                )
             # We know query texts is not None at this point, cast for the typechecker
-            query_embeddings = self._embedding_function(cast(List[Document], query_texts))
+            query_embeddings = self._embedding_function(
+                cast(List[Document], query_texts)
+            )
 
         if where is None:
             where = {}
@@ -234,7 +228,7 @@ class Collection(BaseModel):
             where_document = {}
 
         return self._client._query(
-            collection_name=self.name,
+            collection_id=self.id,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
@@ -242,7 +236,9 @@ class Collection(BaseModel):
             include=include,
         )
 
-    def modify(self, name: Optional[str] = None, metadata=None):
+    def modify(
+        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+    ) -> None:
         """Modify the collection name or metadata
 
         Args:
@@ -252,7 +248,7 @@ class Collection(BaseModel):
         Returns:
             None
         """
-        self._client._modify(current_name=self.name, new_name=name, new_metadata=metadata)
+        self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self.name = name
         if metadata:
@@ -264,7 +260,7 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
-    ):
+    ) -> None:
         """Update the embeddings, metadatas or documents for provided ids.
 
         Args:
@@ -277,18 +273,103 @@ class Collection(BaseModel):
             None
         """
 
-        ids = validate_ids(maybe_cast_one_to_many(ids))
-        embeddings = maybe_cast_one_to_many(embeddings) if embeddings else None
-        metadatas = validate_metadatas(maybe_cast_one_to_many(metadatas)) if metadatas else None
-        documents = maybe_cast_one_to_many(documents) if documents else None
+        ids, embeddings, metadatas, documents = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, require_embeddings_or_documents=False
+        )
 
-        # Must update one of embeddings, metadatas, or documents
-        if embeddings is None and documents is None and metadatas is None:
-            raise ValueError("You must update at least one of embeddings, documents or metadatas.")
+        self._client._update(self.id, ids, embeddings, metadatas, documents)
+
+    def upsert(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        increment_index: bool = True,
+    ) -> None:
+        """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
+
+        Args:
+            ids: The ids of the embeddings to update
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            documents: The documents to associate with the embeddings. Optional.
+
+        Returns:
+            None
+        """
+
+        ids, embeddings, metadatas, documents = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents
+        )
+
+        self._client._upsert(
+            collection_id=self.id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            increment_index=increment_index,
+        )
+
+    def delete(
+        self,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> None:
+        """Delete the embeddings based on ids and/or a where filter
+
+        Args:
+            ids: The ids of the embeddings to delete
+            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
+
+        Returns:
+            None
+        """
+        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
+        where = validate_where(where) if where else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+        self._client._delete(self.id, ids, where, where_document)
+
+    def create_index(self) -> None:
+        self._client.create_index(self.name)
+
+    def _validate_embedding_set(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        require_embeddings_or_documents: bool = True,
+    ) -> Tuple[
+        IDs,
+        Optional[List[Embedding]],
+        Optional[List[Metadata]],
+        Optional[List[Document]],
+    ]:
+        ids = validate_ids(maybe_cast_one_to_many(ids))
+        embeddings = (
+            validate_embeddings(maybe_cast_one_to_many(embeddings))
+            if embeddings is not None
+            else None
+        )
+        metadatas = (
+            validate_metadatas(maybe_cast_one_to_many(metadatas))
+            if metadatas is not None
+            else None
+        )
+        documents = maybe_cast_one_to_many(documents) if documents is not None else None
 
         # Check that one of embeddings or documents is provided
-        if embeddings is not None and documents is None:
-            raise ValueError("You must provide updated documents with updated embeddings")
+        if require_embeddings_or_documents:
+            if embeddings is None and documents is None:
+                raise ValueError(
+                    "You must provide either embeddings or documents, or both"
+                )
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
         if embeddings is not None and len(embeddings) != len(ids):
@@ -307,31 +388,9 @@ class Collection(BaseModel):
         # If document embeddings are not provided, we need to compute them
         if embeddings is None and documents is not None:
             if self._embedding_function is None:
-                raise ValueError("You must provide embeddings or a function to compute them")
+                raise ValueError(
+                    "You must provide embeddings or a function to compute them"
+                )
             embeddings = self._embedding_function(documents)
 
-        self._client._update(self.name, ids, embeddings, metadatas, documents)
-
-    def delete(
-        self,
-        ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
-    ):
-        """Delete the embeddings based on ids and/or a where filter
-
-        Args:
-            ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
-
-        Returns:
-            None
-        """
-        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
-        where = validate_where(where) if where else None
-        where_document = validate_where_document(where_document) if where_document else None
-        return self._client._delete(self.name, ids, where, where_document)
-
-    def create_index(self):
-        self._client.create_index(self.name)
+        return ids, embeddings, metadatas, documents

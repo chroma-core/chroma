@@ -49,7 +49,6 @@ class RepeatedTelemetry:
 
 
 class Telemetry:
-
     USER_ID_PATH = str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
     UNKNOWN_USER_ID = "UNKNOWN"
     SERVER_CONTEXT: ServerContext = ServerContext.NONE

@@ -1,0 +1,5 @@
+# OpenAPI Generator Plus generator configuration
+inputPath: openapi.json
+outputPath: src/generated
+generator: "@openapi-generator-plus/typescript-fetch-client-generator"
+# See https://github.com/karlvr/openapi-generator-plus-generators/tree/master/packages/typescript-fetch-node-client#readme for more configuration options

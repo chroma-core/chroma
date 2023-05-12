@@ -1,4 +1,6 @@
-from typing import Literal, Optional, Union, Dict, Sequence, TypedDict, Protocol, TypeVar, List
+from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
+from typing_extensions import Literal, TypedDict, Protocol
+import chromadb.errors as errors
 
 ID = str
 IDs = List[ID]
@@ -11,10 +13,10 @@ Embeddings = List[Embedding]
 Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
+CollectionMetadata = Dict[Any, Any]
+
 Document = str
 Documents = List[Document]
-
-N_results = int
 
 Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
@@ -28,7 +30,9 @@ LogicalOperator = Literal["$and", "$or"]
 WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
 OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
-Where = Dict[Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]]
+Where = Dict[
+    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
+]
 
 WhereDocumentOperator = Literal["$contains", LogicalOperator]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
@@ -68,7 +72,7 @@ def maybe_cast_one_to_many(
     if isinstance(target, Sequence):
         # One Document or ID
         if isinstance(target, str) and target is not None:
-            return [target]  # type: ignore
+            return [target]
         # One Embedding
         if isinstance(target[0], (int, float)):
             return [target]  # type: ignore
@@ -86,6 +90,11 @@ def validate_ids(ids: IDs) -> IDs:
     for id in ids:
         if not isinstance(id, str):
             raise ValueError(f"Expected ID to be a str, got {id}")
+    if len(ids) != len(set(ids)):
+        dups = set([x for x in ids if ids.count(x) > 1])
+        raise errors.DuplicateIDError(
+            f"Expected IDs to be unique, found duplicates for: {dups}"
+        )
     return ids
 
 
@@ -97,7 +106,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
         if not isinstance(value, (str, int, float)):
-            raise ValueError(f"Expected metadata value to be a str, int, or float, got {value}")
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value}"
+            )
     return metadata
 
 
@@ -120,7 +131,11 @@ def validate_where(where: Where) -> Where:
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
-        if key != "$and" and key != "$or" and not isinstance(value, (str, int, float, dict)):
+        if (
+            key != "$and"
+            and key != "$or"
+            and not isinstance(value, (str, int, float, dict))
+        ):
             raise ValueError(
                 f"Expected where value to be a str, int, float, or operator expression, got {value}"
             )
@@ -169,7 +184,9 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
     a list of where_document expressions
     """
     if not isinstance(where_document, dict):
-        raise ValueError(f"Expected where document to be a dictionary, got {where_document}")
+        raise ValueError(
+            f"Expected where document to be a dictionary, got {where_document}"
+        )
     if len(where_document) != 1:
         raise ValueError(
             f"Expected where document to have exactly one operator, got {where_document}"
@@ -217,7 +234,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     return include
 
 
-def validate_n_results(n_results: N_results) -> N_results:
+def validate_n_results(n_results: int) -> int:
     """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
     # Check Number of requested results
     if not isinstance(n_results, int):
@@ -225,3 +242,18 @@ def validate_n_results(n_results: N_results) -> N_results:
     if n_results < 0:
         raise TypeError(f"Number of requested results {n_results}, cannot be negative.")
     return n_results
+
+
+def validate_embeddings(embeddings: Embeddings) -> Embeddings:
+    """Validates embeddings to ensure it is a list of list of ints, or floats"""
+    if not isinstance(embeddings, list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if not isinstance(embeddings[0], list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    for embedding in embeddings:
+        for value in embedding:
+            if not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Expected embeddings to be a int, float, got {embeddings}"
+                )
+    return embeddings
