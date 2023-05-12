@@ -44,3 +44,24 @@ type WhereDocumentOperator = "$contains" | LogicalOperator;
 export type WhereDocument = {
   [key in WhereDocumentOperator]?: LiteralValue | LiteralNumber | WhereDocument[];
 };
+
+export type CollectionType = {
+  name: string;
+  id: string;
+  metadata: Metadata | null;
+};
+
+export type GetResponse = {
+  ids: IDs;
+  embeddings: null | Embeddings;
+  documents: (null | Document)[];
+  metadatas: (null | Metadata)[];
+};
+
+export type QueryResponse = {
+  ids: IDs;
+  embeddings: null | Embeddings;
+  documents: (null | Document)[];
+  metadatas: (null | Metadata)[];
+  distances: null | number[][];
+}

@@ -10,7 +10,10 @@ import {
   WhereDocument,
   ID,
   IDs,
-  PositiveInteger
+  PositiveInteger,
+  CollectionType,
+  GetResponse,
+  QueryResponse
 } from "./types";
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import Count200Response = Api.Count200Response;
@@ -160,17 +163,8 @@ type CallableFunction = {
 };
 
 export class Collection {
-  /**
-   * @ignore
-   */
   public name: string;
-  /**
-   * @ignore
-   */
   public id: string;
-  /**
-   * @ignore
-   */
   public metadata: Metadata | undefined;
   /**
    * @ignore
@@ -261,6 +255,15 @@ export class Collection {
       documentsArray = toArray(documents);
     }
 
+    // validate all ids are strings
+    for (let i = 0; i < idsArray.length; i += 1) {
+      if (typeof idsArray[i] !== "string") {
+        throw new Error(
+          `Expected ids to be strings, found ${typeof idsArray[i]} at index ${i}`
+        );
+      }
+    }
+
     if (
       (embeddingsArray !== undefined &&
         idsArray.length !== embeddingsArray.length) ||
@@ -292,7 +295,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-   * @returns {Promise<AddResponse>} - The response from the API.
+   * @returns {Promise<boolean>} - The response from the API. True if successful.
    *
    * @example
    * ```typescript
@@ -314,7 +317,7 @@ export class Collection {
     embeddings?: Embedding | Embeddings,
     metadatas?: Metadata | Metadatas,
     documents?: Document | Documents,
-  }) {
+  }): Promise<boolean> {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
       true,
@@ -346,7 +349,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-   * @returns {Promise<UpsertResponse>} - The response from the API.
+   * @returns {Promise<boolean>} - The response from the API. True if successful.
    *
    * @example
    * ```typescript
@@ -368,7 +371,7 @@ export class Collection {
     embeddings?: Embedding | Embeddings,
     metadatas?: Metadata | Metadatas,
     documents?: Document | Documents,
-  }) {
+  }): Promise<boolean> {
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
       true,
       ids,
@@ -396,14 +399,14 @@ export class Collection {
 
   /**
    * Count the number of items in the collection
-   * @returns {Promise<CountResponse>} - The response from the API.
+   * @returns {Promise<number>} - The response from the API.
    *
    * @example
    * ```typescript
    * const response = await collection.count();
    * ```
    */
-  public async count() {
+  public async count(): Promise<number> {
     const response = await this.api.count(this.id);
     return handleSuccess(response);
   }
@@ -413,7 +416,7 @@ export class Collection {
    * @param {Object} params - The parameters for the query.
    * @param {string} [params.name] - Optional new name for the collection.
    * @param {Metadata} [params.metadata] - Optional new metadata for the collection.
-   * @returns {Promise<ModifyResponse>} - The response from the API.
+   * @returns {Promise<void>} - The response from the API.
    *
    * @example
    * ```typescript
@@ -429,7 +432,7 @@ export class Collection {
   }: {
     name?: string,
     metadata?: Metadata
-  } = {}) {
+  } = {}): Promise<void> {
     const response = await this.api
       .updateCollection(
         this.id,
@@ -485,7 +488,7 @@ export class Collection {
     offset?: PositiveInteger,
     include?: IncludeEnum[],
     where_document?: WhereDocument
-  } = {}) {
+  } = {}): Promise<GetResponse> {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
 
@@ -509,7 +512,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings to update.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadatas to update.
    * @param {Document | Documents} [params.documents] - Optional documents to update.
-   * @returns {Promise<APIResponse>} - The API Response.
+   * @returns {Promise<boolean>} - The API Response. True if successful. Else, error.
    *
    * @example
    * ```typescript
@@ -531,7 +534,7 @@ export class Collection {
     embeddings?: Embedding | Embeddings,
     metadatas?: Metadata | Metadatas,
     documents?: Document | Documents,
-  }) {
+  }): Promise<boolean> {
     if (
       embeddings === undefined &&
       documents === undefined &&
@@ -551,14 +554,18 @@ export class Collection {
       }
     }
 
+    // backend expects None if metadatas is undefined
+    if (metadatas !== undefined) metadatas = toArray(metadatas);
+    if (documents !== undefined) documents = toArray(documents);
+
     var resp = await this.api
       .update(
         this.id,
         {
           ids: toArray(ids),
           embeddings: embeddings ? toArrayOfArrays(embeddings) : undefined,
-          documents: documents, //TODO: this was toArray(documents) but that was wrong?
-          metadatas: toArray(metadatas),
+          documents: documents,
+          metadatas: metadatas
         },
       )
       .then(handleSuccess)
@@ -578,7 +585,7 @@ export class Collection {
    * @param {WhereDocument} [params.where_document] - Optional query condition to filter results based on document content.
    * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
    *
-   * @returns {Promise<any>} A promise that resolves to the query results.
+   * @returns {Promise<QueryResponse>} A promise that resolves to the query results.
    * @throws {Error} If there is an issue executing the query.
    * @example
    * // Query the collection using embeddings
@@ -614,7 +621,7 @@ export class Collection {
     query_text?: string | string[], // TODO: should be named query_texts to match python API
     where_document?: WhereDocument, // {"$contains":"search_string"}
     include?: IncludeEnum[] // ["metadata", "document"]
-  }) {
+  }): Promise<QueryResponse> {
     if (n_results === undefined) n_results = 10
     if (query_embeddings === undefined && query_text === undefined) {
       throw new Error(
@@ -651,7 +658,7 @@ export class Collection {
    * Peek inside the collection
    * @param {Object} params - The parameters for the query.
    * @param {PositiveInteger} [params.limit] - Optional number of results to return (default is 10).
-   * @returns {Promise<any>} A promise that resolves to the query results.
+   * @returns {Promise<GetResponse>} A promise that resolves to the query results.
    * @throws {Error} If there is an issue executing the query.
    *
    * @example
@@ -661,7 +668,7 @@ export class Collection {
    * });
    * ```
    */
-  public async peek({ limit }: { limit?: PositiveInteger } = {}) {
+  public async peek({ limit }: { limit?: PositiveInteger } = {}): Promise<GetResponse> {
     if (limit === undefined) limit = 10;
     const response = await this.api.aGet(this.id, {
       limit: limit,
@@ -675,7 +682,7 @@ export class Collection {
    * @param {ID | IDs} [params.ids] - Optional ID or array of IDs of items to delete.
    * @param {Where} [params.where] - Optional query condition to filter items to delete based on metadata values.
    * @param {WhereDocument} [params.where_document] - Optional query condition to filter items to delete based on document content.
-   * @returns {Promise<any>} A promise that resolves to the deletion results.
+   * @returns {Promise<string[]>} A promise that resolves to the IDs of the deleted items.
    * @throws {Error} If there is an issue deleting items from the collection.
    *
    * @example
@@ -695,7 +702,7 @@ export class Collection {
     ids?: ID | IDs,
     where?: Where,
     where_document?: WhereDocument
-  } = {}) {
+  } = {}): Promise<string[]> {
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
     return await this.api
@@ -735,7 +742,7 @@ export class ChromaClient {
   /**
    * Resets the state of the object by making an API call to the reset endpoint.
    *
-   * @returns {Promise<void>} A promise that resolves when the reset operation is complete.
+   * @returns {Promise<Api.Reset200Response>} A promise that resolves when the reset operation is complete.
    * @throws {Error} If there is an issue resetting the state.
    *
    * @example
@@ -743,7 +750,7 @@ export class ChromaClient {
    * await client.reset();
    * ```
    */
-  public async reset() {
+  public async reset(): Promise<Api.Reset200Response> {
     return await this.api.reset();
   }
 
@@ -776,6 +783,9 @@ export class ChromaClient {
     return ret["nanosecond heartbeat"]
   }
 
+  /**
+   * @ignore
+   */
   public async persist(): Promise<never> {
     throw new Error("Not implemented in JS client");
   }
@@ -880,7 +890,7 @@ export class ChromaClient {
   /**
    * Lists all collections.
    *
-   * @returns {Promise<string[]>} A promise that resolves to a list of collection names.
+   * @returns {Promise<CollectionType[]>} A promise that resolves to a list of collection names.
    * @throws {Error} If there is an issue listing the collections.
    *
    * @example
@@ -888,7 +898,7 @@ export class ChromaClient {
    * const collections = await client.listCollections();
    * ```
    */
-  public async listCollections() {
+  public async listCollections(): Promise<CollectionType[]> {
     const response = await this.api.listCollections();
     return handleSuccess(response);
   }
@@ -947,7 +957,7 @@ export class ChromaClient {
     name
   }: {
     name: string
-  }) {
+  }): Promise<void> {
     return await this.api
       .deleteCollection(name)
       .then(handleSuccess)
