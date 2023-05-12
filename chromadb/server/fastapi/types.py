@@ -1,73 +1,67 @@
 from pydantic import BaseModel
-from typing import List, Union
-from chromadb.api.types import Include
+from typing import Any, Dict, List, Optional
+from chromadb.api.types import (
+    CollectionMetadata,
+    Include,
+)
 
 
-# type supports single and batch mode
-class AddEmbedding(BaseModel):
-    embeddings: List
-    metadatas: Union[List, dict] = None
-    documents: Union[str, List] = None
-    ids: Union[str, List] = None
+class AddEmbedding(BaseModel):  # type: ignore
+    # Pydantic doesn't handle Union types cleanly like Embeddings which has
+    # Union[int, float] so we use Any here to ensure data is parsed
+    # to its original type.
+    embeddings: Optional[List[Any]] = None
+    metadatas: Optional[List[Dict[Any, Any]]] = None
+    documents: Optional[List[str]] = None
+    ids: List[str]
     increment_index: bool = True
 
 
-class UpdateEmbedding(BaseModel):
-    embeddings: List = None
-    metadatas: Union[List, dict] = None
-    documents: Union[str, List] = None
-    ids: Union[str, List] = None
+class UpdateEmbedding(BaseModel):  # type: ignore
+    embeddings: Optional[List[Any]] = None
+    metadatas: Optional[List[Dict[Any, Any]]] = None
+    documents: Optional[List[str]] = None
+    ids: List[str]
     increment_index: bool = True
 
 
-class QueryEmbedding(BaseModel):
-    where: dict = {}
-    where_document: dict = {}
-    query_embeddings: List
+class QueryEmbedding(BaseModel):  # type: ignore
+    # TODO: Pydantic doesn't bode well with recursive types so we use generic Dicts
+    # for Where and WhereDocument. This is not ideal, but it works for now since
+    # there is a lot of downstream validation.
+    where: Optional[Dict[Any, Any]] = {}
+    where_document: Optional[Dict[Any, Any]] = {}
+    query_embeddings: List[Any]
     n_results: int = 10
     include: Include = ["metadatas", "documents", "distances"]
 
 
-class ProcessEmbedding(BaseModel):
-    collection_name: str = None
-    training_dataset_name: str = None
-    unlabeled_dataset_name: str = None
-
-
-class GetEmbedding(BaseModel):
-    ids: List = None
-    where: dict = None
-    where_document: dict = None
-    sort: str = None
-    limit: int = None
-    offset: int = None
+class GetEmbedding(BaseModel):  # type: ignore
+    ids: Optional[List[str]] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
+    sort: Optional[str] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = None
     include: Include = ["metadatas", "documents"]
 
 
-class CountEmbedding(BaseModel):
-    collection_name: str = None
+class RawSql(BaseModel):  # type: ignore
+    raw_sql: str
 
 
-class RawSql(BaseModel):
-    raw_sql: str = None
+class DeleteEmbedding(BaseModel):  # type: ignore
+    ids: Optional[List[str]] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
 
 
-class SpaceKeyInput(BaseModel):
-    collection_name: str
-
-
-class DeleteEmbedding(BaseModel):
-    ids: List = None
-    where: dict = None
-    where_document: dict = None
-
-
-class CreateCollection(BaseModel):
+class CreateCollection(BaseModel):  # type: ignore
     name: str
-    metadata: dict = None
+    metadata: Optional[CollectionMetadata] = None
     get_or_create: bool = False
 
 
-class UpdateCollection(BaseModel):
-    new_name: str = None
-    new_metadata: dict = None
+class UpdateCollection(BaseModel):  # type: ignore
+    new_name: Optional[str] = None
+    new_metadata: Optional[CollectionMetadata] = None
