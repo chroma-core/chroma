@@ -1,27 +1,27 @@
 from pydantic import BaseModel
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from chromadb.api.types import (
     CollectionMetadata,
-    Documents,
-    Embeddings,
     IDs,
     Include,
-    Metadatas,
 )
 
 
 class AddEmbedding(BaseModel):  # type: ignore
-    embeddings: Optional[Embeddings] = None
-    metadatas: Optional[Metadatas] = None
-    documents: Optional[Documents] = None
+    # Pydantic doesn't handle Union types cleanly like Embeddings which has
+    # Union[int, float] so we use Any here to ensure data is parsed
+    # to its original type.
+    embeddings: Optional[List[Any]] = None
+    metadatas: Optional[List[Dict[Any, Any]]] = None
+    documents: Optional[List[str]] = None
     ids: IDs
     increment_index: bool = True
 
 
 class UpdateEmbedding(BaseModel):  # type: ignore
-    embeddings: Optional[Embeddings] = None
-    metadatas: Optional[Metadatas] = None
-    documents: Optional[Documents] = None
+    embeddings: Optional[List[Any]] = None
+    metadatas: Optional[List[Dict[Any, Any]]] = None
+    documents: Optional[List[str]] = None
     ids: IDs
     increment_index: bool = True
 
@@ -32,7 +32,7 @@ class QueryEmbedding(BaseModel):  # type: ignore
     # there is a lot of downstream validation.
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    query_embeddings: Embeddings
+    query_embeddings: List[Any]
     n_results: int = 10
     include: Include = ["metadatas", "documents", "distances"]
 
