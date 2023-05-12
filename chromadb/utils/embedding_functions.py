@@ -144,3 +144,25 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction):
             ]
             for text in texts
         ]
+
+class GoogleVertexEmbeddingFunction(EmbeddingFunction):
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "textembedding-gecko-001",
+        project_id: str = "cloud-large-language-models",
+    ):
+        self._api_url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{project_id}/locations/us-central1/endpoints/{model_name}:predict"
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {api_key}"})
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        respnonse = self._session.post(
+            self._api_url, json={"instances": [{"content": texts}]}
+        ).json()
+
+        if "predictions" in respnonse:
+            predictions = respnonse["predictions"]
+            if len(predictions) > 0 and "embedding" in predictions[0]:
+                embedding = predictions[0]["embedding"]
+                return embedding
