@@ -1,0 +1,37 @@
+name: PR Review Checklist
+
+on:
+  pull_request_target:
+    types:
+      - opened
+
+jobs:
+  PR-Comment:
+    runs-on: ubuntu-latest
+    steps:
+    - name: PR Comment
+      uses: actions/github-script@v2
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          github.issues.createComment({
+            issue_number: ${{ github.event.number }},
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `# Reviewer Checklist
+            Please leverage this checklist to ensure your code review is thorough before approving
+            ## Testing, Bugs, Errors, Logs, Documentation
+            - [ ] Can you think of any use case in which the code does not behave as intended? Have they been tested?
+            - [ ] Can you think of any inputs or external events that could break the code? Is user input validated and safe? Have they been tested?
+            - [ ] If appropriate, are there adequate property based tests?
+            - [ ] If appropriate, are there adequate unit tests?
+            - [ ] Should any logging, debugging, tracing information be added or removed?
+            - [ ] Are error messages user-friendly?
+            - [ ] Have all documentation changes needed been made?
+            - [ ] Have all non-obvious changes been commented?
+            ## System Compatibility
+            - [ ] Are there any potential impacts on other parts of the system or backward compatibility?
+            - [ ] Does this change intersect with any items on our roadmap, and if so, is there a plan for fitting them together?
+            ## Quality
+            - [ ] Is this code of a unexpectedly high quality (Readbility, Modularity, Intuitiveness)`
+          })
