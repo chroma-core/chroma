@@ -1244,7 +1244,9 @@ def test_invalid_n_results_param(api):
             where={},
             include=["embeddings", "documents", "metadatas", "distances"],
         )
-    assert "Number of requested results -1, cannot be negative." in str(exc.value)
+    assert "Number of requested results -1, cannot be negative, or zero." in str(
+        exc.value
+    )
     assert exc.type == TypeError
 
     with pytest.raises(ValueError) as exc:

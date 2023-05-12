@@ -239,8 +239,10 @@ def validate_n_results(n_results: int) -> int:
     # Check Number of requested results
     if not isinstance(n_results, int):
         raise ValueError(f"Expected include to be a int, got {n_results}")
-    if n_results < 0:
-        raise TypeError(f"Number of requested results {n_results}, cannot be negative.")
+    if n_results <= 0:
+        raise TypeError(
+            f"Number of requested results {n_results}, cannot be negative, or zero."
+        )
     return n_results
 
 
