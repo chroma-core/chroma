@@ -184,6 +184,7 @@ class Hnswlib(Index):
                 self._index.mark_deleted(label)
                 del self._label_to_id[label]
                 del self._id_to_label[hexid(id)]
+                self._index_metadata["elements"] -= 1
 
         self._save()
 
