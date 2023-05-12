@@ -146,6 +146,10 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction):
         ]
 
 class GoogleVertexEmbeddingFunction(EmbeddingFunction):
+    # Follow API Quickstart for Google Vertex AI
+    # https://cloud.google.com/vertex-ai/docs/generative-ai/start/quickstarts/api-quickstart
+    # Information about the text embedding modules in Google Vertex AI
+    # https://cloud.google.com/vertex-ai/docs/generative-ai/embeddings/get-text-embeddings
     def __init__(
         self,
         api_key: str,
@@ -157,12 +161,13 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, texts: Documents) -> Embeddings:
-        respnonse = self._session.post(
+        response = self._session.post(
             self._api_url, json={"instances": [{"content": texts}]}
         ).json()
 
-        if "predictions" in respnonse:
-            predictions = respnonse["predictions"]
+        if "predictions" in response:
+            predictions = response["predictions"]
             if len(predictions) > 0 and "embedding" in predictions[0]:
                 embedding = predictions[0]["embedding"]
                 return embedding
+        return {}
