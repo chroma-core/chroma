@@ -165,11 +165,16 @@ def switch_to_version(version):
 
 def persist_generated_data_with_old_version(
     version,
-    settings,
+    persist_directory,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ):
     old_module = switch_to_version(version)
+    from chromadb.config import Settings
+
+    settings = Settings(
+        chroma_db_impl="duckdb+parquet", persist_directory=persist_directory
+    )
     api: API = old_module.Client(settings)
     api.reset()
     coll = api.create_collection(
@@ -233,7 +238,12 @@ def test_cycle_versions(
     ctx = multiprocessing.get_context("spawn")
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy),
+        args=(
+            version,
+            settings.persist_directory,
+            collection_strategy,
+            embeddings_strategy,
+        ),
     )
     p.start()
     p.join()
@@ -249,3 +259,92 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+
+
+import numpy as np
+
+
+# def test_simple(version_settings):
+#     version, sett = version_settings
+#     test_cycle_versions(
+#         version_settings=(
+#             version,
+#             Settings(
+#                 environment="",
+#                 chroma_db_impl="duckdb+parquet",
+#                 chroma_api_impl="local",
+#                 chroma_telemetry_impl="chromadb.telemetry.posthog.Posthog",
+#                 clickhouse_host=None,
+#                 clickhouse_port=None,
+#                 persist_directory=sett.persist_directory,
+#                 chroma_server_host=None,
+#                 chroma_server_http_port=None,
+#                 chroma_server_ssl_enabled=False,
+#                 chroma_server_grpc_port=None,
+#                 chroma_server_cors_allow_origins=[],
+#                 anonymized_telemetry=True,
+#             ),
+#         ),
+#         collection_strategy=strategies.Collection(
+#             name="A00",
+#             metadata={
+#                 "hnsw:construction_ef": 128,
+#                 "hnsw:search_ef": 128,
+#                 "hnsw:M": 128,
+#             },
+#             dimension=2,
+#             dtype=np.float16,
+#             known_metadata_keys={},
+#             known_document_keywords=[],
+#             has_documents=False,
+#             has_embeddings=True,
+#             embedding_function=lambda texts: [[1, 2, 3] for _ in range(len(texts))],
+#         ),
+#         embeddings_strategy={
+#             "ids": ["0"],
+#             "embeddings": [[0.09765625, 0.430419921875]],
+#             "metadatas": [{}],
+#             "documents": None,
+#         },
+#     )
+#     test_cycle_versions(
+#         version_settings=(
+#             version,
+#             Settings(
+#                 environment="",
+#                 chroma_db_impl="duckdb+parquet",
+#                 chroma_api_impl="local",
+#                 chroma_telemetry_impl="chromadb.telemetry.posthog.Posthog",
+#                 clickhouse_host=None,
+#                 clickhouse_port=None,
+#                 persist_directory=sett.persist_directory,
+#                 chroma_server_host=None,
+#                 chroma_server_http_port=None,
+#                 chroma_server_ssl_enabled=False,
+#                 chroma_server_grpc_port=None,
+#                 chroma_server_cors_allow_origins=[],
+#                 anonymized_telemetry=True,
+#             ),
+#         ),
+#         collection_strategy=strategies.Collection(
+#             name="A00",
+#             metadata={
+#                 "hnsw:construction_ef": 128,
+#                 "hnsw:search_ef": 128,
+#                 "hnsw:M": 128,
+#             },
+#             dimension=2,
+#             dtype=np.float16,
+#             known_metadata_keys={},
+#             known_document_keywords=[],
+#             has_documents=False,
+#             has_embeddings=True,
+#             embedding_function=lambda texts: [[1, 2, 3] for _ in range(len(texts))],
+#         ),
+#         embeddings_strategy={
+#             "ids": ["0"],
+#             "embeddings": [[0.09765625, 0.430419921875]],
+#             "metadatas": [{}],
+#             "documents": None,
+#         },
+#     )

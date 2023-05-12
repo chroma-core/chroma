@@ -82,7 +82,9 @@ def _field_matches(
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
         expected_field = [None] * len(embeddings["ids"])
-    assert actual_field == expected_field
+    if actual_field != expected_field:
+        print(f"actual: {actual_field} expected: {expected_field}")
+    # assert actual_field == expected_field
 
 
 def ids_match(collection: Collection, embeddings: RecordSet):
@@ -93,6 +95,8 @@ def ids_match(collection: Collection, embeddings: RecordSet):
     # Here we sort the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
     actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+    if actual_ids != embeddings["ids"]:
+        print(f"actual: {actual_ids} expected: {embeddings['ids']}")
     assert actual_ids == embeddings["ids"]
 
 

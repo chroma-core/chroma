@@ -1,5 +1,5 @@
-from pydantic import BaseSettings
-from typing import Optional, List
+from pydantic import BaseSettings, PrivateAttr
+from typing import Any, Dict, Optional, List
 import importlib
 import logging
 
@@ -20,11 +20,9 @@ _legacy_config_values = {
 }
 
 
-_impls = {}
-
-
 class Settings(BaseSettings):
     environment: str = ""
+    _impls: Dict[Any, Any] = PrivateAttr({})
 
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
@@ -42,6 +40,10 @@ class Settings(BaseSettings):
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
     anonymized_telemetry: bool = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._impls = {}
 
     def validate(self, item):
         val = self[item]
@@ -69,11 +71,11 @@ class Settings(BaseSettings):
 
         fqn = self[key]
 
-        if fqn not in _impls:
-            module_name, class_name = fqn.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            cls = getattr(module, class_name)
-            _impls[fqn] = cls(self)
+        # if fqn not in self._impls:
+        module_name, class_name = fqn.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+        self._impls[fqn] = cls(self)
 
         logger.info(f"Using {fqn} for {key}")
-        return _impls[fqn]
+        return self._impls[fqn]
