@@ -30,8 +30,8 @@ def wrap_all(embeddings: RecordSet) -> RecordSet:
         embedding_list = embeddings["embeddings"]
         if len(embedding_list) > 0:
             if not all(isinstance(embedding, list) for embedding in embedding_list):
-                if all(isinstance(e, int) for e in embeddings) or all(
-                    isinstance(e, float) for e in embeddings
+                if all(isinstance(e, int) for e in embedding_list) or all(
+                    isinstance(e, float) for e in embedding_list
                 ):
                     embedding_list = [embedding_list]  # type: ignore
                 else:
