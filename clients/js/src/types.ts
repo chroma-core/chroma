@@ -56,12 +56,17 @@ export type GetResponse = {
   embeddings: null | Embeddings;
   documents: (null | Document)[];
   metadatas: (null | Metadata)[];
+  error: null | string;
 };
 
 export type QueryResponse = {
-  ids: IDs;
-  embeddings: null | Embeddings;
-  documents: (null | Document)[];
-  metadatas: (null | Metadata)[];
-  distances: null | number[][];
+  ids: IDs[];
+  embeddings: null | Embeddings[][];
+  documents: (null | Document)[][];
+  metadatas: (null | Metadata)[][];
+  distances: null | number[][][];
+}
+
+export type AddResponse = {
+    error: string;
 }

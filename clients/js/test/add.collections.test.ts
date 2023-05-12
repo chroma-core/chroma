@@ -18,7 +18,7 @@ test("it should add single embeddings to a collection", async () => {
       IncludeEnum.Embeddings,
     ]
   });
-  expect(res.embeddings[0]).toEqual(embeddings);
+  expect(res.embeddings![0]).toEqual(embeddings);
 });
 
 test("it should add batch embeddings to a collection", async () => {
@@ -38,7 +38,8 @@ test("it should add batch embeddings to a collection", async () => {
 test("add documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, documents: DOCUMENTS });
+  let resp = await collection.add({ ids: IDS, embeddings: EMBEDDINGS, documents: DOCUMENTS });
+  expect(resp).toBe(true)
   const results = await collection.get({ ids: ["test1"] });
   expect(results.documents[0]).toBe("This is a test");
 });

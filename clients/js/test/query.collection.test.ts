@@ -44,6 +44,6 @@ test("it should get embedding with matching documents", async () => {
   });
 
   // expect(results2.embeddings[0][0]).toBeInstanceOf(Array);
-  expect(results2.embeddings[0].length).toBe(1);
-  expect(results2.embeddings[0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(results2.embeddings![0].length).toBe(1);
+  expect(results2.embeddings![0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });

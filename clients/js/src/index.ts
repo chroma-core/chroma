@@ -13,7 +13,8 @@ import {
   PositiveInteger,
   CollectionType,
   GetResponse,
-  QueryResponse
+  QueryResponse,
+  AddResponse
 } from "./types";
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import Count200Response = Api.Count200Response;
@@ -298,7 +299,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-   * @returns {Promise<boolean>} - The response from the API. True if successful.
+   * @returns {Promise<AddResponse>} - The response from the API. True if successful.
    *
    * @example
    * ```typescript
@@ -320,7 +321,7 @@ export class Collection {
     embeddings?: Embedding | Embeddings,
     metadatas?: Metadata | Metadatas,
     documents?: Document | Documents,
-  }): Promise<boolean> {
+  }): Promise<AddResponse> {
 
     const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
       true,
