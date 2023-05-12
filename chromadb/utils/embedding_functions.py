@@ -155,8 +155,9 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         api_key: str,
         model_name: str = "textembedding-gecko-001",
         project_id: str = "cloud-large-language-models",
+        region: str = "us-central1",
     ):
-        self._api_url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{project_id}/locations/us-central1/endpoints/{model_name}:predict"
+        self._api_url = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/endpoints/{model_name}:predict"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
