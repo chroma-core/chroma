@@ -1,10 +1,11 @@
 import os
 import pickle
 import time
-from typing import Dict
+from typing import Dict, List, Optional, Set, Tuple, Union, cast
 
-from chromadb.api.types import IndexMetadata
+from chromadb.api.types import Embeddings, IndexMetadata
 import hnswlib
+from chromadb.config import Settings
 from chromadb.db.index import Index
 from chromadb.errors import (
     NoIndexException,
@@ -37,7 +38,7 @@ class HnswParams:
     num_threads: int
     resize_factor: float
 
-    def __init__(self, metadata):
+    def __init__(self, metadata: Dict[str, str]):
         metadata = metadata or {}
 
         # Convert all values to strings for future compatibility.
@@ -62,12 +63,12 @@ class HnswParams:
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
 
-def hexid(id):
+def hexid(id: Union[str, UUID]) -> str:
     """Backwards compatibility for old indexes which called uuid.hex on UUID ids"""
     return id.hex if isinstance(id, UUID) else id
 
 
-def delete_all_indexes(settings):
+def delete_all_indexes(settings: Settings) -> None:
     if os.path.exists(f"{settings.persist_directory}/index"):
         for file in os.listdir(f"{settings.persist_directory}/index"):
             os.remove(f"{settings.persist_directory}/index/{file}")
@@ -81,7 +82,7 @@ class Hnswlib(Index):
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, UUID]
 
-    def __init__(self, id, settings, metadata):
+    def __init__(self, id: str, settings: Settings, metadata: Dict[str, str]):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
         self._id = id
@@ -92,7 +93,7 @@ class Hnswlib(Index):
 
         self._load()
 
-    def _init_index(self, dimensionality):
+    def _init_index(self, dimensionality: int) -> None:
         # more comments available at the source: https://github.com/nmslib/hnswlib
 
         index = hnswlib.Index(
@@ -114,7 +115,7 @@ class Hnswlib(Index):
         }
         self._save()
 
-    def _check_dimensionality(self, data):
+    def _check_dimensionality(self, data: Embeddings) -> None:
         """Assert that the given data matches the index dimensionality"""
         dim = len(data[0])
         idx_dim = self._index.dim
@@ -123,13 +124,17 @@ class Hnswlib(Index):
                 f"Dimensionality of ({dim}) does not match index dimensionality ({idx_dim})"
             )
 
-    def add(self, ids, embeddings, update=False):
+    def add(
+        self, ids: List[UUID], embeddings: Embeddings, update: bool = False
+    ) -> None:
         """Add or update embeddings to the index"""
 
         dim = len(embeddings[0])
 
         if self._index is None:
             self._init_index(dim)
+        # Calling init_index will ensure the index is not none, so we can safely cast
+        self._index = cast(hnswlib.Index, self._index)
 
         # Check dimensionality
         self._check_dimensionality(embeddings)
@@ -157,7 +162,7 @@ class Hnswlib(Index):
         self._index.add_items(embeddings, labels)
         self._save()
 
-    def delete(self):
+    def delete(self) -> None:
         # delete files, dont throw error if they dont exist
         try:
             os.remove(f"{self._save_folder}/id_to_uuid_{self._id}.pkl")
@@ -172,7 +177,7 @@ class Hnswlib(Index):
         self._id_to_label = {}
         self._label_to_id = {}
 
-    def delete_from_index(self, ids):
+    def delete_from_index(self, ids: List[UUID]) -> None:
         if self._index is not None:
             for id in ids:
                 label = self._id_to_label[hexid(id)]
@@ -182,7 +187,7 @@ class Hnswlib(Index):
 
         self._save()
 
-    def _save(self):
+    def _save(self) -> None:
         # create the directory if it doesn't exist
         if not os.path.exists(f"{self._save_folder}"):
             os.makedirs(f"{self._save_folder}")
@@ -202,10 +207,10 @@ class Hnswlib(Index):
 
         logger.debug(f"Index saved to {self._save_folder}/index.bin")
 
-    def _exists(self):
+    def _exists(self) -> None:
         return
 
-    def _load(self):
+    def _load(self) -> None:
         if not os.path.exists(f"{self._save_folder}/index_{self._id}.bin"):
             return
 
@@ -228,7 +233,9 @@ class Hnswlib(Index):
         self._index.set_ef(self._params.search_ef)
         self._index.set_num_threads(self._params.num_threads)
 
-    def get_nearest_neighbors(self, query, k, ids=None):
+    def get_nearest_neighbors(
+        self, query: Embeddings, k: int, ids: Optional[List[UUID]] = None
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         if self._index is None:
             raise NoIndexException(
                 "Index not found, please create an instance before querying"
@@ -244,7 +251,7 @@ class Hnswlib(Index):
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available
-        labels = {}
+        labels: Set[int] = set()
         if ids is not None:
             labels = {self._id_to_label[hexid(id)] for id in ids}
             if len(labels) < k:
@@ -260,9 +267,10 @@ class Hnswlib(Index):
         database_labels, distances = self._index.knn_query(
             query, k=k, filter=filter_function
         )
+        distances = cast(List[List[float]], distances)
         logger.debug(f"time to run knn query: {time.time() - s3}")
 
-        ids = [
+        return_ids = [
             [self._label_to_id[label] for label in labels] for labels in database_labels
         ]
-        return ids, distances
+        return return_ids, distances

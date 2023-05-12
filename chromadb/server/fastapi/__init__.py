@@ -1,5 +1,6 @@
+from typing import Any, Callable, Dict, List, Sequence
 import fastapi
-from fastapi import FastAPI as _FastAPI
+from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +8,12 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
+import pandas as pd
+
 import chromadb
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import GetResult, QueryResult
+from chromadb.config import Settings
 import chromadb.server
 import chromadb.api
 from chromadb.errors import (
@@ -44,7 +50,9 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
             route.operation_id = route.name
 
 
-async def catch_exceptions_middleware(request: Request, call_next):
+async def catch_exceptions_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
     try:
         return await call_next(request)
     except ChromaError as e:
@@ -56,7 +64,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
-def _uuid(uuid_str: str):
+def _uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
     except ValueError:
@@ -64,7 +72,7 @@ def _uuid(uuid_str: str):
 
 
 class FastAPI(chromadb.server.Server):
-    def __init__(self, settings):
+    def __init__(self, settings: Settings):
         super().__init__(settings)
         Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
@@ -145,45 +153,47 @@ class FastAPI(chromadb.server.Server):
 
         use_route_names_as_operation_ids(self._app)
 
-    def app(self):
+    def app(self) -> fastapi.FastAPI:
         return self._app
 
-    def root(self):
+    def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
 
-    def heartbeat(self):
+    def heartbeat(self) -> Dict[str, int]:
         return self.root()
 
-    def persist(self):
+    def persist(self) -> None:
         self._api.persist()
 
-    def version(self):
+    def version(self) -> str:
         return self._api.get_version()
 
-    def list_collections(self):
+    def list_collections(self) -> Sequence[Collection]:
         return self._api.list_collections()
 
-    def create_collection(self, collection: CreateCollection):
+    def create_collection(self, collection: CreateCollection) -> Collection:
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
         )
 
-    def get_collection(self, collection_name: str):
+    def get_collection(self, collection_name: str) -> Collection:
         return self._api.get_collection(collection_name)
 
-    def update_collection(self, collection_id: str, collection: UpdateCollection):
+    def update_collection(
+        self, collection_id: str, collection: UpdateCollection
+    ) -> None:
         return self._api._modify(
             id=_uuid(collection_id),
             new_name=collection.new_name,
             new_metadata=collection.new_metadata,
         )
 
-    def delete_collection(self, collection_name: str):
+    def delete_collection(self, collection_name: str) -> None:
         return self._api.delete_collection(collection_name)
 
-    def add(self, collection_id: str, add: AddEmbedding):
+    def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:
             result = self._api._add(
                 collection_id=_uuid(collection_id),
@@ -197,7 +207,7 @@ class FastAPI(chromadb.server.Server):
             raise HTTPException(status_code=500, detail=str(e))
         return result
 
-    def update(self, collection_id: str, add: UpdateEmbedding):
+    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
         return self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
@@ -206,7 +216,7 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
-    def upsert(self, collection_id: str, upsert: AddEmbedding):
+    def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
         return self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
@@ -216,7 +226,7 @@ class FastAPI(chromadb.server.Server):
             increment_index=upsert.increment_index,
         )
 
-    def get(self, collection_id: str, get: GetEmbedding):
+    def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
         return self._api._get(
             collection_id=_uuid(collection_id),
             ids=get.ids,
@@ -228,7 +238,7 @@ class FastAPI(chromadb.server.Server):
             include=get.include,
         )
 
-    def delete(self, collection_id: str, delete: DeleteEmbedding):
+    def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
         return self._api._delete(
             where=delete.where,
             ids=delete.ids,
@@ -236,13 +246,15 @@ class FastAPI(chromadb.server.Server):
             where_document=delete.where_document,
         )
 
-    def count(self, collection_id: str):
+    def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
 
-    def reset(self):
+    def reset(self) -> bool:
         return self._api.reset()
 
-    def get_nearest_neighbors(self, collection_id: str, query: QueryEmbedding):
+    def get_nearest_neighbors(
+        self, collection_id: str, query: QueryEmbedding
+    ) -> QueryResult:
         nnresult = self._api._query(
             collection_id=_uuid(collection_id),
             where=query.where,
@@ -253,8 +265,8 @@ class FastAPI(chromadb.server.Server):
         )
         return nnresult
 
-    def raw_sql(self, raw_sql: RawSql):
+    def raw_sql(self, raw_sql: RawSql) -> pd.DataFrame:
         return self._api.raw_sql(raw_sql.raw_sql)
 
-    def create_index(self, collection_name: str):
+    def create_index(self, collection_name: str) -> bool:
         return self._api.create_index(collection_name)
