@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -7,8 +7,6 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
-    Where,
-    WhereDocument,
 )
 
 
@@ -29,8 +27,11 @@ class UpdateEmbedding(BaseModel):  # type: ignore
 
 
 class QueryEmbedding(BaseModel):  # type: ignore
-    where: Where = {}
-    where_document: WhereDocument = {}
+    # TODO: Pydantic doesn't bode well with recursive types so we use generic Dicts
+    # for Where and WhereDocument. This is not ideal, but it works for now since
+    # there is a lot of downstream validation.
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
     query_embeddings: Embeddings
     n_results: int = 10
     include: Include = ["metadatas", "documents", "distances"]
@@ -38,8 +39,8 @@ class QueryEmbedding(BaseModel):  # type: ignore
 
 class GetEmbedding(BaseModel):  # type: ignore
     ids: Optional[IDs] = None
-    where: Optional[Where] = None
-    where_document: Optional[WhereDocument] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
     sort: Optional[str] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
@@ -52,8 +53,8 @@ class RawSql(BaseModel):  # type: ignore
 
 class DeleteEmbedding(BaseModel):  # type: ignore
     ids: Optional[IDs] = None
-    where: Optional[Where] = None
-    where_document: Optional[WhereDocument] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
 
 
 class CreateCollection(BaseModel):  # type: ignore
