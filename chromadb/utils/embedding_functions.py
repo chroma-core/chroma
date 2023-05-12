@@ -167,8 +167,5 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         ).json()
 
         if "predictions" in response:
-            predictions = response["predictions"]
-            if len(predictions) > 0 and "embedding" in predictions[0]:
-                embedding = predictions[0]["embedding"]
-                return embedding
+            return response["predictions"]
         return {}
