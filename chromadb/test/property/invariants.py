@@ -1,6 +1,6 @@
 import math
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Optional, Union, List, TypeVar
+from typing import Callable, Optional, Tuple, Union, List, TypeVar
 from typing_extensions import Literal
 import numpy as np
 from chromadb.api import types
@@ -27,15 +27,21 @@ def wrap_all(embeddings: RecordSet) -> RecordSet:
     if embeddings["embeddings"] is None:
         embedding_list = None
     elif isinstance(embeddings["embeddings"], list):
-        if len(embeddings["embeddings"]) > 0:
-            if isinstance(embeddings["embeddings"][0], list):
-                embedding_list = embeddings["embeddings"]
-            else:
-                embedding_list = [embeddings["embeddings"]]
-        else:
-            embedding_list = []
+        embedding_list = embeddings["embeddings"]
+        if len(embedding_list) > 0:
+            if not all(isinstance(embedding, list) for embedding in embedding_list):
+                if all(isinstance(e, int) for e in embeddings) or all(
+                    isinstance(e, float) for e in embeddings
+                ):
+                    embedding_list = [embedding_list]  # type: ignore
+                else:
+                    raise InvalidArgument(
+                        "embeddings must be a list of lists, a list of numbers, or None"
+                    )
     else:
-        raise InvalidArgument("embeddings must be a list, list of lists, or None")
+        raise InvalidArgument(
+            "embeddings must be a list of lists, a list of numbers, or None"
+        )
 
     return {
         "ids": maybe_wrap(embeddings["ids"]),  # type: ignore
@@ -45,7 +51,7 @@ def wrap_all(embeddings: RecordSet) -> RecordSet:
     }
 
 
-def count(collection: Collection, embeddings: RecordSet):
+def count(collection: Collection, embeddings: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
     embeddings = wrap_all(embeddings)
@@ -56,7 +62,7 @@ def _field_matches(
     collection: Collection,
     embeddings: RecordSet,
     field_name: Union[Literal["documents"], Literal["metadatas"]],
-):
+) -> None:
     """
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
@@ -74,18 +80,18 @@ def _field_matches(
         key=lambda index_and_field_value: embedding_id_to_index[
             result["ids"][index_and_field_value[0]]
         ],
-    )
-    actual_field = [field_value for _, field_value in actual_field]
+    )  # type: ignore
+    actual_field = [field_value for _, field_value in actual_field]  # type: ignore
 
     expected_field = embeddings[field_name]
     if expected_field is None:
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
-        expected_field = [None] * len(embeddings["ids"])
+        expected_field = [None] * len(embeddings["ids"])  # type: ignore
     assert actual_field == expected_field
 
 
-def ids_match(collection: Collection, embeddings: RecordSet):
+def ids_match(collection: Collection, embeddings: RecordSet) -> None:
     """The actual embedding ids is equal to the expected ids"""
     embeddings = wrap_all(embeddings)
     actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
@@ -96,19 +102,19 @@ def ids_match(collection: Collection, embeddings: RecordSet):
     assert actual_ids == embeddings["ids"]
 
 
-def metadatas_match(collection: Collection, embeddings: RecordSet):
+def metadatas_match(collection: Collection, embeddings: RecordSet) -> None:
     """The actual embedding metadata is equal to the expected metadata"""
     embeddings = wrap_all(embeddings)
     _field_matches(collection, embeddings, "metadatas")
 
 
-def documents_match(collection: Collection, embeddings: RecordSet):
+def documents_match(collection: Collection, embeddings: RecordSet) -> None:
     """The actual embedding documents is equal to the expected documents"""
     embeddings = wrap_all(embeddings)
     _field_matches(collection, embeddings, "documents")
 
 
-def no_duplicates(collection: Collection):
+def no_duplicates(collection: Collection) -> None:
     ids = collection.get()["ids"]
     assert len(ids) == len(set(ids))
 
@@ -128,8 +134,8 @@ distance_functions = {
 def _exact_distances(
     query: types.Embeddings,
     targets: types.Embeddings,
-    distance_fn: Callable = lambda x, y: np.linalg.norm(x - y) ** 2,
-):
+    distance_fn: Callable[[np.ndarray, np.ndarray], float] = distance_functions["l2"],
+) -> Tuple[np.ndarray, np.ndarray]:
     """Return the ordered indices and distances from each query to each target"""
     np_query = np.array(query)
     np_targets = np.array(targets)
@@ -150,30 +156,34 @@ def ann_accuracy(
     n_results: int = 1,
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,
-):
+) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     record_set = wrap_all(record_set)
 
     if len(record_set["ids"]) == 0:
         return  # nothing to test here
 
-    embeddings = record_set["embeddings"]
+    embeddings: Optional[types.Embeddings] = record_set["embeddings"]  # type: ignore
     have_embeddings = embeddings is not None and len(embeddings) > 0
     if not have_embeddings:
         assert embedding_function is not None
         assert record_set["documents"] is not None
+        assert isinstance(record_set["documents"], list)
         # Compute the embeddings for the documents
         embeddings = embedding_function(record_set["documents"])
 
     # l2 is the default distance function
     distance_function = distance_functions["l2"]
     accuracy_threshold = 1e-6
+    assert collection.metadata is not None
+    assert embeddings is not None
     if "hnsw:space" in collection.metadata:
         space = collection.metadata["hnsw:space"]
         # TODO: ip and cosine are numerically unstable in HNSW.
         # The higher the dimensionality, the more noise is introduced, since each float element
         # of the vector has noise added, which is then subsequently included in all normalization calculations.
         # This means that higher dimensions will have more noise, and thus more error.
+        assert isinstance(embeddings[0], list)
         dim = len(embeddings[0])
         accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
@@ -194,6 +204,11 @@ def ann_accuracy(
         n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
+
+    assert query_results["distances"] is not None
+    assert query_results["documents"] is not None
+    assert query_results["metadatas"] is not None
+    assert query_results["embeddings"] is not None
 
     # Dict of ids to indices
     id_to_index = {id: i for i, id in enumerate(record_set["ids"])}
@@ -231,7 +246,7 @@ def ann_accuracy(
                 )
             if record_set["metadatas"] is not None:
                 assert (
-                    record_set["metadatas"][index] == query_results["metadatas"][i][j]
+                    record_set["metadatas"][index] == query_results["metadatas"][i][j]  # type: ignore
                 )
 
     size = len(record_set["ids"])
