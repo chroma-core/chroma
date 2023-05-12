@@ -332,3 +332,13 @@ class API(ABC):
     def persist(self) -> None:
         """Persist the database to disk"""
         pass
+
+    @abstractmethod
+    def get_version(self) -> str:
+        """Get the version of Chroma.
+
+        Returns:
+            str: The version of Chroma
+
+        """
+        pass
