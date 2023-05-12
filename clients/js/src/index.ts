@@ -160,10 +160,25 @@ type CallableFunction = {
 };
 
 export class Collection {
+  /**
+   * @ignore
+   */
   public name: string;
+  /**
+   * @ignore
+   */
   public id: string;
+  /**
+   * @ignore
+   */
   public metadata: Metadata | undefined;
+  /**
+   * @ignore
+   */
   private api: DefaultApi;
+  /**
+   * @ignore
+   */
   public embeddingFunction: CallableFunction | undefined;
 
   /**
@@ -270,6 +285,25 @@ export class Collection {
     return [idsArray, embeddingsArray, metadatasArray, documentsArray]
   }
 
+  /**
+   * Add items to the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @returns {Promise<AddResponse>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.add({
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["document1", "document2"]
+   * });
+   * ```
+   */
   public async add({
     ids,
     embeddings,
@@ -305,6 +339,25 @@ export class Collection {
     return response
   }
 
+  /**
+   * Upsert items to the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @returns {Promise<UpsertResponse>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.upsert({
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["document1", "document2"],
+   * });
+   * ```
+   */
   public async upsert({
     ids,
     embeddings,
@@ -341,11 +394,35 @@ export class Collection {
 
   }
 
+  /**
+   * Count the number of items in the collection
+   * @returns {Promise<CountResponse>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.count();
+   * ```
+   */
   public async count() {
     const response = await this.api.count(this.id);
     return handleSuccess(response);
   }
 
+  /**
+   * Modify the collection name or metadata
+   * @param {Object} params - The parameters for the query.
+   * @param {string} [params.name] - Optional new name for the collection.
+   * @param {Metadata} [params.metadata] - Optional new metadata for the collection.
+   * @returns {Promise<ModifyResponse>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.modify({
+   *   name: "new name",
+   *   metadata: { "key": "value" },
+   * });
+   * ```
+   */
   public async modify({
     name,
     metadata
@@ -371,12 +448,36 @@ export class Collection {
 
   }
 
+  /**
+   * Get items from the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - Optional IDs of the items to get.
+   * @param {Where} [params.where] - Optional where clause to filter items by.
+   * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
+   * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
+   * @param {IncludeEnum[]} [params.include] - Optional list of items to include in the response.
+   * @param {WhereDocument} [params.where_document] - Optional where clause to filter items by.
+   * @returns {Promise<GetResponse>} - The response from the server.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.get({
+   *   ids: ["id1", "id2"],
+   *   where: { "key": "value" },
+   *   limit: 10,
+   *   offset: 0,
+   *   include: ["embeddings", "metadatas", "documents"],
+   *   where_document: { $contains: "value" },
+   * });
+   * ```
+   */
   public async get({
     ids,
     where,
     limit,
     offset,
     include,
+    where_document,
   }: {
     ids?: ID | IDs,
     where?: Where,
@@ -395,11 +496,31 @@ export class Collection {
         limit,
         offset,
         include,
+        where_document,
       })
       .then(handleSuccess)
       .catch(handleError);
   }
 
+  /**
+   * Update the embeddings, documents, and/or metadatas of existing items
+   * @param {Object} params - The parameters for the query.
+   * @param {ID | IDs} [params.ids] - The IDs of the items to update.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings to update.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadatas to update.
+   * @param {Document | Documents} [params.documents] - Optional documents to update.
+   * @returns {Promise<APIResponse>} - The API Response.
+   *
+   * @example
+   * ```typescript
+   * const response = await collection.update({
+   *   ids: ["id1", "id2"],
+   *   embeddings: [[1, 2, 3], [4, 5, 6]],
+   *   metadatas: [{ "key": "value" }, { "key": "value" }],
+   *   documents: ["new document 1", "new document 2"],
+   * });
+   * ```
+   */
   public async update({
     ids,
     embeddings,
@@ -526,6 +647,20 @@ export class Collection {
       .catch(handleError);
   }
 
+  /**
+   * Peek inside the collection
+   * @param {Object} params - The parameters for the query.
+   * @param {PositiveInteger} [params.limit] - Optional number of results to return (default is 10).
+   * @returns {Promise<any>} A promise that resolves to the query results.
+   * @throws {Error} If there is an issue executing the query.
+   *
+   * @example
+   * ```typescript
+   * const results = await collection.peek({
+   *   limit: 10
+   * });
+   * ```
+   */
   public async peek({ limit }: { limit?: PositiveInteger } = {}) {
     if (limit === undefined) limit = 10;
     const response = await this.api.aGet(this.id, {
@@ -534,10 +669,24 @@ export class Collection {
     return handleSuccess(response);
   }
 
-  public async createIndex() {
-    return await this.api.createIndex(this.name);
-  }
-
+  /**
+   * Deletes items from the collection.
+   * @param {Object} params - The parameters for deleting items from the collection.
+   * @param {ID | IDs} [params.ids] - Optional ID or array of IDs of items to delete.
+   * @param {Where} [params.where] - Optional query condition to filter items to delete based on metadata values.
+   * @param {WhereDocument} [params.where_document] - Optional query condition to filter items to delete based on document content.
+   * @returns {Promise<any>} A promise that resolves to the deletion results.
+   * @throws {Error} If there is an issue deleting items from the collection.
+   *
+   * @example
+   * ```typescript
+   * const results = await collection.delete({
+   *   ids: "some_id",
+   *   where: {"name": {"$eq": "John Doe"}},
+   *   where_document: {"$contains":"search_string"}
+   * });
+   * ```
+   */
   public async delete({
     ids,
     where,
@@ -557,8 +706,24 @@ export class Collection {
 }
 
 export class ChromaClient {
+  /**
+   * @ignore
+   */
   private api: DefaultApi;
 
+  /**
+   * Creates a new ChromaClient instance.
+   * @param {Object} params - The parameters for creating a new client
+   * @param {string} [params.path] - The base path for the Chroma API.
+   * @returns {ChromaClient} A new ChromaClient instance.
+   *
+   * @example
+   * ```typescript
+   * const client = new ChromaClient({
+   *   path: "http://localhost:8000"
+   * });
+   * ```
+   */
   constructor({ path }: { path?: string } = {}) {
     if (path === undefined) path = "http://localhost:8000";
     const apiConfig: Configuration = new Configuration({
@@ -572,16 +737,39 @@ export class ChromaClient {
    *
    * @returns {Promise<void>} A promise that resolves when the reset operation is complete.
    * @throws {Error} If there is an issue resetting the state.
+   *
+   * @example
+   * ```typescript
+   * await client.reset();
+   * ```
    */
   public async reset() {
     return await this.api.reset();
   }
 
+  /**
+   * Returns the version of the Chroma API.
+   * @returns {Promise<string>} A promise that resolves to the version of the Chroma API.
+   *
+   * @example
+   * ```typescript
+   * const version = await client.version();
+   * ```
+   */
   public async version(): Promise<string> {
     const response = await this.api.version();
     return await handleSuccess(response);
   }
 
+  /**
+   * Returns a heartbeat from the Chroma API.
+   * @returns {Promise<number>} A promise that resolves to the heartbeat from the Chroma API.
+   *
+   * @example
+   * ```typescript
+   * const heartbeat = await client.heartbeat();
+   * ```
+   */
   public async heartbeat(): Promise<number> {
     const response = await this.api.heartbeat();
     let ret = await handleSuccess(response);
@@ -602,6 +790,16 @@ export class ChromaClient {
    *
    * @returns {Promise<Collection>} A promise that resolves to the created collection.
    * @throws {Error} If there is an issue creating the collection.
+   *
+   * @example
+   * ```typescript
+   * const collection = await client.createCollection({
+   *   name: "my_collection",
+   *   metadata: {
+   *     "description": "My first collection"
+   *   }
+   * });
+   * ```
    */
   public async createCollection({
     name,
@@ -627,6 +825,27 @@ export class ChromaClient {
     return new Collection(name, newCollection.id, this.api, metadata, embeddingFunction);
   }
 
+  /**
+   * Gets or creates a collection with the specified properties.
+   *
+   * @param {Object} params - The parameters for creating a new collection.
+   * @param {string} params.name - The name of the collection.
+   * @param {Metadata} [params.metadata] - Optional metadata associated with the collection.
+   * @param {CallableFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+   *
+   * @returns {Promise<Collection>} A promise that resolves to the got or created collection.
+   * @throws {Error} If there is an issue getting or creating the collection.
+   *
+   * @example
+   * ```typescript
+   * const collection = await client.getOrCreateCollection({
+   *   name: "my_collection",
+   *   metadata: {
+   *     "description": "My first collection"
+   *   }
+   * });
+   * ```
+   */
   public async getOrCreateCollection({
     name,
     metadata,
@@ -658,11 +877,37 @@ export class ChromaClient {
     );
   }
 
+  /**
+   * Lists all collections.
+   *
+   * @returns {Promise<string[]>} A promise that resolves to a list of collection names.
+   * @throws {Error} If there is an issue listing the collections.
+   *
+   * @example
+   * ```typescript
+   * const collections = await client.listCollections();
+   * ```
+   */
   public async listCollections() {
     const response = await this.api.listCollections();
     return handleSuccess(response);
   }
 
+  /**
+   * Gets a collection with the specified name.
+   * @param {Object} params - The parameters for getting a collection.
+   * @param {string} params.name - The name of the collection.
+   * @param {CallableFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+   * @returns {Promise<Collection>} A promise that resolves to the collection.
+   * @throws {Error} If there is an issue getting the collection.
+   *
+   * @example
+   * ```typescript
+   * const collection = await client.getCollection({
+   *   name: "my_collection"
+   * });
+   * ```
+   */
   public async getCollection({
     name,
     embeddingFunction
@@ -684,6 +929,20 @@ export class ChromaClient {
     );
   }
 
+  /**
+   * Deletes a collection with the specified name.
+   * @param {Object} params - The parameters for deleting a collection.
+   * @param {string} params.name - The name of the collection.
+   * @returns {Promise<void>} A promise that resolves when the collection is deleted.
+   * @throws {Error} If there is an issue deleting the collection.
+   *
+   * @example
+   * ```typescript
+   * await client.deleteCollection({
+   *  name: "my_collection"
+   * });
+   * ```
+   */
   public async deleteCollection({
     name
   }: {
