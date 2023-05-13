@@ -231,6 +231,10 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
+        # Backwards compatability with versions that don't have curr_elements
+        if "curr_elements" not in self._index_metadata:
+            self._index_metadata["curr_elements"] = self._index_metadata["elements"]
+
         p = hnswlib.Index(
             space=self._params.space, dim=self._index_metadata["dimensionality"]
         )
