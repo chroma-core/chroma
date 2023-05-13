@@ -55,7 +55,8 @@ class QueryResult(TypedDict):
 
 class IndexMetadata(TypedDict):
     dimensionality: int
-    elements: int
+    elements: int  # The capacity of the index, never shrinks since that works poorly with hnswlib
+    curr_elements: int  # The current number of elements in the index
     time_created: float
 
 
@@ -243,5 +244,7 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     for embedding in embeddings:
         for value in embedding:
             if not isinstance(value, (int, float)):
-                raise ValueError(f"Expected embeddings to be a int, float, got {embeddings}")
+                raise ValueError(
+                    f"Expected embeddings to be a int, float, got {embeddings}"
+                )
     return embeddings

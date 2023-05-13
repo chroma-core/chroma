@@ -29,6 +29,8 @@ valid_params = {
     "hnsw:resize_factor": r"^\d+(\.\d+)?$",
 }
 
+DEFAULT_CAPACITY = 1000
+
 
 class HnswParams:
     space: str
@@ -100,7 +102,7 @@ class Hnswlib(Index):
             space=self._params.space, dim=dimensionality
         )  # possible options are l2, cosine or ip
         index.init_index(
-            max_elements=1000,
+            max_elements=DEFAULT_CAPACITY,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
         )
@@ -111,6 +113,7 @@ class Hnswlib(Index):
         self._index_metadata = {
             "dimensionality": dimensionality,
             "elements": 0,
+            "curr_elements": 0,
             "time_created": time.time(),
         }
         self._save()
@@ -148,16 +151,21 @@ class Hnswlib(Index):
                     raise ValueError(f"ID {id} already exists in index")
             else:
                 self._index_metadata["elements"] += 1
+                self._index_metadata["curr_elements"] += 1
                 next_label = self._index_metadata["elements"]
                 self._id_to_label[hexid(id)] = next_label
                 self._label_to_id[next_label] = id
                 labels.append(next_label)
 
         if self._index_metadata["elements"] > self._index.get_max_elements():
-            new_size = max(
-                self._index_metadata["elements"] * self._params.resize_factor, 1000
+            new_size = int(
+                max(
+                    self._index_metadata["elements"] * self._params.resize_factor,
+                    DEFAULT_CAPACITY,
+                )
             )
-            self._index.resize_index(int(new_size))
+            self._index.resize_index(new_size)
+            self._index_metadata["elements"] = new_size
 
         self._index.add_items(embeddings, labels)
         self._save()
@@ -184,7 +192,7 @@ class Hnswlib(Index):
                 self._index.mark_deleted(label)
                 del self._label_to_id[label]
                 del self._id_to_label[hexid(id)]
-                self._index_metadata["elements"] -= 1
+                self._index_metadata["curr_elements"] -= 1
 
         self._save()
 
@@ -245,7 +253,7 @@ class Hnswlib(Index):
         # Check dimensionality
         self._check_dimensionality(query)
 
-        if k > self._index_metadata["elements"]:
+        if k > self._index_metadata["curr_elements"]:
             raise NotEnoughElementsException(
                 f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
             )
