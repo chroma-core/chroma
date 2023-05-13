@@ -21,17 +21,17 @@ def settings() -> Generator[Settings, None, None]:
 def test_count_tracking(settings: Settings) -> None:
     hnswlib = Hnswlib("test", settings, {})
     hnswlib._init_index(2)
-    assert hnswlib._index_metadata["elements"] == 0
+    assert hnswlib._index_metadata["curr_elements"] == 0
     idA, idB = uuid.uuid4(), uuid.uuid4()
 
     embeddingA = np.random.rand(1, 2)
     hnswlib.add([idA], embeddingA.tolist())
-    assert hnswlib._index_metadata["elements"] == 1
+    assert hnswlib._index_metadata["curr_elements"] == 1
 
     embeddingB = np.random.rand(1, 2)
     hnswlib.add([idB], embeddingB.tolist())
-    assert hnswlib._index_metadata["elements"] == 2
+    assert hnswlib._index_metadata["curr_elements"] == 2
     hnswlib.delete_from_index(ids=[idA])
-    assert hnswlib._index_metadata["elements"] == 1
+    assert hnswlib._index_metadata["curr_elements"] == 1
     hnswlib.delete_from_index(ids=[idB])
-    assert hnswlib._index_metadata["elements"] == 0
+    assert hnswlib._index_metadata["curr_elements"] == 0
