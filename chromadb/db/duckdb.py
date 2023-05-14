@@ -370,6 +370,9 @@ class DuckDB(Clickhouse):
 
         return response
 
+    def raw_sql(self, sql):
+        return self._conn.execute(sql).df()
+
     # TODO: This method should share logic with clickhouse impl
     def reset(self):
         self._conn.execute("DROP TABLE collections")
