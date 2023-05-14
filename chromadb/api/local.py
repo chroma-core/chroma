@@ -56,7 +56,12 @@ class LocalAPI(API):
         self._telemetry_client = telemetry_client
 
     def heartbeat(self) -> int:
-        """Ping the database to ensure it is alive"""
+        """Ping the database to ensure it is alive
+
+        Returns:
+            The current time in milliseconds
+
+        """
         return int(1000 * time.time_ns())
 
     #
@@ -84,11 +89,13 @@ class LocalAPI(API):
             ValueError: If the collection name is invalid
 
         Examples:
-            >>> client.create_collection("my_collection")
-            collection(name="my_collection", metadata={})
+            ```python
+            client.create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
 
-            >>> client.create_collection("my_collection", metadata={"foo": "bar"})
-            collection(name="my_collection", metadata={"foo": "bar"})
+            client.create_collection("my_collection", metadata={"foo": "bar"})
+            # collection(name="my_collection", metadata={"foo": "bar"})
+            ```
         """
         check_index_name(name)
 
@@ -117,8 +124,10 @@ class LocalAPI(API):
             The collection
 
         Examples:
-            >>> client.get_or_create_collection("my_collection")
-            collection(name="my_collection", metadata={})
+            ```python
+            client.get_or_create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
         """
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
@@ -141,8 +150,10 @@ class LocalAPI(API):
             ValueError: If the collection does not exist
 
         Examples:
-            >>> client.get_collection("my_collection")
-            collection(name="my_collection", metadata={})
+            ```python
+            client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
         """
         res = self._db.get_collection(name)
         if len(res) == 0:
@@ -161,8 +172,10 @@ class LocalAPI(API):
             A list of collections
 
         Examples:
-            >>> client.list_collections()
-            [collection(name="my_collection", metadata={})]
+            ```python
+            client.list_collections()
+            # [collection(name="my_collection", metadata={})]
+            ```
         """
         collections = []
         db_collections = self._db.list_collections()
@@ -197,7 +210,9 @@ class LocalAPI(API):
             ValueError: If the collection does not exist
 
         Examples:
-            >>> client.delete_collection("my_collection")
+            ```python
+            client.delete_collection("my_collection")
+            ```
         """
         self._db.delete_collection(name)
 
