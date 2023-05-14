@@ -12,6 +12,8 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
+from chromadb.api.types import Documents, Embeddings
+
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
 
@@ -164,6 +166,13 @@ class hashing_embedding_function(types.EmbeddingFunction):
         ).tolist()
 
         return embeddings
+
+
+class not_implemented_embedding_function(types.EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        raise NotImplementedError(
+            "This embedding function is not implemented - It should never be called"
+        )
 
 
 def embedding_function_strategy(
