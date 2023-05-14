@@ -15,7 +15,7 @@ def db_fixtures() -> List[Callable[[], Generator[MigratableDB, None, None]]]:
     return [sqlite]
 
 
-@pytest.fixture(scope="module", params=db_fixtures())  # type: ignore
+@pytest.fixture(scope="module", params=db_fixtures())
 def db(request: FixtureRequest) -> Generator[MigratableDB, None, None]:
     yield next(request.param())
 

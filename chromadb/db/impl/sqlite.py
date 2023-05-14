@@ -12,12 +12,12 @@ class TxWrapper(base.TxWrapper):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    @override  # type: ignore
+    @override
     def __enter__(self) -> base.Cursor:
         self._conn.execute("BEGIN;")
         return self._conn.cursor()  # type: ignore
 
-    @override  # type: ignore
+    @override
     def __exit__(
         self,
         exc_type: Optional[Type[BaseException]],
@@ -46,35 +46,35 @@ class SqliteDB(MigratableDB):
         self.initialize_migrations()
 
     @staticmethod
-    @override  # type: ignore
+    @override
     def querybuilder() -> type[pypika.Query]:
         return pypika.Query  # type: ignore
 
     @staticmethod
-    @override  # type: ignore
+    @override
     def parameter_format() -> str:
         return "?"
 
     @staticmethod
-    @override  # type: ignore
+    @override
     def migration_dirs() -> Sequence[str]:
         return []
 
     @staticmethod
-    @override  # type: ignore
+    @override
     def migration_scope() -> str:
         return "sqlite"
 
-    @override  # type: ignore
+    @override
     def tx(self) -> TxWrapper:
         return TxWrapper(self._conn)
 
-    @override  # type: ignore
+    @override
     def reset(self) -> None:
         self._conn.close()
         self._init()
 
-    @override  # type: ignore
+    @override
     def setup_migrations(self) -> None:
         with self.tx() as cur:
             cur.execute(
@@ -90,7 +90,7 @@ class SqliteDB(MigratableDB):
                  """
             )
 
-    @override  # type: ignore
+    @override
     def migrations_initialized(self) -> bool:
         with self.tx() as cur:
             cur.execute(
@@ -103,7 +103,7 @@ class SqliteDB(MigratableDB):
             else:
                 return True
 
-    @override  # type: ignore
+    @override
     def db_migrations(self, dir: str) -> Sequence[Migration]:
         with self.tx() as cur:
             cur.execute(
@@ -133,7 +133,7 @@ class SqliteDB(MigratableDB):
                 )
             return migrations
 
-    @override  # type: ignore
+    @override
     def apply(self, cur: base.Cursor, migration: Migration) -> None:
         cur.execute(migration["sql"])
         cur.execute(

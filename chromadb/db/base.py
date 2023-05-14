@@ -27,7 +27,7 @@ class Cursor(Protocol):
         ...
 
 
-class TxWrapper(ABC, EnforceOverrides):  # type: ignore
+class TxWrapper(ABC, EnforceOverrides):
     """Wrapper class for DBAPI 2.0 Connection objects, with which clients can implement transactions.
     Makes two guarantees that basic DBAPI 2.0 connections do not:
 
@@ -49,7 +49,7 @@ class TxWrapper(ABC, EnforceOverrides):  # type: ignore
         pass
 
 
-class SqlDB(ABC, EnforceOverrides):  # type: ignore
+class SqlDB(ABC, EnforceOverrides):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
 
     @abstractmethod
