@@ -1,10 +1,9 @@
-# from abc import ABC, abstractmethod
 from typing import TypedDict, Sequence
 import os
 import re
 import hashlib
-
-from chromadb.db.base import SqlDB  # , TxWrapper
+from chromadb.db.base import SqlDB, Cursor
+from chromadb.config import Settings
 from abc import abstractmethod
 
 
@@ -20,16 +19,35 @@ class Migration(MigrationFile):
     sql: str
 
 
+class UninitializedMigrationsError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Migrations have not been initialized")
+
+
 class UnappliedMigrationsError(Exception):
-    pass
+    def __init__(self, dir: str, version: int):
+        self.dir = dir
+        self.version = version
+        super().__init__(
+            f"Unapplied migrations in {dir}, starting with version {version}"
+        )
 
 
 class InconsistentVersionError(Exception):
-    pass
+    def __init__(self, dir: str, db_version: int, source_version: int):
+        super().__init__(
+            f"Inconsistent migration versions in {dir}:"
+            + f"db version was {db_version}, source version was {source_version}"
+        )
 
 
 class InconsistentHashError(Exception):
-    pass
+    def __init__(self, path: str, db_hash: str, source_hash: str):
+        super().__init__(
+            f"Inconsistent MD5 hashes in {path}:"
+            + f"db hash was {db_hash}, source={source_hash}."
+            + " Was the migration file modified after being applied to the DB?"
+        )
 
 
 class InvalidMigrationFilename(Exception):
@@ -54,6 +72,12 @@ class MigratableDB(SqlDB):
     identifying the database implementation.
     """
 
+    _settings: Settings
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        super().__init__()
+
     @staticmethod
     @abstractmethod
     def migration_dirs() -> Sequence[str]:
@@ -77,35 +101,82 @@ class MigratableDB(SqlDB):
         """Return true if the migrations table exists"""
         pass
 
-    # def validate_migrations(self):
-    #     """Validate all migrations and throw an exception if there are any unapplied
-    #     migrations in the source repo."""
-    #     if not self.migrations_initialized():
-    #         raise UnappliedMigrationsError("Migrations not initialized")
-    #     for dir in self.migration_dirs():
-    #         with self.tx() as cur:
-    #             migrations = source_migrations(dir, self.migration_scope())
-    #             unapplied_migrations = validate(cur, migrations)
-    #             if len(unapplied_migrations) > 0:
-    #                 raise UnappliedMigrationsError(
-    #                     f"Unapplied migrations in {dir}: starting at version {unapplied_migrations[0]['version']}"
-    #                 )
+    @abstractmethod
+    def db_migrations(self, dir: str) -> Sequence[Migration]:
+        """Return a list of all migrations already applied to this database, from the
+        given source directory, in ascending order."""
+        pass
 
-    # def apply_migrations(self):
-    #     """Validate existing migrations, and apply all new ones."""
-    #     self.setup_migrations()
-    #     for dir in self.migration_dirs():
-    #         with self.tx() as cur:
-    #             migrations = source_migrations(dir, self.migration_scope())
-    #             unapplied_migrations = validate(cur, migrations)
-    #             for migration in unapplied_migrations:
-    #                 apply(cur, migration)
+    @abstractmethod
+    def apply(self, cur: Cursor, migration: Migration) -> None:
+        """Apply a single migration to the database"""
+        pass
+
+    def initialize_migrations(self) -> None:
+        """Initialize migrations for this DB"""
+        migrate = self._settings.validate("migrations")
+
+        if migrate == "validate":
+            self.validate_migrations()
+
+        if migrate == "apply":
+            self.apply_migrations()
+
+    def validate_migrations(self) -> None:
+        """Validate all migrations and throw an exception if there are any unapplied
+        migrations in the source repo."""
+        if not self.migrations_initialized():
+            raise UninitializedMigrationsError()
+        for dir in self.migration_dirs():
+            source_migrations = _find_migrations(dir, self.migration_scope())
+            unapplied_migrations = self._verify_sequence(dir, source_migrations)
+            if len(unapplied_migrations) > 0:
+                version = unapplied_migrations[0]["version"]
+                raise UnappliedMigrationsError(dir=dir, version=version)
+
+    def apply_migrations(self) -> None:
+        """Validate existing migrations, and apply all new ones."""
+        self.setup_migrations()
+        for dir in self.migration_dirs():
+            migrations = _find_migrations(dir, self.migration_scope())
+            with self.tx() as cur:
+                unapplied_migrations = self._verify_sequence(dir, migrations)
+                for migration in unapplied_migrations:
+                    self.apply(cur, migration)
+
+    def _verify_sequence(
+        self, dir: str, migrations: Sequence[Migration]
+    ) -> Sequence[Migration]:
+        """Validate the given source migrations against migrations already applied to
+        this database.
+
+        Return a sequence of all unapplied migrations, or an empty list if all
+        inconsistent with the source migrations."""
+
+        db_migrations = self.db_migrations(dir)
+
+        for source_migration, db_migration in zip(migrations, db_migrations):
+            if db_migration["version"] != source_migration["version"]:
+                raise InconsistentVersionError(
+                    dir=dir,
+                    db_version=db_migration["version"],
+                    source_version=source_migration["version"],
+                )
+
+            if db_migration["hash"] != source_migration["hash"]:
+                raise InconsistentHashError(
+                    path=db_migration["dir"] + "/" + db_migration["filename"],
+                    db_hash=db_migration["hash"],
+                    source_hash=source_migration["hash"],
+                )
+
+        return migrations[len(db_migrations) :]
 
 
 filename_regex = re.compile(r"(\d+)-(.+)\.(.+)\.sql")
 
 
-def parse_migration_filename(dir: str, filename: str) -> MigrationFile:
+def _parse_migration_filename(dir: str, filename: str) -> MigrationFile:
     """Parse a migration filename into a MigrationFile object"""
     match = filename_regex.match(filename)
     if match is None:
@@ -119,20 +190,20 @@ def parse_migration_filename(dir: str, filename: str) -> MigrationFile:
     }
 
 
-def find_migrations(dir: str, scope: str) -> Sequence[MigrationFile]:
+def _find_migrations(dir: str, scope: str) -> Sequence[Migration]:
     """Return a list of all migration present in the given directory, in ascending
     order. Filter by scope."""
     files = [
-        parse_migration_filename(dir, filename)
+        _parse_migration_filename(dir, filename)
         for filename in os.listdir(dir)
         if filename.endswith(".sql")
     ]
     files = list(filter(lambda f: f["scope"] == scope, files))
     files = sorted(files, key=lambda f: f["version"])
-    return [read_migration_file(f) for f in files]
+    return [_read_migration_file(f) for f in files]
 
 
-def read_migration_file(file: MigrationFile) -> Migration:
+def _read_migration_file(file: MigrationFile) -> Migration:
     """Read a migration file"""
     sql = open(os.path.join(file["dir"], file["filename"])).read()
     hash = hashlib.md5(sql.encode("utf-8")).hexdigest()

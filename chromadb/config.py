@@ -1,5 +1,6 @@
 from pydantic import BaseSettings
-from typing import Optional, List
+from typing import Optional, List, Any
+from typing_extensions import Literal
 import importlib
 import logging
 
@@ -23,7 +24,7 @@ _legacy_config_values = {
 _impls = {}
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
@@ -43,13 +44,16 @@ class Settings(BaseSettings):
 
     anonymized_telemetry: bool = True
 
-    def validate(self, item):
+    sqlite_database: Optional[str] = ":memory:"
+    migrations: Literal["none", "validate", "apply"] = "apply"
+
+    def require(self, item: str) -> Any:
         val = self[item]
         if val is None:
             raise ValueError(f"Missing required config value '{item}'")
         return val
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> Any:
         val = getattr(self, item)
         # Backwards compatibility with short names instead of full class names
         if val in _legacy_config_values:
@@ -61,7 +65,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    def get_component(self, key):
+    def get_component(self, key: str) -> Any:
         """Retrieve a component instance, constructing it if necessary.
         The component constructor must take a single Settings object as its argument."""
 
