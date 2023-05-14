@@ -103,6 +103,7 @@ class Hnswlib(Index):
             max_elements=1000,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
+            allow_replace_deleted=True
         )
         index.set_ef(self._params.search_ef)
         index.set_num_threads(self._params.num_threads)
@@ -159,7 +160,7 @@ class Hnswlib(Index):
             )
             self._index.resize_index(int(new_size))
 
-        self._index.add_items(embeddings, labels)
+        self._index.add_items(embeddings, labels, replace_deleted=True)
         self._save()
 
     def delete(self) -> None:
