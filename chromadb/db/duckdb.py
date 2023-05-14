@@ -175,7 +175,7 @@ class DuckDB(Clickhouse):
 
         return [uuid.UUID(x[1]) for x in data_to_insert]  # return uuids
 
-    def count(self, collection_uuid):
+    def count(self, collection_uuid) -> int:
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return self._conn.query(
             f"SELECT COUNT() FROM embeddings {where_string}"
@@ -370,9 +370,6 @@ class DuckDB(Clickhouse):
 
         return response
 
-    def raw_sql(self, sql):
-        return self._conn.execute(sql).df()
-
     # TODO: This method should share logic with clickhouse impl
     def reset(self):
         self._conn.execute("DROP TABLE collections")
@@ -386,7 +383,7 @@ class DuckDB(Clickhouse):
         logger.info("Exiting: Cleaning up .chroma directory")
         self.reset_indexes()
 
-    def persist(self):
+    def persist(self) -> None:
         raise NotImplementedError(
             "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
         )
