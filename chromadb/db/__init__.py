@@ -131,5 +131,13 @@ class DB(ABC):
         pass
 
     @abstractmethod
+    def raw_sql(self, raw_sql):
+        pass
+
+    @abstractmethod
+    def create_index(self, collection_uuid: UUID):
+        pass
+
+    @abstractmethod
     def persist(self) -> None:
         pass

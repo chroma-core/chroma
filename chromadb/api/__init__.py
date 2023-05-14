@@ -315,6 +315,20 @@ class API(ABC):
         pass
 
     @abstractmethod
+    def create_index(self, collection_name: Optional[str] = None) -> bool:
+        """Creates an index for the given collection
+        ⚠️ This method should not be used directly.
+
+        Args:
+            collection_name: The collection to create the index for. Uses the client's collection if None. Defaults to None.
+
+        Returns:
+            bool: True if the index was created successfully
+
+        """
+        pass
+
+    @abstractmethod
     def persist(self) -> bool:
         """Persist the database to disk"""
         pass
