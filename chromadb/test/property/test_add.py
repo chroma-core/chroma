@@ -2,14 +2,17 @@ import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import API
+from chromadb.api.types import Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
-@given(collection=collection_st, embeddings=strategies.recordsets(collection_st))
-@settings(deadline=None)
+@given(
+    collection=collection_st, record_set=strategies.recordsets(collection_st)
+)  # type: ignore
+@settings(deadline=None)  # type: ignore
 def test_add(
     api: API, collection: strategies.Collection, embeddings: strategies.RecordSet
 ):
@@ -38,7 +41,7 @@ def test_add(
 @pytest.mark.xfail(
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
-)
+)  # type: ignore
 def test_out_of_order_ids(api: API):
     api.reset()
     ooo_ids = [
@@ -68,7 +71,11 @@ def test_out_of_order_ids(api: API):
         "4",
         "1",
     ]
-    coll = api.create_collection("test", embedding_function=lambda x: [1, 2, 3])
-    coll.add(ids=ooo_ids, embeddings=[[1, 2, 3] for _ in range(len(ooo_ids))])
+
+    coll = api.create_collection(
+        "test", embedding_function=lambda texts: [[1, 2, 3] for _ in texts]  # type: ignore
+    )
+    embeddings: Embeddings = [[1, 2, 3] for _ in ooo_ids]
+    coll.add(ids=ooo_ids, embeddings=embeddings)
     get_ids = coll.get(ids=ooo_ids)["ids"]
     assert get_ids == ooo_ids
