@@ -1,5 +1,5 @@
-from typing import TYPE_CHECKING, Optional, cast, List, Tuple
-from pydantic import BaseModel, PrivateAttr
+from typing import TYPE_CHECKING, Optional, cast, List, Tuple, Dict, Union
+from pydantic import BaseModel, PrivateAttr, StrictStr, StrictInt, StrictFloat
 from uuid import UUID
 
 from chromadb.api.types import (
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 class Collection(BaseModel):  # type: ignore
     name: str
     id: UUID
-    metadata: Optional[Metadata] = None
+    metadata: Optional[Dict[str, Union[StrictStr, StrictInt, StrictFloat]]] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
