@@ -105,7 +105,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         c = self.api.get_or_create_collection(
             name=coll.name,
-            metadata=new_metadata,
+            metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
         assert c.name == coll.name
