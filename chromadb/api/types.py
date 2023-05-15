@@ -55,8 +55,12 @@ class QueryResult(TypedDict):
 
 class IndexMetadata(TypedDict):
     dimensionality: int
-    elements: int  # The capacity of the index, never shrinks since that works poorly with hnswlib
-    curr_elements: int  # The current number of elements in the index
+    # The current number of elements in the index (total = additions - deletes)
+    curr_elements: int
+    # The auto-incrementing ID of the last inserted element, never decreases so
+    # can be used as a count of total historical size. Should increase by 1 every add.
+    # Assume cannot overflow
+    curr_id: int
     time_created: float
 
 
