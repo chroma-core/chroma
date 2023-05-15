@@ -1,5 +1,6 @@
 import json
 import time
+import pd
 from uuid import UUID
 from typing import List, Optional, Sequence, Callable, cast
 from chromadb import __version__
@@ -492,6 +493,14 @@ class LocalAPI(API):
             query_result["ids"].append(ids)
 
         return query_result
+
+    def raw_sql(self, raw_sql: str) -> pd.DataFrame:
+        return self._db.raw_sql(raw_sql)  # type: ignore
+
+    def create_index(self, collection_name: str) -> bool:
+        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
+        self._db.create_index(collection_uuid=collection_uuid)
+        return True
 
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(

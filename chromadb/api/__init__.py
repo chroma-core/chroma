@@ -315,7 +315,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def create_index(self, collection_name: Optional[str] = None) -> bool:
+    def create_index(self, collection_name: str) -> bool:
         """Creates an index for the given collection
         ⚠️ This method should not be used directly.
 
