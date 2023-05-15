@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+from multiprocessing.connection import Connection
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -29,7 +30,7 @@ configurations = [
 ]
 
 
-@pytest.fixture(scope="module", params=configurations)
+@pytest.fixture(scope="module", params=configurations)  # type: ignore
 def settings(request) -> Generator[Settings, None, None]:
     configuration = request.param
     yield configuration
@@ -45,12 +46,12 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
-)
+)  # type: ignore
 def test_persist(
     settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
-):
+) -> None:
     api_1 = chromadb.Client(settings)
     api_1.reset()
     coll = api_1.create_collection(
@@ -90,11 +91,17 @@ def test_persist(
     )
 
 
-def load_and_check(settings: Settings, collection_name: str, embeddings_set, conn):
+def load_and_check(
+    settings: Settings,
+    collection_name: str,
+    embeddings_set: strategies.RecordSet,
+    conn: Connection,
+) -> None:
     try:
         api = chromadb.Client(settings)
         coll = api.get_collection(
-            name=collection_name, embedding_function=lambda x: None
+            name=collection_name,
+            embedding_function=strategies.not_implemented_embedding_function(),
         )
         invariants.count(coll, embeddings_set)
         invariants.metadatas_match(coll, embeddings_set)
@@ -118,10 +125,10 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.api.reset()
         super().__init__(self.api)
 
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
-    @precondition(lambda self: self.last_persist_delay <= 0)
-    @rule()
-    def persist(self):
+    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)  # type: ignore
+    @precondition(lambda self: self.last_persist_delay <= 0)  # type: ignore
+    @rule()  # type: ignore
+    def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         self.api.persist()
         collection_name = self.collection.name
@@ -140,14 +147,16 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
             e = conn1.recv()
             raise e
 
-    def on_state_change(self, new_state):
+    def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
             self.last_persist_delay = 10
         else:
             self.last_persist_delay -= 1
 
 
-def test_persist_embeddings_state(caplog, settings: Settings):
+def test_persist_embeddings_state(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
     caplog.set_level(logging.ERROR)
     api = chromadb.Client(settings)
     run_state_machine_as_test(
