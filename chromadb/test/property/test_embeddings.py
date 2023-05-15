@@ -107,7 +107,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
             self._upsert_embeddings(record_set)
             return multiple(*normalized_record_set["ids"])
 
-    @precondition(lambda self: len(self.embeddings["ids"]) > 20)  # type: ignore
+    @precondition(lambda self: len(self.record_set_state["ids"]) > 20)  # type: ignore
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))  # type: ignore
     def delete_by_ids(self, ids: IDs):
         trace("remove embeddings")
@@ -119,7 +119,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 5)  # type: ignore
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 5)  # type: ignore
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -135,9 +135,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 3)  # type: ignore
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)  # type: ignore
     @rule(
-        embedding_set=strategies.recordsets(
+        record_set=strategies.recordsets(
             collection_strategy=collection_st,
             id_strategy=st.one_of(embedding_ids, strategies.safe_text),
             min_size=1,
@@ -173,7 +173,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
-        for idx, id in enumerate(record_set["ids"]):
+        for idx, id in enumerate(normalized_record_set["ids"]):
             # Update path
             if id in self.record_set_state["ids"]:
                 target_idx = self.record_set_state["ids"].index(id)

@@ -94,7 +94,7 @@ def test_persist(
 def load_and_check(
     settings: Settings,
     collection_name: str,
-    embeddings_set: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     conn: Connection,
 ) -> None:
     try:
@@ -103,11 +103,11 @@ def load_and_check(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),
         )
-        invariants.count(coll, embeddings_set)
-        invariants.metadatas_match(coll, embeddings_set)
-        invariants.documents_match(coll, embeddings_set)
-        invariants.ids_match(coll, embeddings_set)
-        invariants.ann_accuracy(coll, embeddings_set)
+        invariants.count(coll, record_set)
+        invariants.metadatas_match(coll, record_set)
+        invariants.documents_match(coll, record_set)
+        invariants.ids_match(coll, record_set)
+        invariants.ann_accuracy(coll, record_set)
     except Exception as e:
         conn.send(e)
         raise e

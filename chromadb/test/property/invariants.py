@@ -29,20 +29,19 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         embedding_list = None
     elif isinstance(record_set["embeddings"], list):
         assert record_set["embeddings"] is not None
-        if len(record_set["embeddings"]) > 0:
-            if not all(
-                isinstance(embedding, list) for embedding in record_set["embeddings"]
+        if len(record_set["embeddings"]) > 0 and not all(
+            isinstance(embedding, list) for embedding in record_set["embeddings"]
+        ):
+            if all(isinstance(e, int) for e in record_set["embeddings"]) or all(
+                isinstance(e, float) for e in record_set["embeddings"]
             ):
-                if all(isinstance(e, int) for e in record_set["embeddings"]) or all(
-                    isinstance(e, float) for e in record_set["embeddings"]
-                ):
-                    embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
-                else:
-                    raise InvalidArgument(
-                        "embeddings must be a list of lists, a list of numbers, or None"
-                    )
+                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
             else:
-                embedding_list = cast(types.Embeddings, record_set["embeddings"])
+                raise InvalidArgument(
+                    "embeddings must be a list of lists, a list of numbers, or None"
+                )
+        else:
+            embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
         raise InvalidArgument(
             "embeddings must be a list of lists, a list of numbers, or None"

@@ -142,11 +142,11 @@ recordset_st = st.shared(
 )  # type: ignore
 @given(
     collection=collection_st,
-    recordset=recordset_st,
+    record_set=recordset_st,
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
 )
 def test_filterable_metadata_get(
-    caplog, api: API, collection, recordset, filters
+    caplog, api: API, collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -156,11 +156,11 @@ def test_filterable_metadata_get(
         metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
-    coll.add(**recordset)
+    coll.add(**record_set)
 
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
-        expected_ids = _filter_embedding_set(recordset, filter)
+        expected_ids = _filter_embedding_set(record_set, filter)
         assert sorted(result_ids) == sorted(expected_ids)
 
 
@@ -172,7 +172,7 @@ def test_filterable_metadata_get(
 )  # type: ignore
 @given(
     collection=collection_st,
-    recordset=recordset_st,
+    record_set=recordset_st,
     filters=st.lists(
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
