@@ -494,7 +494,7 @@ class Clickhouse(DB):
 
         return val
 
-    def count(self, collection_uuid: UUID):
+    def count(self, collection_uuid: UUID) -> int:
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return (
             self._get_conn()
