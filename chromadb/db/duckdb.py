@@ -1,3 +1,4 @@
+# type: ignore
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db.clickhouse import (
     Clickhouse,
@@ -83,7 +84,9 @@ class DuckDB(Clickhouse):
         if len(dupe_check) > 0:
             if get_or_create is True:
                 if dupe_check[0][2] != metadata:
-                    self.update_collection(name, new_name=name, new_metadata=metadata)
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
                     dupe_check = self.get_collection(name)
 
                 logger.info(
@@ -127,17 +130,23 @@ class DuckDB(Clickhouse):
         self._conn.execute("""DELETE FROM collections WHERE name = ?""", [name])
 
     def update_collection(
-        self, current_name: str, new_name: str, new_metadata: Optional[Dict] = None
+        self, id: uuid.UUID, new_name: str, new_metadata: Optional[Dict] = None
     ):
-        if new_name is None:
-            new_name = current_name
-        if new_metadata is None:
-            new_metadata = self.get_collection(current_name)[0][2]
+        if new_name is not None:
+            dupe_check = self.get_collection(new_name)
+            if len(dupe_check) > 0 and dupe_check[0][0] != str(id):
+                raise ValueError(f"Collection with name {new_name} already exists")
 
-        self._conn.execute(
-            """UPDATE collections SET name = ?, metadata = ? WHERE name = ?""",
-            [new_name, json.dumps(new_metadata), current_name],
-        )
+            self._conn.execute(
+                """UPDATE collections SET name = ? WHERE uuid = ?""",
+                [new_name, id],
+            )
+
+        if new_metadata is not None:
+            self._conn.execute(
+                """UPDATE collections SET metadata = ? WHERE uuid = ?""",
+                [json.dumps(new_metadata), id],
+            )
 
     #
     #  ITEM METHODS
@@ -166,13 +175,11 @@ class DuckDB(Clickhouse):
 
         return [uuid.UUID(x[1]) for x in data_to_insert]  # return uuids
 
-    def _count(self, collection_uuid):
+    def count(self, collection_uuid) -> int:
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
-        return self._conn.query(f"SELECT COUNT() FROM embeddings {where_string}")
-
-    def count(self, collection_name=None):
-        collection_uuid = self.get_collection_uuid_from_name(collection_name)
-        return self._count(collection_uuid=collection_uuid).fetchall()[0][0]
+        return self._conn.query(
+            f"SELECT COUNT() FROM embeddings {where_string}"
+        ).fetchall()[0][0]
 
     def _format_where(self, where, result):
         for key, value in where.items():
@@ -379,7 +386,7 @@ class DuckDB(Clickhouse):
         logger.info("Exiting: Cleaning up .chroma directory")
         self.reset_indexes()
 
-    def persist(self):
+    def persist(self) -> None:
         raise NotImplementedError(
             "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
         )

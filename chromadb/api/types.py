@@ -1,4 +1,4 @@
-from typing import Optional, Union, Dict, Sequence, TypeVar, List
+from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 
@@ -12,6 +12,8 @@ Embeddings = List[Embedding]
 
 Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
+
+CollectionMetadata = Dict[Any, Any]
 
 Document = str
 Documents = List[Document]
@@ -70,7 +72,7 @@ def maybe_cast_one_to_many(
     if isinstance(target, Sequence):
         # One Document or ID
         if isinstance(target, str) and target is not None:
-            return [target]  # type: ignore
+            return [target]
         # One Embedding
         if isinstance(target[0], (int, float)):
             return [target]  # type: ignore
@@ -230,3 +232,16 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
                 f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"
             )
     return include
+
+
+def validate_embeddings(embeddings: Embeddings) -> Embeddings:
+    """Validates embeddings to ensure it is a list of list of ints, or floats"""
+    if not isinstance(embeddings, list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if not isinstance(embeddings[0], list):
+        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    for embedding in embeddings:
+        for value in embedding:
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"Expected embeddings to be a int, float, got {embeddings}")
+    return embeddings
