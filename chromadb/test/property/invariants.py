@@ -1,5 +1,5 @@
 import math
-from chromadb.test.property.strategies import RecordSet
+from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
 from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
 import numpy as np
@@ -11,64 +11,75 @@ from hypothesis.errors import InvalidArgument
 T = TypeVar("T")
 
 
-def maybe_wrap(value: Union[T, List[T]]) -> Union[None, List[T]]:
+def wrap(value: Union[T, List[T]]) -> List[T]:
     """Wrap a value in a list if it is not a list"""
     if value is None:
-        return None
+        raise InvalidArgument("value cannot be None")
     elif isinstance(value, List):
         return value
     else:
         return [value]
 
 
-def wrap_all(embeddings: RecordSet) -> RecordSet:
+def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     """Ensure that an embedding set has lists for all its values"""
 
-    if embeddings["embeddings"] is None:
+    embedding_list: Optional[types.Embeddings]
+    if record_set["embeddings"] is None:
         embedding_list = None
-    elif isinstance(embeddings["embeddings"], list):
-        embedding_list = embeddings["embeddings"]
-        if len(embedding_list) > 0:
-            if not all(isinstance(embedding, list) for embedding in embedding_list):
-                if all(isinstance(e, (int, float)) for e in embedding_list):
-                    embedding_list = cast(types.Embeddings, [embedding_list])
+    elif isinstance(record_set["embeddings"], list):
+        assert record_set["embeddings"] is not None
+        if len(record_set["embeddings"]) > 0:
+            if not all(
+                isinstance(embedding, list) for embedding in record_set["embeddings"]
+            ):
+                if all(isinstance(e, int) for e in record_set["embeddings"]) or all(
+                    isinstance(e, float) for e in record_set["embeddings"]
+                ):
+                    embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
                 else:
                     raise InvalidArgument(
                         "embeddings must be a list of lists, a list of numbers, or None"
                     )
+            else:
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
         raise InvalidArgument(
             "embeddings must be a list of lists, a list of numbers, or None"
         )
 
     return {
-        "ids": maybe_wrap(embeddings["ids"]),  # type: ignore
-        "documents": maybe_wrap(embeddings["documents"]),  # type: ignore
-        "metadatas": maybe_wrap(embeddings["metadatas"]),  # type: ignore
+        "ids": wrap(record_set["ids"]),
+        "documents": wrap(record_set["documents"])
+        if record_set["documents"] is not None
+        else None,
+        "metadatas": wrap(record_set["metadatas"])
+        if record_set["metadatas"] is not None
+        else None,
         "embeddings": embedding_list,
     }
 
 
-def count(collection: Collection, embeddings: RecordSet) -> None:
+def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
-    embeddings = wrap_all(embeddings)
-    assert count == len(embeddings["ids"])
+    normalized_record_set = wrap_all(record_set)
+    assert count == len(normalized_record_set["ids"])
 
 
 def _field_matches(
     collection: Collection,
-    record_set: RecordSet,
+    normalized_record_set: NormalizedRecordSet,
     field_name: Union[Literal["documents"], Literal["metadatas"]],
 ) -> None:
     """
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    result = collection.get(ids=record_set["ids"], include=[field_name])
+    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
-    embedding_id_to_index = {id: i for i, id in enumerate(record_set["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
@@ -81,35 +92,35 @@ def _field_matches(
     )
     field_values = [field_value for _, field_value in sorted_field]
 
-    expected_field = cast(List[Optional[types.Document]], record_set[field_name])
+    expected_field = normalized_record_set[field_name]
     if expected_field is None:
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
-        expected_field = [None] * len(record_set["ids"])
-    assert field_values == expected_field
+        expected_field = [None] * len(normalized_record_set["ids"])  # type: ignore
+    assert actual_field == expected_field
 
 
-def ids_match(collection: Collection, embeddings: RecordSet) -> None:
+def ids_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding ids is equal to the expected ids"""
-    embeddings = wrap_all(embeddings)
-    actual_ids = collection.get(ids=embeddings["ids"], include=[])["ids"]
+    normalized_record_set = wrap_all(record_set)
+    actual_ids = collection.get(ids=normalized_record_set["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
-    embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
-    assert actual_ids == embeddings["ids"]
+    assert actual_ids == normalized_record_set["ids"]
 
 
-def metadatas_match(collection: Collection, embeddings: RecordSet) -> None:
+def metadatas_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding metadata is equal to the expected metadata"""
-    embeddings = wrap_all(embeddings)
-    _field_matches(collection, embeddings, "metadatas")
+    normalized_record_set = wrap_all(record_set)
+    _field_matches(collection, normalized_record_set, "metadatas")
 
 
-def documents_match(collection: Collection, embeddings: RecordSet) -> None:
+def documents_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding documents is equal to the expected documents"""
-    embeddings = wrap_all(embeddings)
-    _field_matches(collection, embeddings, "documents")
+    normalized_record_set = wrap_all(record_set)
+    _field_matches(collection, normalized_record_set, "documents")
 
 
 def no_duplicates(collection: Collection) -> None:
@@ -156,19 +167,19 @@ def ann_accuracy(
     embedding_function: Optional[types.EmbeddingFunction] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
-    record_set = wrap_all(record_set)
+    normalized_record_set = wrap_all(record_set)
 
-    if len(record_set["ids"]) == 0:
+    if len(normalized_record_set["ids"]) == 0:
         return  # nothing to test here
 
-    embeddings: Optional[types.Embeddings] = record_set["embeddings"]  # type: ignore
+    embeddings: Optional[types.Embeddings] = normalized_record_set["embeddings"]
     have_embeddings = embeddings is not None and len(embeddings) > 0
     if not have_embeddings:
         assert embedding_function is not None
-        assert record_set["documents"] is not None
-        assert isinstance(record_set["documents"], list)
+        assert normalized_record_set["documents"] is not None
+        assert isinstance(normalized_record_set["documents"], list)
         # Compute the embeddings for the documents
-        embeddings = embedding_function(record_set["documents"])
+        embeddings = embedding_function(normalized_record_set["documents"])
 
     # l2 is the default distance function
     distance_function = distance_functions["l2"]
@@ -197,8 +208,8 @@ def ann_accuracy(
     )
 
     query_results = collection.query(
-        query_embeddings=record_set["embeddings"],
-        query_texts=record_set["documents"] if not have_embeddings else None,
+        query_embeddings=normalized_record_set["embeddings"],
+        query_texts=normalized_record_set["documents"] if not have_embeddings else None,
         n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
@@ -209,10 +220,10 @@ def ann_accuracy(
     assert query_results["embeddings"] is not None
 
     # Dict of ids to indices
-    id_to_index = {id: i for i, id in enumerate(record_set["ids"])}
+    id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     missing = 0
     for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
-        expected_ids = np.array(record_set["ids"])[indices_i[:n_results]]
+        expected_ids = np.array(normalized_record_set["ids"])[indices_i[:n_results]]
         missing += len(set(expected_ids) - set(query_results["ids"][i]))
 
         # For each id in the query results, find the index in the embeddings set
@@ -238,16 +249,18 @@ def ann_accuracy(
                 assert correct_distance
 
             assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
-            if record_set["documents"] is not None:
+            if normalized_record_set["documents"] is not None:
                 assert (
-                    record_set["documents"][index] == query_results["documents"][i][j]
+                    normalized_record_set["documents"][index]
+                    == query_results["documents"][i][j]
                 )
-            if record_set["metadatas"] is not None:
+            if normalized_record_set["metadatas"] is not None:
                 assert (
-                    record_set["metadatas"][index] == query_results["metadatas"][i][j]  # type: ignore
+                    normalized_record_set["metadatas"][index]
+                    == query_results["metadatas"][i][j]
                 )
 
-    size = len(record_set["ids"])
+    size = len(normalized_record_set["ids"])
     recall = (size - missing) / size
 
     try:

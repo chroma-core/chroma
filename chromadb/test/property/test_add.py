@@ -1,3 +1,4 @@
+from typing import cast
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
@@ -12,8 +13,10 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @given(collection=collection_st, record_set=strategies.recordsets(collection_st))
 @settings(deadline=None)
 def test_add(
-    api: API, collection: strategies.Collection, record_set: strategies.RecordSet
-) -> None:
+    api: API,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+):
     api.reset()
 
     # TODO: Generative embedding functions
@@ -24,12 +27,12 @@ def test_add(
     )
     coll.add(**record_set)
 
-    record_set = invariants.wrap_all(record_set)
-    invariants.count(coll, record_set)
-    n_results = max(1, (len(record_set["ids"]) // 10))
+    normalized_record_set = invariants.wrap_all(record_set)
+    invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
     invariants.ann_accuracy(
         coll,
-        record_set,
+        cast(strategies.RecordSet, normalized_record_set),
         n_results=n_results,
         embedding_function=collection.embedding_function,
     )

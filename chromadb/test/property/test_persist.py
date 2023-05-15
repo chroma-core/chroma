@@ -139,7 +139,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         conn1, conn2 = multiprocessing.Pipe()
         p = ctx.Process(
             target=load_and_check,
-            args=(self.settings, collection_name, self.embeddings, conn2),
+            args=(self.settings, collection_name, self.record_set_state, conn2),
         )
         p.start()
         p.join()
