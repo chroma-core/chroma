@@ -1,6 +1,5 @@
 import json
 import time
-import pd
 from uuid import UUID
 from typing import List, Optional, Sequence, Callable, cast
 from chromadb import __version__
@@ -494,7 +493,7 @@ class LocalAPI(API):
 
         return query_result
 
-    def raw_sql(self, raw_sql: str) -> pd.DataFrame:
+    def raw_sql(self, raw_sql: str):  # type: ignore
         return self._db.raw_sql(raw_sql)  # type: ignore
 
     def create_index(self, collection_name: str) -> bool:
