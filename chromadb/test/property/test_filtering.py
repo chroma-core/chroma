@@ -167,7 +167,7 @@ def test_filterable_metadata_get(
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
     ]
-)
+)  # type: ignore
 @given(
     collection=collection_st,
     recordset=recordset_st,
@@ -175,7 +175,7 @@ def test_filterable_metadata_get(
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
     ),
-)
+)  # type: ignore
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
     api: API,
