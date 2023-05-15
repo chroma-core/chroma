@@ -1,61 +1,93 @@
+from typing import Any, Dict
 from hypothesis import given, settings, HealthCheck
 from chromadb.api import API
 from chromadb.test.property import invariants
+from chromadb.api.types import (
+    Document,
+    Embedding,
+    IDs,
+    Metadata,
+    Metadatas,
+    Where,
+    WhereDocument,
+)
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
 
 
-def _filter_where_clause(clause, mm):
+def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
     """Return true if the where clause is true for the given metadata map"""
 
     key, expr = list(clause.items())[0]
 
     # Handle the shorthand for equal: {key: val} where val is a simple value
     if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float):
-        return _filter_where_clause({key: {"$eq": expr}}, mm)
+        return _filter_where_clause({key: {"$eq": expr}}, metadata)
 
+    # expr is a list of clauses
     if key == "$and":
-        return all(_filter_where_clause(clause, mm) for clause in expr)
-    if key == "$or":
-        return any(_filter_where_clause(clause, mm) for clause in expr)
+        assert isinstance(expr, list)
+        return all(_filter_where_clause(clause, metadata) for clause in expr)
 
+    if key == "$or":
+        assert isinstance(expr, list)
+        return any(_filter_where_clause(clause, metadata) for clause in expr)
+
+    # expr is an operator expression
+    assert isinstance(expr, dict)
     op, val = list(expr.items())[0]
 
+    assert isinstance(metadata, dict)
+    if key not in metadata:
+        return False
+    metadata_key = metadata[key]
     if op == "$eq":
-        return key in mm and mm[key] == val
+        return key in metadata and metadata_key == val
     elif op == "$ne":
-        return key in mm and mm[key] != val
-    elif op == "$gt":
-        return key in mm and mm[key] > val
+        return key in metadata and metadata_key != val
+
+    # The following conditions only make sense for numeric values
+    assert isinstance(metadata_key, int) or isinstance(metadata_key, float)
+    assert isinstance(val, int) or isinstance(val, float)
+    if op == "$gt":
+        return (key in metadata) and (metadata_key > val)
     elif op == "$gte":
-        return key in mm and mm[key] >= val
+        return key in metadata and metadata_key >= val
     elif op == "$lt":
-        return key in mm and mm[key] < val
+        return key in metadata and metadata_key < val
     elif op == "$lte":
-        return key in mm and mm[key] <= val
+        return key in metadata and metadata_key <= val
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
 
-def _filter_where_doc_clause(clause, doc):
+def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     key, expr = list(clause.items())[0]
+
     if key == "$and":
+        assert isinstance(expr, list)
         return all(_filter_where_doc_clause(clause, doc) for clause in expr)
-    elif key == "$or":
+    if key == "$or":
+        assert isinstance(expr, list)
         return any(_filter_where_doc_clause(clause, doc) for clause in expr)
-    elif key == "$contains":
+
+    # Simple $contains clause
+    assert isinstance(expr, str)
+    if key == "$contains":
         return expr in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
 
-EMPTY_DICT = {}
-EMPTY_STRING = ""
+EMPTY_DICT: Dict[Any, Any] = {}
+EMPTY_STRING: str = ""
 
 
-def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Filter):
+def _filter_embedding_set(
+    recordset: strategies.RecordSet, filter: strategies.Filter
+) -> IDs:
     """Return IDs from the embedding set that match the given filter object"""
 
     recordset = invariants.wrap_all(recordset)
@@ -72,8 +104,13 @@ def _filter_embedding_set(recordset: strategies.RecordSet, filter: strategies.Fi
 
     for i in range(len(recordset["ids"])):
         if filter["where"]:
-            metadatas = recordset["metadatas"] or [EMPTY_DICT] * len(recordset["ids"])
-            if not _filter_where_clause(filter["where"], metadatas[i]):
+            metadatas: Metadatas
+            if isinstance(recordset["metadatas"], list):
+                metadatas = recordset["metadatas"]
+            else:
+                metadatas = [EMPTY_DICT] * len(recordset["ids"])
+            filter_where: Where = filter["where"]  # type: ignore
+            if not _filter_where_clause(filter_where, metadatas[i]):
                 ids.discard(recordset["ids"][i])
 
         if filter["where_document"]:
@@ -98,13 +135,15 @@ recordset_st = st.shared(
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
     ]
-)
+)  # type: ignore
 @given(
     collection=collection_st,
     recordset=recordset_st,
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
-)
-def test_filterable_metadata_get(caplog, api: API, collection, recordset, filters):
+)  # type: ignore
+def test_filterable_metadata_get(
+    caplog, api: API, collection, recordset, filters
+) -> None:
     caplog.set_level(logging.ERROR)
 
     api.reset()
@@ -126,7 +165,7 @@ def test_filterable_metadata_get(caplog, api: API, collection, recordset, filter
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
     ]
-)
+)  # type: ignore
 @given(
     collection=collection_st,
     recordset=recordset_st,
@@ -134,14 +173,14 @@ def test_filterable_metadata_get(caplog, api: API, collection, recordset, filter
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
     ),
-)
+)  # type: ignore
 def test_filterable_metadata_query(
     caplog,
     api: API,
     collection: strategies.Collection,
     recordset: strategies.RecordSet,
     filters,
-):
+) -> None:
     caplog.set_level(logging.ERROR)
 
     api.reset()
@@ -154,12 +193,17 @@ def test_filterable_metadata_query(
     recordset = invariants.wrap_all(recordset)
     total_count = len(recordset["ids"])
     # Pick a random vector
+    random_query: Embedding
     if collection.has_embeddings:
-        random_query = recordset["embeddings"][random.randint(0, total_count - 1)]
+        assert recordset["embeddings"] is not None
+        assert all(isinstance(e, list) for e in recordset["embeddings"])
+        random_query = recordset["embeddings"][random.randint(0, total_count - 1)]  # type: ignore
     else:
+        assert isinstance(recordset["documents"], list)
+        assert collection.embedding_function is not None
         random_query = collection.embedding_function(
-            recordset["documents"][random.randint(0, total_count - 1)]
-        )
+            [recordset["documents"][random.randint(0, total_count - 1)]]
+        )[0]
     for filter in filters:
         result_ids = set(
             coll.query(
