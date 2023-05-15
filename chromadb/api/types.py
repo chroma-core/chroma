@@ -60,7 +60,7 @@ class IndexMetadata(TypedDict):
     # The auto-incrementing ID of the last inserted element, never decreases so
     # can be used as a count of total historical size. Should increase by 1 every add.
     # Assume cannot overflow
-    curr_id: int
+    total_elements_added: int
     time_created: float
 
 

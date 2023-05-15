@@ -113,7 +113,7 @@ class Hnswlib(Index):
         self._index_metadata = {
             "dimensionality": dimensionality,
             "curr_elements": 0,
-            "curr_id": 0,
+            "total_elements_added": 0,
             "time_created": time.time(),
         }
         self._save()
@@ -150,17 +150,21 @@ class Hnswlib(Index):
                 else:
                     raise ValueError(f"ID {id} already exists in index")
             else:
-                self._index_metadata["curr_id"] += 1
+                self._index_metadata["total_elements_added"] += 1
                 self._index_metadata["curr_elements"] += 1
-                next_label = self._index_metadata["curr_id"]
+                next_label = self._index_metadata["total_elements_added"]
                 self._id_to_label[hexid(id)] = next_label
                 self._label_to_id[next_label] = id
                 labels.append(next_label)
 
-        if self._index_metadata["curr_id"] > self._index.get_max_elements():
+        if (
+            self._index_metadata["total_elements_added"]
+            > self._index.get_max_elements()
+        ):
             new_size = int(
                 max(
-                    self._index_metadata["curr_id"] * self._params.resize_factor,
+                    self._index_metadata["total_elements_added"]
+                    * self._params.resize_factor,
                     DEFAULT_CAPACITY,
                 )
             )
@@ -230,11 +234,13 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
-        # Backwards compatability with versions that don't have curr_elements or curr_id
+        # Backwards compatability with versions that don't have curr_elements or total_elements_added
         if "curr_elements" not in self._index_metadata:
             self._index_metadata["curr_elements"] = self._index_metadata["elements"]
-        if "curr_id" not in self._index_metadata:
-            self._index_metadata["curr_id"] = self._index_metadata["elements"]
+        if "total_elements_added" not in self._index_metadata:
+            self._index_metadata["total_elements_added"] = self._index_metadata[
+                "elements"
+            ]
 
         p = hnswlib.Index(
             space=self._params.space, dim=self._index_metadata["dimensionality"]
@@ -243,7 +249,10 @@ class Hnswlib(Index):
         self._index.load_index(
             f"{self._save_folder}/index_{self._id}.bin",
             max_elements=max(
-                int(self._index_metadata["curr_id"] * self._params.resize_factor),
+                int(
+                    self._index_metadata["total_elements_added"]
+                    * self._params.resize_factor
+                ),
                 DEFAULT_CAPACITY,
             ),
         )
