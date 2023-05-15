@@ -15,7 +15,6 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 from typing import Optional, Set
-from hypothesis import settings
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
@@ -154,7 +153,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return multiple(coll)
 
 
-@settings(deadline=None)
 def test_collections(caplog: pytest.LogCaptureFixture, api: API) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
