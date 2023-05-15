@@ -39,7 +39,8 @@ class Text2VecEmbeddingFunction(EmbeddingFunction):
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __init__(
-        self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002"
+            self, api_key: Optional[str] = None, model_name: str = "text-embedding-ada-002",
+            organization_id: Optional[str] = None
     ):
         try:
             import openai
@@ -55,6 +56,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
             raise ValueError(
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
+
+        if organization_id is not None:
+            openai.organization = organization_id
 
         self._client = openai.Embedding
         self._model_name = model_name
