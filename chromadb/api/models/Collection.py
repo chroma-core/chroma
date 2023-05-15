@@ -384,9 +384,9 @@ class Collection(BaseModel):  # type: ignore
                 )
             embeddings = self._embedding_function(documents)
 
-        if embeddings is None:
-            raise ValueError(
-                "Something went wrong. Embeddings should be computed at this point"
-            )
+        # if embeddings is None:
+        #     raise ValueError(
+        #         "Something went wrong. Embeddings should be computed at this point"
+        #     )
 
-        return ids, embeddings, metadatas, documents
+        return ids, embeddings, metadatas, documents  # type: ignore
