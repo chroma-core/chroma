@@ -1,13 +1,11 @@
 from pydantic import BaseSettings
-from typing import Optional, List
+from typing import Optional, List, Any
 import importlib
 import logging
+import chromadb.db
+import chromadb.api
+import chromadb.telemetry
 
-TELEMETRY_WHITELISTED_SETTINGS = [
-    "chroma_db_impl",
-    "chroma_api_impl",
-    "chroma_server_ssl_enabled",
-]
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +16,6 @@ _legacy_config_values = {
     "rest": "chromadb.api.fastapi.FastAPI",
     "local": "chromadb.api.local.LocalAPI",
 }
-
-
-_impls = {}
 
 
 class Settings(BaseSettings):
@@ -43,14 +38,16 @@ class Settings(BaseSettings):
 
     anonymized_telemetry: bool = True
 
-    def validate(self, item):
-        val = self[item]
+    def require(self, key: str) -> Any:
+        """Return the value of a required config key, or raise an exception if it is not
+        set"""
+        val = self[key]
         if val is None:
-            raise ValueError(f"Missing required config value '{item}'")
+            raise ValueError(f"Missing required config value '{key}'")
         return val
 
-    def __getitem__(self, item):
-        val = getattr(self, item)
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key)
         # Backwards compatibility with short names instead of full class names
         if val in _legacy_config_values:
             newval = _legacy_config_values[val]
@@ -61,19 +58,40 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    def get_component(self, key):
-        """Retrieve a component instance, constructing it if necessary.
-        The component constructor must take a single Settings object as its argument."""
 
-        assert self[key], f"Setting '{key}' is required."
+class System:
+    settings: Settings
 
-        fqn = self[key]
+    db: Optional[chromadb.db.DB]
+    api: Optional[chromadb.api.API]
+    telemetry: Optional[chromadb.telemetry.Telemetry]
 
-        if fqn not in _impls:
-            module_name, class_name = fqn.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            cls = getattr(module, class_name)
-            _impls[fqn] = cls(self)
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.db = None
+        self.api = None
+        self.telemetry = None
 
-        logger.info(f"Using {fqn} for {key}")
-        return _impls[fqn]
+    def _instantiate(self, key: str) -> Any:
+        assert self.settings[key], f"Setting '{key}' is required."
+        fqn = self.settings[key]
+        module_name, class_name = fqn.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+        impl = cls(self)
+        return impl
+
+    def get_db(self) -> chromadb.db.DB:
+        if self.db is None:
+            self.db = self._instantiate("chroma_db_impl")
+        return self.db
+
+    def get_api(self) -> chromadb.api.API:
+        if self.api is None:
+            self.api = self._instantiate("chroma_api_impl")
+        return self.api
+
+    def get_telemetry(self) -> chromadb.telemetry.Telemetry:
+        if self.telemetry is None:
+            self.telemetry = self._instantiate("chroma_telemetry_impl")
+        return self.telemetry

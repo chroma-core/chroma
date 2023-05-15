@@ -21,6 +21,7 @@ from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
 import logging
 from uuid import UUID
+from chromadb.config import System
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,12 @@ class Clickhouse(DB):
     #
     #  INIT METHODS
     #
-    def __init__(self, settings):
+    def __init__(self, system: System):
         self._conn = None
-        self._settings = settings
+        self._settings = system.settings
 
-        settings.validate("clickhouse_host")
-        settings.validate("clickhouse_port")
+        self._settings.require("clickhouse_host")
+        self._settings.require("clickhouse_port")
 
     def _init_conn(self):
         common.set_setting("autogenerate_session_id", False)

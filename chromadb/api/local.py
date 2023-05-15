@@ -1,3 +1,4 @@
+# type: ignore
 import json
 import time
 from uuid import UUID
@@ -18,7 +19,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.api.models.Collection import Collection
-import chromadb.config
+from chromadb.config import System
 
 import re
 
@@ -48,13 +49,12 @@ def check_index_name(index_name):
 
 
 class LocalAPI(API):
-
     _db: DB
     _telemetry_client: Telemetry
 
-    def __init__(self, settings: chromadb.config.Settings):
-        self._db = settings.get_component("chroma_db_impl")
-        self._telemetry_client = settings.get_component("chroma_telemetry_impl")
+    def __init__(self, system: System):
+        self._db = system.get_db()
+        self._telemetry_client = system.get_telemetry()
 
     def heartbeat(self):
         """Ping the database to ensure it is alive"""
