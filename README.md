@@ -71,7 +71,8 @@ results = collection.query(
 - __Free & Open Source__: Apache 2.0 Licensed
 
 ## Chroma DB Server Deployment with Persistance Storage
-This method doesnt need cloning the entire codebase and rebuilding process. Docker container used in this process are using docker volumes to store data. As long as volumes are not retained restarting the containers will persist data in chromadb.
+This method doesnt need cloning of the entire codebase and rebuilding process. 
+Docker container used in this process are using docker volumes to store data. As long as volumes are retained during the restarting containers the data will persist in the chromadb.
 1. Download docker-compose.server.example.yml file from the root and rename it to docker-compose.yml
 2. Install docker on your local machine. [`Docker Engine`](https://docs.docker.com/engine/install/) or [`Docker Desktop`](https://docs.docker.com/desktop/install/)
 3. Install docker compose [`Docker Compose`](https://docs.docker.com/compose/install/)
