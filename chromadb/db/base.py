@@ -3,7 +3,7 @@ from types import TracebackType
 from typing_extensions import Protocol, Self
 from abc import ABC, abstractmethod
 from threading import local
-from overrides import EnforceOverrides
+from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
 import itertools
@@ -93,7 +93,8 @@ class ParameterValue(pypika.Parameter):  # type: ignore
     def __init__(self, value: Any):
         self.value = value
 
-    def get_sql(self) -> str:
+    @override
+    def get_sql(self, **kwargs: Any) -> str:
         _context.values.append(self.value)
         val = _context.formatstr.format(next(_context.generator))
         return str(val)
