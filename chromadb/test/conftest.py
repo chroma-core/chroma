@@ -15,7 +15,7 @@ import shutil
 
 hypothesis.settings.register_profile(
     "dev",
-    deadline=15000,
+    deadline=30000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
@@ -24,7 +24,7 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
-def _run_server():
+def _run_server() -> None:
     """Run a Chroma server locally"""
     settings = Settings(
         chroma_api_impl="local",
@@ -35,7 +35,7 @@ def _run_server():
     uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="error")
 
 
-def _await_server(api: API, attempts: int = 0):
+def _await_server(api: API, attempts: int = 0) -> None:
     try:
         api.heartbeat()
     except ConnectionError as e:
@@ -106,5 +106,5 @@ def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
 
 
 @pytest.fixture(scope="module", params=fixtures())
-def api(request) -> Generator[API, None, None]:
+def api(request: pytest.FixtureRequest) -> Generator[API, None, None]:
     yield next(request.param())

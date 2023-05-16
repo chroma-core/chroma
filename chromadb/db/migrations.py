@@ -3,8 +3,8 @@ import os
 import re
 import hashlib
 from chromadb.db.base import SqlDB, Cursor
-from chromadb.config import Settings
 from abc import abstractmethod
+from chromadb.config import System, Settings
 
 
 class MigrationFile(TypedDict):
@@ -74,8 +74,8 @@ class MigratableDB(SqlDB):
 
     _settings: Settings
 
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
+    def __init__(self, system: System) -> None:
+        self._settings = system.settings
         super().__init__()
 
     @staticmethod

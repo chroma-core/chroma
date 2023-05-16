@@ -7,7 +7,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
 
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
         if model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -15,8 +15,23 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name)
+            self.models[model_name] = SentenceTransformer(model_name, device=device)
         self._model = self.models[model_name]
+
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        return self._model.encode(list(texts), convert_to_numpy=True).tolist()
+
+
+class Text2VecEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name: str = "shibing624/text2vec-base-chinese"):
+        try:
+            from text2vec import SentenceModel
+        except ImportError:
+            raise ValueError(
+                "The text2vec python package is not installed. Please install it with `pip install text2vec`"
+            )
+        self._model = SentenceModel(model_name_or_path=model_name)
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(list(texts), convert_to_numpy=True).tolist()

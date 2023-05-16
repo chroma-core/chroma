@@ -1,5 +1,5 @@
 from chromadb.db.migrations import MigratableDB, Migration
-from chromadb.config import Settings
+from chromadb.config import System, Settings
 import chromadb.db.base as base
 import sqlite3
 from overrides import override
@@ -35,10 +35,10 @@ class SqliteDB(MigratableDB):
     _conn: sqlite3.Connection
     _settings: Settings
 
-    def __init__(self, settings: Settings):
-        self._settings = settings
+    def __init__(self, system: System):
+        self._settings = system.settings
         self._init()
-        super().__init__(settings)
+        super().__init__(system)
 
     def _init(self) -> None:
         sqlite_db = self._settings.require("sqlite_database")
