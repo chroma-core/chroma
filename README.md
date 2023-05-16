@@ -35,7 +35,6 @@
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
-# for client-server mode, docker-compose up -d --build
 ```
 
 The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
@@ -70,6 +69,34 @@ results = collection.query(
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
 - __Free & Open Source__: Apache 2.0 Licensed
+
+## Chroma DB Server Deployment with Persistance Storage
+This method doesnt need cloning the entire codebase and rebuilding process. Docker container used in this process are using docker volumes to store data. As long as volumes are not retained restarting the containers will persist data in chromadb.
+1. Download docker-compose.server.example.yml file from the root and rename it to docker-compose.yml
+2. Install docker on your local machine. [`Docker Engine`](https://docs.docker.com/engine/install/) or [`Docker Desktop`](https://docs.docker.com/desktop/install/)
+3. Install docker compose [`Docker Compose`](https://docs.docker.com/compose/install/)
+4. run following commands from the directory where earlier downloaded docker compose file is saved.
+
+- __Command to Start Containers__
+``` bash
+docker compose up -d
+or 
+docker-compose up -d
+```
+
+- __Command to Stop Containers__
+``` bash
+docker compose down
+or 
+docker-compose down
+```
+- __Command to Stop Containers and delete volumes__
+This is distructive command. With this command volumes created earlier will be deleted along with data stored.
+``` bash
+docker compose down -v
+or 
+docker-compose down -v
+```
 
 ## Use case: ChatGPT for ______
 
