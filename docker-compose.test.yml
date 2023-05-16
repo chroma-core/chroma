@@ -17,6 +17,7 @@ services:
       - CHROMA_DB_IMPL=clickhouse
       - CLICKHOUSE_HOST=test_clickhouse
       - CLICKHOUSE_PORT=8123
+      - ANONYMIZED_TELEMETRY=False
     ports:
       - ${CHROMA_PORT}:8000
     depends_on:

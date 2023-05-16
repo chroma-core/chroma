@@ -21,6 +21,7 @@ from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
 import logging
 from uuid import UUID
+from chromadb.config import System
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +56,12 @@ class Clickhouse(DB):
     #
     #  INIT METHODS
     #
-    def __init__(self, settings):
+    def __init__(self, system: System):
         self._conn = None
-        self._settings = settings
+        self._settings = system.settings
+
+        self._settings.require("clickhouse_host")
+        self._settings.require("clickhouse_port")
 
     def _init_conn(self):
         common.set_setting("autogenerate_session_id", False)
@@ -495,7 +499,7 @@ class Clickhouse(DB):
 
         return val
 
-    def count(self, collection_uuid: UUID):
+    def count(self, collection_uuid: UUID) -> int:
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return (
             self._get_conn()

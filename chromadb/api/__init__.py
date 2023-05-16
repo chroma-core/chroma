@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Sequence, Optional
+from typing import Sequence, Optional
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
@@ -56,17 +56,17 @@ class API(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        get_or_create: bool = False,
         embedding_function: Optional[EmbeddingFunction] = None,
+        get_or_create: bool = False,
     ) -> Collection:
         """Creates a new collection in the database
 
         Args:
             name  The name of the collection to create. The name must be unique.
             metadata: A dictionary of metadata to associate with the collection. Defaults to None.
+            embedding_function: A function that takes documents and returns an embedding. Defaults to None.
             get_or_create: If True, will return the collection if it already exists,
                 and update the metadata (if applicable). Defaults to False.
-            embedding_function: A function that takes documents and returns an embedding. Defaults to None.
 
         Returns:
             dict: the created collection
@@ -108,7 +108,7 @@ class API(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
@@ -143,11 +143,11 @@ class API(ABC):
         self,
         ids: IDs,
         collection_id: UUID,
-        embeddings: Optional[Embeddings],
+        embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ) -> None:
+    ) -> bool:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
@@ -168,7 +168,7 @@ class API(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ) -> None:
+    ) -> bool:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
 
@@ -183,11 +183,11 @@ class API(ABC):
         self,
         collection_id: UUID,
         ids: IDs,
-        embeddings: Optional[Embeddings] = None,
+        embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ) -> None:
+    ) -> bool:
         """Add or update entries in the embedding store.
         If an entry with the same id already exists, it will be updated, otherwise it will be added.
 
@@ -257,7 +257,7 @@ class API(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> List[UUID]:
+    ) -> IDs:
         """Deletes embeddings from the database
         ⚠️ This method should not be used directly.
 
@@ -315,7 +315,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def create_index(self, collection_name: Optional[str] = None) -> bool:
+    def create_index(self, collection_name: str) -> bool:
         """Creates an index for the given collection
         ⚠️ This method should not be used directly.
 
@@ -329,7 +329,7 @@ class API(ABC):
         pass
 
     @abstractmethod
-    def persist(self) -> None:
+    def persist(self) -> bool:
         """Persist the database to disk"""
         pass
 
