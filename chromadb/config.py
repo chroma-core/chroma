@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     anonymized_telemetry: bool = True
 
+    allow_reset: bool = False
+
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not
         set"""
