@@ -50,8 +50,8 @@ class Settings(BaseSettings):
             raise ValueError(f"Missing required config value '{key}'")
         return val
 
-    def __getitem__(self, item: str) -> Any:
-        val = getattr(self, item)
+    def __getitem__(self, key: str) -> Any:
+        val = getattr(self, key)
         # Backwards compatibility with short names instead of full class names
         if val in _legacy_config_values:
             newval = _legacy_config_values[val]
