@@ -6,6 +6,7 @@ networks:
 
 services:
   server:
+    image: server
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,7 +35,8 @@ services:
       - '8123:8123'
       - '9000:9000'
     volumes:
-      - clickhouse_data:/bitnami/clickhouse
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
       - backups:/backups
       - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
       - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
@@ -43,6 +45,8 @@ services:
 
 volumes:
   clickhouse_data:
+    driver: local
+  clickhouse_logs:
     driver: local
   index_data:
     driver: local
