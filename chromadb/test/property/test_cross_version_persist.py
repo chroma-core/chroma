@@ -12,7 +12,6 @@ from urllib import request
 from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from importlib.util import spec_from_file_location, module_from_spec
 from packaging import version as packaging_version
 import re
 import multiprocessing
@@ -152,15 +151,11 @@ def switch_to_version(version):
 
     # Load the target version and override the path to the installed version
     # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    path = get_path_to_version_library(version)
     sys.path.insert(0, get_path_to_version_install(version))
-    spec = spec_from_file_location(module_name, path)
-    assert spec is not None and spec.loader is not None
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.__version__ == version
-    sys.modules[module_name] = module
-    return module
+    import chromadb
+
+    assert chromadb.__version__ == version
+    return chromadb
 
 
 def persist_generated_data_with_old_version(
