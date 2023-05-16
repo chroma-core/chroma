@@ -112,7 +112,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         # get_or_create should return the existing collection with updated metadata
 
         # Case 3
-        # new_metadata is none, coll is a new collection
+        # new_metadata is not none, coll is a new collection
         # get_or_create should create a new collection with the new metadata, ignoring
         # the metdata of in the input coll.
 
