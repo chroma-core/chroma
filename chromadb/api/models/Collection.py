@@ -174,6 +174,7 @@ class Collection(BaseModel):
             include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
             ids: The ids of the embeddings to pre-filter for query. Optional.
         """
+        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = validate_where_document(where_document) if where_document else None
         query_embeddings = maybe_cast_one_to_many(query_embeddings) if query_embeddings else None
