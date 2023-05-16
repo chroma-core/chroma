@@ -12,7 +12,6 @@ from urllib import request
 from chromadb.api import API
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from importlib.util import spec_from_file_location, module_from_spec
 from packaging import version as packaging_version
 import re
 import multiprocessing
@@ -152,15 +151,11 @@ def switch_to_version(version):
 
     # Load the target version and override the path to the installed version
     # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    path = get_path_to_version_library(version)
     sys.path.insert(0, get_path_to_version_install(version))
-    spec = spec_from_file_location(module_name, path)
-    assert spec is not None and spec.loader is not None
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.__version__ == version
-    sys.modules[module_name] = module
-    return module
+    import chromadb
+
+    assert chromadb.__version__ == version
+    return chromadb
 
 
 def persist_generated_data_with_old_version(
@@ -168,31 +163,35 @@ def persist_generated_data_with_old_version(
     settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
+    conn,
 ):
-    old_module = switch_to_version(version)
-    api: API = old_module.Client(settings)
-    api.reset()
-    coll = api.create_collection(
-        name=collection_strategy.name,
-        metadata=collection_strategy.metadata,
-        embedding_function=lambda x: None,
-    )
-    coll.add(**embeddings_strategy)
-    # We can't use the invariants module here because it uses the current version
-    # Just use some basic checks for sanity and manual testing where you break the new
-    # version
+    try:
+        old_module = switch_to_version(version)
+        api: API = old_module.Client(settings)
+        api.reset()
+        coll = api.create_collection(
+            name=collection_strategy.name,
+            metadata=collection_strategy.metadata,
+            embedding_function=lambda x: None,
+        )
+        coll.add(**embeddings_strategy)
+        # We can't use the invariants module here because it uses the current version
+        # Just use some basic checks for sanity and manual testing where you break the new
+        # version
 
-    check_embeddings = invariants.wrap_all(embeddings_strategy)
-    # Check count
-    assert coll.count() == len(check_embeddings["embeddings"] or [])
-    # Check ids
-    result = coll.get()
-    actual_ids = result["ids"]
-    embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
-    actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
-    assert actual_ids == check_embeddings["ids"]
-    api.persist()
-    del api
+        check_embeddings = invariants.wrap_all(embeddings_strategy)
+        # Check count
+        assert coll.count() == len(check_embeddings["embeddings"] or [])
+        # Check ids
+        result = coll.get()
+        actual_ids = result["ids"]
+        embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
+        actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+        assert actual_ids == check_embeddings["ids"]
+        api.persist()
+    except Exception as e:
+        conn.send(e)
+        raise e
 
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
@@ -231,12 +230,17 @@ def test_cycle_versions(
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
     ctx = multiprocessing.get_context("spawn")
+    conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy),
+        args=(version, settings, collection_strategy, embeddings_strategy, conn2),
     )
     p.start()
     p.join()
+
+    if conn1.poll():
+        e = conn1.recv()
+        raise e
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
