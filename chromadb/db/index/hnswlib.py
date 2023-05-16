@@ -84,7 +84,13 @@ class Hnswlib(Index):
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, UUID]
 
-    def __init__(self, id: str, settings: Settings, metadata: Dict[str, str]):
+    def __init__(
+        self,
+        id: str,
+        settings: Settings,
+        metadata: Dict[str, str],
+        number_elements: int = DEFAULT_CAPACITY,
+    ):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
         self._id = id
@@ -93,7 +99,7 @@ class Hnswlib(Index):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._load()
+        self._load(number_elements)
 
     def _init_index(self, dimensionality: int) -> None:
         # more comments available at the source: https://github.com/nmslib/hnswlib
@@ -222,7 +228,7 @@ class Hnswlib(Index):
     def _exists(self) -> None:
         return
 
-    def _load(self) -> None:
+    def _load(self, curr_elements: int) -> None:
         if not os.path.exists(f"{self._save_folder}/index_{self._id}.bin"):
             return
 
@@ -234,9 +240,8 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
+        self._index_metadata["curr_elements"] = curr_elements
         # Backwards compatability with versions that don't have curr_elements or total_elements_added
-        if "curr_elements" not in self._index_metadata:
-            self._index_metadata["curr_elements"] = self._index_metadata["elements"]
         if "total_elements_added" not in self._index_metadata:
             self._index_metadata["total_elements_added"] = self._index_metadata[
                 "elements"
@@ -248,13 +253,7 @@ class Hnswlib(Index):
         self._index = p
         self._index.load_index(
             f"{self._save_folder}/index_{self._id}.bin",
-            max_elements=max(
-                int(
-                    self._index_metadata["total_elements_added"]
-                    * self._params.resize_factor
-                ),
-                DEFAULT_CAPACITY,
-            ),
+            max_elements=int(curr_elements * self._params.resize_factor),
         )
         self._index.set_ef(self._params.search_ef)
         self._index.set_num_threads(self._params.num_threads)
