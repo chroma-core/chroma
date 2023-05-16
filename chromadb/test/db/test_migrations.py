@@ -2,13 +2,13 @@ import pytest
 from typing import Generator, List, Callable
 from chromadb.db.migrations import MigratableDB
 from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.config import Settings
+from chromadb.config import System, Settings
 from pytest import FixtureRequest
 
 
 def sqlite() -> Generator[MigratableDB, None, None]:
     """Fixture generator for sqlite DB"""
-    yield SqliteDB(Settings(sqlite_database=":memory:", migrations="none"))
+    yield SqliteDB(System(Settings(sqlite_database=":memory:", migrations="none")))
 
 
 def db_fixtures() -> List[Callable[[], Generator[MigratableDB, None, None]]]:
