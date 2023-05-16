@@ -20,7 +20,7 @@ def settings() -> Generator[Settings, None, None]:
 
 
 def test_count_tracking(settings: Settings) -> None:
-    hnswlib = Hnswlib("test", settings, {})
+    hnswlib = Hnswlib("test", settings, {}, 2)
     hnswlib._init_index(2)
     assert hnswlib._index_metadata["curr_elements"] == 0
     assert hnswlib._index_metadata["total_elements_added"] == 0
@@ -54,7 +54,7 @@ def test_add_delete_large_amount(settings: Settings) -> None:
     D = 512
     large_records = np.random.rand(N, D).astype(np.float32).tolist()
     ids = [uuid.uuid4() for _ in range(N)]
-    hnswlib = Hnswlib("test", settings, {})
+    hnswlib = Hnswlib("test", settings, {}, N)
     hnswlib._init_index(D)
     hnswlib.add(ids, large_records)
     assert hnswlib._index_metadata["curr_elements"] == N
