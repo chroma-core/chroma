@@ -165,11 +165,16 @@ def switch_to_version(version):
 
 def persist_generated_data_with_old_version(
     version,
-    settings,
+    persist_directory,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ):
     old_module = switch_to_version(version)
+    from chromadb.config import Settings
+
+    settings = Settings(
+        chroma_db_impl="duckdb+parquet", persist_directory=persist_directory
+    )
     api: API = old_module.Client(settings)
     api.reset()
     coll = api.create_collection(
@@ -233,7 +238,12 @@ def test_cycle_versions(
     ctx = multiprocessing.get_context("spawn")
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy),
+        args=(
+            version,
+            settings.persist_directory,
+            collection_strategy,
+            embeddings_strategy,
+        ),
     )
     p.start()
     p.join()
