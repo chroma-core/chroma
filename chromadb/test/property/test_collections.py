@@ -17,8 +17,8 @@ from hypothesis.stateful import (
 from typing import Dict, Optional
 
 
-class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
-    collections: Bundle
+class CollectionStateMachine(RuleBasedStateMachine):
+    collections: Bundle[strategies.Collection]
     model: Dict[str, Optional[types.CollectionMetadata]]
 
     collections = Bundle("collections")
@@ -28,12 +28,12 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         self.model = {}
         self.api = api
 
-    @initialize()  # type: ignore
+    @initialize()
     def initialize(self) -> None:
         self.api.reset()
         self.model = {}
 
-    @rule(target=collections, coll=strategies.collections())  # type: ignore
+    @rule(target=collections, coll=strategies.collections())
     def create_coll(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
@@ -57,7 +57,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         assert c.metadata == coll.metadata
         return multiple(coll)
 
-    @rule(coll=collections)  # type: ignore
+    @rule(coll=collections)
     def get_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.model:
             c = self.api.get_collection(name=coll.name)
@@ -67,7 +67,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
             with pytest.raises(Exception):
                 self.api.get_collection(name=coll.name)
 
-    @rule(coll=consumes(collections))  # type: ignore
+    @rule(coll=consumes(collections))
     def delete_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.model:
             self.api.delete_collection(name=coll.name)
@@ -79,7 +79,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         with pytest.raises(Exception):
             self.api.get_collection(name=coll.name)
 
-    @rule()  # type: ignore
+    @rule()
     def list_collections(self) -> None:
         colls = self.api.list_collections()
         assert len(colls) == len(self.model)
@@ -90,7 +90,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         target=collections,
         new_metadata=st.one_of(st.none(), strategies.collection_metadata),
         coll=st.one_of(consumes(collections), strategies.collections()),
-    )  # type: ignore
+    )
     def get_or_create_coll(
         self,
         coll: strategies.Collection,
@@ -147,7 +147,7 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
         coll=consumes(collections),
         new_metadata=strategies.collection_metadata,
         new_name=st.one_of(st.none(), strategies.collection_name()),
-    )  # type: ignore
+    )
     def modify_coll(
         self,
         coll: strategies.Collection,
@@ -185,4 +185,4 @@ class CollectionStateMachine(RuleBasedStateMachine):  # type: ignore
 
 def test_collections(caplog: pytest.LogCaptureFixture, api: API) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: CollectionStateMachine(api))
+    run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
