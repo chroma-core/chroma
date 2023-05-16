@@ -89,7 +89,7 @@ class Hnswlib(Index):
         id: str,
         settings: Settings,
         metadata: Dict[str, str],
-        number_elements: int = DEFAULT_CAPACITY,
+        number_elements: int,
     ):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
@@ -253,7 +253,9 @@ class Hnswlib(Index):
         self._index = p
         self._index.load_index(
             f"{self._save_folder}/index_{self._id}.bin",
-            max_elements=int(curr_elements * self._params.resize_factor),
+            max_elements=int(
+                max(curr_elements * self._params.resize_factor, DEFAULT_CAPACITY)
+            ),
         )
         self._index.set_ef(self._params.search_ef)
         self._index.set_num_threads(self._params.num_threads)
