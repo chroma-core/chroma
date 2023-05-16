@@ -114,7 +114,7 @@ class MigratableDB(SqlDB):
 
     def initialize_migrations(self) -> None:
         """Initialize migrations for this DB"""
-        migrate = self._settings.validate("migrations")
+        migrate = self._settings.require("migrations")
 
         if migrate == "validate":
             self.validate_migrations()
