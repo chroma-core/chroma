@@ -6,6 +6,7 @@ from overrides import override
 import pypika
 from typing import Sequence, cast, Optional, Type, Literal
 from types import TracebackType
+import os
 
 
 class TxWrapper(base.TxWrapper):
@@ -72,7 +73,14 @@ class SqliteDB(MigratableDB):
 
     @override
     def reset(self) -> None:
+        if not self._settings.require("allow_reset"):
+            raise ValueError(
+                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+            )
         self._conn.close()
+        db_file = self._settings.require("sqlite_database")
+        if db_file != ":memory:":
+            os.remove(db_file)
         self._init()
 
     @override

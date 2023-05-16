@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     anonymized_telemetry: bool = True
 
+    allow_reset: bool = False
+
     sqlite_database: Optional[str] = ":memory:"
     migrations: Literal["none", "validate", "apply"] = "apply"
 
