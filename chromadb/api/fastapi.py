@@ -7,7 +7,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Include,
-    Metadata,
     Metadatas,
     Where,
     WhereDocument,
@@ -52,7 +51,7 @@ class FastAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
         get_or_create: bool = False,
     ) -> Collection:
@@ -93,7 +92,7 @@ class FastAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Get a collection, or return it if it exists"""
