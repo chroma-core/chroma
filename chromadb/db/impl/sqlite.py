@@ -34,9 +34,11 @@ class TxWrapper(base.TxWrapper):
 class SqliteDB(MigratableDB):
     _conn: sqlite3.Connection
     _settings: Settings
+    _migration_dirs: Sequence[str]
 
     def __init__(self, system: System):
         self._settings = system.settings
+        self._migration_dirs = []
         self._init()
         super().__init__(system)
 
@@ -57,13 +59,12 @@ class SqliteDB(MigratableDB):
 
     @staticmethod
     @override
-    def migration_dirs() -> Sequence[str]:
-        return []
-
-    @staticmethod
-    @override
     def migration_scope() -> str:
         return "sqlite"
+
+    @override
+    def migration_dirs(self) -> Sequence[str]:
+        return self._migration_dirs
 
     @override
     def tx(self) -> TxWrapper:
@@ -108,6 +109,8 @@ class SqliteDB(MigratableDB):
         with self.tx() as cur:
             cur.execute(
                 """
+                SELECT dir, version, filename, sql, hash
+                FROM migrations
                 WHERE dir = ?
                 ORDER BY version ASC
                 """,
@@ -134,7 +137,7 @@ class SqliteDB(MigratableDB):
             return migrations
 
     @override
-    def apply(self, cur: base.Cursor, migration: Migration) -> None:
+    def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
         cur.execute(migration["sql"])
         cur.execute(
             """

@@ -37,7 +37,8 @@ class InconsistentVersionError(Exception):
     def __init__(self, dir: str, db_version: int, source_version: int):
         super().__init__(
             f"Inconsistent migration versions in {dir}:"
-            + f"db version was {db_version}, source version was {source_version}"
+            + f"db version was {db_version}, source version was {source_version}."
+            + " Has the migration sequence been modified since being applied to the DB?"
         )
 
 
@@ -45,7 +46,7 @@ class InconsistentHashError(Exception):
     def __init__(self, path: str, db_hash: str, source_hash: str):
         super().__init__(
             f"Inconsistent MD5 hashes in {path}:"
-            + f"db hash was {db_hash}, source={source_hash}."
+            + f"db hash was {db_hash}, source has was {source_hash}."
             + " Was the migration file modified after being applied to the DB?"
         )
 
@@ -80,15 +81,14 @@ class MigratableDB(SqlDB):
 
     @staticmethod
     @abstractmethod
-    def migration_dirs() -> Sequence[str]:
-        """Directories containing the migration sequences that should be applied to this
-        DB."""
-        pass
-
-    @staticmethod
-    @abstractmethod
     def migration_scope() -> str:
         """The database implementation to use for migrations (e.g, sqlite, pgsql)"""
+        pass
+
+    @abstractmethod
+    def migration_dirs(self) -> Sequence[str]:
+        """Directories containing the migration sequences that should be applied to this
+        DB."""
         pass
 
     @abstractmethod
@@ -108,7 +108,7 @@ class MigratableDB(SqlDB):
         pass
 
     @abstractmethod
-    def apply(self, cur: Cursor, migration: Migration) -> None:
+    def apply_migration(self, cur: Cursor, migration: Migration) -> None:
         """Apply a single migration to the database"""
         pass
 
@@ -128,8 +128,11 @@ class MigratableDB(SqlDB):
         if not self.migrations_initialized():
             raise UninitializedMigrationsError()
         for dir in self.migration_dirs():
-            source_migrations = _find_migrations(dir, self.migration_scope())
-            unapplied_migrations = self._verify_sequence(dir, source_migrations)
+            db_migrations = self.db_migrations(dir)
+            source_migrations = find_migrations(dir, self.migration_scope())
+            unapplied_migrations = verify_migration_sequence(
+                db_migrations, source_migrations
+            )
             if len(unapplied_migrations) > 0:
                 version = unapplied_migrations[0]["version"]
                 raise UnappliedMigrationsError(dir=dir, version=version)
@@ -138,41 +141,18 @@ class MigratableDB(SqlDB):
         """Validate existing migrations, and apply all new ones."""
         self.setup_migrations()
         for dir in self.migration_dirs():
-            migrations = _find_migrations(dir, self.migration_scope())
+            db_migrations = self.db_migrations(dir)
+            source_migrations = find_migrations(dir, self.migration_scope())
+            unapplied_migrations = verify_migration_sequence(
+                db_migrations, source_migrations
+            )
             with self.tx() as cur:
-                unapplied_migrations = self._verify_sequence(dir, migrations)
                 for migration in unapplied_migrations:
-                    self.apply(cur, migration)
-
-    def _verify_sequence(
-        self, dir: str, migrations: Sequence[Migration]
-    ) -> Sequence[Migration]:
-        """Validate the given source migrations against migrations already applied to
-        this database.
-
-        Return a sequence of all unapplied migrations, or an empty list if all
-        inconsistent with the source migrations."""
-
-        db_migrations = self.db_migrations(dir)
-
-        for source_migration, db_migration in zip(migrations, db_migrations):
-            if db_migration["version"] != source_migration["version"]:
-                raise InconsistentVersionError(
-                    dir=dir,
-                    db_version=db_migration["version"],
-                    source_version=source_migration["version"],
-                )
-
-            if db_migration["hash"] != source_migration["hash"]:
-                raise InconsistentHashError(
-                    path=db_migration["dir"] + "/" + db_migration["filename"],
-                    db_hash=db_migration["hash"],
-                    source_hash=source_migration["hash"],
-                )
-
-        return migrations[len(db_migrations) :]
+                    self.apply_migration(cur, migration)
 
 
+# Format is <version>-<name>.<scope>.sql
+# e.g, 00001-users.sqlite.sql
 filename_regex = re.compile(r"(\d+)-(.+)\.(.+)\.sql")
 
 
@@ -190,7 +170,39 @@ def _parse_migration_filename(dir: str, filename: str) -> MigrationFile:
     }
 
 
-def _find_migrations(dir: str, scope: str) -> Sequence[Migration]:
+def verify_migration_sequence(
+    db_migrations: Sequence[Migration],
+    source_migrations: Sequence[Migration],
+) -> Sequence[Migration]:
+    """Given a list of migrations already applied to a database, and a list of
+    migrations from the source code, validate that the applied migrations are correct
+    and match the expected migrations.
+
+    Throws an exception if any migrations are missing, out of order, or if the source
+    hash does not match.
+
+    Returns a list of all unapplied migrations, or an empty list if all migrations are
+    applied and the database is up to date."""
+
+    for db_migration, source_migration in zip(db_migrations, source_migrations):
+        if db_migration["version"] != source_migration["version"]:
+            raise InconsistentVersionError(
+                dir=db_migration["dir"],
+                db_version=db_migration["version"],
+                source_version=source_migration["version"],
+            )
+
+        if db_migration["hash"] != source_migration["hash"]:
+            raise InconsistentHashError(
+                path=db_migration["dir"] + "/" + db_migration["filename"],
+                db_hash=db_migration["hash"],
+                source_hash=source_migration["hash"],
+            )
+
+    return source_migrations[len(db_migrations) :]
+
+
+def find_migrations(dir: str, scope: str) -> Sequence[Migration]:
     """Return a list of all migration present in the given directory, in ascending
     order. Filter by scope."""
     files = [
