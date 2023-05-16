@@ -69,7 +69,7 @@ class NormalizedRecordSet(TypedDict):
 
 class StateMachineRecordSet(TypedDict):
     """
-    Literally clown world.
+    Rpresents the internal state of a state machine in hypothesis tests.
     """
 
     ids: List[types.ID]
