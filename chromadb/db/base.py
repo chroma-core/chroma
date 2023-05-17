@@ -104,7 +104,7 @@ class ParameterValue(pypika.Parameter):  # type: ignore
 
 def get_sql(
     query: pypika.queries.QueryBuilder, formatstr: str = "?"
-) -> tuple[str, Tuple[Any, ...]]:
+) -> Tuple[str, Tuple[Any, ...]]:
     """
     Wrapper for pypika's get_sql method that allows the values for Parameters
     to be expressed inline while building a query, and that returns a tuple of the
