@@ -1,6 +1,6 @@
-from typing import Any, Optional, Sequence, Tuple, Type, Literal
+from typing import Any, Optional, Sequence, Tuple, Type
 from types import TracebackType
-from typing_extensions import Protocol, Self
+from typing_extensions import Protocol, Self, Literal
 from abc import ABC, abstractmethod
 from threading import local
 from overrides import override, EnforceOverrides
