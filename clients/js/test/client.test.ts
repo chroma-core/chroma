@@ -1,5 +1,5 @@
 import { expect, test } from "@jest/globals";
-import { ChromaClient } from "../src/ChromaClient";
+import { ChromaClient } from "../src/index";
 import chroma from "./initClient";
 
 test("it should create the client connection", async () => {
