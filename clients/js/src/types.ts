@@ -68,5 +68,7 @@ export type QueryResponse = {
 }
 
 export type AddResponse = {
-    error: string;
+  error: string;
 }
+
+export type CollectionMetadata = Record<string, unknown>;

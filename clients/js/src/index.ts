@@ -14,7 +14,8 @@ import {
   CollectionType,
   GetResponse,
   QueryResponse,
-  AddResponse
+  AddResponse,
+  CollectionMetadata
 } from "./types";
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import Count200Response = Api.Count200Response;
@@ -169,7 +170,7 @@ type CallableFunction = {
 export class Collection {
   public name: string;
   public id: string;
-  public metadata: Metadata | undefined;
+  public metadata: CollectionMetadata | undefined;
   /**
    * @ignore
    */
@@ -186,7 +187,7 @@ export class Collection {
     name: string,
     id: string,
     api: DefaultApi,
-    metadata?: Metadata,
+    metadata?: CollectionMetadata,
     embeddingFunction?: CallableFunction
   ) {
     this.name = name;
@@ -206,7 +207,7 @@ export class Collection {
   /**
    * @ignore
    */
-  private setMetadata(metadata: Metadata | undefined): void {
+  private setMetadata(metadata: CollectionMetadata | undefined): void {
     this.metadata = metadata;
   }
 
@@ -419,7 +420,7 @@ export class Collection {
    * Modify the collection name or metadata
    * @param {Object} params - The parameters for the query.
    * @param {string} [params.name] - Optional new name for the collection.
-   * @param {Metadata} [params.metadata] - Optional new metadata for the collection.
+   * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
    * @returns {Promise<void>} - The response from the API.
    *
    * @example
@@ -435,7 +436,7 @@ export class Collection {
     metadata
   }: {
     name?: string,
-    metadata?: Metadata
+    metadata?: CollectionMetadata
   } = {}): Promise<void> {
     const response = await this.api
       .updateCollection(
@@ -799,7 +800,7 @@ export class ChromaClient {
    *
    * @param {Object} params - The parameters for creating a new collection.
    * @param {string} params.name - The name of the collection.
-   * @param {Metadata} [params.metadata] - Optional metadata associated with the collection.
+   * @param {CollectionMetadata} [params.metadata] - Optional metadata associated with the collection.
    * @param {CallableFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
    *
    * @returns {Promise<Collection>} A promise that resolves to the created collection.
@@ -821,7 +822,7 @@ export class ChromaClient {
     embeddingFunction
   }: {
     name: string,
-    metadata?: Metadata,
+    metadata?: CollectionMetadata,
     embeddingFunction?: CallableFunction
   }): Promise<Collection> {
     const newCollection = await this.api
@@ -844,7 +845,7 @@ export class ChromaClient {
    *
    * @param {Object} params - The parameters for creating a new collection.
    * @param {string} params.name - The name of the collection.
-   * @param {Metadata} [params.metadata] - Optional metadata associated with the collection.
+   * @param {CollectionMetadata} [params.metadata] - Optional metadata associated with the collection.
    * @param {CallableFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
    *
    * @returns {Promise<Collection>} A promise that resolves to the got or created collection.
@@ -866,7 +867,7 @@ export class ChromaClient {
     embeddingFunction
   }: {
     name: string,
-    metadata?: Metadata,
+    metadata?: CollectionMetadata,
     embeddingFunction?: CallableFunction
   }): Promise<Collection> {
     const newCollection = await this.api
