@@ -490,7 +490,7 @@ class LocalAPI(API):
             if include_metadatas:
                 cast(List, query_result["metadatas"]).append(metadatas)  # type: ignore
             if include_distances:
-                cast(List, query_result["distances"]).append(distances[i].tolist())  # type: ignore
+                cast(List, query_result["distances"]).append(distances[i])  # type: ignore
             query_result["ids"].append(ids)
 
         return query_result
