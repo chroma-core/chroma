@@ -1,6 +1,6 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
-import { EMBEDDINGS, IDS, METADATAS } from "./data";
+import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
 
 test("it should get a collection", async () => {
   await chroma.reset();
@@ -32,6 +32,17 @@ test("wrong code returns an error", async () => {
   });
   expect(results.error).toBeDefined();
   expect(results.error).toContain("ValueError");
+});
+
+test("it should get embedding with matching documents", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+  const results2 = await collection.get({ where_document: { $contains: "This is a test" } });
+  expect(results2).toBeDefined();
+  expect(results2).toBeInstanceOf(Object);
+  expect(results2.ids.length).toBe(1);
+  expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
 test("test gt, lt, in a simple small way", async () => {

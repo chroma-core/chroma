@@ -41,3 +41,27 @@ test("it should get embedding with matching documents", async () => {
   expect(results2.metadatas[0]).toEqual({ test: "test1new" });
   expect(results2.documents[0]).toEqual("doc1new");
 });
+
+// this currently fails
+// test("it should update metadata or documents to array of Nones", async () => {
+//   await chroma.reset();
+//   const collection = await chroma.createCollection({ name: "test" });
+//   await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+//   await collection.update({
+//     ids: ["test1"],
+//     metadatas: [undefined],
+//   });
+
+//   const results3 = await collection.get({
+//     ids: ["test1"],
+//     include: [
+//       IncludeEnum.Embeddings,
+//       IncludeEnum.Metadatas,
+//       IncludeEnum.Documents,
+//     ]
+//   });
+//   expect(results3).toBeDefined();
+//   expect(results3).toBeInstanceOf(Object);
+//   expect(results3.metadatas[0]).toEqual({});
+// });
