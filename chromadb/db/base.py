@@ -1,6 +1,6 @@
-from typing import Any, Optional, Sequence, Tuple, Type, Literal
+from typing import Any, Optional, Sequence, Tuple, Type
 from types import TracebackType
-from typing_extensions import Protocol, Self
+from typing_extensions import Protocol, Self, Literal
 from abc import ABC, abstractmethod
 from threading import local
 from overrides import override, EnforceOverrides
@@ -59,7 +59,9 @@ class SqlDB(ABC, EnforceOverrides):
 
     @abstractmethod
     def reset(self) -> None:
-        """Reset the database to a clean state"""
+        """Reset the database to a clean state. Implementations may throw an exception
+        if they do not support reset. In all cases, implementations should respect the
+        `allow_reset` config setting and throw an exception if it is set to False."""
         pass
 
     @staticmethod

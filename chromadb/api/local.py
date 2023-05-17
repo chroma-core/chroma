@@ -17,6 +17,7 @@ from chromadb.api.types import (
     QueryResult,
     Where,
     WhereDocument,
+    CollectionMetadata,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -71,7 +72,7 @@ class LocalAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[Callable] = None,  # type: ignore
         get_or_create: bool = False,
     ) -> Collection:
@@ -112,7 +113,7 @@ class LocalAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[Callable] = None,  # type: ignore
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
