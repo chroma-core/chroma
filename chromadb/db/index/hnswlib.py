@@ -267,6 +267,7 @@ class Hnswlib(Index):
         database_labels, distances = self._index.knn_query(
             query, k=k, filter=filter_function
         )
+        distances = distances.tolist()
         distances = cast(List[List[float]], distances)
         logger.debug(f"time to run knn query: {time.time() - s3}")
 

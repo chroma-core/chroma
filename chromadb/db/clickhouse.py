@@ -9,9 +9,6 @@ from chromadb.api.types import (
 )
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
-from chromadb.errors import (
-    NoDatapointsException,
-)
 import uuid
 import numpy.typing as npt
 import json
@@ -579,9 +576,10 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException(
-                    f"No datapoints found for the supplied filter {json.dumps(where)}"
-                )
+                # No results found, return empty lists
+                return [[] for _ in range(len(embeddings))], [
+                    [] for _ in range(len(embeddings))
+                ]
         else:
             ids = None
 
