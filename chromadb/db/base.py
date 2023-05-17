@@ -66,7 +66,7 @@ class SqlDB(ABC, EnforceOverrides):
 
     @staticmethod
     @abstractmethod
-    def querybuilder() -> type[pypika.Query]:
+    def querybuilder() -> Type[pypika.Query]:
         """Return a PyPika Query builder of an appropriate subtype for this database
         implementation (see
         https://pypika.readthedocs.io/en/latest/3_advanced.html#handling-different-database-platforms)
