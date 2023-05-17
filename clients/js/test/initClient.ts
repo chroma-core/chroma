@@ -1,4 +1,4 @@
-import { ChromaClient } from "../src/index";
+import { ChromaClient } from "../src/ChromaClient";
 
 const PORT = process.env.PORT || "8000";
 const URL = "http://localhost:" + PORT;
