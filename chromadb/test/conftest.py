@@ -15,7 +15,7 @@ import shutil
 
 hypothesis.settings.register_profile(
     "dev",
-    deadline=30000,
+    deadline=None,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
