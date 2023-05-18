@@ -7,6 +7,8 @@ def pulsar_to_int(message_id: pulsar.MessageId) -> int:
     batch_index: int = message_id.batch_index()
     partition: int = message_id.partition()
 
+    # Convert to offset binary encoding to preserve ordering semantics when encoded
+    # see https://en.wikipedia.org/wiki/Offset_binary
     ledger_id = ledger_id + 2**63
     entry_id = entry_id + 2**63
     batch_index = batch_index + 2**31
