@@ -11,7 +11,7 @@
     "**/.pytest_cache": true,
     "**/chroma.egg-info": true
   },
-  "python.analysis.typeCheckingMode": "off",
+  "python.analysis.typeCheckingMode": "basic",
   "python.linting.flake8Enabled": true,
   "python.linting.enabled": true,
   "python.linting.flake8Args": [
