@@ -40,6 +40,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction):
 class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __init__(self, api_key: Optional[str] = None,
                  model_name: str = "text-embedding-ada-002",
+                 organization_id: Optional[str] = None,
                  api_base: Optional[str] = None,
                  api_type: Optional[str] = None):
         """
@@ -48,6 +49,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         Args:
             api_key (str, optional): Your API key for the OpenAI API. If not
                 provided, it will raise an error to provide an OpenAI API key.
+            organization_id(str, optional): The OpenAI organization ID if applicable
             model_name (str, optional): The name of the model to use for text 
                 embeddings. Defaults to "text-embedding-ada-002".
             api_base (str, optional): The base path for the API. If not provided,
@@ -78,6 +80,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
 
         if api_type is not None:
             openai.api_type = api_type
+
+        if organization_id is not None:
+            openai.organization = organization_id
 
         self._client = openai.Embedding
         self._model_name = model_name
