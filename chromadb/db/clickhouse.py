@@ -10,7 +10,6 @@ from chromadb.api.types import (
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 import uuid
-import numpy.typing as npt
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
@@ -561,7 +560,7 @@ class Clickhouse(DB):
         where_document: WhereDocument,
         embeddings: Embeddings,
         n_results: int,
-    ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
         # Either the collection name or the collection uuid must be provided
         if collection_uuid is None:
             raise TypeError("Argument collection_uuid cannot be None")
