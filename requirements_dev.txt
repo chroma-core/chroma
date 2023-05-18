@@ -1,5 +1,9 @@
+black==23.3.0 # match what's in pyproject.toml
 build
+httpx
+hypothesis
+hypothesis[numpy]
+pre-commit
 pytest
 setuptools_scm
-httpx
-black==22.10.0 # match what's in pyproject.toml
+types-requests==2.30.0.0

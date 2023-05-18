@@ -1,18 +1,29 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Sequence, Optional, Tuple
+from typing import List, Sequence, Optional, Tuple
 from uuid import UUID
 import numpy.typing as npt
-from chromadb.api.types import Embeddings, Documents, IDs, Metadatas, Where, WhereDocument
+from chromadb.api.types import (
+    Embeddings,
+    Documents,
+    IDs,
+    Metadatas,
+    Metadata,
+    Where,
+    WhereDocument,
+)
 
 
 class DB(ABC):
     @abstractmethod
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @abstractmethod
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        get_or_create: bool = False,
     ) -> Sequence:
         pass
 
@@ -26,31 +37,36 @@ class DB(ABC):
 
     @abstractmethod
     def update_collection(
-        self, current_name: str, new_name: Optional[str] = None, new_metadata: Optional[Dict] = None
-    ):
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[Metadata] = None,
+    ) -> None:
         pass
 
     @abstractmethod
-    def delete_collection(self, name: str):
+    def delete_collection(self, name: str) -> None:
         pass
 
     @abstractmethod
-    def get_collection_uuid_from_name(self, collection_name: str) -> str:
+    def get_collection_uuid_from_name(self, collection_name: str) -> UUID:
         pass
 
     @abstractmethod
     def add(
         self,
-        collection_uuid: str,
+        collection_uuid: UUID,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
-        ids: List[UUID],
+        ids: List[str],
     ) -> List[UUID]:
         pass
 
     @abstractmethod
-    def add_incremental(self, collection_uuid: str, ids: List[UUID], embeddings: Embeddings):
+    def add_incremental(
+        self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
+    ) -> None:
         pass
 
     @abstractmethod
@@ -58,7 +74,7 @@ class DB(ABC):
         self,
         where: Where = {},
         collection_name: Optional[str] = None,
-        collection_uuid: Optional[str] = None,
+        collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
@@ -71,40 +87,47 @@ class DB(ABC):
     @abstractmethod
     def update(
         self,
-        collection_uuid: str,
+        collection_uuid: UUID,
         ids: IDs,
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> bool:
         pass
 
     @abstractmethod
-    def count(self, collection_name: str):
+    def count(self, collection_id: UUID) -> int:
         pass
 
     @abstractmethod
     def delete(
         self,
         where: Where = {},
-        collection_uuid: Optional[str] = None,
+        collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ) -> List:
+    ) -> List[str]:
         pass
 
     @abstractmethod
-    def reset(self):
+    def reset(self) -> None:
         pass
 
     @abstractmethod
     def get_nearest_neighbors(
-        self, collection_name, where, embeddings, n_results, where_document
+        self,
+        collection_uuid: UUID,
+        where: Where = {},
+        embeddings: Optional[Embeddings] = None,
+        n_results: int = 10,
+        where_document: WhereDocument = {},
     ) -> Tuple[List[List[UUID]], npt.NDArray]:
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids, columns=None) -> Sequence:
+    def get_by_ids(
+        self, uuids: List[UUID], columns: Optional[List[str]] = None
+    ) -> Sequence:
         pass
 
     @abstractmethod
@@ -112,9 +135,9 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def create_index(self, collection_uuid: str):
+    def create_index(self, collection_uuid: UUID):
         pass
 
     @abstractmethod
-    def persist(self):
+    def persist(self) -> None:
         pass
