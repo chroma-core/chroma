@@ -99,7 +99,12 @@ class Clickhouse(DB):
         if collection_id not in self.index_cache:
             coll = self.get_collection_by_id(collection_id)
             collection_metadata = coll[2]
-            index = Hnswlib(collection_id, self._settings, collection_metadata)
+            index = Hnswlib(
+                collection_id,
+                self._settings,
+                collection_metadata,
+                self.count(collection_id),
+            )
             self.index_cache[collection_id] = index
 
         return self.index_cache[collection_id]
