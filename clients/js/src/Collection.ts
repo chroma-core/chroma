@@ -441,7 +441,7 @@ export class Collection {
      * @param {Embedding | Embeddings} [params.query_embeddings] - Optional query embeddings to use for the search.
      * @param {PositiveInteger} [params.n_results] - Optional number of results to return (default is 10).
      * @param {Where} [params.where] - Optional query condition to filter results based on metadata values.
-     * @param {string | string[]} [params.query_text] - Optional query text(s) to search for in the collection (renamed to 'query_texts' in the future).
+     * @param {string | string[]} [params.query_texts] - Optional query text(s) to search for in the collection (renamed to 'query_texts' in the future).
      * @param {WhereDocument} [params.where_document] - Optional query condition to filter results based on document content.
      * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
      *
@@ -459,7 +459,7 @@ export class Collection {
      * ```js
      * // Query the collection using query text
      * const results = await collection.query({
-     *   query_text: "some text",
+     *   query_texts: "some text",
      *   n_results: 10,
      *   where: {"name": {"$eq": "John Doe"}},
      *   include: ["metadata", "document"]
@@ -471,24 +471,24 @@ export class Collection {
         query_embeddings,
         n_results,
         where,
-        query_text,
+        query_texts,
         where_document,
         include,
     }: {
         query_embeddings?: Embedding | Embeddings,
         n_results?: PositiveInteger,
         where?: Where,
-        query_text?: string | string[], // TODO: should be named query_texts to match python API
+        query_texts?: string | string[], // TODO: should be named query_texts to match python API
         where_document?: WhereDocument, // {"$contains":"search_string"}
         include?: IncludeEnum[] // ["metadata", "document"]
     }): Promise<QueryResponse> {
         if (n_results === undefined) n_results = 10
-        if (query_embeddings === undefined && query_text === undefined) {
+        if (query_embeddings === undefined && query_texts === undefined) {
             throw new Error(
-                "query_embeddings and query_text cannot both be undefined"
+                "query_embeddings and query_texts cannot both be undefined"
             );
-        } else if (query_embeddings === undefined && query_text !== undefined) {
-            const query_texts = toArray(query_text);
+        } else if (query_embeddings === undefined && query_texts !== undefined) {
+            const query_texts = toArray(query_texts);
             if (this.embeddingFunction !== undefined) {
                 query_embeddings = await this.embeddingFunction.generate(query_texts);
             } else {
