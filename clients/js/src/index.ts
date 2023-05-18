@@ -616,26 +616,26 @@ export class Collection {
     query_embeddings,
     n_results,
     where,
-    query_text,
+    query_texts,
     where_document,
     include,
   }: {
     query_embeddings?: Embedding | Embeddings,
     n_results?: PositiveInteger,
     where?: Where,
-    query_text?: string | string[], // TODO: should be named query_texts to match python API
+    query_texts?: string | string[], // TODO: should be named query_texts to match python API
     where_document?: WhereDocument, // {"$contains":"search_string"}
     include?: IncludeEnum[] // ["metadata", "document"]
   }): Promise<QueryResponse> {
     if (n_results === undefined) n_results = 10
-    if (query_embeddings === undefined && query_text === undefined) {
+    if (query_embeddings === undefined && query_texts === undefined) {
       throw new Error(
-        "query_embeddings and query_text cannot both be undefined"
+        "query_embeddings and query_texts cannot both be undefined"
       );
-    } else if (query_embeddings === undefined && query_text !== undefined) {
-      const query_texts = toArray(query_text);
+    } else if (query_embeddings === undefined && query_texts !== undefined) {
+      const query_textsArray = toArray(query_texts);
       if (this.embeddingFunction !== undefined) {
-        query_embeddings = await this.embeddingFunction.generate(query_texts);
+        query_embeddings = await this.embeddingFunction.generate(query_textsArray);
       } else {
         throw new Error(
           "embeddingFunction is undefined. Please configure an embedding function"
