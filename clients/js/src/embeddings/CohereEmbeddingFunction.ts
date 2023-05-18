@@ -20,8 +20,6 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
     }
 
     public async generate(texts: string[]) {
-        const cohere = CohereAiApi.init(this.api_key);
-        const embeddings = [];
         const response = await CohereAiApi.embed({
             texts: texts,
             model: this.model,
