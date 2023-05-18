@@ -7,16 +7,31 @@ def pulsar_to_int(message_id: pulsar.MessageId) -> int:
     batch_index: int = message_id.batch_index()
     partition: int = message_id.partition()
 
-    return ledger_id << 128 | entry_id << 64 | batch_index << 32 | partition
+    # Encode batch_index and partition as signed ints, by setting the high bit to
+    # indicate a positive value. This preserves numeric ordering in the resulting value
+    # (unlike other signed integer binary encoding schemes).
+    batch_encoded = 0x80000000 | batch_index if batch_index >= 0 else abs(batch_index)
+    partition_encoded = 0x80000000 | partition if partition >= 0 else abs(partition)
+    return ledger_id << 128 | entry_id << 64 | batch_encoded << 32 | partition_encoded
 
 
-def int_to_pulsar(message_id_int: int) -> pulsar.MessageId:
-    return pulsar.MessageId(
-        message_id_int & 0xFFFFFFFF,
-        (message_id_int >> 128) & 0xFFFFFFFFFFFFFFFF,
-        (message_id_int >> 64) & 0xFFFFFFFFFFFFFFFF,
-        (message_id_int >> 32) & 0xFFFFFFFF,
-    )
+def int_to_pulsar(message_id: int) -> pulsar.MessageId:
+    partition_encoded = message_id & 0xFFFFFFFF
+    batch_encoded = message_id >> 32 & 0xFFFFFFFF
+    entry_id = message_id >> 64 & 0xFFFFFFFFFFFFFFFF
+    ledger_id = message_id >> 128 & 0xFFFFFFFFFFFFFFFF
+
+    if batch_encoded & 0x80000000:
+        batch_index = batch_encoded & 0x7FFFFFFF
+    else:
+        batch_index = -(batch_encoded & 0x7FFFFFFF)
+
+    if partition_encoded & 0x80000000:
+        partition = partition_encoded & 0x7FFFFFFF
+    else:
+        partition = -(partition_encoded & 0x7FFFFFFF)
+
+    return pulsar.MessageId(partition, ledger_id, entry_id, batch_index)
 
 
 def int_to_bytes(int: int) -> bytes:

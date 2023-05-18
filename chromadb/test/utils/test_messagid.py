@@ -1,52 +1,17 @@
 import chromadb.utils.messageid as mid
 import pulsar
 import hypothesis.strategies as st
-from hypothesis import given, settings  # , note
+from hypothesis import given, settings, note
 from typing import Any, Tuple
-
-MIN_64_INT = -(2**63)
-MAX_64_INT = 2**63 - 1
-MIN_32_INT = -(2**31)
-MAX_32_INT = 2**31 - 1
-
-
-def tuple_to_int(message_id: Tuple[int, int, int, int]) -> int:
-    partition, ledger_id, entry_id, batch_index = message_id
-    return ledger_id << 128 | entry_id << 64 | batch_index << 32 | partition
-
-
-def int_to_tuple(message_id_int: int) -> Tuple[int, int, int, int]:
-    partition = message_id_int & 0xFFFFFFFF
-    ledger_id = 0  # (message_id_int >> 128) & 0xFFFFFFFFFFFFFFFF
-    entry_id = 0  # (message_id_int >> 64) & 0xFFFFFFFFFFFFFFFF
-    batch_index = 0  # (message_id_int >> 32) & 0xFFFFFFFF
-
-    return partition, ledger_id, entry_id, batch_index
 
 
 @st.composite
 def message_id(draw: st.DrawFn) -> pulsar.MessageId:
-    ledger_id = draw(st.integers(min_value=0, max_value=MAX_64_INT))
-    entry_id = draw(st.integers(min_value=0, max_value=MAX_64_INT))
-    batch_index = draw(st.integers(min_value=MIN_32_INT, max_value=MAX_32_INT))
-    partition = draw(st.integers(min_value=MIN_32_INT, max_value=MAX_32_INT))
+    ledger_id = draw(st.integers(min_value=0, max_value=2**63 - 1))
+    entry_id = draw(st.integers(min_value=0, max_value=2**63 - 1))
+    batch_index = draw(st.integers(min_value=(2**31 - 1) * -1, max_value=2**31 - 1))
+    partition = draw(st.integers(min_value=(2**31 - 1) * -1, max_value=2**31 - 1))
     return pulsar.MessageId(partition, ledger_id, entry_id, batch_index)
-
-
-def test_roundtrip_tuples() -> None:
-    message_id = pulsar.MessageId(-1, 0, 0, 0)
-
-    t1 = (
-        message_id.partition(),
-        message_id.ledger_id(),
-        message_id.entry_id(),
-        message_id.batch_index(),
-    )
-    # note("t1:" + str(t1))
-    int1 = tuple_to_int(t1)
-    t2 = int_to_tuple(int1)
-    # note("t2:" + str(t2))
-    assert t1 == t2
 
 
 @given(message_id=message_id())
@@ -55,12 +20,12 @@ def test_roundtrip_formats(message_id: pulsar.MessageId) -> None:
     int1 = mid.pulsar_to_int(message_id)
 
     # Roundtrip int->string and back
-    # str1 = mid.int_to_str(int1)
-    # assert int1 == mid.str_to_int(str1)
+    str1 = mid.int_to_str(int1)
+    assert int1 == mid.str_to_int(str1)
 
     # Roundtrip int->bytes and back
-    # b1 = mid.int_to_bytes(int1)
-    # assert int1 == mid.bytes_to_int(b1)
+    b1 = mid.int_to_bytes(int1)
+    assert int1 == mid.bytes_to_int(b1)
 
     # Roundtrip int -> MessageId and back
     message_id_result = mid.int_to_pulsar(int1)
@@ -84,7 +49,7 @@ def assert_compare(pair1: Tuple[Any, Any], pair2: Tuple[Any, Any]) -> None:
         assert (a <= b) == (c <= d)
         assert (a == b) == (c == d)
     except AssertionError:
-        print(f"Failed to compare {a} and {b} with {c} and {d}")
+        note(f"Failed to compare {a} and {b} with {c} and {d}")
         raise
 
 
@@ -109,4 +74,4 @@ def test_comparison(m1: pulsar.MessageId, m2: pulsar.MessageId) -> None:
 
 
 def test_max_values() -> None:
-    pulsar.MessageId(MAX_32_INT, MAX_64_INT, MAX_64_INT, MAX_32_INT)
+    pulsar.MessageId(2**31 - 1, 2**63 - 1, 2**63 - 1, 2**31 - 1)
