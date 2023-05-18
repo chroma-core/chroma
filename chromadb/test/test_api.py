@@ -1308,20 +1308,20 @@ def test_invalid_embeddings(api):
 
     # Add with string embeddings
     invalid_records = {
-        "embeddings": [['0', '0', '0'], ['1.2', '2.24', '3.2']],
+        "embeddings": [["0", "0", "0"], ["1.2", "2.24", "3.2"]],
         "ids": ["id1", "id2"],
     }
     with pytest.raises(ValueError) as e:
         collection.add(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Query with invalid embeddings
     with pytest.raises(ValueError) as e:
         collection.query(
-            query_embeddings=[['1.1', '2.3', '3.2']],
+            query_embeddings=[["1.1", "2.3", "3.2"]],
             n_results=1,
         )
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Update with invalid embeddings
     invalid_records = {
@@ -1330,7 +1330,7 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.update(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Upsert with invalid embeddings
     invalid_records = {
@@ -1339,4 +1339,4 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
