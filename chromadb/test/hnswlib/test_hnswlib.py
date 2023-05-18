@@ -10,11 +10,10 @@ import uuid
 import numpy as np
 
 
-@pytest.fixture(scope="module")  # type: ignore
+@pytest.fixture(scope="module")
 def settings() -> Generator[Settings, None, None]:
     save_path = tempfile.gettempdir() + "/tests/hnswlib/"
     yield Settings(persist_directory=save_path)
-    print("after yield")
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
