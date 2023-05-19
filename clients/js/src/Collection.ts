@@ -319,7 +319,7 @@ export class Collection {
      * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
      * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
      * @param {IncludeEnum[]} [params.include] - Optional list of items to include in the response.
-     * @param {WhereDocument} [params.where_document] - Optional where clause to filter items by.
+     * @param {WhereDocument} [params.whereDocument] - Optional where clause to filter items by.
      * @returns {Promise<GetResponse>} - The response from the server.
      *
      * @example
@@ -330,7 +330,7 @@ export class Collection {
      *   limit: 10,
      *   offset: 0,
      *   include: ["embeddings", "metadatas", "documents"],
-     *   where_document: { $contains: "value" },
+     *   whereDocument: { $contains: "value" },
      * });
      * ```
      */
@@ -340,14 +340,14 @@ export class Collection {
         limit,
         offset,
         include,
-        where_document,
+        whereDocument,
     }: {
         ids?: ID | IDs,
         where?: Where,
         limit?: PositiveInteger,
         offset?: PositiveInteger,
         include?: IncludeEnum[],
-        where_document?: WhereDocument
+        whereDocument?: WhereDocument
     } = {}): Promise<GetResponse> {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
@@ -359,7 +359,7 @@ export class Collection {
                 limit,
                 offset,
                 include,
-                where_document,
+                where_document: whereDocument,
             })
             .then(handleSuccess)
             .catch(handleError);
@@ -438,11 +438,11 @@ export class Collection {
      * Performs a query on the collection using the specified parameters.
      *
      * @param {Object} params - The parameters for the query.
-     * @param {Embedding | Embeddings} [params.query_embeddings] - Optional query embeddings to use for the search.
-     * @param {PositiveInteger} [params.n_results] - Optional number of results to return (default is 10).
+     * @param {Embedding | Embeddings} [params.queryEmbeddings] - Optional query embeddings to use for the search.
+     * @param {PositiveInteger} [params.nResults] - Optional number of results to return (default is 10).
      * @param {Where} [params.where] - Optional query condition to filter results based on metadata values.
-     * @param {string | string[]} [params.query_texts] - Optional query text(s) to search for in the collection.
-     * @param {WhereDocument} [params.where_document] - Optional query condition to filter results based on document content.
+     * @param {string | string[]} [params.queryTexts] - Optional query text(s) to search for in the collection.
+     * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter results based on document content.
      * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
      *
      * @returns {Promise<QueryResponse>} A promise that resolves to the query results.
@@ -450,8 +450,8 @@ export class Collection {
      * @example
      * // Query the collection using embeddings
      * const results = await collection.query({
-     *   query_embeddings: [[0.1, 0.2, ...], ...],
-     *   n_results: 10,
+     *   queryEmbeddings: [[0.1, 0.2, ...], ...],
+     *   nResults: 10,
      *   where: {"name": {"$eq": "John Doe"}},
      *   include: ["metadata", "document"]
      * });
@@ -459,8 +459,8 @@ export class Collection {
      * ```js
      * // Query the collection using query text
      * const results = await collection.query({
-     *   query_texts: "some text",
-     *   n_results: 10,
+     *   queryTexts: "some text",
+     *   nResults: 10,
      *   where: {"name": {"$eq": "John Doe"}},
      *   include: ["metadata", "document"]
      * });
@@ -468,46 +468,46 @@ export class Collection {
      *
      */
     public async query({
-        query_embeddings,
-        n_results,
+        queryEmbeddings,
+        nResults,
         where,
-        query_texts,
-        where_document,
+        queryTexts,
+        whereDocument,
         include,
     }: {
-        query_embeddings?: Embedding | Embeddings,
-        n_results?: PositiveInteger,
+        queryEmbeddings?: Embedding | Embeddings,
+        nResults?: PositiveInteger,
         where?: Where,
-        query_texts?: string | string[], // TODO: should be named query_texts to match python API
-        where_document?: WhereDocument, // {"$contains":"search_string"}
+        queryTexts?: string | string[],
+        whereDocument?: WhereDocument, // {"$contains":"search_string"}
         include?: IncludeEnum[] // ["metadata", "document"]
     }): Promise<QueryResponse> {
-        if (n_results === undefined) n_results = 10
-        if (query_embeddings === undefined && query_texts === undefined) {
+        if (nResults === undefined) nResults = 10
+        if (queryEmbeddings === undefined && queryTexts === undefined) {
             throw new Error(
-                "query_embeddings and query_texts cannot both be undefined"
+                "queryEmbeddings and queryTexts cannot both be undefined"
             );
-        } else if (query_embeddings === undefined && query_texts !== undefined) {
-            const queryTextsArray = toArray(query_texts);
+        } else if (queryEmbeddings === undefined && queryTexts !== undefined) {
+            const queryTextsArray = toArray(queryTexts);
             if (this.embeddingFunction !== undefined) {
-                query_embeddings = await this.embeddingFunction.generate(queryTextsArray);
+                queryEmbeddings = await this.embeddingFunction.generate(queryTextsArray);
             } else {
                 throw new Error(
                     "embeddingFunction is undefined. Please configure an embedding function"
                 );
             }
         }
-        if (query_embeddings === undefined)
+        if (queryEmbeddings === undefined)
             throw new Error("embeddings is undefined but shouldnt be");
 
-        const query_embeddingsArray = toArrayOfArrays(query_embeddings);
+        const query_embeddingsArray = toArrayOfArrays(queryEmbeddings);
 
         return await this.api
             .getNearestNeighbors(this.id, {
                 query_embeddings: query_embeddingsArray,
                 where,
-                n_results: n_results,
-                where_document: where_document,
+                n_results: nResults,
+                where_document: whereDocument,
                 include: include,
             })
             .then(handleSuccess)
@@ -541,7 +541,7 @@ export class Collection {
      * @param {Object} params - The parameters for deleting items from the collection.
      * @param {ID | IDs} [params.ids] - Optional ID or array of IDs of items to delete.
      * @param {Where} [params.where] - Optional query condition to filter items to delete based on metadata values.
-     * @param {WhereDocument} [params.where_document] - Optional query condition to filter items to delete based on document content.
+     * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter items to delete based on document content.
      * @returns {Promise<string[]>} A promise that resolves to the IDs of the deleted items.
      * @throws {Error} If there is an issue deleting items from the collection.
      *
@@ -550,23 +550,23 @@ export class Collection {
      * const results = await collection.delete({
      *   ids: "some_id",
      *   where: {"name": {"$eq": "John Doe"}},
-     *   where_document: {"$contains":"search_string"}
+     *   whereDocument: {"$contains":"search_string"}
      * });
      * ```
      */
     public async delete({
         ids,
         where,
-        where_document
+        whereDocument
     }: {
         ids?: ID | IDs,
         where?: Where,
-        where_document?: WhereDocument
+        whereDocument?: WhereDocument
     } = {}): Promise<string[]> {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
         return await this.api
-            .aDelete(this.id, { ids: idsArray, where: where, where_document: where_document })
+            .aDelete(this.id, { ids: idsArray, where: where, where_document: whereDocument })
             .then(handleSuccess)
             .catch(handleError);
     }

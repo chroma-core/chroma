@@ -38,7 +38,7 @@ test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
   await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
-  const results2 = await collection.get({ where_document: { $contains: "This is a test" } });
+  const results2 = await collection.get({ whereDocument: { $contains: "This is a test" } });
   expect(results2).toBeDefined();
   expect(results2).toBeInstanceOf(Object);
   expect(results2.ids.length).toBe(1);
