@@ -1,7 +1,7 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, List, Dict, Union
+from typing import Any, Optional, List, Dict, Union
 from typing_extensions import TypedDict
 import numpy as np
 import chromadb.api.types as types
@@ -81,12 +81,16 @@ safe_floats = st.floats(
     allow_infinity=False, allow_nan=False, allow_subnormal=False
 )  # TODO: handle infinity and NAN
 
-safe_values = [safe_text, safe_integers, safe_floats]
+safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+    safe_text,
+    safe_integers,
+    safe_floats,
+]
 
 
 def one_or_both(
-    strategy_a: st.SearchStrategy, strategy_b: st.SearchStrategy
-) -> st.SearchStrategy:
+    strategy_a: st.SearchStrategy[Any], strategy_b: st.SearchStrategy[Any]
+) -> st.SearchStrategy[Any]:
     return st.one_of(
         st.tuples(strategy_a, strategy_b),
         st.tuples(strategy_a, st.none()),
@@ -103,7 +107,7 @@ float_types = [np.float16, np.float32, np.float64]
 int_types = [np.int16, np.int32, np.int64]  # TODO: handle int types
 
 
-@st.composite  # type: ignore
+@st.composite
 def collection_name(draw: st.DrawFn) -> str:
     _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
     _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -174,7 +178,7 @@ class Collection:
     metadata: Optional[types.Metadata]
     dimension: int
     dtype: np.dtype
-    known_metadata_keys: Dict[str, st.SearchStrategy]
+    known_metadata_keys: Dict[str, str]
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
@@ -212,7 +216,7 @@ def collections(
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
-            known_metadata_keys[key] = draw(st.sampled_from(safe_values))
+            known_metadata_keys[key] = draw(st.one_of(*safe_values))
 
     if has_documents is None:
         has_documents = draw(st.booleans())
@@ -242,22 +246,23 @@ def collections(
     )
 
 
-@st.composite  # type: ignore
+@st.composite
 def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
-    md: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
     if collection.known_metadata_keys:
         for key in collection.known_metadata_keys.keys():
-            if key in md:
-                del md[key]
+            if key in metadata:
+                del metadata[key]
         # Finally, add in some of the known keys for the collection
-        md.update(
-            draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys))
-        )
-    return md
+        sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
+            k: st.just(v) for k, v in collection.known_metadata_keys.items()
+        }
+        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))
+    return metadata
 
 
 @st.composite  # type: ignore
@@ -347,9 +352,9 @@ def recordsets(
 # unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
 class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
     def __init__(self, machine: RuleBasedStateMachine) -> None:
-        super().__init__()
+        super().__init__()  # type: ignore
         self.machine = machine
-        self.rules = list(machine.rules())
+        self.rules = list(machine.rules())  # type: ignore
 
         # The order is a bit arbitrary. Primarily we're trying to group rules
         # that write to the same location together, and to put rules with no
@@ -386,26 +391,26 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
             return False
 
         for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)
+            bundle = self.machine.bundle(b.name)  # type: ignore
             if not bundle:
                 return False
         return True
 
 
-@st.composite  # type: ignore
+@st.composite
 def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
 
     known_keys = sorted(collection.known_metadata_keys.keys())
 
     key = draw(st.sampled_from(known_keys))
-    value = draw(collection.known_metadata_keys[key])
+    value = collection.known_metadata_keys[key]
 
     legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
     if not isinstance(value, str):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
 
-    op = draw(st.sampled_from(legal_ops))
+    op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
     if op is None:
         return {key: value}
@@ -413,8 +418,8 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
         return {key: {op: value}}
 
 
-@st.composite  # type: ignore
-def where_doc_clause(draw, collection: Collection) -> types.WhereDocument:
+@st.composite
+def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
     if collection.known_document_keywords:
         word = draw(st.sampled_from(collection.known_document_keywords))
@@ -423,40 +428,50 @@ def where_doc_clause(draw, collection: Collection) -> types.WhereDocument:
     return {"$contains": word}
 
 
-@st.composite  # type: ignore
-def binary_operator_clause(draw: st.DrawFn, base_st: st.SearchStrategy) -> types.Where:
-    op = draw(st.sampled_from(["$and", "$or"]))
-    return {op: [draw(base_st), draw(base_st)]}
+def binary_operator_clause(
+    base_st: SearchStrategy[types.Where],
+) -> SearchStrategy[types.Where]:
+    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    return st.dictionaries(keys=op, values=st.lists(base_st, max_size=2, min_size=2))
 
 
-@st.composite  # type: ignore
+def binary_document_operator_clause(
+    base_st: SearchStrategy[types.WhereDocument],
+) -> SearchStrategy[types.WhereDocument]:
+    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    return st.dictionaries(keys=op, values=st.lists(base_st, max_size=2, min_size=2))
+
+
+@st.composite
 def recursive_where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     base_st = where_clause(collection)
     where: types.Where = draw(st.recursive(base_st, binary_operator_clause))
     return where
 
 
-@st.composite  # type: ignore
+@st.composite
 def recursive_where_doc_clause(
     draw: st.DrawFn, collection: Collection
 ) -> types.WhereDocument:
     base_st = where_doc_clause(collection)
-    where: types.WhereDocument = draw(st.recursive(base_st, binary_operator_clause))
+    where: types.WhereDocument = draw(
+        st.recursive(base_st, binary_document_operator_clause)
+    )
     return where
 
 
 class Filter(TypedDict):
-    where: Optional[Dict[str, Union[str, int, float]]]
+    where: Optional[types.Where]
     ids: Optional[Union[str, List[str]]]
     where_document: Optional[types.WhereDocument]
 
 
-@st.composite  # type: ignore
+@st.composite
 def filters(
     draw: st.DrawFn,
     collection_st: st.SearchStrategy[Collection],
     recordset_st: st.SearchStrategy[RecordSet],
-    include_all_ids=False,
+    include_all_ids: bool = False,
 ) -> Filter:
     collection = draw(collection_st)
     recordset = draw(recordset_st)
@@ -466,10 +481,12 @@ def filters(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
 
-    ids = recordset["ids"]
+    ids: Optional[Union[List[types.ID], types.ID]]
     # Record sets can be a value instead of a list of values if there is only one record
-    if isinstance(ids, str):
-        ids = [ids]
+    if isinstance(recordset["ids"], str):
+        ids = [recordset["ids"]]
+    else:
+        ids = recordset["ids"]
 
     if not include_all_ids:
         ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))

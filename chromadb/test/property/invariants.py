@@ -1,6 +1,6 @@
 import math
 from chromadb.test.property.strategies import RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
 import numpy as np
 from chromadb.api import types
@@ -30,10 +30,8 @@ def wrap_all(embeddings: RecordSet) -> RecordSet:
         embedding_list = embeddings["embeddings"]
         if len(embedding_list) > 0:
             if not all(isinstance(embedding, list) for embedding in embedding_list):
-                if all(isinstance(e, int) for e in embedding_list) or all(
-                    isinstance(e, float) for e in embedding_list
-                ):
-                    embedding_list = [embedding_list]  # type: ignore
+                if all(isinstance(e, (int, float)) for e in embedding_list):
+                    embedding_list = cast(types.Embeddings, [embedding_list])
                 else:
                     raise InvalidArgument(
                         "embeddings must be a list of lists, a list of numbers, or None"
@@ -60,35 +58,35 @@ def count(collection: Collection, embeddings: RecordSet) -> None:
 
 def _field_matches(
     collection: Collection,
-    embeddings: RecordSet,
+    record_set: RecordSet,
     field_name: Union[Literal["documents"], Literal["metadatas"]],
 ) -> None:
     """
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    result = collection.get(ids=embeddings["ids"], include=[field_name])
+    result = collection.get(ids=record_set["ids"], include=[field_name])
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
-    embedding_id_to_index = {id: i for i, id in enumerate(embeddings["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(record_set["ids"])}
     actual_field = result[field_name]
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
     assert actual_field is not None
-    actual_field = sorted(
+    sorted_field = sorted(
         enumerate(actual_field),
         key=lambda index_and_field_value: embedding_id_to_index[
             result["ids"][index_and_field_value[0]]
         ],
-    )  # type: ignore
-    actual_field = [field_value for _, field_value in actual_field]  # type: ignore
+    )
+    field_values = [field_value for _, field_value in sorted_field]
 
-    expected_field = embeddings[field_name]
+    expected_field = cast(List[Optional[types.Document]], record_set[field_name])
     if expected_field is None:
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
-        expected_field = [None] * len(embeddings["ids"])  # type: ignore
-    assert actual_field == expected_field
+        expected_field = [None] * len(record_set["ids"])
+    assert field_values == expected_field
 
 
 def ids_match(collection: Collection, embeddings: RecordSet) -> None:
@@ -183,7 +181,7 @@ def ann_accuracy(
         # The higher the dimensionality, the more noise is introduced, since each float element
         # of the vector has noise added, which is then subsequently included in all normalization calculations.
         # This means that higher dimensions will have more noise, and thus more error.
-        assert isinstance(embeddings[0], list)
+        assert all(isinstance(e, list) for e in embeddings)
         dim = len(embeddings[0])
         accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
