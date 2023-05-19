@@ -245,7 +245,9 @@ def validate_n_results(n_results: int) -> int:
     """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
     # Check Number of requested results
     if not isinstance(n_results, int):
-        raise ValueError(f"Expected include to be a int, got {n_results}")
+        raise ValueError(
+            f"Expected requested number of results to be a int, got {n_results}"
+        )
     if n_results <= 0:
         raise TypeError(
             f"Number of requested results {n_results}, cannot be negative, or zero."
