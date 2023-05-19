@@ -1,7 +1,7 @@
 {
   "git.ignoreLimitWarning": true,
   "editor.rulers": [
-    120
+    88
   ],
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",
@@ -24,5 +24,15 @@
     "."
   ],
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true
+  "python.testing.pytestEnabled": true,
+  "editor.formatOnPaste": true,
+  "python.linting.mypyEnabled": true,
+  "python.linting.mypyCategorySeverity.note": "Error",
+  "python.linting.mypyArgs": [
+    "--follow-imports=silent",
+    "--ignore-missing-imports",
+    "--show-column-numbers",
+    "--no-pretty",
+    "--strict"
+  ]
 }

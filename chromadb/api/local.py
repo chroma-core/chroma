@@ -4,7 +4,6 @@ from uuid import UUID
 from typing import List, Optional, Sequence, Callable, cast
 from chromadb import __version__
 import chromadb.errors as errors
-import chromadb.config
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -18,8 +17,10 @@ from chromadb.api.types import (
     QueryResult,
     Where,
     WhereDocument,
+    CollectionMetadata,
 )
 from chromadb.api.models.Collection import Collection
+from chromadb.config import System
 
 import re
 
@@ -49,11 +50,12 @@ def check_index_name(index_name: str) -> None:
 
 
 class LocalAPI(API):
-    def __init__(
-        self, settings: chromadb.config.Settings, db: DB, telemetry_client: Telemetry
-    ) -> None:
-        self._db = db
-        self._telemetry_client = telemetry_client
+    _db: DB
+    _telemetry_client: Telemetry
+
+    def __init__(self, system: System):
+        self._db = system.get_db()
+        self._telemetry_client = system.get_telemetry()
 
     def heartbeat(self) -> int:
         """Ping the database to ensure it is alive
@@ -70,7 +72,7 @@ class LocalAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[Callable] = None,  # type: ignore
         get_or_create: bool = False,
     ) -> Collection:
@@ -111,7 +113,7 @@ class LocalAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[Callable] = None,  # type: ignore
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
@@ -455,10 +457,10 @@ class LocalAPI(API):
             distances=[] if include_distances else None,
         )
         for i in range(len(uuids)):
-            embeddings = []
-            documents = []
-            ids = []
-            metadatas = []
+            embeddings: Embeddings = []
+            documents: Documents = []
+            ids: IDs = []
+            metadatas: List[Optional[Metadata]] = []
             # Remove plural from include since db columns are singular
             db_columns = [
                 column[:-1] for column in include if column != "distances"
@@ -482,13 +484,15 @@ class LocalAPI(API):
                 ids.append(entry[column_index["id"]])
 
             if include_embeddings:
-                cast(List, query_result["embeddings"]).append(embeddings)  # type: ignore
+                cast(List[Embeddings], query_result["embeddings"]).append(embeddings)
             if include_documents:
-                cast(List, query_result["documents"]).append(documents)  # type: ignore
+                cast(List[Documents], query_result["documents"]).append(documents)
             if include_metadatas:
-                cast(List, query_result["metadatas"]).append(metadatas)  # type: ignore
+                cast(List[List[Optional[Metadata]]], query_result["metadatas"]).append(
+                    metadatas
+                )
             if include_distances:
-                cast(List, query_result["distances"]).append(distances[i].tolist())  # type: ignore
+                cast(List[float], query_result["distances"]).append(distances[i])
             query_result["ids"].append(ids)
 
         return query_result

@@ -1,31 +1,24 @@
 version: '3.9'
 
 networks:
-  test_net:
+  net:
     driver: bridge
-
 services:
-  test_server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  server:
+    image: ghcr.io/chroma-core/chroma:latest
     volumes:
-      - ./:/chroma
-      - test_index_data:/index_data
-    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
+      - index_data:/chroma/.chroma/index
     environment:
       - CHROMA_DB_IMPL=clickhouse
-      - CLICKHOUSE_HOST=test_clickhouse
+      - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PORT=8123
-      - ANONYMIZED_TELEMETRY=False
     ports:
-      - ${CHROMA_PORT}:8000
+      - 8000:8000
     depends_on:
-      - test_clickhouse
+      - clickhouse
     networks:
-      - test_net
-
-  test_clickhouse:
+      - net
+  clickhouse:
     image: clickhouse/clickhouse-server:22.9-alpine
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -35,17 +28,19 @@ services:
       - '8123:8123'
       - '9000:9000'
     volumes:
-      - test_clickhouse_data:/bitnami/clickhouse
-      - test_backups:/backups
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - backups:/backups
       - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
       - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
     networks:
-      - test_net
-
+      - net
 volumes:
-  test_clickhouse_data:
+  clickhouse_data:
     driver: local
-  test_index_data:
+  clickhouse_logs:
     driver: local
-  test_backups:
+  index_data:
+    driver: local
+  backups:
     driver: local
