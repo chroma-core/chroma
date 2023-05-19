@@ -6,6 +6,10 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+from chromadb.utils.embedding_functions import (
+    DefaultEmbeddingFunction,
+    ONNXMiniLM_L6_V2,
+)
 
 
 @pytest.fixture
@@ -1137,8 +1141,6 @@ def test_add_large(api):
 
 
 # test get_version
-
-
 def test_get_version(api):
     api.reset()
     version = api.get_version()
@@ -1150,8 +1152,6 @@ def test_get_version(api):
 
 
 # test delete_collection
-
-
 def test_delete_collection(api):
     api.reset()
     collection = api.create_collection("test_delete_collection")
@@ -1160,6 +1160,18 @@ def test_delete_collection(api):
     assert len(api.list_collections()) == 1
     api.delete_collection("test_delete_collection")
     assert len(api.list_collections()) == 0
+
+
+# test default embedding function
+def test_default_embedding():
+    embedding_function = DefaultEmbeddingFunction()
+    docs = ["this is a test" for _ in range(64)]
+    embeddings = embedding_function(docs)
+    assert len(embeddings) == 64
+
+
+def test_default_ef_is_onnx_mini_l6_v2():
+    assert DefaultEmbeddingFunction == ONNXMiniLM_L6_V2
 
 
 def test_multiple_collections(api):

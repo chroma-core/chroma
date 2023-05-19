@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from chromadb.api import API
 
 
-class Collection(BaseModel):  # type: ignore
+class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[Dict[str, Union[StrictStr, StrictInt, StrictFloat]]] = None
@@ -53,9 +53,9 @@ class Collection(BaseModel):  # type: ignore
             import chromadb.utils.embedding_functions as ef
 
             logger.warning(
-                "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
+                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
             )
-            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
+            self._embedding_function = ef.DefaultEmbeddingFunction()
         super().__init__(name=name, metadata=metadata, id=id)
 
     def __repr__(self) -> str:
