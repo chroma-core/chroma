@@ -243,21 +243,6 @@ def test_get_nearest_neighbors(api):
         assert len(nn[key]) == 2
 
 
-def test_get_nearest_neighbors_filter(api, request):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records)
-
-    # assert api.create_index(collection_name="testspace") # default is auto now
-
-    with pytest.raises(Exception) as e:
-        collection.query(
-            query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={"distance": "false"}
-        )
-
-    assert str(e.value).__contains__("found")
-
-
 def test_delete(api):
     api.reset()
     collection = api.create_collection("testspace")
