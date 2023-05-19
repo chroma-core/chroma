@@ -6,3 +6,4 @@ hypothesis[numpy]
 pre-commit
 pytest
 setuptools_scm
+types-requests==2.30.0.0

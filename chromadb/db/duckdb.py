@@ -1,4 +1,5 @@
 # type: ignore
+from chromadb.config import System
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 from chromadb.db.clickhouse import (
     Clickhouse,
@@ -41,11 +42,11 @@ def clickhouse_to_duckdb_schema(table_schema):
 # to a third superclass they both extend would be preferable.
 class DuckDB(Clickhouse):
     # duckdb has a different way of connecting to the database
-    def __init__(self, settings):
+    def __init__(self, system: System):
         self._conn = duckdb.connect()
         self._create_table_collections()
         self._create_table_embeddings()
-        self._settings = settings
+        self._settings = system.settings
 
         # https://duckdb.org/docs/extensions/overview
         self._conn.execute("LOAD 'json';")
@@ -175,7 +176,7 @@ class DuckDB(Clickhouse):
 
         return [uuid.UUID(x[1]) for x in data_to_insert]  # return uuids
 
-    def count(self, collection_uuid):
+    def count(self, collection_uuid) -> int:
         where_string = f"WHERE collection_uuid = '{collection_uuid}'"
         return self._conn.query(
             f"SELECT COUNT() FROM embeddings {where_string}"
@@ -386,7 +387,7 @@ class DuckDB(Clickhouse):
         logger.info("Exiting: Cleaning up .chroma directory")
         self.reset_indexes()
 
-    def persist(self):
+    def persist(self) -> None:
         raise NotImplementedError(
             "Set chroma_db_impl='duckdb+parquet' to get persistence functionality"
         )
@@ -395,15 +396,17 @@ class DuckDB(Clickhouse):
 class PersistentDuckDB(DuckDB):
     _save_folder = None
 
-    def __init__(self, settings):
-        super().__init__(settings=settings)
+    def __init__(self, system: System):
+        super().__init__(system=system)
 
-        if settings.persist_directory == ".chroma":
+        system.settings.require("persist_directory")
+
+        if system.settings.persist_directory == ".chroma":
             raise ValueError(
                 "You cannot use chroma's cache directory .chroma/, please set a different directory"
             )
 
-        self._save_folder = settings.persist_directory
+        self._save_folder = system.settings.persist_directory
         self.load()
         # https://docs.python.org/3/library/atexit.html
         atexit.register(self.persist)

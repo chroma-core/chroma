@@ -1,5 +1,5 @@
+import { ChromaClient } from '../../src/ChromaClient';
 // import env.ts
-import { ChromaClient } from "../../src/index";
 
 window.onload = async () => {
   const chroma = new ChromaClient("http://localhost:8000");

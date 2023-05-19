@@ -1,14 +1,19 @@
 from abc import abstractmethod
 from dataclasses import asdict, dataclass
 import os
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, Dict, Any
 import uuid
 import time
 from threading import Event, Thread
 import chromadb
 from pathlib import Path
-from chromadb.config import TELEMETRY_WHITELISTED_SETTINGS, Settings
 from enum import Enum
+
+TELEMETRY_WHITELISTED_SETTINGS = [
+    "chroma_db_impl",
+    "chroma_api_impl",
+    "chroma_server_ssl_enabled",
+]
 
 
 class ServerContext(Enum):
@@ -21,12 +26,12 @@ class TelemetryEvent:
     name: ClassVar[str]
 
     @property
-    def properties(self) -> dict:
+    def properties(self) -> Dict[str, Any]:
         return asdict(self)
 
 
 class RepeatedTelemetry:
-    def __init__(self, interval, function):
+    def __init__(self, interval: int, function: Callable[[], None]):
         self.interval = interval
         self.function = function
         self.start = time.time()
@@ -35,15 +40,15 @@ class RepeatedTelemetry:
         self.thread.daemon = True
         self.thread.start()
 
-    def _target(self):
+    def _target(self) -> None:
         while not self.event.wait(self._time):
             self.function()
 
     @property
-    def _time(self):
+    def _time(self) -> float:
         return self.interval - ((time.time() - self.start) % self.interval)
 
-    def stop(self):
+    def stop(self) -> None:
         self.event.set()
         self.thread.join()
 
@@ -55,21 +60,17 @@ class Telemetry:
     _curr_user_id = None
 
     @abstractmethod
-    def __init__(self, settings: Settings):
-        pass
-
-    @abstractmethod
-    def capture(self, event: TelemetryEvent):
+    def capture(self, event: TelemetryEvent) -> None:
         pass
 
     # Schedule a function that creates a TelemetryEvent to be called every `every_seconds` seconds.
     def schedule_event_function(
         self, event_function: Callable[..., TelemetryEvent], every_seconds: int
-    ):
+    ) -> None:
         RepeatedTelemetry(every_seconds, lambda: self.capture(event_function()))
 
     @property
-    def context(self) -> dict:
+    def context(self) -> Dict[str, Any]:
         chroma_version = chromadb.__version__
         settings = chromadb.get_settings()
         telemetry_settings = {}
