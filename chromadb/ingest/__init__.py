@@ -18,13 +18,15 @@ class Producer(ABC, EnforceOverrides):
 
     @abstractmethod
     def submit_embedding(
-        self, topic_name: str, embedding: InsertEmbeddingRecord
+        self, topic_name: str, embedding: InsertEmbeddingRecord, sync: bool = False
     ) -> None:
         """Add an embedding record to the given topic."""
         pass
 
     @abstractmethod
-    def submit_embedding_delete(self, topic_name: str, id: str) -> None:
+    def submit_embedding_delete(
+        self, topic_name: str, id: str, sync: bool = False
+    ) -> None:
         """Add an embedding deletion record (soft delete) to the given topic."""
         pass
 
