@@ -243,21 +243,6 @@ def test_get_nearest_neighbors(api):
         assert len(nn[key]) == 2
 
 
-def test_get_nearest_neighbors_filter(api, request):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records)
-
-    # assert api.create_index(collection_name="testspace") # default is auto now
-
-    with pytest.raises(Exception) as e:
-        collection.query(
-            query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={"distance": "false"}
-        )
-
-    assert str(e.value).__contains__("found")
-
-
 def test_delete(api):
     api.reset()
     collection = api.create_collection("testspace")
@@ -1345,7 +1330,7 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.add(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Query with invalid embeddings
     with pytest.raises(ValueError) as e:
@@ -1353,7 +1338,7 @@ def test_invalid_embeddings(api):
             query_embeddings=[["1.1", "2.3", "3.2"]],
             n_results=1,
         )
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Update with invalid embeddings
     invalid_records = {
@@ -1362,7 +1347,7 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.update(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Upsert with invalid embeddings
     invalid_records = {
@@ -1371,4 +1356,4 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)

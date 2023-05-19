@@ -3,17 +3,11 @@ version: '3.9'
 networks:
   net:
     driver: bridge
-
 services:
   server:
-    image: server
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/chroma-core/chroma:latest
     volumes:
-      - ./:/chroma
-      - index_data:/index_data
-    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
+      - index_data:/chroma/.chroma/index
     environment:
       - CHROMA_DB_IMPL=clickhouse
       - CLICKHOUSE_HOST=clickhouse
@@ -24,7 +18,6 @@ services:
       - clickhouse
     networks:
       - net
-
   clickhouse:
     image: clickhouse/clickhouse-server:22.9-alpine
     environment:
@@ -42,7 +35,6 @@ services:
       - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
     networks:
       - net
-
 volumes:
   clickhouse_data:
     driver: local

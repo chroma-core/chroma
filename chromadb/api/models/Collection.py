@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, cast, List, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple, cast, List
 from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from chromadb.api import API
 
 
-class Collection(BaseModel):  # type: ignore
+class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
@@ -122,11 +122,11 @@ class Collection(BaseModel):  # type: ignore
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
-            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents". Ids are always included. Defaults to ["metadatas", "documents"]. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
 
         Returns:
             GetResult: A GetResult object containing the results.
@@ -174,10 +174,10 @@ class Collection(BaseModel):  # type: ignore
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
-            n_results: The number of neighbors to return for each query_embedding or query_text. Optional.
-            where: A Where type dict used to filter results by. E.g. {"color" : "red", "price": 4.20}. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. {$contains: {"text": "hello"}}. Optional.
-            include: A list of what to include in the results. Can contain "embeddings", "metadatas", "documents", "distances". Ids are always included. Defaults to ["metadatas", "documents", "distances"]. Optional.
+            n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
         Returns:
             QueryResult: A QueryResult object containing the results.
@@ -322,8 +322,8 @@ class Collection(BaseModel):  # type: ignore
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. {"color" : "red", "price": 4.20}. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. {$contains: {"text": "hello"}}. Optional.
+            where: A Where type dict used to filter the delection by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
 
         Returns:
             None
@@ -341,13 +341,13 @@ class Collection(BaseModel):  # type: ignore
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]] = None,
-        metadatas: Optional[OneOrMany[Metadata]] = None,
-        documents: Optional[OneOrMany[Document]] = None,
+        embeddings: Optional[OneOrMany[Embedding]],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
         require_embeddings_or_documents: bool = True,
     ) -> Tuple[
         IDs,
-        Optional[List[Embedding]],
+        List[Embedding],
         Optional[List[Metadata]],
         Optional[List[Document]],
     ]:
@@ -393,4 +393,9 @@ class Collection(BaseModel):  # type: ignore
                 )
             embeddings = self._embedding_function(documents)
 
-        return ids, embeddings, metadatas, documents
+        # if embeddings is None:
+        #     raise ValueError(
+        #         "Something went wrong. Embeddings should be computed at this point"
+        #     )
+
+        return ids, embeddings, metadatas, documents  # type: ignore
