@@ -21,6 +21,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
+import numpy as np
 
 
 traces = defaultdict(lambda: 0)
@@ -250,10 +251,13 @@ def test_query_without_add(api: API):
     api.reset()
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
-    results = coll.query(query_embeddings=[[0.0], [1.2]], include=fields)
+    N = np.random.randint(1, 2000)
+    K = np.random.randint(1, 100)
+    results = coll.query(
+        query_embeddings=np.random.random((N, K)).tolist(), include=fields
+    )
     for field in fields:
-        for result in results[field]:
-            assert len(result) == 0
+        all([len(result) == 0 for result in results[field]])
 
 
 # TODO: Use SQL escaping correctly internally
