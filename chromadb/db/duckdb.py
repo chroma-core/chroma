@@ -237,6 +237,8 @@ class DuckDB(Clickhouse):
                 for subwhere in value:
                     subresults = []
                     self._format_where(subwhere, subresults)
+                    if len(subresults) == 0:
+                        return
                     all_subresults.append(subresults[0])
                 if key == "$or":
                     result.append(f"({' OR '.join(all_subresults)})")
