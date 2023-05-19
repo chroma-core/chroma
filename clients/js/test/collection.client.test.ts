@@ -1,4 +1,4 @@
-import { expect, test } from "@jest/globals";
+import { expect, test, beforeEach } from "@jest/globals";
 import chroma from "./initClient";
 
 beforeEach(async () => {
@@ -10,13 +10,13 @@ test("it should list collections", async () => {
   expect(collections).toBeDefined();
   expect(collections).toBeInstanceOf(Array);
   expect(collections.length).toBe(0);
-  const collection = await chroma.createCollection("test");
+  const collection = await chroma.createCollection({ name: "test" });
   collections = await chroma.listCollections();
   expect(collections.length).toBe(1);
 });
 
 test("it should create a collection", async () => {
-  const collection = await chroma.createCollection("test");
+  const collection = await chroma.createCollection({ name: "test" });
   expect(collection).toBeDefined();
   expect(collection).toHaveProperty("name");
   expect(collection).toHaveProperty('id')
@@ -30,7 +30,7 @@ test("it should create a collection", async () => {
   );
 
   await chroma.reset();
-  const collection2 = await chroma.createCollection("test2", { test: "test" });
+  const collection2 = await chroma.createCollection({ name: "test2", metadata: { test: "test" } });
   expect(collection2).toBeDefined();
   expect(collection2).toHaveProperty("name");
   expect(collection2).toHaveProperty('id')
@@ -45,8 +45,8 @@ test("it should create a collection", async () => {
 });
 
 test("it should get a collection", async () => {
-  const collection = await chroma.createCollection("test");
-  const collection2 = await chroma.getCollection("test");
+  const collection = await chroma.createCollection({ name: "test" });
+  const collection2 = await chroma.getCollection({ name: "test" });
   expect(collection).toBeDefined();
   expect(collection2).toBeDefined();
   expect(collection).toHaveProperty("name");
@@ -69,10 +69,10 @@ test("it should get a collection", async () => {
 // });
 
 test("it should delete a collection", async () => {
-  const collection = await chroma.createCollection("test");
+  const collection = await chroma.createCollection({ name: "test" });
   let collections = await chroma.listCollections();
   expect(collections.length).toBe(1);
-  await chroma.deleteCollection("test");
+  await chroma.deleteCollection({ name: "test" });
   collections = await chroma.listCollections();
   expect(collections.length).toBe(0);
 });

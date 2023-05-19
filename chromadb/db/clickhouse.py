@@ -9,11 +9,7 @@ from chromadb.api.types import (
 )
 from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
-from chromadb.errors import (
-    NoDatapointsException,
-)
 import uuid
-import numpy.typing as npt
 import json
 from typing import Dict, Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
@@ -99,7 +95,12 @@ class Clickhouse(DB):
         if collection_id not in self.index_cache:
             coll = self.get_collection_by_id(collection_id)
             collection_metadata = coll[2]
-            index = Hnswlib(collection_id, self._settings, collection_metadata)
+            index = Hnswlib(
+                collection_id,
+                self._settings,
+                collection_metadata,
+                self.count(collection_id),
+            )
             self.index_cache[collection_id] = index
 
         return self.index_cache[collection_id]
@@ -564,7 +565,7 @@ class Clickhouse(DB):
         where_document: WhereDocument,
         embeddings: Embeddings,
         n_results: int,
-    ) -> Tuple[List[List[uuid.UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
         # Either the collection name or the collection uuid must be provided
         if collection_uuid is None:
             raise TypeError("Argument collection_uuid cannot be None")
@@ -579,9 +580,10 @@ class Clickhouse(DB):
             if len(results) > 0:
                 ids = [x[1] for x in results]
             else:
-                raise NoDatapointsException(
-                    f"No datapoints found for the supplied filter {json.dumps(where)}"
-                )
+                # No results found, return empty lists
+                return [[] for _ in range(len(embeddings))], [
+                    [] for _ in range(len(embeddings))
+                ]
         else:
             ids = None
 
