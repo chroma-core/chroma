@@ -206,10 +206,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
     def _normalize(self, v: npt.NDArray) -> npt.NDArray:
-        norm = np.linalg.norm(v)
-        if norm == 0:
-            norm = 1e-12
-        return v / norm
+        norm = np.linalg.norm(v, axis=1)
+        norm[norm == 0] = 1e-12
+        return v / norm[:, np.newaxis]
 
     def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
