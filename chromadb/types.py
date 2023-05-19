@@ -1,5 +1,5 @@
-from typing import TypedDict, TypeVar, Optional, Union, Sequence, Dict, Any
-from typing_extensions import Literal, Protocol
+from typing import TypeVar, Optional, Union, Sequence, Dict, Any
+from typing_extensions import Literal, Protocol, TypedDict
 from uuid import UUID
 from enum import Enum
 
@@ -79,7 +79,11 @@ class MetadataEmbeddingRecord(TypedDict):
     metadata: Dict[str, Metadata]
 
 
-BaseEmbeddingRecord = Union[VectorEmbeddingRecord, MetadataEmbeddingRecord]
+class EmbeddingRecord(TypedDict):
+    id: str
+    seq_id: SeqId
+    embedding: Vector
+    metadata: Optional[Metadata]
 
 
 class InsertEmbeddingRecord(TypedDict):
