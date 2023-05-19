@@ -31,8 +31,8 @@ services:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
       - backups:/backups
-      - ./config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
-      - ./config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
+      - ${PWD}/config/backup_disk.xml:/etc/clickhouse-server/config.d/backup_disk.xml
+      - ${PWD}/config/chroma_users.xml:/etc/clickhouse-server/users.d/chroma.xml
     networks:
       - net
 volumes:
