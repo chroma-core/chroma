@@ -1,7 +1,5 @@
 import { expect, test } from '@jest/globals';
 import chroma from './initClient'
-import { DOCUMENTS, EMBEDDINGS, IDS } from './data';
-import { METADATAS } from './data';
 
 
 test('it should upsert embeddings to a collection', async () => {
