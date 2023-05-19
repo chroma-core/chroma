@@ -7,6 +7,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Include,
+    Metadata,
     Metadatas,
     Where,
     WhereDocument,

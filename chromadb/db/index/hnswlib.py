@@ -8,9 +8,7 @@ import hnswlib
 from chromadb.config import Settings
 from chromadb.db.index import Index
 from chromadb.errors import (
-    NoIndexException,
     InvalidDimensionException,
-    NotEnoughElementsException,
 )
 import logging
 import re
@@ -28,6 +26,8 @@ valid_params = {
     "hnsw:num_threads": r"^\d+$",
     "hnsw:resize_factor": r"^\d+(\.\d+)?$",
 }
+
+DEFAULT_CAPACITY = 1000
 
 
 class HnswParams:
@@ -82,7 +82,13 @@ class Hnswlib(Index):
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, UUID]
 
-    def __init__(self, id: str, settings: Settings, metadata: Dict[str, str]):
+    def __init__(
+        self,
+        id: str,
+        settings: Settings,
+        metadata: Dict[str, str],
+        number_elements: int,
+    ):
         self._save_folder = settings.persist_directory + "/index"
         self._params = HnswParams(metadata)
         self._id = id
@@ -91,7 +97,7 @@ class Hnswlib(Index):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._load()
+        self._load(number_elements)
 
     def _init_index(self, dimensionality: int) -> None:
         # more comments available at the source: https://github.com/nmslib/hnswlib
@@ -100,7 +106,7 @@ class Hnswlib(Index):
             space=self._params.space, dim=dimensionality
         )  # possible options are l2, cosine or ip
         index.init_index(
-            max_elements=1000,
+            max_elements=DEFAULT_CAPACITY,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
         )
@@ -110,7 +116,8 @@ class Hnswlib(Index):
         self._index = index
         self._index_metadata = {
             "dimensionality": dimensionality,
-            "elements": 0,
+            "curr_elements": 0,
+            "total_elements_added": 0,
             "time_created": time.time(),
         }
         self._save()
@@ -147,17 +154,25 @@ class Hnswlib(Index):
                 else:
                     raise ValueError(f"ID {id} already exists in index")
             else:
-                self._index_metadata["elements"] += 1
-                next_label = self._index_metadata["elements"]
+                self._index_metadata["total_elements_added"] += 1
+                self._index_metadata["curr_elements"] += 1
+                next_label = self._index_metadata["total_elements_added"]
                 self._id_to_label[hexid(id)] = next_label
                 self._label_to_id[next_label] = id
                 labels.append(next_label)
 
-        if self._index_metadata["elements"] > self._index.get_max_elements():
-            new_size = max(
-                self._index_metadata["elements"] * self._params.resize_factor, 1000
+        if (
+            self._index_metadata["total_elements_added"]
+            > self._index.get_max_elements()
+        ):
+            new_size = int(
+                max(
+                    self._index_metadata["total_elements_added"]
+                    * self._params.resize_factor,
+                    DEFAULT_CAPACITY,
+                )
             )
-            self._index.resize_index(int(new_size))
+            self._index.resize_index(new_size)
 
         self._index.add_items(embeddings, labels)
         self._save()
@@ -184,6 +199,7 @@ class Hnswlib(Index):
                 self._index.mark_deleted(label)
                 del self._label_to_id[label]
                 del self._id_to_label[hexid(id)]
+                self._index_metadata["curr_elements"] -= 1
 
         self._save()
 
@@ -210,7 +226,7 @@ class Hnswlib(Index):
     def _exists(self) -> None:
         return
 
-    def _load(self) -> None:
+    def _load(self, curr_elements: int) -> None:
         if not os.path.exists(f"{self._save_folder}/index_{self._id}.bin"):
             return
 
@@ -222,13 +238,22 @@ class Hnswlib(Index):
         with open(f"{self._save_folder}/index_metadata_{self._id}.pkl", "rb") as f:
             self._index_metadata = pickle.load(f)
 
+        self._index_metadata["curr_elements"] = curr_elements
+        # Backwards compatability with versions that don't have curr_elements or total_elements_added
+        if "total_elements_added" not in self._index_metadata:
+            self._index_metadata["total_elements_added"] = self._index_metadata[
+                "elements"
+            ]
+
         p = hnswlib.Index(
             space=self._params.space, dim=self._index_metadata["dimensionality"]
         )
         self._index = p
         self._index.load_index(
             f"{self._save_folder}/index_{self._id}.bin",
-            max_elements=self._index_metadata["elements"],
+            max_elements=int(
+                max(curr_elements * self._params.resize_factor, DEFAULT_CAPACITY)
+            ),
         )
         self._index.set_ef(self._params.search_ef)
         self._index.set_num_threads(self._params.num_threads)
@@ -236,18 +261,22 @@ class Hnswlib(Index):
     def get_nearest_neighbors(
         self, query: Embeddings, k: int, ids: Optional[List[UUID]] = None
     ) -> Tuple[List[List[UUID]], List[List[float]]]:
+        # The only case where the index is none is if no elements have been added
+        # We don't save the index until at least one element has been added
+        # And so there is also nothing at load time for persisted indexes
+        # In the case where no elements have been added, we return empty
         if self._index is None:
-            raise NoIndexException(
-                "Index not found, please create an instance before querying"
-            )
+            return [[] for _ in range(len(query))], [[] for _ in range(len(query))]
 
         # Check dimensionality
         self._check_dimensionality(query)
 
-        if k > self._index_metadata["elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['elements']}"
+        # Check Number of requested results
+        if k > self._index_metadata["curr_elements"]:
+            logger.warning(
+                f"Number of requested results {k} is greater than number of elements in index {self._index_metadata['curr_elements']}, updating n_results = {self._index_metadata['curr_elements']}"
             )
+            k = self._index_metadata["curr_elements"]
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available
@@ -267,6 +296,7 @@ class Hnswlib(Index):
         database_labels, distances = self._index.knn_query(
             query, k=k, filter=filter_function
         )
+        distances = distances.tolist()
         distances = cast(List[List[float]], distances)
         logger.debug(f"time to run knn query: {time.time() - s3}")
 

@@ -55,7 +55,12 @@ class QueryResult(TypedDict):
 
 class IndexMetadata(TypedDict):
     dimensionality: int
-    elements: int
+    # The current number of elements in the index (total = additions - deletes)
+    curr_elements: int
+    # The auto-incrementing ID of the last inserted element, never decreases so
+    # can be used as a count of total historical size. Should increase by 1 every add.
+    # Assume cannot overflow
+    total_elements_added: int
     time_created: float
 
 
@@ -87,6 +92,8 @@ def validate_ids(ids: IDs) -> IDs:
     """Validates ids to ensure it is a list of strings"""
     if not isinstance(ids, list):
         raise ValueError(f"Expected IDs to be a list, got {ids}")
+    if len(ids) == 0:
+        raise ValueError(f"Expected IDs to be a non-empty list, got {ids}")
     for id in ids:
         if not isinstance(id, str):
             raise ValueError(f"Expected ID to be a str, got {id}")
@@ -234,14 +241,35 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     return include
 
 
+def validate_n_results(n_results: int) -> int:
+    """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
+    # Check Number of requested results
+    if not isinstance(n_results, int):
+        raise ValueError(
+            f"Expected requested number of results to be a int, got {n_results}"
+        )
+    if n_results <= 0:
+        raise TypeError(
+            f"Number of requested results {n_results}, cannot be negative, or zero."
+        )
+    return n_results
+
+
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
-    if not isinstance(embeddings[0], list):
-        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if len(embeddings) == 0:
+        raise ValueError(
+            f"Expected embeddings to be a list with at least one item, got {embeddings}"
+        )
+    if not all([isinstance(e, list) for e in embeddings]):
+        raise ValueError(
+            f"Expected each embedding in the embeddings to be a list, got {embeddings}"
+        )
     for embedding in embeddings:
-        for value in embedding:
-            if not isinstance(value, (int, float)):
-                raise ValueError(f"Expected embeddings to be a int, float, got {embeddings}")
+        if not all([isinstance(value, (int, float)) for value in embedding]):
+            raise ValueError(
+                f"Expected each value in the embedding to be a int or float, got {embeddings}"
+            )
     return embeddings

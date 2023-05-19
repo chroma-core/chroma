@@ -1,6 +1,5 @@
 from hypothesis import given, settings, HealthCheck
 from chromadb.api import API
-from chromadb.errors import NoDatapointsException
 from chromadb.test.property import invariants
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
@@ -162,16 +161,41 @@ def test_filterable_metadata_query(
             recordset["documents"][random.randint(0, total_count - 1)]
         )
     for filter in filters:
-        try:
-            result_ids = set(
-                coll.query(
-                    query_embeddings=random_query,
-                    n_results=total_count,
-                    where=filter["where"],
-                    where_document=filter["where_document"],
-                )["ids"][0]
-            )
-        except NoDatapointsException:
-            result_ids = set()
+        result_ids = set(
+            coll.query(
+                query_embeddings=random_query,
+                n_results=total_count,
+                where=filter["where"],
+                where_document=filter["where_document"],
+            )["ids"][0]
+        )
         expected_ids = set(_filter_embedding_set(recordset, filter))
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
+
+
+def test_empty_filter(api):
+    """Test that a filter where no document matches returns an empty result"""
+    api.reset()
+    coll = api.create_collection(name="test")
+    coll.add(ids=["1", "2", "3"], embeddings=[[1, 1], [2, 2], [3, 3]])
+
+    res = coll.query(
+        query_embeddings=[1, 2],
+        where={"q": {"$eq": 4}},
+        n_results=3,
+        include=["embeddings", "distances", "metadatas"],
+    )
+    assert res["ids"] == [[]]
+    assert res["embeddings"] == [[]]
+    assert res["distances"] == [[]]
+    assert res["metadatas"] == [[]]
+
+    res = coll.query(
+        query_embeddings=[[1, 2], [1, 2]],
+        where={"test": "yes"},
+        n_results=3,
+    )
+    assert res["ids"] == [[], []]
+    assert res["embeddings"] is None
+    assert res["distances"] == [[], []]
+    assert res["metadatas"] == [[], []]
