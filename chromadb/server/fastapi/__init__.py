@@ -257,8 +257,8 @@ class FastAPI(chromadb.server.Server):
     ) -> QueryResult:
         nnresult = self._api._query(
             collection_id=_uuid(collection_id),
-            where=query.where,
-            where_document=query.where_document,
+            where=query.where,  # type: ignore
+            where_document=query.where_document,  # type: ignore
             query_embeddings=query.query_embeddings,
             n_results=query.n_results,
             include=query.include,
