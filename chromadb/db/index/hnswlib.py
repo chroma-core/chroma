@@ -8,7 +8,6 @@ import hnswlib
 from chromadb.config import Settings
 from chromadb.db.index import Index
 from chromadb.errors import (
-    NoIndexException,
     InvalidDimensionException,
     NotEnoughElementsException,
 )
@@ -263,10 +262,12 @@ class Hnswlib(Index):
     def get_nearest_neighbors(
         self, query: Embeddings, k: int, ids: Optional[List[UUID]] = None
     ) -> Tuple[List[List[UUID]], List[List[float]]]:
+        # The only case where the index is none is if no elements have been added
+        # We don't save the index until at least one element has been added
+        # And so there is also nothing at load time for persisted indexes
+        # In the case where no elements have been added, we return empty
         if self._index is None:
-            raise NoIndexException(
-                "Index not found, please create an instance before querying"
-            )
+            return [[] for _ in range(len(query))], [[] for _ in range(len(query))]
 
         # Check dimensionality
         self._check_dimensionality(query)
