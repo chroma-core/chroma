@@ -457,10 +457,10 @@ class LocalAPI(API):
             distances=[] if include_distances else None,
         )
         for i in range(len(uuids)):
-            embeddings = []
-            documents = []
-            ids = []
-            metadatas = []
+            embeddings: Embeddings = []
+            documents: Documents = []
+            ids: IDs = []
+            metadatas: List[Optional[Metadata]] = []
             # Remove plural from include since db columns are singular
             db_columns = [
                 column[:-1] for column in include if column != "distances"
@@ -484,13 +484,15 @@ class LocalAPI(API):
                 ids.append(entry[column_index["id"]])
 
             if include_embeddings:
-                cast(List, query_result["embeddings"]).append(embeddings)  # type: ignore
+                cast(List[Embeddings], query_result["embeddings"]).append(embeddings)
             if include_documents:
-                cast(List, query_result["documents"]).append(documents)  # type: ignore
+                cast(List[Documents], query_result["documents"]).append(documents)
             if include_metadatas:
-                cast(List, query_result["metadatas"]).append(metadatas)  # type: ignore
+                cast(List[List[Optional[Metadata]]], query_result["metadatas"]).append(
+                    metadatas
+                )
             if include_distances:
-                cast(List, query_result["distances"]).append(distances[i])  # type: ignore
+                cast(List[float], query_result["distances"]).append(distances[i])
             query_result["ids"].append(ids)
 
         return query_result
