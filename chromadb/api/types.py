@@ -92,6 +92,8 @@ def validate_ids(ids: IDs) -> IDs:
     """Validates ids to ensure it is a list of strings"""
     if not isinstance(ids, list):
         raise ValueError(f"Expected IDs to be a list, got {ids}")
+    if len(ids) == 0:
+        raise ValueError(f"Expected IDs to be a non-empty list, got {ids}")
     for id in ids:
         if not isinstance(id, str):
             raise ValueError(f"Expected ID to be a str, got {id}")
@@ -243,12 +245,17 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
-    if not isinstance(embeddings[0], list):
-        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if len(embeddings) == 0:
+        raise ValueError(
+            f"Expected embeddings to be a list with at least one item, got {embeddings}"
+        )
+    if not all([isinstance(e, list) for e in embeddings]):
+        raise ValueError(
+            f"Expected each embedding in the embeddings to be a list, got {embeddings}"
+        )
     for embedding in embeddings:
-        for value in embedding:
-            if not isinstance(value, (int, float)):
-                raise ValueError(
-                    f"Expected embeddings to be a int, float, got {embeddings}"
-                )
+        if not all([isinstance(value, (int, float)) for value in embedding]):
+            raise ValueError(
+                f"Expected each value in the embedding to be a int or float, got {embeddings}"
+            )
     return embeddings
