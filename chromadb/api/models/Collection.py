@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from chromadb.api import API
 
 
-class Collection(BaseModel):  # type: ignore
+class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[Dict[str, Union[StrictStr, StrictInt, StrictFloat]]] = None
@@ -53,9 +53,9 @@ class Collection(BaseModel):  # type: ignore
             import chromadb.utils.embedding_functions as ef
 
             logger.warning(
-                "No embedding_function provided, using default embedding function: SentenceTransformerEmbeddingFunction"
+                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
             )
-            self._embedding_function = ef.SentenceTransformerEmbeddingFunction()
+            self._embedding_function = ef.DefaultEmbeddingFunction()
         super().__init__(name=name, metadata=metadata, id=id)
 
     def __repr__(self) -> str:
@@ -172,7 +172,7 @@ class Collection(BaseModel):  # type: ignore
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
-            n_results: The number of neighbors to return for each query_embedding or query_text. Optional.
+            n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
             where: A Where type dict used to filter results by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.

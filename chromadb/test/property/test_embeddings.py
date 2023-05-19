@@ -3,6 +3,7 @@ import logging
 import hypothesis.strategies as st
 from typing import Set
 from dataclasses import dataclass
+from chromadb.api.types import Include
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
@@ -20,6 +21,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
+import numpy as np
 
 
 traces = defaultdict(lambda: 0)
@@ -243,6 +245,19 @@ def test_dup_add(api: API):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])
     with pytest.raises(errors.DuplicateIDError):
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
+
+
+def test_query_without_add(api: API):
+    api.reset()
+    coll = api.create_collection(name="foo")
+    fields: Include = ["documents", "metadatas", "embeddings", "distances"]
+    N = np.random.randint(1, 2000)
+    K = np.random.randint(1, 100)
+    results = coll.query(
+        query_embeddings=np.random.random((N, K)).tolist(), include=fields
+    )
+    for field in fields:
+        all([len(result) == 0 for result in results[field]])
 
 
 # TODO: Use SQL escaping correctly internally
