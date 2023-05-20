@@ -1,15 +1,10 @@
-CREATE TABLE embeddings (
+CREATE TABLE embeddings_log (
     seq_id INTEGER PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     topic TEXT NOT NULL,
     id TEXT NOT NULL,
-    vector BLOB NOT NULL,
-    UNIQUE (topic, id)
+    is_delete INTEGER,
+    vector BLOB,
+    encoding TEXT,
+    metadata TEXT
 );
-
-CREATE TABLE embeddings_metadata {
-    embedding INTEGER NOT NULL,
-    string_value TEXT,
-    int_value INTEGER,
-    float_value REAL,
-    FOREIGN KEY (embedding) REFERENCES embeddings (seq_id) ON DELETE CASCADE
-}

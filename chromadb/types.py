@@ -1,5 +1,5 @@
-from typing import TypeVar, Optional, Union, Sequence, Dict, Any
-from typing_extensions import Literal, Protocol, TypedDict
+from typing import Optional, Union, Sequence, Dict, Any
+from typing_extensions import Literal, TypedDict
 from uuid import UUID
 from enum import Enum
 
@@ -48,21 +48,18 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
 
 
-S = TypeVar("S", bound="SeqId")
+# The desire here is for SeqID to be any type that can be compared to other values of
+# the same type to establish a linear order.
 
-
-class SeqId(Protocol):
-    def __eq__(self, other: Any) -> bool:
-        ...
-
-    def __lt__(self: S, other: S) -> bool:
-        ...
+# This is surprisingly difficult to express in Python. ints, for example, do not
+# "support" __eq__ and __lt__ so using a protocol won't work.
+SeqId = Any
 
 
 class InsertType(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
-    UPSER = "UPSERT"
+    UPSERT = "UPSERT"
 
 
 Vector = Union[Sequence[float], Sequence[int]]
@@ -72,6 +69,7 @@ class VectorEmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
     embedding: Vector
+    encoding: ScalarEncoding
 
 
 class MetadataEmbeddingRecord(TypedDict):
@@ -84,14 +82,21 @@ class EmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
     embedding: Vector
+    encoding: ScalarEncoding
     metadata: Optional[Metadata]
 
 
 class InsertEmbeddingRecord(TypedDict):
     id: str
     embedding: Vector
+    encoding: ScalarEncoding
     metadata: Optional[Metadata]
     insert_type: InsertType
+
+
+class DeleteEmbeddingRecord(TypedDict):
+    id: str
+    seq_id: SeqId
 
 
 class VectorQuery(TypedDict):
