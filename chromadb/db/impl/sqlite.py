@@ -4,7 +4,8 @@ import chromadb.db.base as base
 import sqlite3
 from overrides import override
 import pypika
-from typing import Sequence, cast, Optional, Type, Literal
+from typing import Sequence, cast, Optional, Type
+from typing_extensions import Literal
 from types import TracebackType
 import os
 
@@ -50,7 +51,7 @@ class SqliteDB(MigratableDB):
 
     @staticmethod
     @override
-    def querybuilder() -> type[pypika.Query]:
+    def querybuilder() -> Type[pypika.Query]:
         return pypika.Query  # type: ignore
 
     @staticmethod
