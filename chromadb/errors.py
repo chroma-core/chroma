@@ -25,13 +25,6 @@ class InvalidDimensionException(ChromaError):
         return "InvalidDimension"
 
 
-class NotEnoughElementsException(ChromaError):
-    @classmethod
-    @overrides
-    def name(cls) -> str:
-        return "NotEnoughElements"
-
-
 class IDAlreadyExistsError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -59,7 +52,6 @@ class InvalidUUIDError(ChromaError):
 
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
-    "NotEnoughElements": NotEnoughElementsException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
     "InvalidUUID": InvalidUUIDError,

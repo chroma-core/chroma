@@ -1,4 +1,5 @@
-from typing import TypedDict, Sequence
+from typing import Sequence
+from typing_extensions import TypedDict
 import os
 import re
 import hashlib

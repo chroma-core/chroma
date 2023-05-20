@@ -702,16 +702,6 @@ def test_dimensionality_validation_query(api):
     assert "dimensionality" in str(e.value)
 
 
-def test_number_of_elements_validation_query(api):
-    api.reset()
-    collection = api.create_collection("test_number_of_elements_validation")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.query(**bad_number_of_results_query)
-    assert "number of elements" in str(e.value)
-
-
 def test_query_document_valid_operators(api):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
@@ -1223,6 +1213,48 @@ def test_update_query(api):
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
     assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+
+
+def test_get_nearest_neighbors_where_n_results_more_than_element(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+
+    results1 = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=5,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in results1.keys():
+        assert len(results1[key][0]) == 2
+
+
+def test_invalid_n_results_param(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+    with pytest.raises(TypeError) as exc:
+        collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results=-1,
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+    assert "Number of requested results -1, cannot be negative, or zero." in str(
+        exc.value
+    )
+    assert exc.type == TypeError
+
+    with pytest.raises(ValueError) as exc:
+        collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results="one",
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+    assert "int" in str(exc.value)
+    assert exc.type == ValueError
 
 
 initial_records = {

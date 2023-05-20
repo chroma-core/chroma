@@ -1,16 +1,24 @@
 from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.types import (
+    Metadata,
+    Vector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+)
 
 ID = str
 IDs = List[ID]
 
-Number = Union[int, float]
-Embedding = List[Number]
+Embedding = Vector
 Embeddings = List[Embedding]
 
-
-Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
 CollectionMetadata = Dict[Any, Any]
@@ -24,18 +32,13 @@ OneOrMany = Union[T, List[T]]
 
 Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
 
-# Grammar for where expressions
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
-]
-
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+# Re-export types from chromadb.types
+LiteralValue = LiteralValue
+LogicalOperator = LogicalOperator
+WhereOperator = WhereOperator
+OperatorExpression = OperatorExpression
+Where = Where
+WhereDocumentOperator = WhereDocumentOperator
 
 
 class GetResult(TypedDict):
@@ -239,6 +242,20 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
                 f"Expected include item to be one of {', '.join(allowed_values)}, got {item}"
             )
     return include
+
+
+def validate_n_results(n_results: int) -> int:
+    """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
+    # Check Number of requested results
+    if not isinstance(n_results, int):
+        raise ValueError(
+            f"Expected requested number of results to be a int, got {n_results}"
+        )
+    if n_results <= 0:
+        raise TypeError(
+            f"Number of requested results {n_results}, cannot be negative, or zero."
+        )
+    return n_results
 
 
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:

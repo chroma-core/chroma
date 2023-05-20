@@ -15,6 +15,11 @@ class ScalarEncoding(Enum):
     INT32 = "INT32"
 
 
+class SegmentScope(Enum):
+    VECTOR = "VECTOR"
+    METADATA = "METADATA"
+
+
 # Note: This is the data model for identifying and describing an embedding function,
 # not the actual function implementation.
 class EmbeddingFunction(TypedDict):
@@ -33,7 +38,7 @@ class Collection(TypedDict):
 class Segment(TypedDict):
     id: UUID
     type: NamespacedName
-    scope: Literal["vector", "metadata"]
+    scope: SegmentScope
     # If a segment has a topic, it implies that this segment is a consumer of the topic
     # and indexes the contents of the topic.
     topic: Optional[str]
@@ -47,9 +52,6 @@ S = TypeVar("S", bound="SeqId")
 
 
 class SeqId(Protocol):
-    def serialize(self) -> bytes:
-        ...
-
     def __eq__(self, other: Any) -> bool:
         ...
 
@@ -58,9 +60,9 @@ class SeqId(Protocol):
 
 
 class InsertType(Enum):
-    ADD_ONLY = "ADD_ONLY"
-    UPDATE_ONLY = "UPDATE_ONLY"
-    ADD_OR_UPDATE = "ADD_OR_UPDATE"
+    ADD = "ADD"
+    UPDATE = "UPDATE"
+    UPSER = "UPSERT"
 
 
 Vector = Union[Sequence[float], Sequence[int]]

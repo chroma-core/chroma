@@ -109,11 +109,11 @@ test('it should query a collection', async () => {
         [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
     ]
     await collection.add({ ids, embeddings })
-    const results = await collection.query({ query_embeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], n_results: 2 })
+    const results = await collection.query({ queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], nResults: 2 })
     expect(results).toBeDefined()
     expect(results).toBeInstanceOf(Object)
     // expect(results.embeddings[0].length).toBe(2)
-    const result: string[]= ['test1', 'test2']
+    const result: string[] = ['test1', 'test2']
     expect(result).toEqual(expect.arrayContaining(results.ids[0]));
     expect(['test3']).not.toEqual(expect.arrayContaining(results.ids[0]));
 })

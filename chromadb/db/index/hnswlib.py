@@ -9,7 +9,6 @@ from chromadb.config import Settings
 from chromadb.db.index import Index
 from chromadb.errors import (
     InvalidDimensionException,
-    NotEnoughElementsException,
 )
 import logging
 import re
@@ -272,10 +271,12 @@ class Hnswlib(Index):
         # Check dimensionality
         self._check_dimensionality(query)
 
+        # Check Number of requested results
         if k > self._index_metadata["curr_elements"]:
-            raise NotEnoughElementsException(
-                f"Number of requested results {k} cannot be greater than number of elements in index {self._index_metadata['curr_elements']}"
+            logger.warning(
+                f"Number of requested results {k} is greater than number of elements in index {self._index_metadata['curr_elements']}, updating n_results = {self._index_metadata['curr_elements']}"
             )
+            k = self._index_metadata["curr_elements"]
 
         s2 = time.time()
         # get ids from uuids as a set, if they are available
