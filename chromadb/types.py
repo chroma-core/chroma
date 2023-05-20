@@ -62,7 +62,7 @@ class SeqId(Protocol):
 class InsertType(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
-    UPSER = "UPSERT"
+    UPSERT = "UPSERT"
 
 
 Vector = Union[Sequence[float], Sequence[int]]
