@@ -1,8 +1,9 @@
-from typing import TYPE_CHECKING, Optional, cast, List, Tuple, Dict, Union
-from pydantic import BaseModel, PrivateAttr, StrictStr, StrictInt, StrictFloat
+from typing import TYPE_CHECKING, Optional, Tuple, cast, List
+from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
 
 from chromadb.api.types import (
+    CollectionMetadata,
     Embedding,
     Include,
     Metadata,
@@ -21,6 +22,7 @@ from chromadb.api.types import (
     validate_metadatas,
     validate_where,
     validate_where_document,
+    validate_n_results,
     validate_embeddings,
 )
 import logging
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     id: UUID
-    metadata: Optional[Dict[str, Union[StrictStr, StrictInt, StrictFloat]]] = None
+    metadata: Optional[CollectionMetadata] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -44,7 +46,7 @@ class Collection(BaseModel):
         name: str,
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = None,
-        metadata: Optional[Metadata] = None,
+        metadata: Optional[CollectionMetadata] = None,
     ):
         self._client = client
         if embedding_function is not None:
@@ -198,6 +200,7 @@ class Collection(BaseModel):
             maybe_cast_one_to_many(query_texts) if query_texts is not None else None
         )
         include = validate_include(include, allow_distances=True)
+        n_results = validate_n_results(n_results)
 
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
         if (query_embeddings is None and query_texts is None) or (
@@ -234,7 +237,7 @@ class Collection(BaseModel):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[Metadata] = None
+        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
     ) -> None:
         """Modify the collection name or metadata
 
@@ -291,6 +294,9 @@ class Collection(BaseModel):
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
+
+        Returns:
+            None
         """
 
         ids, embeddings, metadatas, documents = self._validate_embedding_set(
@@ -311,7 +317,7 @@ class Collection(BaseModel):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> List[str]:
+    ) -> None:
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
@@ -327,9 +333,9 @@ class Collection(BaseModel):
         where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        return self._client._delete(self.id, ids, where, where_document)
+        self._client._delete(self.id, ids, where, where_document)
 
-    def create_index(self):  # type: ignore
+    def create_index(self) -> None:
         self._client.create_index(self.name)
 
     def _validate_embedding_set(
