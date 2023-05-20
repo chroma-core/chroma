@@ -81,6 +81,10 @@ class SqlDB(ABC, EnforceOverrides):
         """
         pass
 
+    def param(self, idx: int) -> pypika.Parameter:
+        """Return a PyPika Parameter object for the given index"""
+        return pypika.Parameter(self.parameter_format().format(idx))
+
 
 _context = local()
 

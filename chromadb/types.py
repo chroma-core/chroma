@@ -11,7 +11,6 @@ NamespacedName = str
 
 
 class ScalarEncoding(Enum):
-    FLOAT16 = "FLOAT16"
     FLOAT32 = "FLOAT32"
     INT32 = "INT32"
 

@@ -1,8 +1,42 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Optional, Sequence
 from overrides import EnforceOverrides
-from chromadb.types import InsertEmbeddingRecord, EmbeddingRecord, SeqId
+from chromadb.types import (
+    InsertEmbeddingRecord,
+    EmbeddingRecord,
+    SeqId,
+    Vector,
+    ScalarEncoding,
+)
 from uuid import UUID
+import array
+
+
+def get_encoding(embedding: InsertEmbeddingRecord) -> ScalarEncoding:
+    """Observe the encoding of an embedding record based on the type of the vector."""
+
+    if isinstance(embedding["embedding"][0], float):
+        encoding = ScalarEncoding.FLOAT32
+    elif isinstance(embedding["embedding"][0], int):
+        encoding = ScalarEncoding.INT32
+    else:
+        raise ValueError(
+            f"Unsupported scalar type for vector: {type(embedding['embedding'][0])}"
+        )
+    return encoding
+
+
+def encode_vector(
+    vector: Vector, encoding: ScalarEncoding = ScalarEncoding.FLOAT32
+) -> bytes:
+    """Encode a vector into a byte array."""
+
+    if encoding == ScalarEncoding.FLOAT32:
+        return array.array("f", vector).tobytes()
+    elif encoding == ScalarEncoding.INT32:
+        return array.array("i", vector).tobytes()
+    else:
+        raise ValueError(f"Unsupported encoding: {encoding.value}")
 
 
 class Producer(ABC, EnforceOverrides):
