@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, Sequence
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ import pandas as pd
 
 import chromadb
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import GetResult, QueryResult, IDs
 from chromadb.config import Settings
 import chromadb.server
 import chromadb.api
@@ -195,20 +195,18 @@ class FastAPI(chromadb.server.Server):
 
     def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:
-            result = self._api._add(
+            self._api._add(
                 collection_id=_uuid(collection_id),
-                embeddings=add.embeddings,
+                embeddings=add.embeddings,  # type: ignore
                 metadatas=add.metadatas,
                 documents=add.documents,
                 ids=add.ids,
-                increment_index=add.increment_index,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
-        return result
 
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        return self._api._update(
+        self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
@@ -217,13 +215,12 @@ class FastAPI(chromadb.server.Server):
         )
 
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        return self._api._upsert(
+        self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
-            embeddings=upsert.embeddings,
+            embeddings=upsert.embeddings,  # type: ignore
             documents=upsert.documents,
             metadatas=upsert.metadatas,
-            increment_index=upsert.increment_index,
         )
 
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
@@ -238,7 +235,7 @@ class FastAPI(chromadb.server.Server):
             include=get.include,
         )
 
-    def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
+    def delete(self, collection_id: str, delete: DeleteEmbedding) -> IDs:
         return self._api._delete(
             where=delete.where,
             ids=delete.ids,

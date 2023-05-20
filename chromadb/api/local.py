@@ -228,7 +228,6 @@ class LocalAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
         if len(existing_ids) > 0:
@@ -244,8 +243,7 @@ class LocalAPI(API):
             ids=ids,
         )
 
-        if increment_index:
-            self._db.add_incremental(collection_id, added_uuids, embeddings)
+        self._db.add_incremental(collection_id, added_uuids, embeddings)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
@@ -268,7 +266,6 @@ class LocalAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         # Determine which ids need to be added and which need to be updated based on the ids already in the collection
         existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
@@ -307,7 +304,6 @@ class LocalAPI(API):
                 embeddings_to_add,
                 metadatas_to_add,
                 documents_to_add,
-                increment_index=increment_index,
             )
 
         if len(ids_to_update) > 0:

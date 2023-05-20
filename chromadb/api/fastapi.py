@@ -7,7 +7,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Include,
-    Metadata,
     Metadatas,
     Where,
     WhereDocument,
@@ -203,13 +202,10 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
-        - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
-        -     and then manually create the index yourself with collection.create_index()
         """
         resp = requests.post(
             self._api_url + "/collections/" + str(collection_id) + "/add",
@@ -219,7 +215,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )
@@ -262,7 +257,6 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Updates a batch of embeddings in the database
@@ -277,7 +271,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )

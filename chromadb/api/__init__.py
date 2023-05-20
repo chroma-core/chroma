@@ -146,7 +146,6 @@ class API(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """Add embeddings to the data store. This is the most general way to add embeddings to the database.
         ⚠️ It is recommended to use the more specific methods below when possible.
@@ -186,7 +185,6 @@ class API(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """Add or update entries in the embedding store.
         If an entry with the same id already exists, it will be updated, otherwise it will be added.
@@ -197,7 +195,6 @@ class API(ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-            increment_index: If True, will incrementally add to the ANN index of the collection. Defaults to True.
         """
         pass
 

@@ -6,7 +6,7 @@ from chromadb.api.types import (
 )
 
 
-class AddEmbedding(BaseModel):  # type: ignore
+class AddEmbedding(BaseModel):
     # Pydantic doesn't handle Union types cleanly like Embeddings which has
     # Union[int, float] so we use Any here to ensure data is parsed
     # to its original type.
@@ -14,18 +14,16 @@ class AddEmbedding(BaseModel):  # type: ignore
     metadatas: Optional[List[Dict[Any, Any]]] = None
     documents: Optional[List[str]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
-class UpdateEmbedding(BaseModel):  # type: ignore
+class UpdateEmbedding(BaseModel):
     embeddings: Optional[List[Any]] = None
     metadatas: Optional[List[Dict[Any, Any]]] = None
     documents: Optional[List[str]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
-class QueryEmbedding(BaseModel):  # type: ignore
+class QueryEmbedding(BaseModel):
     # TODO: Pydantic doesn't bode well with recursive types so we use generic Dicts
     # for Where and WhereDocument. This is not ideal, but it works for now since
     # there is a lot of downstream validation.
@@ -36,7 +34,7 @@ class QueryEmbedding(BaseModel):  # type: ignore
     include: Include = ["metadatas", "documents", "distances"]
 
 
-class GetEmbedding(BaseModel):  # type: ignore
+class GetEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
@@ -46,22 +44,22 @@ class GetEmbedding(BaseModel):  # type: ignore
     include: Include = ["metadatas", "documents"]
 
 
-class RawSql(BaseModel):  # type: ignore
+class RawSql(BaseModel):
     raw_sql: str
 
 
-class DeleteEmbedding(BaseModel):  # type: ignore
+class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
 
 
-class CreateCollection(BaseModel):  # type: ignore
+class CreateCollection(BaseModel):
     name: str
     metadata: Optional[CollectionMetadata] = None
     get_or_create: bool = False
 
 
-class UpdateCollection(BaseModel):  # type: ignore
+class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
