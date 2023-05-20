@@ -1,16 +1,24 @@
 from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.types import (
+    Metadata,
+    Vector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+)
 
 ID = str
 IDs = List[ID]
 
-Number = Union[int, float]
-Embedding = List[Number]
+Embedding = Vector
 Embeddings = List[Embedding]
 
-
-Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
 CollectionMetadata = Dict[Any, Any]
@@ -24,18 +32,13 @@ OneOrMany = Union[T, List[T]]
 
 Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
 
-# Grammar for where expressions
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
-]
-
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+# Re-export types from chromadb.types
+LiteralValue = LiteralValue
+LogicalOperator = LogicalOperator
+WhereOperator = WhereOperator
+OperatorExpression = OperatorExpression
+Where = Where
+WhereDocumentOperator = WhereDocumentOperator
 
 
 class GetResult(TypedDict):
