@@ -193,9 +193,9 @@ class FastAPI(chromadb.server.Server):
     def delete_collection(self, collection_name: str) -> None:
         return self._api.delete_collection(collection_name)
 
-    def add(self, collection_id: str, add: AddEmbedding) -> None:
+    def add(self, collection_id: str, add: AddEmbedding) -> bool:
         try:
-            self._api._add(
+            result = self._api._add(
                 collection_id=_uuid(collection_id),
                 embeddings=add.embeddings,  # type: ignore
                 metadatas=add.metadatas,
@@ -204,9 +204,10 @@ class FastAPI(chromadb.server.Server):
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
+        return result
 
-    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        self._api._update(
+    def update(self, collection_id: str, add: UpdateEmbedding) -> bool:
+        return self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
@@ -214,8 +215,8 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
-    def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        self._api._upsert(
+    def upsert(self, collection_id: str, upsert: AddEmbedding) -> bool:
+        return self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,  # type: ignore
