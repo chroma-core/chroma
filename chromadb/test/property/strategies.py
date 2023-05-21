@@ -432,14 +432,24 @@ def binary_operator_clause(
     base_st: SearchStrategy[types.Where],
 ) -> SearchStrategy[types.Where]:
     op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
-    return st.dictionaries(keys=op, values=st.lists(base_st, max_size=2, min_size=2))
+    return st.dictionaries(
+        keys=op,
+        values=st.lists(base_st, max_size=2, min_size=2),
+        min_size=1,
+        max_size=1,
+    )
 
 
 def binary_document_operator_clause(
     base_st: SearchStrategy[types.WhereDocument],
 ) -> SearchStrategy[types.WhereDocument]:
     op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
-    return st.dictionaries(keys=op, values=st.lists(base_st, max_size=2, min_size=2))
+    return st.dictionaries(
+        keys=op,
+        values=st.lists(base_st, max_size=2, min_size=2),
+        min_size=1,
+        max_size=1,
+    )
 
 
 @st.composite
