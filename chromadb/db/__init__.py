@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Sequence, Optional, Tuple
+from typing import List, Sequence, Optional, Tuple, Any
 from uuid import UUID
 import numpy.typing as npt
 from chromadb.api.types import (
@@ -24,15 +24,15 @@ class DB(ABC):
         name: str,
         metadata: Optional[Metadata] = None,
         get_or_create: bool = False,
-    ) -> Sequence:
+    ) -> Sequence[Sequence[Any]]:
         pass
 
     @abstractmethod
-    def get_collection(self, name: str) -> Sequence:
+    def get_collection(self, name: str) -> Sequence[Sequence[Any]]:
         pass
 
     @abstractmethod
-    def list_collections(self) -> Sequence:
+    def list_collections(self) -> Sequence[Sequence[Any]]:
         pass
 
     @abstractmethod
@@ -81,7 +81,7 @@ class DB(ABC):
         offset: Optional[int] = None,
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
-    ) -> Sequence:
+    ) -> Sequence[Any]:
         pass
 
     @abstractmethod
@@ -127,15 +127,11 @@ class DB(ABC):
     @abstractmethod
     def get_by_ids(
         self, uuids: List[UUID], columns: Optional[List[str]] = None
-    ) -> Sequence:
+    ) -> Sequence[Any]:
         pass
 
     @abstractmethod
-    def raw_sql(self, raw_sql):
-        pass
-
-    @abstractmethod
-    def create_index(self, collection_uuid: UUID):
+    def raw_sql(self, raw_sql):  # type: ignore
         pass
 
     @abstractmethod

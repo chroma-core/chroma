@@ -500,11 +500,6 @@ class LocalAPI(API):
     def raw_sql(self, raw_sql: str):  # type: ignore
         return self._db.raw_sql(raw_sql)  # type: ignore
 
-    def create_index(self, collection_name: str) -> bool:
-        collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
-        self._db.create_index(collection_uuid=collection_uuid)
-        return True
-
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(
             collection_id=collection_id,

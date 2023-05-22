@@ -7,7 +7,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Include,
-    Metadata,
     Metadatas,
     Where,
     WhereDocument,
@@ -339,14 +338,6 @@ class FastAPI(API):
         )
         raise_chroma_error(resp)
         return pd.DataFrame.from_dict(resp.json())
-
-    def create_index(self, collection_name: str) -> bool:
-        """Creates an index for the given space key"""
-        resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/create_index"
-        )
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
 
     def get_version(self) -> str:
         """Returns the version of the server"""

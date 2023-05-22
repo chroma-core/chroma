@@ -592,22 +592,6 @@ class Clickhouse(DB):
 
         return uuids, distances
 
-    def create_index(self, collection_uuid: str):
-        """Create an index for a collection_uuid and optionally scoped to a dataset.
-        Args:
-            collection_uuid (str): The collection_uuid to create an index for
-            dataset (str, optional): The dataset to scope the index to. Defaults to None.
-        Returns:
-            None
-        """
-        get = self.get(collection_uuid=collection_uuid)
-
-        uuids = [x[1] for x in get]
-        embeddings = [x[2] for x in get]
-
-        index = self._index(collection_uuid)
-        index.add(uuids, embeddings)
-
     def add_incremental(self, collection_uuid, uuids, embeddings):
         index = self._index(collection_uuid)
         index.add(uuids, embeddings)
