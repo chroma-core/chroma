@@ -356,23 +356,6 @@ def test_increment_index_on(api):
         assert len(nn[key]) == 1
 
 
-def test_increment_index_off(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    collection.create_index()
-    nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]],
-        n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
-    )
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-
 def skipping_indexing_will_fail(api):
     api.reset()
     collection = api.create_collection("testspace")
