@@ -6,6 +6,12 @@ import chromadb.db
 import chromadb.api
 import chromadb.telemetry
 
+# The thin client will have a flag to control which implementations to use
+try:
+    from chromadb.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +90,23 @@ class System:
         return impl
 
     def get_db(self) -> chromadb.db.DB:
+        if is_thin_client:
+            raise RuntimeError(
+                "Chroma is running in thin client mode, and cannot access the database."
+            )
         if self.db is None:
             self.db = self._instantiate("chroma_db_impl")
         return self.db
 
     def get_api(self) -> chromadb.api.API:
+        if (
+            is_thin_client
+            and self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI"
+        ):
+            # TODO: show example and link to docs
+            raise RuntimeError(
+                "Chroma is running in thin client mode, and can only be run with chromadb.api.fastapi.FastAPI as the chroma_api_impl."
+            )
         if self.api is None:
             self.api = self._instantiate("chroma_api_impl")
         return self.api
