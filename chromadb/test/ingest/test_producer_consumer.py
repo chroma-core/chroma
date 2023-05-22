@@ -24,6 +24,8 @@ from chromadb.types import (
 )
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
+from asyncio import Event, wait_for
+from asyncio.exceptions import TimeoutError
 
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
@@ -67,14 +69,32 @@ def sample_embeddings() -> Iterator[InsertEmbeddingRecord]:
 
 class CapturingConsumeFn:
     embeddings: List[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
+    waiters: List[Tuple[int, Event]]
 
     def __init__(self) -> None:
         self.embeddings = []
+        self.waiters = []
 
     def __call__(
         self, embeddings: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
     ) -> None:
         self.embeddings.extend(embeddings)
+        for n, event in self.waiters:
+            if len(self.embeddings) >= n:
+                event.set()
+
+    async def get(
+        self, n: int
+    ) -> Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]:
+        "Wait until at least N embeddings are available, then return all embeddings"
+        if len(self.embeddings) >= n:
+            return self.embeddings[:n]
+        else:
+            event = Event()
+            self.waiters.append((n, event))
+            # timeout so we don't hang forever on failure
+            await wait_for(event.wait(), 10)
+            return self.embeddings[:n]
 
 
 def assert_approx_equal(a: Sequence[float], b: Sequence[float]) -> None:
@@ -101,7 +121,8 @@ def assert_records_match(
             assert consumed.get("metadata", None) == inserted.get("metadata", None)
 
 
-def test_backfill(
+@pytest.mark.asyncio
+async def test_backfill(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -117,10 +138,12 @@ def test_backfill(
     consume_fn = CapturingConsumeFn()
     consumer.subscribe("test_topic", consume_fn, start=consumer.min_seqid())
 
-    assert_records_match(embeddings, consume_fn.embeddings)
+    recieved = await consume_fn.get(3)
+    assert_records_match(embeddings, recieved)
 
 
-def test_notifications(
+@pytest.mark.asyncio
+async def test_notifications(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -138,10 +161,12 @@ def test_notifications(
         e = next(sample_embeddings)
         embeddings.append(e)
         producer.submit_embedding("test_topic", e)
-        assert_records_match(embeddings, consume_fn.embeddings)
+        received = await consume_fn.get(i + 1)
+        assert_records_match(embeddings, received)
 
 
-def test_sync_failure(
+@pytest.mark.asyncio
+async def test_sync_failure(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -162,10 +187,13 @@ def test_sync_failure(
 
     second_consumer = CapturingConsumeFn()
     consumer.subscribe("test_topic", second_consumer, start=consumer.min_seqid())
-    assert second_consumer.embeddings == []
+
+    with pytest.raises(TimeoutError):
+        _ = await wait_for(second_consumer.get(1), timeout=1)
 
 
-def test_async_failure(
+@pytest.mark.asyncio
+async def test_async_failure(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -184,10 +212,13 @@ def test_async_failure(
 
     second_consumer = CapturingConsumeFn()
     consumer.subscribe("test_topic", second_consumer, start=consumer.min_seqid())
-    assert_records_match([e], second_consumer.embeddings)
+
+    received = await second_consumer.get(1)
+    assert_records_match([e], received)
 
 
-def test_multiple_topics(
+@pytest.mark.asyncio
+async def test_multiple_topics(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -209,15 +240,18 @@ def test_multiple_topics(
         e_1 = next(sample_embeddings)
         embeddings_1.append(e_1)
         producer.submit_embedding("test_topic_1", e_1)
-        assert_records_match(embeddings_1, consume_fn_1.embeddings)
+        results_2 = await consume_fn_1.get(i + 1)
+        assert_records_match(embeddings_1, results_2)
 
         e_2 = next(sample_embeddings)
         embeddings_2.append(e_2)
         producer.submit_embedding("test_topic_2", e_2)
-        assert_records_match(embeddings_2, consume_fn_2.embeddings)
+        results_2 = await consume_fn_2.get(i + 1)
+        assert_records_match(embeddings_2, results_2)
 
 
-def test_start_seq_id(
+@pytest.mark.asyncio
+async def test_start_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -236,7 +270,8 @@ def test_start_seq_id(
         embeddings.append(e)
         producer.submit_embedding("test_topic", e)
 
-    assert_records_match(embeddings, consume_fn_1.embeddings)
+    results_1 = await consume_fn_1.get(5)
+    assert_records_match(embeddings, results_1)
 
     start = consume_fn_1.embeddings[-1]["seq_id"]
     consumer.subscribe("test_topic", consume_fn_2, start=start)
@@ -245,10 +280,12 @@ def test_start_seq_id(
         embeddings.append(e)
         producer.submit_embedding("test_topic", e)
 
-    assert_records_match(embeddings[-5:], consume_fn_2.embeddings)
+    results_2 = await consume_fn_2.get(5)
+    assert_records_match(embeddings[-5:], results_2)
 
 
-def test_end_seq_id(
+@pytest.mark.asyncio
+async def test_end_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
     sample_embeddings: Iterator[InsertEmbeddingRecord],
 ) -> None:
@@ -267,9 +304,15 @@ def test_end_seq_id(
         embeddings.append(e)
         producer.submit_embedding("test_topic", e)
 
-    assert_records_match(embeddings, consume_fn_1.embeddings)
+    results_1 = await consume_fn_1.get(10)
+    assert_records_match(embeddings, results_1)
 
     end = consume_fn_1.embeddings[-5]["seq_id"]
     consumer.subscribe("test_topic", consume_fn_2, start=consumer.min_seqid(), end=end)
 
-    assert_records_match(embeddings[:6], consume_fn_2.embeddings)
+    results_2 = await consume_fn_2.get(6)
+    assert_records_match(embeddings[:6], results_2)
+
+    # Should never produce a 7th
+    with pytest.raises(TimeoutError):
+        _ = await wait_for(consume_fn_2.get(7), timeout=1)
