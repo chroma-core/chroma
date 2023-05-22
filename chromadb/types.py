@@ -95,7 +95,11 @@ class InsertEmbeddingRecord(TypedDict):
 
 
 class DeleteEmbeddingRecord(TypedDict):
-    id: str
+    delete_id: str
+
+
+class EmbeddingDeleteRecord(TypedDict):
+    delete_id: str
     seq_id: SeqId
 
 

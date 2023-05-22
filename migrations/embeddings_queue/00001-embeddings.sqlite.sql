@@ -1,4 +1,4 @@
-CREATE TABLE embeddings_log (
+CREATE TABLE embeddings_queue (
     seq_id INTEGER PRIMARY KEY,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     topic TEXT NOT NULL,
