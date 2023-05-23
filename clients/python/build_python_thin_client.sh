@@ -25,5 +25,3 @@ rm "$existing_toml"
 mv "$staged_toml" "$existing_toml"
 
 rm "$is_thin_client_target"
-
-echo "Teardown completed."
