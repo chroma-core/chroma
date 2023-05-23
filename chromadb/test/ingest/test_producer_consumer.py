@@ -12,7 +12,7 @@ from typing import (
     cast,
     Tuple,
 )
-from chromadb.ingest import Producer, Consumer, RejectedEmbeddingException
+from chromadb.ingest import Producer, Consumer
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.types import (
     InsertEmbeddingRecord,
@@ -163,58 +163,6 @@ async def test_notifications(
         producer.submit_embedding("test_topic", e)
         received = await consume_fn.get(i + 1)
         assert_records_match(embeddings, received)
-
-
-@pytest.mark.asyncio
-async def test_sync_failure(
-    producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
-) -> None:
-    producer, consumer = producer_consumer
-    producer.reset()
-    producer.create_topic("test_topic")
-
-    def failing_consumer(
-        embeddings: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
-    ) -> None:
-        raise RejectedEmbeddingException("test failure")
-
-    consumer.subscribe("test_topic", failing_consumer, start=consumer.min_seqid())
-
-    e = next(sample_embeddings)
-    with pytest.raises(Exception):
-        producer.submit_embedding("test_topic", e, sync=True)
-
-    second_consumer = CapturingConsumeFn()
-    consumer.subscribe("test_topic", second_consumer, start=consumer.min_seqid())
-
-    with pytest.raises(TimeoutError):
-        _ = await wait_for(second_consumer.get(1), timeout=1)
-
-
-@pytest.mark.asyncio
-async def test_async_failure(
-    producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
-) -> None:
-    producer, consumer = producer_consumer
-    producer.reset()
-    producer.create_topic("test_topic")
-
-    def failing_consumer(
-        embeddings: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
-    ) -> None:
-        raise RejectedEmbeddingException("test failure")
-
-    consumer.subscribe("test_topic", failing_consumer, start=consumer.min_seqid())
-    e = next(sample_embeddings)
-    producer.submit_embedding("test_topic", e, sync=False)
-
-    second_consumer = CapturingConsumeFn()
-    consumer.subscribe("test_topic", second_consumer, start=consumer.min_seqid())
-
-    received = await second_consumer.get(1)
-    assert_records_match([e], received)
 
 
 @pytest.mark.asyncio

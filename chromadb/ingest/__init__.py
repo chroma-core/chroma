@@ -49,17 +49,14 @@ class Producer(ABC, EnforceOverrides):
 
     @abstractmethod
     def submit_embedding(
-        self, topic_name: str, embedding: InsertEmbeddingRecord, sync: bool = False
+        self, topic_name: str, embedding: InsertEmbeddingRecord
     ) -> None:
         """Add an embedding record to the given topic."""
         pass
 
     @abstractmethod
     def submit_embedding_delete(
-        self,
-        topic_name: str,
-        delete_embedding: DeleteEmbeddingRecord,
-        sync: bool = False,
+        self, topic_name: str, delete_embedding: DeleteEmbeddingRecord
     ) -> None:
         """Add an embedding deletion record (soft delete) to the given topic."""
         pass
@@ -74,29 +71,6 @@ class Producer(ABC, EnforceOverrides):
 ConsumerCallbackFn = Callable[
     [Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]], None
 ]
-
-
-class RejectedEmbeddingException(Exception):
-    """Exception thrown by a consumer to explicitly indicate that an embedding cannot be
-    processed."""
-
-    pass
-
-
-class IDAlreadyExistsException(RejectedEmbeddingException):
-    """Exception thrown by a consumer to explicitly indicate that an embedding cannot be
-    processed because the ID already exists."""
-
-    def __init__(self, id: str) -> None:
-        super().__init__(f"ID already exists: {id}")
-
-
-class IDDoesNotExistException(RejectedEmbeddingException):
-    """Exception thrown by a consumer to explicitly indicate that an embedding cannot be
-    processed because the ID does not exist."""
-
-    def __init__(self, id: str) -> None:
-        super().__init__(f"ID does not exist: {id}")
 
 
 class Consumer(ABC, EnforceOverrides):
@@ -120,11 +94,6 @@ class Consumer(ABC, EnforceOverrides):
         generated, not including those generated before creating the subscription. If
         end is None, the consumer will consume indefinitely, otherwise it will
         automatically be unsubscribed when the end SeqID is reached.
-
-        The function should return if and only if the embeddings were successfully
-        processed. Any failure should throw an exception. Failures due to the embeddings
-        themselves (e.g, duplicate or missing values) should throw a
-        RejectedEmbeddingException (or subtype.)
 
         If the function throws an exception, the function may be called again with the
         same or different records.

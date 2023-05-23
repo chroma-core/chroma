@@ -5,7 +5,6 @@ from chromadb.ingest import (
     encode_vector,
     decode_vector,
     ConsumerCallbackFn,
-    RejectedEmbeddingException,
 )
 from chromadb.types import (
     InsertEmbeddingRecord,
@@ -87,7 +86,7 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @override
     def submit_embedding(
-        self, topic_name: str, embedding: InsertEmbeddingRecord, sync: bool = False
+        self, topic_name: str, embedding: InsertEmbeddingRecord
     ) -> None:
         embedding_bytes = encode_vector(embedding["embedding"], embedding["encoding"])
         metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
@@ -117,14 +116,11 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
                 encoding=embedding["encoding"],
                 metadata=embedding["metadata"],
             )
-            self._notify_all(topic_name, sync, embedding_record)
+            self._notify_all(topic_name, embedding_record)
 
     @override
     def submit_embedding_delete(
-        self,
-        topic_name: str,
-        delete_embedding: DeleteEmbeddingRecord,
-        sync: bool = False,
+        self, topic_name: str, delete_embedding: DeleteEmbeddingRecord
     ) -> None:
         t = Table("embeddings_queue")
         insert = (
@@ -143,7 +139,6 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
             seq_id = int(cur.execute(sql, params).fetchone()[0])
             self._notify_all(
                 topic_name,
-                sync,
                 EmbeddingDeleteRecord(
                     seq_id=seq_id,
                     delete_id=delete_embedding["delete_id"],
@@ -211,7 +206,6 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
                 if row[2]:
                     self._notify_one(
                         subscription,
-                        False,
                         EmbeddingDeleteRecord(seq_id=row[0], delete_id=row[1]),
                     )
                 else:
@@ -219,7 +213,6 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
                     vector = decode_vector(row[3], encoding)
                     self._notify_one(
                         subscription,
-                        False,
                         EmbeddingRecord(
                             seq_id=row[0],
                             id=row[1],
@@ -253,17 +246,15 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
     def _notify_all(
         self,
         topic: str,
-        sync: bool,
         embedding: Union[EmbeddingRecord, EmbeddingDeleteRecord],
     ) -> None:
         """Send a notification to each subscriber of the given topic."""
         for sub in self._subscriptions[topic]:
-            self._notify_one(sub, sync, embedding)
+            self._notify_one(sub, embedding)
 
     def _notify_one(
         self,
         sub: Subscription,
-        sync: bool,
         embedding: Union[EmbeddingRecord, EmbeddingDeleteRecord],
     ) -> None:
         """Send a notification to a single subscriber."""
@@ -274,14 +265,14 @@ class EmbeddingsQueue(SqlDB, Producer, Consumer):
         if embedding["seq_id"] <= sub.start:
             return
 
-        if sync:
+        # Log errors instead of throwing them to preserve async semantics
+        # for consistency between local and distributed configurations
+        try:
             sub.callback([embedding])
-        else:
-            try:
-                sub.callback([embedding])
-            except RejectedEmbeddingException as e:
-                id = embedding.get("id", embedding.get("delete_id"))
-                logger.info(
-                    f"Consumer {sub.id} to topic {sub.topic_name} rejected"
-                    + f"embedding {id}: {e}"
-                )
+        except BaseException as e:
+            id = embedding.get("id", embedding.get("delete_id"))
+            logger.error(
+                f"Exception occurred invoking consumer for subscription {sub.id}"
+                + f"to topic {sub.topic_name} for embedding id {id} ",
+                e,
+            )
