@@ -408,11 +408,12 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = []
+    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
     if not isinstance(value, str):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
-    if not isinstance(value, float):
-        legal_ops.extend([None, "$eq", "$ne"])
+    if isinstance(value, float):
+        # Add or subtract a small number to avoid floating point rounding errors
+        value = value + draw(st.sampled_from([1e6, -1e6]))
 
     op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
