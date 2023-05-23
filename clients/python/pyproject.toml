@@ -1,5 +1,5 @@
 [project]
-name = "chromadb-thin-client"
+name = "chromadb-client"
 dynamic = ["version"]
 
 authors = [
