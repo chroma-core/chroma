@@ -178,7 +178,7 @@ class Collection:
     metadata: Optional[types.Metadata]
     dimension: int
     dtype: np.dtype
-    known_metadata_keys: Dict[str, str]
+    known_metadata_keys: Dict[str, Union[str, int, float]]
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
@@ -212,7 +212,7 @@ def collections(
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
             metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
-    known_metadata_keys: Dict[str, str] = {}
+    known_metadata_keys: Dict[str, Union[int, str, float]] = {}
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
@@ -220,6 +220,7 @@ def collections(
 
     if has_documents is None:
         has_documents = draw(st.booleans())
+    assert has_documents is not None
     if has_documents and add_filterable_data:
         known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
     else:
@@ -230,6 +231,7 @@ def collections(
     else:
         if has_embeddings is None:
             has_embeddings = draw(st.booleans())
+    assert has_embeddings is not None
 
     embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
@@ -406,9 +408,11 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
+    legal_ops: List[Optional[str]] = []
     if not isinstance(value, str):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
+    if not isinstance(value, float):
+        legal_ops.extend([None, "$eq", "$ne"])
 
     op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
