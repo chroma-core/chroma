@@ -1,5 +1,6 @@
 from pydantic import BaseSettings
 from typing import Optional, List, Any
+from typing_extensions import Literal
 import importlib
 import logging
 import chromadb.db
@@ -46,6 +47,9 @@ class Settings(BaseSettings):
     anonymized_telemetry: bool = True
 
     allow_reset: bool = False
+
+    sqlite_database: Optional[str] = ":memory:"
+    migrations: Literal["none", "validate", "apply"] = "apply"
 
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not
