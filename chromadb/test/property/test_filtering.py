@@ -1,10 +1,12 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 from hypothesis import given, settings, HealthCheck
+import pytest
 from chromadb.api import API
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
     Embedding,
+    Embeddings,
     IDs,
     Metadata,
     Metadatas,
@@ -109,7 +111,7 @@ def _filter_embedding_set(
                 metadatas = recordset["metadatas"]
             else:
                 metadatas = [EMPTY_DICT] * len(recordset["ids"])
-            filter_where: Where = filter["where"]  # type: ignore
+            filter_where: Where = filter["where"]
             if not _filter_where_clause(filter_where, metadatas[i]):
                 ids.discard(recordset["ids"][i])
 
@@ -140,7 +142,7 @@ recordset_st = st.shared(
     collection=collection_st,
     recordset=recordset_st,
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
-)  # type: ignore
+)
 def test_filterable_metadata_get(
     caplog, api: API, collection, recordset, filters
 ) -> None:
@@ -165,7 +167,7 @@ def test_filterable_metadata_get(
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
     ]
-)  # type: ignore
+)
 @given(
     collection=collection_st,
     recordset=recordset_st,
@@ -173,13 +175,13 @@ def test_filterable_metadata_get(
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
     ),
-)  # type: ignore
+)
 def test_filterable_metadata_query(
-    caplog,
+    caplog: pytest.LogCaptureFixture,
     api: API,
     collection: strategies.Collection,
     recordset: strategies.RecordSet,
-    filters,
+    filters: List[strategies.Filter],
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -217,14 +219,20 @@ def test_filterable_metadata_query(
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 
-def test_empty_filter(api):
+def test_empty_filter(api: API) -> None:
     """Test that a filter where no document matches returns an empty result"""
     api.reset()
     coll = api.create_collection(name="test")
-    coll.add(ids=["1", "2", "3"], embeddings=[[1, 1], [2, 2], [3, 3]])
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_query_embedding: Embedding = [1, 2]
+    test_query_embeddings: Embeddings = [test_query_embedding, test_query_embedding]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings)
 
     res = coll.query(
-        query_embeddings=[1, 2],
+        query_embeddings=test_query_embedding,
         where={"q": {"$eq": 4}},
         n_results=3,
         include=["embeddings", "distances", "metadatas"],
@@ -235,7 +243,7 @@ def test_empty_filter(api):
     assert res["metadatas"] == [[]]
 
     res = coll.query(
-        query_embeddings=[[1, 2], [1, 2]],
+        query_embeddings=test_query_embeddings,
         where={"test": "yes"},
         n_results=3,
     )
