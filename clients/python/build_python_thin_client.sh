@@ -18,8 +18,6 @@ cp "$thin_client_toml" "$existing_toml"
 # Copy the thin client flag script in place
 cp "$is_thin_client_py" "$is_thin_client_target"
 
-# Perform the work that could potentially error
-# Add your commands here
 python -m build
 
 # Teardown: Remove the new toml file and put the old one back

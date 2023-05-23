@@ -7,8 +7,9 @@ import chromadb.api
 import chromadb.telemetry
 
 # The thin client will have a flag to control which implementations to use
+is_thin_client = False
 try:
-    from chromadb.is_thin_client import is_thin_client
+    from chromadb.is_thin_client import is_thin_client  # type: ignore
 except ImportError:
     is_thin_client = False
 

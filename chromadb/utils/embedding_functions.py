@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 import importlib
 from typing import Optional
+from chromadb.config import is_thin_client
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
@@ -299,7 +300,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
                 tar.extractall(self.DOWNLOAD_PATH)
 
 
-DefaultEmbeddingFunction = ONNXMiniLM_L6_V2
+def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction]:
+    if is_thin_client:
+        return None
+    else:
+        return ONNXMiniLM_L6_V2()
 
 
 class GooglePalmEmbeddingFunction(EmbeddingFunction):
