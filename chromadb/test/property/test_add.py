@@ -9,13 +9,11 @@ import chromadb.test.property.invariants as invariants
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
-@given(
-    collection=collection_st, record_set=strategies.recordsets(collection_st)
-)  # type: ignore
-@settings(deadline=None)  # type: ignore
+@given(collection=collection_st, record_set=strategies.recordsets(collection_st))
+@settings(deadline=None)
 def test_add(
-    api: API, collection: strategies.Collection, embeddings: strategies.RecordSet
-):
+    api: API, collection: strategies.Collection, record_set: strategies.RecordSet
+) -> None:
     api.reset()
 
     # TODO: Generative embedding functions
@@ -24,14 +22,14 @@ def test_add(
         metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
-    coll.add(**embeddings)
+    coll.add(**record_set)
 
-    embeddings = invariants.wrap_all(embeddings)
-    invariants.count(coll, embeddings)
-    n_results = max(1, (len(embeddings["ids"]) // 10))
+    record_set = invariants.wrap_all(record_set)
+    invariants.count(coll, record_set)
+    n_results = max(1, (len(record_set["ids"]) // 10))
     invariants.ann_accuracy(
         coll,
-        embeddings,
+        record_set,
         n_results=n_results,
         embedding_function=collection.embedding_function,
     )
@@ -41,8 +39,8 @@ def test_add(
 @pytest.mark.xfail(
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
-)  # type: ignore
-def test_out_of_order_ids(api: API):
+)
+def test_out_of_order_ids(api: API) -> None:
     api.reset()
     ooo_ids = [
         "40",

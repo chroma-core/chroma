@@ -1,3 +1,4 @@
+from multiprocessing.connection import Connection
 import sys
 import os
 import shutil
@@ -11,6 +12,7 @@ import pytest
 import json
 from urllib import request
 from chromadb.api import API
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -161,13 +163,18 @@ def switch_to_version(version: str) -> ModuleType:
     return chromadb
 
 
+class not_implemented_ef(EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        assert False, "Embedding function should not be called"
+
+
 def persist_generated_data_with_old_version(
     version: str,
     settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
-    conn,
-):
+    conn: Connection,
+) -> None:
     try:
         old_module = switch_to_version(version)
         api: API = old_module.Client(settings)
@@ -175,7 +182,8 @@ def persist_generated_data_with_old_version(
         coll = api.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
-            embedding_function=strategies.not_implemented_embedding_function(),
+            # In order to test old versions, we can't rely on the not_implemented function
+            embedding_function=not_implemented_ef(),
         )
         coll.add(**embeddings_strategy)
         # We can't use the invariants module here because it uses the current version
@@ -198,7 +206,7 @@ def persist_generated_data_with_old_version(
 
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
-collection_st: st.SearchStrategy = st.shared(
+collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )
 
@@ -206,13 +214,13 @@ collection_st: st.SearchStrategy = st.shared(
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
-)  # type: ignore
+)
 @pytest.mark.skipif(
     sys.version_info.major < 3
     or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
     reason="The mininum supported versions of chroma do not work with python <= 3.7",
-)  # type: ignore
-@settings(deadline=None)  # type: ignore
+)
+@settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
@@ -250,7 +258,7 @@ def test_cycle_versions(
     api = Client(settings)
     coll = api.get_collection(
         name=collection_strategy.name,
-        embedding_function=strategies.not_implemented_embedding_function(),
+        embedding_function=not_implemented_ef(),
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)

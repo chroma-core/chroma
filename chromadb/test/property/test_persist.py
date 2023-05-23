@@ -30,8 +30,8 @@ configurations = [
 ]
 
 
-@pytest.fixture(scope="module", params=configurations)  # type: ignore
-def settings(request) -> Generator[Settings, None, None]:
+@pytest.fixture(scope="module", params=configurations)
+def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     configuration = request.param
     yield configuration
     save_path = configuration.persist_directory
@@ -46,7 +46,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
-)  # type: ignore
+)
 def test_persist(
     settings: Settings,
     collection_strategy: strategies.Collection,
@@ -125,9 +125,10 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.api.reset()
         super().__init__(self.api)
 
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)  # type: ignore
-    @precondition(lambda self: self.last_persist_delay <= 0)  # type: ignore
-    @rule()  # type: ignore
+    @precondition(
+        lambda self: len(self.embeddings["ids"]) >= 1 and self.last_persist_delay <= 0
+    )
+    @rule()
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         self.api.persist()
@@ -161,4 +162,4 @@ def test_persist_embeddings_state(
     api = chromadb.Client(settings)
     run_state_machine_as_test(
         lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
-    )
+    )  # type: ignore
