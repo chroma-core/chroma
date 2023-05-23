@@ -7,7 +7,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Include,
-    Metadata,
     Metadatas,
     Where,
     WhereDocument,
@@ -15,6 +14,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
 )
+import chromadb.utils.embedding_functions as ef
 import pandas as pd
 import requests
 import json
@@ -53,7 +53,7 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
@@ -76,7 +76,7 @@ class FastAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
@@ -94,7 +94,7 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection, or return it if it exists"""
 

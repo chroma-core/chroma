@@ -8,7 +8,11 @@ import numpy as np
 import numpy.typing as npt
 import importlib
 from typing import Optional
-from chromadb.config import is_thin_client
+
+try:
+    from chromadb.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
