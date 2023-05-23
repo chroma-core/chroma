@@ -8,6 +8,7 @@ import pypika
 import pypika.queries
 import itertools
 from chromadb.config import System
+from uuid import UUID
 
 
 class Cursor(Protocol):
@@ -83,6 +84,16 @@ class SqlDB(ABC, EnforceOverrides):
         """Return the appropriate parameter format for this database implementation.
         Will be called with str.format(i) where i is the numeric index of the parameter.
         """
+        pass
+
+    @abstractmethod
+    def uuid_to_db(self, uuid: Optional[UUID]) -> Optional[Any]:
+        """Convert a UUID to a value that can be passed to the DB driver"""
+        pass
+
+    @abstractmethod
+    def uuid_from_db(self, value: Optional[Any]) -> Optional[UUID]:
+        """Convert a value from the DB driver to a UUID"""
         pass
 
     def param(self, idx: int) -> pypika.Parameter:

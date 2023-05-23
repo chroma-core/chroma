@@ -5,10 +5,11 @@ from chromadb.db.mixins.embeddings_queue import EmbeddingsQueue
 import sqlite3
 from overrides import override
 import pypika
-from typing import Sequence, cast, Optional, Type
+from typing import Sequence, cast, Optional, Type, Any
 from typing_extensions import Literal
 from types import TracebackType
 import os
+from uuid import UUID
 
 
 class TxWrapper(base.TxWrapper):
@@ -48,6 +49,8 @@ class SqliteDB(MigratableDB, EmbeddingsQueue):
     def _init(self) -> None:
         sqlite_db = self._settings.require("sqlite_database")
         self._conn = sqlite3.connect(sqlite_db)
+        with self.tx() as cur:
+            cur.execute("PRAGMA foreign_keys = ON")
         self.initialize_migrations()
 
     @staticmethod
@@ -162,3 +165,11 @@ class SqliteDB(MigratableDB, EmbeddingsQueue):
                 migration["hash"],
             ),
         )
+
+    @override
+    def uuid_from_db(self, value: Optional[Any]) -> Optional[UUID]:
+        return UUID(value) if value is not None else None
+
+    @override
+    def uuid_to_db(self, uuid: Optional[UUID]) -> Optional[Any]:
+        return str(uuid) if uuid is not None else None
