@@ -69,7 +69,7 @@ class NormalizedRecordSet(TypedDict):
 
 class StateMachineRecordSet(TypedDict):
     """
-    Rpresents the internal state of a state machine in hypothesis tests.
+    Represents the internal state of a state machine in hypothesis tests.
     """
 
     ids: List[types.ID]

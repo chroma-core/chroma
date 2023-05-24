@@ -32,14 +32,10 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         if len(record_set["embeddings"]) > 0 and not all(
             isinstance(embedding, list) for embedding in record_set["embeddings"]
         ):
-            if all(isinstance(e, int) for e in record_set["embeddings"]) or all(
-                isinstance(e, float) for e in record_set["embeddings"]
-            ):
+            if all(isinstance(e, (int, float)) for e in record_set["embeddings"]):
                 embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
             else:
-                raise InvalidArgument(
-                    "embeddings must be a list of lists, a list of numbers, or None"
-                )
+                raise InvalidArgument("an embedding must be a list of floats or ints")
         else:
             embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
