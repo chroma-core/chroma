@@ -214,13 +214,13 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 @given(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
-)  # type: ignore
+)
 @pytest.mark.skipif(
     sys.version_info.major < 3
     or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
     reason="The mininum supported versions of chroma do not work with python <= 3.7",
-)  # type: ignore
-@settings(deadline=None)  # type: ignore
+)
+@settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,

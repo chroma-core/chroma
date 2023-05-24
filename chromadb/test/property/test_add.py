@@ -16,7 +16,7 @@ def test_add(
     api: API,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
-):
+) -> None:
     api.reset()
 
     # TODO: Generative embedding functions

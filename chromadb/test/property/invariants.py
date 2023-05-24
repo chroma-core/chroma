@@ -96,7 +96,7 @@ def _field_matches(
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
         expected_field = [None] * len(normalized_record_set["ids"])  # type: ignore
-    assert actual_field == expected_field
+    assert field_values == expected_field
 
 
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
