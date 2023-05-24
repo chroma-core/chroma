@@ -148,9 +148,9 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, texts: Documents) -> Embeddings:
         # Call HuggingFace Embedding API for each document
-        return self._session.post(  # type: ignore
+        return [self._session.post(  # type: ignore
             self._api_url, json={"inputs": texts, "options": {"wait_for_model": True}}
-        ).json()
+        ).json()]
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction):
@@ -364,4 +364,4 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
         if "predictions" in response:
             return response["predictions"]
-        return {}
+        return []
