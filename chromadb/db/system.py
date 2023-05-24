@@ -4,9 +4,7 @@ from uuid import UUID
 from overrides import EnforceOverrides
 from chromadb.types import (
     Collection,
-    EmbeddingFunction,
     Metadata,
-    NamespacedName,
     Segment,
 )
 
@@ -37,7 +35,6 @@ class SysDB(ABC, EnforceOverrides):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
-        embedding_function: Optional[NamespacedName] = None,
         metadata: Optional[dict[str, Metadata]] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
@@ -51,18 +48,6 @@ class SysDB(ABC, EnforceOverrides):
     @abstractmethod
     def delete_collection(self, id: UUID) -> None:
         """Delete a topic and all associated segments from the SysDB"""
-        pass
-
-    @abstractmethod
-    def get_embedding_functions(
-        self, name: Optional[str]
-    ) -> Sequence[EmbeddingFunction]:
-        """Find embedding functions"""
-        pass
-
-    @abstractmethod
-    def create_embedding_function(self, embedding_function: EmbeddingFunction) -> None:
-        """Create a new embedding function"""
         pass
 
     @abstractmethod
