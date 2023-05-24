@@ -1,7 +1,7 @@
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
-from chromadb.db.mixins.embeddings_queue import EmbeddingsQueue
+from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
 import sqlite3
 from overrides import override
@@ -36,7 +36,7 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
-class SqliteDB(MigratableDB, EmbeddingsQueue, SqlSysDB):
+class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn: sqlite3.Connection
     _settings: Settings
     _migration_dirs: Sequence[str]

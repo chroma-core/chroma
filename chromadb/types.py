@@ -20,14 +20,6 @@ class SegmentScope(Enum):
     METADATA = "METADATA"
 
 
-# Note: This is the data model for identifying and describing an embedding function,
-# not the actual function implementation.
-class EmbeddingFunction(TypedDict):
-    name: NamespacedName
-    dimension: int
-    scalar_encoding: ScalarEncoding
-
-
 class Collection(TypedDict):
     id: UUID
     name: str

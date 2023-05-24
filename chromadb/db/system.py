@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import EnforceOverrides
-from chromadb.types import Collection, SegmentScope, Segment
+from chromadb.types import Collection, Segment, SegmentScope
 
 
 class SysDB(ABC, EnforceOverrides):

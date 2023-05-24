@@ -27,7 +27,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingsQueue(SqlDB, Producer, Consumer):
+class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     """A SQL database that stores embeddings, allowing a traditional RDBMS to be used as
     the primary ingest queue and satisfying the top level Producer/Consumer interfaces.
 
