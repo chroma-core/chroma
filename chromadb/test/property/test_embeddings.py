@@ -1,9 +1,9 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Set, cast
+from typing import Set, cast, Union
 from dataclasses import dataclass
-from chromadb.api.types import Include, IDs, ID
+from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
@@ -39,10 +39,11 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy = st.shared(
-    st.sampled_from(strategies.float_types), key="dtype"
-)
-dimension_shared_st: st.SearchStrategy = st.shared(
+dtype_shared_st: st.SearchStrategy[
+    Union[np.float16, np.float32, np.float64]
+] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
+
+dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
 )
 
@@ -59,14 +60,14 @@ class EmbeddingStateMachineStates:
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
 
-class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
+class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
-    embedding_ids: Bundle = Bundle("embedding_ids")
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
     def __init__(self, api: API):
         super().__init__()
         self.api = api
-        self._rules_strategy = strategies.DeterministicRuleStrategy(self)
+        self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
@@ -84,7 +85,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
-    @rule(target=embedding_ids, record_set=strategies.recordsets(collection_st))  # type: ignore
+    @rule(target=embedding_ids, record_set=strategies.recordsets(collection_st))
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
@@ -107,9 +108,9 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
             self._upsert_embeddings(record_set)
             return multiple(*normalized_record_set["ids"])
 
-    @precondition(lambda self: len(self.record_set_state["ids"]) > 20)  # type: ignore
-    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))  # type: ignore
-    def delete_by_ids(self, ids: IDs):
+    @precondition(lambda self: len(self.record_set_state["ids"]) > 20)
+    @rule(ids=st.lists(consumes(embedding_ids), min_size=1, max_size=20))
+    def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
         indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
@@ -119,7 +120,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
 
     # Removing the precondition causes the tests to frequently fail as "unsatisfiable"
     # Using a value < 5 causes retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.record_set_state["ids"]) >= 5)  # type: ignore
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 5)
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -127,15 +128,15 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
             min_size=1,
             max_size=5,
         )
-    )  # type: ignore
-    def update_embeddings(self, record_set: strategies.RecordSet):
+    )
+    def update_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("update embeddings")
         self.on_state_change(EmbeddingStateMachineStates.update_embeddings)
         self.collection.update(**record_set)
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)  # type: ignore
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -143,24 +144,24 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
             min_size=1,
             max_size=5,
         )
-    )  # type: ignore
+    )
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         trace("upsert embeddings")
         self.on_state_change(EmbeddingStateMachineStates.upsert_embeddings)
         self.collection.upsert(**record_set)
         self._upsert_embeddings(record_set)
 
-    @invariant()  # type: ignore
+    @invariant()
     def count(self) -> None:
         invariants.count(
             self.collection, cast(strategies.RecordSet, self.record_set_state)
         )
 
-    @invariant()  # type: ignore
+    @invariant()
     def no_duplicates(self) -> None:
         invariants.no_duplicates(self.collection)
 
-    @invariant()  # type: ignore
+    @invariant()
     def ann_accuracy(self) -> None:
         invariants.ann_accuracy(
             collection=self.collection,
@@ -243,7 +244,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):  # type: ignore
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: API) -> None:
     caplog.set_level(logging.ERROR)
-    run_state_machine_as_test(lambda: EmbeddingStateMachine(api))
+    run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
     print_traces()
 
 
@@ -274,7 +275,7 @@ def test_dup_add(api: API) -> None:
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: API):
+def test_query_without_add(api: API) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
@@ -284,11 +285,13 @@ def test_query_without_add(api: API):
         query_embeddings=np.random.random((N, K)).tolist(), include=fields
     )
     for field in fields:
-        all([len(result) == 0 for result in results[field]])
+        field_results = results[field]
+        assert field_results is not None
+        assert all([len(result) == 0 for result in field_results])
 
 
 # TODO: Use SQL escaping correctly internally
-@pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")  # type: ignore
+@pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(api: API) -> None:
     api.reset()
     id = "\x1f"
