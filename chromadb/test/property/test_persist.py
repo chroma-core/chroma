@@ -126,7 +126,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         super().__init__(self.api)
 
     @precondition(
-        lambda self: len(self.embeddings["ids"]) >= 1 and self.last_persist_delay <= 0
+        lambda self: len(self.record_set_state["ids"]) >= 1
+        and self.last_persist_delay <= 0
     )
     @rule()
     def persist(self) -> None:
