@@ -55,7 +55,7 @@ class Collection(BaseModel):
             import chromadb.utils.embedding_functions as ef
 
             logger.warning(
-                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
+                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://github.com/chroma-core/onnx-embedding"
             )
             self._embedding_function = ef.DefaultEmbeddingFunction()
         super().__init__(name=name, metadata=metadata, id=id)
