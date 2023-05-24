@@ -111,7 +111,7 @@ def _filter_embedding_set(
                 metadatas = normalized_record_set["metadatas"]
             else:
                 metadatas = [EMPTY_DICT] * len(normalized_record_set["ids"])
-            filter_where: Where = filter["where"]  # type: ignore
+            filter_where: Where = filter["where"]
             if not _filter_where_clause(filter_where, metadatas[i]):
                 ids.discard(normalized_record_set["ids"][i])
 
@@ -169,7 +169,7 @@ def test_filterable_metadata_get(
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
     ]
-)  # type: ignore
+)
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -177,12 +177,12 @@ def test_filterable_metadata_get(
         strategies.filters(collection_st, recordset_st, include_all_ids=True),
         min_size=1,
     ),
-)  # type: ignore
+)
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
     api: API,
     collection: strategies.Collection,
-    recordset: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
 ) -> None:
     caplog.set_level(logging.ERROR)
@@ -211,17 +211,14 @@ def test_filterable_metadata_query(
             [normalized_record_set["documents"][random.randint(0, total_count - 1)]]
         )[0]
     for filter in filters:
-        try:
-            result_ids = set(
-                coll.query(
-                    query_embeddings=random_query,
-                    n_results=total_count,
-                    where=filter["where"],
-                    where_document=filter["where_document"],
-                )["ids"][0]
-            )
-        except NoDatapointsException:
-            result_ids = set()
+        result_ids = set(
+            coll.query(
+                query_embeddings=random_query,
+                n_results=total_count,
+                where=filter["where"],
+                where_document=filter["where_document"],
+            )["ids"][0]
+        )
         expected_ids = set(
             _filter_embedding_set(
                 cast(strategies.RecordSet, normalized_record_set), filter
