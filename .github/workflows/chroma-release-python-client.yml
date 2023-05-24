@@ -38,3 +38,8 @@ jobs:
       with:
         password: ${{ secrets.TEST_PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
         repository_url: https://test.pypi.org/legacy/
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
