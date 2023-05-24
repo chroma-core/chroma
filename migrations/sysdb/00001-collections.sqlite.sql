@@ -4,12 +4,11 @@ CREATE TABLE collections (
     topic TEXT NOT NULL
 );
 
-CREATE TABLE collection_metadata {
-    collection_id TEXT PRIMARY KEY,
+CREATE TABLE collection_metadata (
+    collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
-    text_value TEXT,
+    str_value TEXT,
     int_value INTEGER,
     float_value REAL,
-    PRIMARY KEY (collection_id, key),
-    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
-};
+    PRIMARY KEY (collection_id, key)
+);

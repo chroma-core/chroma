@@ -43,7 +43,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = ["migrations/embeddings_queue"]
+        self._migration_dirs = ["migrations/embeddings_queue", "migrations/sysdb"]
         self._init()
         super().__init__(system)
 
@@ -152,7 +152,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        cur.execute(migration["sql"])
+        cur.executescript(migration["sql"])
         cur.execute(
             """
             INSERT INTO migrations (dir, version, filename, sql, hash)
@@ -167,10 +167,17 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             ),
         )
 
+    @staticmethod
     @override
-    def uuid_from_db(self, value: Optional[Any]) -> Optional[UUID]:
+    def uuid_from_db(value: Optional[Any]) -> Optional[UUID]:
         return UUID(value) if value is not None else None
 
+    @staticmethod
     @override
-    def uuid_to_db(self, uuid: Optional[UUID]) -> Optional[Any]:
+    def uuid_to_db(uuid: Optional[UUID]) -> Optional[Any]:
         return str(uuid) if uuid is not None else None
+
+    @staticmethod
+    @override
+    def unique_constraint_error() -> Type[BaseException]:
+        return sqlite3.IntegrityError

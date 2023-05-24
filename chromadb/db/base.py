@@ -11,10 +11,25 @@ from chromadb.config import System
 from uuid import UUID
 
 
+class NotFoundError(Exception):
+    """Raised when a delete or update operation affects no rows"""
+
+    pass
+
+
+class UniqueConstraintError(Exception):
+    """Raised when an insert operation would violate a unique constraint"""
+
+    pass
+
+
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
 
     def execute(self, sql: str, params: Optional[Tuple[Any, ...]] = None) -> Self:
+        ...
+
+    def executescript(self, script: str) -> Self:
         ...
 
     def executemany(
@@ -86,14 +101,23 @@ class SqlDB(ABC, EnforceOverrides):
         """
         pass
 
+    @staticmethod
     @abstractmethod
-    def uuid_to_db(self, uuid: Optional[UUID]) -> Optional[Any]:
+    def uuid_to_db(uuid: Optional[UUID]) -> Optional[Any]:
         """Convert a UUID to a value that can be passed to the DB driver"""
         pass
 
+    @staticmethod
     @abstractmethod
-    def uuid_from_db(self, value: Optional[Any]) -> Optional[UUID]:
+    def uuid_from_db(value: Optional[Any]) -> Optional[UUID]:
         """Convert a value from the DB driver to a UUID"""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def unique_constraint_error() -> Type[BaseException]:
+        """Return the exception type that the DB raises when a unique constraint is
+        violated"""
         pass
 
     def param(self, idx: int) -> pypika.Parameter:

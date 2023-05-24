@@ -5,7 +5,14 @@ from pypika import Table, Column
 from itertools import groupby
 
 from chromadb.config import System
-from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
+from chromadb.db.base import (
+    Cursor,
+    SqlDB,
+    ParameterValue,
+    get_sql,
+    NotFoundError,
+    UniqueConstraintError,
+)
 from chromadb.db.system import SysDB
 from chromadb.types import Segment, Metadata, Collection, SegmentScope
 
@@ -31,13 +38,18 @@ class SqlSysDB(SqlDB, SysDB):
                 .insert(
                     ParameterValue(self.uuid_to_db(segment["id"])),
                     ParameterValue(segment["type"]),
-                    ParameterValue(segment["scope"]),
+                    ParameterValue(segment["scope"].value),
                     ParameterValue(segment["topic"]),
                     ParameterValue(self.uuid_to_db(segment["collection"])),
                 )
             )
             sql, params = get_sql(insert_segment, self.parameter_format())
-            cur.execute(sql, params)
+            try:
+                cur.execute(sql, params)
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(
+                    f"Segment {segment['id']} already exists"
+                ) from e
             metadata_t = Table("segment_metadata")
             if segment["metadata"]:
                 self._insert_metadata(
@@ -64,7 +76,12 @@ class SqlSysDB(SqlDB, SysDB):
                 )
             )
             sql, params = get_sql(insert_collection, self.parameter_format())
-            cur.execute(sql, params)
+            try:
+                cur.execute(sql, params)
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(
+                    f"Collection {collection['id']} already exists"
+                ) from e
             metadata_t = Table("collection_metadata")
             if collection["metadata"]:
                 self._insert_metadata(
@@ -211,7 +228,10 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
-            cur.execute(sql, params)
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Segment {id} not found")
 
     @override
     def delete_collection(self, id: UUID) -> None:
@@ -226,7 +246,10 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
-            cur.execute(sql, params)
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Collection {id} not found")
 
     def _metadata_from_rows(
         self, rows: Sequence[Tuple[Any, ...]]
@@ -234,8 +257,6 @@ class SqlSysDB(SqlDB, SysDB):
         """Given SQL rows, return a metadata map (assuming that the last four columns
         are the key, str_value, int_value & float_value)"""
         # this originated from a left join, so we might not have any metadata values
-        if not rows[0][-4]:
-            return None
         metadata: Metadata = {}
         for row in rows:
             key = str(row[-4])
@@ -257,18 +278,31 @@ class SqlSysDB(SqlDB, SysDB):
                 id_col, table.key, table.str_value, table.int_value, table.float_value
             )
         )
+        sql_id = self.uuid_to_db(id)
         for k, v in metadata.items():
             if isinstance(v, str):
-                q.insert(
-                    ParameterValue(id), ParameterValue(k), ParameterValue(v), None, None
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    ParameterValue(v),
+                    None,
+                    None,
                 )
             elif isinstance(v, int):
-                q.insert(
-                    ParameterValue(id), ParameterValue(k), None, ParameterValue(v), None
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    None,
+                    ParameterValue(v),
+                    None,
                 )
             elif isinstance(v, float):
-                q.insert(
-                    ParameterValue(id), ParameterValue(k), None, None, ParameterValue(v)
+                q = q.insert(
+                    ParameterValue(sql_id),
+                    ParameterValue(k),
+                    None,
+                    None,
+                    ParameterValue(v),
                 )
         sql, params = get_sql(q, self.parameter_format())
         cur.execute(sql, params)

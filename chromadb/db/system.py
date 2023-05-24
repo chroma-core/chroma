@@ -10,7 +10,8 @@ class SysDB(ABC, EnforceOverrides):
 
     @abstractmethod
     def create_segment(self, segment: Segment) -> None:
-        """Create a new segment in the System database."""
+        """Create a new segment in the System database. Raises DuplicateError if the ID
+        already exists."""
         pass
 
     @abstractmethod
@@ -31,16 +32,6 @@ class SysDB(ABC, EnforceOverrides):
         pass
 
     @abstractmethod
-    def get_collections(
-        self,
-        id: Optional[UUID] = None,
-        topic: Optional[str] = None,
-        name: Optional[str] = None,
-    ) -> Sequence[Collection]:
-        """Find collections by id, topic or name"""
-        pass
-
-    @abstractmethod
     def create_collection(self, collection: Collection) -> None:
         """Create a new topic"""
         pass
@@ -48,6 +39,16 @@ class SysDB(ABC, EnforceOverrides):
     @abstractmethod
     def delete_collection(self, id: UUID) -> None:
         """Delete a topic and all associated segments from the SysDB"""
+        pass
+
+    @abstractmethod
+    def get_collections(
+        self,
+        id: Optional[UUID] = None,
+        topic: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> Sequence[Collection]:
+        """Find collections by id, topic or name"""
         pass
 
     @abstractmethod
