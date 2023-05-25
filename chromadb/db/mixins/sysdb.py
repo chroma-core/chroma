@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Any, Tuple, cast
+from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
 from pypika import Table, Column
@@ -14,7 +14,15 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
-from chromadb.types import Segment, Metadata, Collection, SegmentScope
+from chromadb.types import (
+    OptionalArgument,
+    Segment,
+    Metadata,
+    Collection,
+    SegmentScope,
+    Unspecified,
+    UpdateMetadata,
+)
 
 
 class SqlSysDB(SqlDB, SysDB):
@@ -251,13 +259,114 @@ class SqlSysDB(SqlDB, SysDB):
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
 
+    @override
+    def update_segment(
+        self,
+        id: UUID,
+        topic: OptionalArgument[Optional[str]] = Unspecified(),
+        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        segments_t = Table("segments")
+        metadata_t = Table("segment_metadata")
+
+        q = (
+            self.querybuilder()
+            .update(segments_t)
+            .where(segments_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+
+        if not topic == Unspecified():
+            q = q.set(segments_t.topic, ParameterValue(topic))
+
+        if not collection == Unspecified():
+            collection = cast(Optional[UUID], collection)
+            q = q.set(
+                segments_t.collection, ParameterValue(self.uuid_to_db(collection))
+            )
+
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            if sql:  # pypika emits a blank string if nothing to do
+                cur.execute(sql, params)
+
+            if metadata is None:
+                q = (
+                    self.querybuilder()
+                    .from_(metadata_t)
+                    .where(metadata_t.segment_id == ParameterValue(self.uuid_to_db(id)))
+                    .delete()
+                )
+                sql, params = get_sql(q, self.parameter_format())
+                cur.execute(sql, params)
+            elif metadata != Unspecified():
+                metadata = cast(UpdateMetadata, metadata)
+                metadata = cast(UpdateMetadata, metadata)
+                self._insert_metadata(
+                    cur,
+                    metadata_t,
+                    metadata_t.segment_id,
+                    id,
+                    metadata,
+                    set(metadata.keys()),
+                )
+
+    @override
+    def update_collection(
+        self,
+        id: UUID,
+        topic: OptionalArgument[Optional[str]] = Unspecified(),
+        name: OptionalArgument[str] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        collections_t = Table("collections")
+        metadata_t = Table("collection_metadata")
+
+        q = (
+            self.querybuilder()
+            .update(collections_t)
+            .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+
+        if not topic == Unspecified():
+            q = q.set(collections_t.topic, ParameterValue(topic))
+
+        if not name == Unspecified():
+            q = q.set(collections_t.name, ParameterValue(name))
+
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            if sql:  # pypika emits a blank string if nothing to do
+                cur.execute(sql, params)
+
+            if metadata is None:
+                q = (
+                    self.querybuilder()
+                    .from_(metadata_t)
+                    .where(
+                        metadata_t.collection_id == ParameterValue(self.uuid_to_db(id))
+                    )
+                    .delete()
+                )
+                sql, params = get_sql(q, self.parameter_format())
+                cur.execute(sql, params)
+            elif metadata != Unspecified():
+                metadata = cast(UpdateMetadata, metadata)
+                self._insert_metadata(
+                    cur,
+                    metadata_t,
+                    metadata_t.collection_id,
+                    id,
+                    metadata,
+                    set(metadata.keys()),
+                )
+
     def _metadata_from_rows(
         self, rows: Sequence[Tuple[Any, ...]]
     ) -> Optional[Metadata]:
         """Given SQL rows, return a metadata map (assuming that the last four columns
         are the key, str_value, int_value & float_value)"""
-        # this originated from a left join, so we might not have any metadata values
-        metadata: Metadata = {}
+        metadata: Dict[str, Union[str, int, float]] = {}
         for row in rows:
             key = str(row[-4])
             if row[-3]:
@@ -266,11 +375,31 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata[key] = int(row[-2])
             elif row[-1]:
                 metadata[key] = float(row[-1])
-        return metadata
+        return metadata or None
 
     def _insert_metadata(
-        self, cur: Cursor, table: Table, id_col: Column, id: UUID, metadata: Metadata
+        self,
+        cur: Cursor,
+        table: Table,
+        id_col: Column,
+        id: UUID,
+        metadata: UpdateMetadata,
+        clear_keys: Optional[Set[str]] = None,
     ) -> None:
+        # It would be cleaner to use something like ON CONFLICT UPDATE here But that is
+        # very difficult to do in a portable way (e.g sqlite and postgres have
+        # completely different sytnax)
+        if clear_keys:
+            q = (
+                self.querybuilder()
+                .from_(table)
+                .where(id_col == ParameterValue(self.uuid_to_db(id)))
+                .where(table.key.isin([ParameterValue(k) for k in clear_keys]))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
         q = (
             self.querybuilder()
             .into(table)
@@ -304,5 +433,9 @@ class SqlSysDB(SqlDB, SysDB):
                     None,
                     ParameterValue(v),
                 )
+            elif v is None:
+                continue
+
         sql, params = get_sql(q, self.parameter_format())
-        cur.execute(sql, params)
+        if sql:
+            cur.execute(sql, params)

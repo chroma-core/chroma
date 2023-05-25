@@ -1,5 +1,5 @@
 import pytest
-from typing import Generator, List, Callable
+from typing import Generator, List, Callable, Dict, Union
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.config import System, Settings
@@ -102,6 +102,60 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
         sysdb.delete_collection(c1["id"])
 
 
+def test_update_collections(sysdb: SysDB) -> None:
+    metadata: Dict[str, Union[str, int, float]] = {
+        "test_str": "str1",
+        "test_int": 1,
+        "test_float": 1.3,
+    }
+    coll = Collection(
+        id=uuid.uuid4(),
+        name="test_collection_1",
+        topic="test_topic_1",
+        metadata=metadata,
+    )
+
+    sysdb.reset()
+
+    sysdb.create_collection(coll)
+
+    # Update name
+    coll["name"] = "new_name"
+    sysdb.update_collection(coll["id"], name=coll["name"])
+    result = sysdb.get_collections(name=coll["name"])
+    assert result == [coll]
+
+    # Update topic
+    coll["topic"] = "new_topic"
+    sysdb.update_collection(coll["id"], topic=coll["topic"])
+    result = sysdb.get_collections(topic=coll["topic"])
+    assert result == [coll]
+
+    # Add a new metadata key
+    metadata["test_str2"] = "str2"
+    sysdb.update_collection(coll["id"], metadata={"test_str2": "str2"})
+    result = sysdb.get_collections(id=coll["id"])
+    assert result == [coll]
+
+    # Update a metadata key
+    metadata["test_str"] = "str3"
+    sysdb.update_collection(coll["id"], metadata={"test_str": "str3"})
+    result = sysdb.get_collections(id=coll["id"])
+    assert result == [coll]
+
+    # Delete a metadata key
+    del metadata["test_str"]
+    sysdb.update_collection(coll["id"], metadata={"test_str": None})
+    result = sysdb.get_collections(id=coll["id"])
+    assert result == [coll]
+
+    # Delete all metadata keys
+    coll["metadata"] = None
+    sysdb.update_collection(coll["id"], metadata=None)
+    result = sysdb.get_collections(id=coll["id"])
+    assert result == [coll]
+
+
 sample_segments = [
     Segment(
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
@@ -188,3 +242,73 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
         sysdb.delete_segment(s1["id"])
+
+
+def test_update_segment(sysdb: SysDB) -> None:
+    metadata: Dict[str, Union[str, int, float]] = {
+        "test_str": "str1",
+        "test_int": 1,
+        "test_float": 1.3,
+    }
+    segment = Segment(
+        id=uuid.uuid4(),
+        type="test_type_a",
+        scope=SegmentScope.VECTOR,
+        topic="test_topic_a",
+        collection=sample_collections[0]["id"],
+        metadata=metadata,
+    )
+
+    sysdb.reset()
+    for c in sample_collections:
+        sysdb.create_collection(c)
+
+    sysdb.create_segment(segment)
+
+    # Update topic to new value
+    segment["topic"] = "new_topic"
+    sysdb.update_segment(segment["id"], topic=segment["topic"])
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Update topic to None
+    segment["topic"] = None
+    sysdb.update_segment(segment["id"], topic=segment["topic"])
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Update collection to new value
+    segment["collection"] = sample_collections[1]["id"]
+    sysdb.update_segment(segment["id"], collection=segment["collection"])
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Update collection to None
+    segment["collection"] = None
+    sysdb.update_segment(segment["id"], collection=segment["collection"])
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Add a new metadata key
+    metadata["test_str2"] = "str2"
+    sysdb.update_segment(segment["id"], metadata={"test_str2": "str2"})
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Update a metadata key
+    metadata["test_str"] = "str3"
+    sysdb.update_segment(segment["id"], metadata={"test_str": "str3"})
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Delete a metadata key
+    del metadata["test_str"]
+    sysdb.update_segment(segment["id"], metadata={"test_str": None})
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]
+
+    # Delete all metadata keys
+    segment["metadata"] = None
+    sysdb.update_segment(segment["id"], metadata=None)
+    result = sysdb.get_segments(id=segment["id"])
+    assert result == [segment]

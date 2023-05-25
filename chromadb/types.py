@@ -1,9 +1,9 @@
-from typing import Optional, Union, Sequence, Dict, Any
-from typing_extensions import Literal, TypedDict
+from typing import Optional, Union, Sequence, Dict, Any, Mapping
+from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Dict[str, Union[str, int, float]]
+Metadata = Mapping[str, Union[str, int, float]]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -122,3 +122,21 @@ Where = dict[
 
 WhereDocumentOperator = Literal["$contains", LogicalOperator]
 WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
+
+
+class Unspecified:
+    """A sentinel value used to indicate that a value should not be updated"""
+
+    _instance: Optional["Unspecified"] = None
+
+    def __new__(cls) -> "Unspecified":
+        if cls._instance is None:
+            cls._instance = super(Unspecified, cls).__new__(cls)
+
+        return cls._instance
+
+
+T = TypeVar("T")
+OptionalArgument = Union[T, Unspecified]
+
+UpdateMetadata = Mapping[str, Union[int, float, str, None]]

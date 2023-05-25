@@ -2,7 +2,14 @@ from abc import ABC, abstractmethod
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import EnforceOverrides
-from chromadb.types import Collection, Segment, SegmentScope
+from chromadb.types import (
+    Collection,
+    Segment,
+    SegmentScope,
+    OptionalArgument,
+    Unspecified,
+    UpdateMetadata,
+)
 
 
 class SysDB(ABC, EnforceOverrides):
@@ -32,6 +39,19 @@ class SysDB(ABC, EnforceOverrides):
         pass
 
     @abstractmethod
+    def update_segment(
+        self,
+        id: UUID,
+        topic: OptionalArgument[Optional[str]] = Unspecified(),
+        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        """Update a segment. Unspecified fields will be left unchanged. For the
+        metadata, keys with None values will be removed and keys not present in the
+        UpdateMetadata dict will be left unchanged."""
+        pass
+
+    @abstractmethod
     def create_collection(self, collection: Collection) -> None:
         """Create a new topic"""
         pass
@@ -49,6 +69,19 @@ class SysDB(ABC, EnforceOverrides):
         name: Optional[str] = None,
     ) -> Sequence[Collection]:
         """Find collections by id, topic or name"""
+        pass
+
+    @abstractmethod
+    def update_collection(
+        self,
+        id: UUID,
+        topic: OptionalArgument[str] = Unspecified(),
+        name: OptionalArgument[str] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        """Update a collection. Unspecified fields will be left unchanged. For metadata,
+        keys with None values will be removed and keys not present in the UpdateMetadata
+        dict will be left unchanged."""
         pass
 
     @abstractmethod
