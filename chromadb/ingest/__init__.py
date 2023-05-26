@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Optional, Sequence
 from overrides import EnforceOverrides
 from chromadb.types import (
-    InsertEmbeddingRecord,
-    DeleteEmbeddingRecord,
-    EmbeddingDeleteRecord,
+    SubmitEmbeddingRecord,
     EmbeddingRecord,
     SeqId,
     Vector,
@@ -49,16 +47,9 @@ class Producer(ABC, EnforceOverrides):
 
     @abstractmethod
     def submit_embedding(
-        self, topic_name: str, embedding: InsertEmbeddingRecord
+        self, topic_name: str, embedding: SubmitEmbeddingRecord
     ) -> None:
         """Add an embedding record to the given topic."""
-        pass
-
-    @abstractmethod
-    def submit_embedding_delete(
-        self, topic_name: str, delete_embedding: DeleteEmbeddingRecord
-    ) -> None:
-        """Add an embedding deletion record (soft delete) to the given topic."""
         pass
 
     @abstractmethod
@@ -68,9 +59,7 @@ class Producer(ABC, EnforceOverrides):
         pass
 
 
-ConsumerCallbackFn = Callable[
-    [Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]], None
-]
+ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], None]
 
 
 class Consumer(ABC, EnforceOverrides):
