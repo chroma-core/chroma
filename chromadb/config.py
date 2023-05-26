@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     allow_reset: bool = False
 
+    persist_atexit: bool = True
+
     sqlite_database: Optional[str] = ":memory:"
     migrations: Literal["none", "validate", "apply"] = "apply"
 
