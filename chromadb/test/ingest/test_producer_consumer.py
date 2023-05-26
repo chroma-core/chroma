@@ -9,18 +9,15 @@ from typing import (
     Union,
     Iterator,
     Sequence,
-    cast,
     Tuple,
 )
 from chromadb.ingest import Producer, Consumer
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.types import (
-    InsertEmbeddingRecord,
+    SubmitEmbeddingRecord,
+    Operation,
     EmbeddingRecord,
-    DeleteEmbeddingRecord,
-    EmbeddingDeleteRecord,
     ScalarEncoding,
-    InsertType,
 )
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
@@ -46,8 +43,8 @@ def producer_consumer(
 
 
 @pytest.fixture(scope="module")
-def sample_embeddings() -> Iterator[InsertEmbeddingRecord]:
-    def create_record(i: int) -> InsertEmbeddingRecord:
+def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
+    def create_record(i: int) -> SubmitEmbeddingRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
         metadata: Optional[Dict[str, Union[str, int, float]]]
         if i % 2 == 0:
@@ -55,12 +52,12 @@ def sample_embeddings() -> Iterator[InsertEmbeddingRecord]:
         else:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
 
-        record = InsertEmbeddingRecord(
+        record = SubmitEmbeddingRecord(
             id=f"embedding_{i}",
             embedding=vector,
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
-            insert_type=InsertType.ADD,
+            operation=Operation.ADD,
         )
         return record
 
@@ -68,24 +65,20 @@ def sample_embeddings() -> Iterator[InsertEmbeddingRecord]:
 
 
 class CapturingConsumeFn:
-    embeddings: List[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
+    embeddings: List[EmbeddingRecord]
     waiters: List[Tuple[int, Event]]
 
     def __init__(self) -> None:
         self.embeddings = []
         self.waiters = []
 
-    def __call__(
-        self, embeddings: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]
-    ) -> None:
+    def __call__(self, embeddings: Sequence[EmbeddingRecord]) -> None:
         self.embeddings.extend(embeddings)
         for n, event in self.waiters:
             if len(self.embeddings) >= n:
                 event.set()
 
-    async def get(
-        self, n: int
-    ) -> Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]]:
+    async def get(self, n: int) -> Sequence[EmbeddingRecord]:
         "Wait until at least N embeddings are available, then return all embeddings"
         if len(self.embeddings) >= n:
             return self.embeddings[:n]
@@ -103,28 +96,26 @@ def assert_approx_equal(a: Sequence[float], b: Sequence[float]) -> None:
 
 
 def assert_records_match(
-    inserted_records: Sequence[Union[InsertEmbeddingRecord, DeleteEmbeddingRecord]],
-    consumed_records: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]],
+    inserted_records: Sequence[SubmitEmbeddingRecord],
+    consumed_records: Sequence[EmbeddingRecord],
 ) -> None:
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)
     for inserted, consumed in zip(inserted_records, consumed_records):
-        if "delete_id" in inserted:
-            inserted = cast(DeleteEmbeddingRecord, inserted)
-            consumed = cast(EmbeddingDeleteRecord, consumed)
-            assert inserted["delete_id"] == consumed["delete_id"]
-        else:
-            inserted = cast(InsertEmbeddingRecord, inserted)
-            consumed = cast(EmbeddingRecord, consumed)
-            assert_approx_equal(consumed["embedding"], inserted["embedding"])
-            assert consumed.get("encoding", None) == inserted.get("encoding", None)
-            assert consumed.get("metadata", None) == inserted.get("metadata", None)
+        assert inserted["id"] == consumed["id"]
+        assert inserted["operation"] == consumed["operation"]
+        assert inserted["encoding"] == consumed["encoding"]
+        assert inserted["metadata"] == consumed["metadata"]
+
+        if inserted["embedding"] is not None:
+            assert consumed["embedding"] is not None
+            assert_approx_equal(inserted["embedding"], consumed["embedding"])
 
 
 @pytest.mark.asyncio
 async def test_backfill(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset()
@@ -145,13 +136,13 @@ async def test_backfill(
 @pytest.mark.asyncio
 async def test_notifications(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset()
     producer.create_topic("test_topic")
 
-    embeddings: List[InsertEmbeddingRecord] = []
+    embeddings: List[SubmitEmbeddingRecord] = []
 
     consume_fn = CapturingConsumeFn()
 
@@ -168,15 +159,15 @@ async def test_notifications(
 @pytest.mark.asyncio
 async def test_multiple_topics(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset()
     producer.create_topic("test_topic_1")
     producer.create_topic("test_topic_2")
 
-    embeddings_1: List[InsertEmbeddingRecord] = []
-    embeddings_2: List[InsertEmbeddingRecord] = []
+    embeddings_1: List[SubmitEmbeddingRecord] = []
+    embeddings_2: List[SubmitEmbeddingRecord] = []
 
     consume_fn_1 = CapturingConsumeFn()
     consume_fn_2 = CapturingConsumeFn()
@@ -201,7 +192,7 @@ async def test_multiple_topics(
 @pytest.mark.asyncio
 async def test_start_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset()
@@ -235,7 +226,7 @@ async def test_start_seq_id(
 @pytest.mark.asyncio
 async def test_end_seq_id(
     producer_consumer: Tuple[Producer, Consumer],
-    sample_embeddings: Iterator[InsertEmbeddingRecord],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset()

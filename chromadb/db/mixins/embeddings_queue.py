@@ -7,17 +7,16 @@ from chromadb.ingest import (
     ConsumerCallbackFn,
 )
 from chromadb.types import (
-    InsertEmbeddingRecord,
+    SubmitEmbeddingRecord,
     EmbeddingRecord,
-    DeleteEmbeddingRecord,
-    EmbeddingDeleteRecord,
     SeqId,
     ScalarEncoding,
+    Operation,
 )
 from chromadb.config import System
 from overrides import override
 from collections import defaultdict
-from typing import Tuple, Optional, Dict, Set, Union
+from typing import Tuple, Optional, Dict, Set
 from uuid import UUID
 from pypika import Table, functions
 import uuid
@@ -25,6 +24,14 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+_operation_codes = {
+    Operation.ADD: 0,
+    Operation.UPDATE: 1,
+    Operation.UPSERT: 2,
+    Operation.DELETE: 3,
+}
+_operation_codes_inv = {v: k for k, v in _operation_codes.items()}
 
 
 class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
@@ -86,22 +93,30 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     @override
     def submit_embedding(
-        self, topic_name: str, embedding: InsertEmbeddingRecord
+        self, topic_name: str, embedding: SubmitEmbeddingRecord
     ) -> None:
-        embedding_bytes = encode_vector(embedding["embedding"], embedding["encoding"])
+        if embedding["embedding"]:
+            assert embedding["encoding"] is not None
+            encoding = embedding["encoding"].value
+            embedding_bytes = encode_vector(
+                embedding["embedding"], embedding["encoding"]
+            )
+        else:
+            embedding_bytes = None
+            encoding = None
         metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
 
         t = Table("embeddings_queue")
         insert = (
             self.querybuilder()
             .into(t)
-            .columns(t.topic, t.id, t.is_delete, t.vector, t.encoding, t.metadata)
+            .columns(t.operation, t.topic, t.id, t.vector, t.encoding, t.metadata)
             .insert(
+                ParameterValue(_operation_codes[embedding["operation"]]),
                 ParameterValue(topic_name),
                 ParameterValue(embedding["id"]),
-                False,
                 ParameterValue(embedding_bytes),
-                ParameterValue(embedding["encoding"].value),
+                ParameterValue(encoding),
                 ParameterValue(metadata),
             )
         )
@@ -115,35 +130,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 embedding=embedding["embedding"],
                 encoding=embedding["encoding"],
                 metadata=embedding["metadata"],
+                operation=embedding["operation"],
             )
             self._notify_all(topic_name, embedding_record)
-
-    @override
-    def submit_embedding_delete(
-        self, topic_name: str, delete_embedding: DeleteEmbeddingRecord
-    ) -> None:
-        t = Table("embeddings_queue")
-        insert = (
-            self.querybuilder()
-            .into(t)
-            .columns(t.topic, t.id, t.is_delete)
-            .insert(
-                ParameterValue(topic_name),
-                ParameterValue(delete_embedding["delete_id"]),
-                True,
-            )
-        )
-        with self.tx() as cur:
-            sql, params = get_sql(insert, self.parameter_format())
-            sql = f"{sql} RETURNING seq_id"  # Pypika doesn't support RETURNING
-            seq_id = int(cur.execute(sql, params).fetchone()[0])
-            self._notify_all(
-                topic_name,
-                EmbeddingDeleteRecord(
-                    seq_id=seq_id,
-                    delete_id=delete_embedding["delete_id"],
-                ),
-            )
 
     @override
     def subscribe(
@@ -195,7 +184,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .where(t.topic == ParameterValue(subscription.topic_name))
             .where(t.seq_id > ParameterValue(subscription.start))
             .where(t.seq_id <= ParameterValue(subscription.end))
-            .select(t.seq_id, t.id, t.is_delete, t.vector, t.encoding, t.metadata)
+            .select(t.seq_id, t.operation, t.id, t.vector, t.encoding, t.metadata)
             .orderby(t.seq_id)
         )
         with self.tx() as cur:
@@ -203,24 +192,23 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(sql, params)
             rows = cur.fetchall()
             for row in rows:
-                if row[2]:
-                    self._notify_one(
-                        subscription,
-                        EmbeddingDeleteRecord(seq_id=row[0], delete_id=row[1]),
-                    )
-                else:
+                if row[3]:
                     encoding = ScalarEncoding(row[4])
                     vector = decode_vector(row[3], encoding)
-                    self._notify_one(
-                        subscription,
-                        EmbeddingRecord(
-                            seq_id=row[0],
-                            id=row[1],
-                            embedding=vector,
-                            encoding=encoding,
-                            metadata=json.loads(row[5]) if row[5] else None,
-                        ),
-                    )
+                else:
+                    encoding = None
+                    vector = None
+                self._notify_one(
+                    subscription,
+                    EmbeddingRecord(
+                        seq_id=row[0],
+                        operation=_operation_codes_inv[row[1]],
+                        id=row[2],
+                        embedding=vector,
+                        encoding=encoding,
+                        metadata=json.loads(row[5]) if row[5] else None,
+                    ),
+                )
 
     def _validate_range(
         self, start: Optional[SeqId], end: Optional[SeqId]
@@ -243,20 +231,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(q.get_sql())
             return int(cur.fetchone()[0]) + 1
 
-    def _notify_all(
-        self,
-        topic: str,
-        embedding: Union[EmbeddingRecord, EmbeddingDeleteRecord],
-    ) -> None:
+    def _notify_all(self, topic: str, embedding: EmbeddingRecord) -> None:
         """Send a notification to each subscriber of the given topic."""
         for sub in self._subscriptions[topic]:
             self._notify_one(sub, embedding)
 
-    def _notify_one(
-        self,
-        sub: Subscription,
-        embedding: Union[EmbeddingRecord, EmbeddingDeleteRecord],
-    ) -> None:
+    def _notify_one(self, sub: Subscription, embedding: EmbeddingRecord) -> None:
         """Send a notification to a single subscriber."""
         if embedding["seq_id"] > sub.end:
             self.unsubscribe(sub.id)
