@@ -48,10 +48,11 @@ class Segment(TypedDict):
 SeqId = Any
 
 
-class InsertType(Enum):
+class Operation(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
     UPSERT = "UPSERT"
+    DELETE = "DELETE"
 
 
 Vector = Union[Sequence[float], Sequence[int]]
@@ -73,26 +74,18 @@ class MetadataEmbeddingRecord(TypedDict):
 class EmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
-    embedding: Vector
-    encoding: ScalarEncoding
+    embedding: Optional[Vector]
+    encoding: Optional[ScalarEncoding]
     metadata: Optional[Metadata]
+    operation: Operation
 
 
-class InsertEmbeddingRecord(TypedDict):
+class SubmitEmbeddingRecord(TypedDict):
     id: str
-    embedding: Vector
-    encoding: ScalarEncoding
+    embedding: Optional[Vector]
+    encoding: Optional[ScalarEncoding]
     metadata: Optional[Metadata]
-    insert_type: InsertType
-
-
-class DeleteEmbeddingRecord(TypedDict):
-    delete_id: str
-
-
-class EmbeddingDeleteRecord(TypedDict):
-    delete_id: str
-    seq_id: SeqId
+    operation: Operation
 
 
 class VectorQuery(TypedDict):
