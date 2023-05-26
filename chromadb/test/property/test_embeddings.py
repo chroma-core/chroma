@@ -101,11 +101,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             set(self.record_set_state["ids"])
         ):
             with pytest.raises(errors.IDAlreadyExistsError):
-                self.collection.add(**record_set)
+                self.collection.add(**normalized_record_set)
             return multiple()
         else:
-            self.collection.add(**record_set)
-            self._upsert_embeddings(record_set)
+            self.collection.add(**normalized_record_set)
+            self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
     @precondition(lambda self: len(self.record_set_state["ids"]) > 20)
