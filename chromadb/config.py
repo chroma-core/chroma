@@ -1,9 +1,11 @@
 from pydantic import BaseSettings
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, TypeVar
 from typing_extensions import Literal
 import importlib
 import logging
 import chromadb.db
+import chromadb.db.system
+import chromadb.db.metadata
 import chromadb.api
 import chromadb.telemetry
 
@@ -25,6 +27,8 @@ class Settings(BaseSettings):
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
+    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_metadb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
@@ -65,12 +69,13 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
 
+T = TypeVar("T")
+
+
 class System:
     settings: Settings
 
-    db: Optional[chromadb.db.DB]
-    api: Optional[chromadb.api.API]
-    telemetry: Optional[chromadb.telemetry.Telemetry]
+    _instances: Dict[str, Any] = {}
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -78,26 +83,39 @@ class System:
         self.api = None
         self.telemetry = None
 
-    def _instantiate(self, key: str) -> Any:
+    def _instance(self, key: str) -> Any:
         assert self.settings[key], f"Setting '{key}' is required."
         fqn = self.settings[key]
-        module_name, class_name = fqn.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        cls = getattr(module, class_name)
-        impl = cls(self)
-        return impl
+        if fqn not in self._instances:
+            module_name, class_name = fqn.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            cls = getattr(module, class_name)
+            impl = cls(self)
+            self._instances[fqn] = impl
+        instance = self._instances[fqn]
+        return instance
 
     def get_db(self) -> chromadb.db.DB:
-        if self.db is None:
-            self.db = self._instantiate("chroma_db_impl")
-        return self.db
+        inst = self._instance("chroma_db_impl")
+        assert isinstance(inst, chromadb.db.DB)
+        return inst
 
     def get_api(self) -> chromadb.api.API:
-        if self.api is None:
-            self.api = self._instantiate("chroma_api_impl")
-        return self.api
+        inst = self._instance("chroma_api_impl")
+        assert isinstance(inst, chromadb.api.API)
+        return inst
 
     def get_telemetry(self) -> chromadb.telemetry.Telemetry:
-        if self.telemetry is None:
-            self.telemetry = self._instantiate("chroma_telemetry_impl")
-        return self.telemetry
+        inst = self._instance("chroma_telemetry_impl")
+        assert isinstance(inst, chromadb.telemetry.Telemetry)
+        return inst
+
+    def get_system_db(self) -> chromadb.db.system.SysDB:
+        inst = self._instance("chroma_sysdb_impl")
+        assert isinstance(inst, chromadb.db.system.SysDB)
+        return inst
+
+    def get_metadata_db(self) -> chromadb.db.metadata.MetadataDB:
+        inst = self._instance("chroma_metadb_impl")
+        assert isinstance(inst, chromadb.db.metadata.MetadataDB)
+        return inst

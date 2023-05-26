@@ -27,7 +27,6 @@ class MetadataReader(SegmentImplementation):
         where: Optional[Where],
         where_document: Optional[WhereDocument],
         ids: Optional[Sequence[str]] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:

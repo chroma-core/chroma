@@ -3,6 +3,7 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
+from chromadb.db.mixins.metadb import SqlMetaDB
 import sqlite3
 from overrides import override
 import pypika
@@ -36,14 +37,18 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
-class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
+class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB, SqlMetaDB):
     _conn: sqlite3.Connection
     _settings: Settings
     _migration_dirs: Sequence[str]
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = ["migrations/embeddings_queue", "migrations/sysdb"]
+        self._migration_dirs = [
+            "migrations/embeddings_queue",
+            "migrations/sysdb",
+            "migrations/metadb",
+        ]
         self._init()
         super().__init__(system)
 
