@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, Any, Mapping
+from typing import Optional, Union, Sequence, Mapping
 from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
@@ -40,12 +40,15 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
 
 
-# The desire here is for SeqID to be any type that can be compared to other values of
-# the same type to establish a linear order.
+# SeqID can be one of three types of value in our current and future plans:
+# 1. A Pulsar MessageID encoded as a 192-bit integer
+# 2. A Pulsar MessageIndex (a 64-bit integer)
+# 3. A SQL RowID (a 64-bit integer)
 
-# This is surprisingly difficult to express in Python. ints, for example, do not
-# "support" __eq__ and __lt__ so using a protocol won't work.
-SeqId = Any
+# All three of these types can be expressed as a Python int, so that is the type we
+# use in the internal Python API. However, care should be taken that the larger 192-bit
+# values are stored correctly when persisting to DBs.
+SeqId = int
 
 
 class Operation(Enum):

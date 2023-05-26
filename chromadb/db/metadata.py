@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 from uuid import UUID
 from overrides import EnforceOverrides
 from chromadb.types import (
@@ -7,8 +7,20 @@ from chromadb.types import (
     WhereDocument,
     MetadataEmbeddingRecord,
     EmbeddingRecord,
-    EmbeddingDeleteRecord,
+    SeqId,
 )
+
+
+class OutdatedOperationError(Exception):
+    """Raised when a write operation is attempted with a SeqID less than one already
+    present in the DB for the topic."""
+
+    def __init__(self, seq_id: SeqId, max_seq_id: SeqId):
+        super().__init__(
+            f"Operation for seq ${seq_id} is outdated, max seq_id is {max_seq_id}"
+        )
+
+    pass
 
 
 class MetadataDB(ABC, EnforceOverrides):
@@ -36,7 +48,10 @@ class MetadataDB(ABC, EnforceOverrides):
     def write_metadata(
         self,
         segment_id: UUID,
-        metadata: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]],
-        replace: bool = False,
+        records: Sequence[EmbeddingRecord],
     ) -> None:
+        pass
+
+    @abstractmethod
+    def max_seq_id(self, segment_id: UUID) -> SeqId:
         pass

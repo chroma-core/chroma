@@ -4,7 +4,6 @@ from typing import (
     Any,
     Tuple,
     cast,
-    Union,
     Generator,
     List,
 )
@@ -12,10 +11,11 @@ from uuid import UUID
 from overrides import override
 from pypika import Table
 from pypika.queries import QueryBuilder
+import pypika.functions as fn
 from itertools import islice
 
 from chromadb.config import System
-from chromadb.db.metadata import MetadataDB
+from chromadb.db.metadata import MetadataDB, OutdatedOperationError
 from chromadb.db.base import (
     Cursor,
     SqlDB,
@@ -27,7 +27,8 @@ from chromadb.types import (
     WhereDocument,
     MetadataEmbeddingRecord,
     EmbeddingRecord,
-    EmbeddingDeleteRecord,
+    SeqId,
+    Operation,
 )
 
 
@@ -106,13 +107,61 @@ class SqlMetaDB(SqlDB, MetadataDB):
             return list(islice(self._records(cur, q), offset, offset + limit))
 
     @override
+    def max_seq_id(self, segment_id: UUID) -> SeqId:
+        t = Table("embeddings")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .select(fn.Max(t.seq_id))
+            .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
+        )
+        sql, params = get_sql(q)
+        with self.tx() as cur:
+            result = cur.execute(sql, params).fetchone()[0]
+            return _decode_seq_id(result)
+
+    @override
     def write_metadata(
-        self,
-        segment_id: UUID,
-        metadata: Sequence[Union[EmbeddingRecord, EmbeddingDeleteRecord]],
-        replace: bool = False,
+        self, segment_id: UUID, records: Sequence[EmbeddingRecord]
     ) -> None:
-        return
+        """Write embedding metadata to the database."""
+        with self.tx() as cur:
+            max_seq_id = self.max_seq_id(segment_id)
+
+            for record in records:
+                if record["seq_id"] <= max_seq_id:
+                    raise OutdatedOperationError(record["seq_id"], max_seq_id)
+                if record["operation"] == Operation.ADD:
+                    self._insert_record(cur, segment_id, record, False)
+                elif record["operation"] == Operation.UPSERT:
+                    self._insert_record(cur, segment_id, record, True)
+                elif record["operation"] == Operation.DELETE:
+                    self._delete_record(cur, segment_id, record)
+                elif record["operation"] == Operation.UPDATE:
+                    self._update_record(cur, segment_id, record)
+
+    def _insert_record(
+        self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord, upsert: bool
+    ) -> None:
+        # t = Table("embeddings")
+        # q = (
+        #     self.querybuilder()
+        #     .into(t)
+        #     .columns(t.segment_id, t.embedding_id, t.seq_id)
+        #     .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
+        #     .where(t.embedding_id == ParameterValue(record["id"]))
+        # )
+        pass
+
+    def _delete_record(
+        self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord
+    ) -> None:
+        raise NotImplementedError()
+
+    def _update_record(
+        self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord
+    ) -> None:
+        raise NotImplementedError()
 
     def _record(self, rows: List[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
@@ -130,7 +179,7 @@ class SqlMetaDB(SqlDB, MetadataDB):
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
-            seq_id=seq_id,
+            seq_id=_decode_seq_id(seq_id),
             metadata=metadata or None,
         )
 
@@ -164,3 +213,23 @@ class SqlMetaDB(SqlDB, MetadataDB):
         fulltext_table: Table,
     ) -> QueryBuilder:
         return q
+
+
+def _encode_seq_id(seq_id: SeqId) -> bytes:
+    """Encode a SeqID into a byte array"""
+    if seq_id.bit_length() < 64:
+        return int.to_bytes(seq_id, 8, "big")
+    elif seq_id.bit_length() < 192:
+        return int.to_bytes(seq_id, 24, "big")
+    else:
+        raise ValueError(f"Unsupported SeqID: {seq_id}")
+
+
+def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
+    """Decode a byte array into a SeqID"""
+    if len(seq_id_bytes) == 8:
+        return int.from_bytes(seq_id_bytes, "big")
+    elif len(seq_id_bytes) == 24:
+        return int.from_bytes(seq_id_bytes, "big")
+    else:
+        raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
