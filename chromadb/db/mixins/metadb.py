@@ -29,11 +29,14 @@ from chromadb.types import (
     EmbeddingRecord,
     SeqId,
     Operation,
+    UpdateMetadata,
 )
 
 
 class SqlMetaDB(SqlDB, MetadataDB):
-    """A SQL database for storing and retrieving embedding metadata."""
+    """A SQL database for storing and retrieving embedding metadata. Intended
+    for use as a storage layer for implementations of chromadb.segment.MetadataReader.
+    """
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -143,25 +146,104 @@ class SqlMetaDB(SqlDB, MetadataDB):
     def _insert_record(
         self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord, upsert: bool
     ) -> None:
-        # t = Table("embeddings")
-        # q = (
-        #     self.querybuilder()
-        #     .into(t)
-        #     .columns(t.segment_id, t.embedding_id, t.seq_id)
-        #     .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
-        #     .where(t.embedding_id == ParameterValue(record["id"]))
-        # )
-        pass
+        t = Table("embeddings")
+        q = (
+            self.querybuilder()
+            .into(t)
+            .columns(t.segment_id, t.embedding_id, t.seq_id)
+            .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
+            .where(t.embedding_id == ParameterValue(record["id"]))
+        ).insert(
+            self.uuid_to_db(segment_id), record["id"], _encode_seq_id(record["seq_id"])
+        )
+        sql, params = get_sql(q)
+        if upsert:
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+        sql = sql + "RETURNING id"
+        id = cur.execute(sql, params).fetchone()[0]
+
+        if record["metadata"]:
+            if upsert:
+                self._update_metadata(cur, id, record["metadata"])
+            else:
+                self._insert_metadata(cur, id, record["metadata"])
+
+    def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+        t = Table("embedding_metadata")
+        to_delete = list(metadata.keys())
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.id == ParameterValue(id))
+            .where(t.key.isin(to_delete))
+            .delete()
+        )
+        sql, params = get_sql(q)
+        cur.execute(sql, params)
+        self._insert_metadata(cur, id, metadata)
+
+    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+        t = Table("embedding_metadata")
+        q = (
+            self.querybuilder()
+            .into(t)
+            .columns(t.id, t.key, t.string_value, t.int_value, t.float_value)
+        )
+        for key, value in metadata.items():
+            if isinstance(value, str):
+                q = q.insert(id, key, value, None, None)
+            elif isinstance(value, int):
+                q = q.insert(id, key, None, value, None)
+            elif isinstance(value, float):
+                q = q.insert(id, key, None, None, value)
+
+        sql, params = get_sql(q)
+        if sql:
+            cur.execute(sql, params)
 
     def _delete_record(
         self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord
     ) -> None:
-        raise NotImplementedError()
+        t = Table("embeddings")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
+            .where(t.embedding_id == ParameterValue(record["id"]))
+            .delete()
+        )
+        sql, params = get_sql(q)
+        sql = sql + " RETURNING id"
+        id = cur.execute(sql, params).fetchone()[0]
+
+        # Manually delete metadata; cannot use cascade because
+        # that triggers on replace
+        metadata_t = Table("embedding_metadata")
+        q = (
+            self.querybuilder()
+            .from_(metadata_t)
+            .where(metadata_t.id == ParameterValue(id))
+            .delete()
+        )
+        sql, params = get_sql(q)
+        cur.execute(sql, params)
 
     def _update_record(
         self, cur: Cursor, segment_id: UUID, record: EmbeddingRecord
     ) -> None:
-        raise NotImplementedError()
+        t = Table("embeddings")
+        q = (
+            self.querybuilder()
+            .from_(t)
+            .where(t.segment_id == ParameterValue(self.uuid_to_db(segment_id)))
+            .where(t.embedding_id == ParameterValue(record["id"]))
+            .update(t.seq_id, _encode_seq_id(record["seq_id"]))
+        )
+        sql, params = get_sql(q)
+        sql = sql + " RETURNING id"
+        id = cur.execute(sql, params).fetchone()[0]
+        if record["metadata"]:
+            self._update_metadata(cur, id, record["metadata"])
 
     def _record(self, rows: List[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a

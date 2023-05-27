@@ -12,7 +12,8 @@ CREATE TABLE embedding_metadata {
     key TEXT NOT NULL,
     string_value TEXT,
     int_value INTEGER,
-    float_value REAL
+    float_value REAL,
+    PRIMARY KEY (id, key)
 };
 
 CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id UNINDEXED, string_value);

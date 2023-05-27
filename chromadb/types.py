@@ -4,6 +4,7 @@ from uuid import UUID
 from enum import Enum
 
 Metadata = Mapping[str, Union[str, int, float]]
+UpdateMetadata = Mapping[str, Union[int, float, str, None]]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -79,7 +80,7 @@ class EmbeddingRecord(TypedDict):
     seq_id: SeqId
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
-    metadata: Optional[Metadata]
+    metadata: Optional[UpdateMetadata]
     operation: Operation
 
 
@@ -87,7 +88,7 @@ class SubmitEmbeddingRecord(TypedDict):
     id: str
     embedding: Optional[Vector]
     encoding: Optional[ScalarEncoding]
-    metadata: Optional[Metadata]
+    metadata: Optional[UpdateMetadata]
     operation: Operation
 
 
@@ -134,5 +135,3 @@ class Unspecified:
 
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
-
-UpdateMetadata = Mapping[str, Union[int, float, str, None]]
