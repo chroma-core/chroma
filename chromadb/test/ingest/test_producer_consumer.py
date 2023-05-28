@@ -28,7 +28,9 @@ from asyncio.exceptions import TimeoutError
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
     """Fixture generator for sqlite Producer + Consumer"""
     db = SqliteDB(System(Settings(sqlite_database=":memory:", allow_reset=True)))
+    db.start()
     yield db, db
+    db.stop()
 
 
 def fixtures() -> List[Callable[[], Generator[Tuple[Producer, Consumer], None, None]]]:
