@@ -1,7 +1,7 @@
 import json
 import time
 from uuid import UUID
-from typing import List, Optional, Sequence, Callable, cast
+from typing import List, Optional, Sequence, cast
 from chromadb import __version__
 import chromadb.errors as errors
 from chromadb.api import API
@@ -18,6 +18,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     CollectionMetadata,
+    EmbeddingFunction,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -26,6 +27,8 @@ import re
 
 from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
+from overrides import override
+import pandas as pd
 
 
 # mimics s3 bucket requirements for naming
@@ -54,9 +57,11 @@ class LocalAPI(API):
     _telemetry_client: Telemetry
 
     def __init__(self, system: System):
-        self._db = system.get_db()
-        self._telemetry_client = system.get_telemetry()
+        super().__init__(system)
+        self._db = self.require(DB)
+        self._telemetry_client = self.require(Telemetry)
 
+    @override
     def heartbeat(self) -> int:
         """Ping the database to ensure it is alive
 
@@ -69,11 +74,12 @@ class LocalAPI(API):
     #
     # COLLECTION METHODS
     #
+    @override
     def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[Callable] = None,  # type: ignore
+        embedding_function: Optional[EmbeddingFunction] = None,
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -110,11 +116,12 @@ class LocalAPI(API):
             metadata=res[0][2],
         )
 
+    @override
     def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[Callable] = None,  # type: ignore
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -135,10 +142,11 @@ class LocalAPI(API):
             name, metadata, embedding_function, get_or_create=True
         )
 
+    @override
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[Callable] = None,  # type: ignore
+        embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -168,6 +176,7 @@ class LocalAPI(API):
             metadata=res[0][2],
         )
 
+    @override
     def list_collections(self) -> Sequence[Collection]:
         """List all collections.
         Returns:
@@ -192,17 +201,19 @@ class LocalAPI(API):
             )
         return collections
 
+    @override
     def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Metadata] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         if new_name is not None:
             check_index_name(new_name)
 
         self._db.update_collection(id, new_name, new_metadata)
 
+    @override
     def delete_collection(self, name: str) -> None:
         """Delete a collection with the given name.
         Args:
@@ -221,6 +232,7 @@ class LocalAPI(API):
     #
     # ITEM METHODS
     #
+    @override
     def _add(
         self,
         ids: IDs,
@@ -250,6 +262,7 @@ class LocalAPI(API):
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
+    @override
     def _update(
         self,
         collection_id: UUID,
@@ -261,6 +274,7 @@ class LocalAPI(API):
         self._db.update(collection_id, ids, embeddings, metadatas, documents)
         return True
 
+    @override
     def _upsert(
         self,
         collection_id: UUID,
@@ -322,6 +336,7 @@ class LocalAPI(API):
 
         return True
 
+    @override
     def _get(
         self,
         collection_id: UUID,
@@ -389,6 +404,7 @@ class LocalAPI(API):
             get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
+    @override
     def _delete(
         self,
         collection_id: UUID,
@@ -414,9 +430,11 @@ class LocalAPI(API):
 
         return deleted_uuids
 
+    @override
     def _count(self, collection_id: UUID) -> int:
         return self._db.count(collection_id)
 
+    @override
     def reset(self) -> bool:
         """Reset the database. This will delete all collections and items.
 
@@ -427,6 +445,7 @@ class LocalAPI(API):
         self._db.reset()
         return True
 
+    @override
     def _query(
         self,
         collection_id: UUID,
@@ -497,14 +516,17 @@ class LocalAPI(API):
 
         return query_result
 
-    def raw_sql(self, raw_sql: str):  # type: ignore
-        return self._db.raw_sql(raw_sql)  # type: ignore
+    @override
+    def raw_sql(self, sql: str) -> pd.DataFrame:
+        return self._db.raw_sql(sql)  # type: ignore
 
+    @override
     def create_index(self, collection_name: str) -> bool:
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
+    @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(
             collection_id=collection_id,
@@ -512,6 +534,7 @@ class LocalAPI(API):
             include=["embeddings", "documents", "metadatas"],
         )
 
+    @override
     def persist(self) -> bool:
         """Persist the database to disk.
 
@@ -522,6 +545,7 @@ class LocalAPI(API):
         self._db.persist()
         return True
 
+    @override
     def get_version(self) -> str:
         """Get the version of Chroma.
 

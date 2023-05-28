@@ -7,7 +7,7 @@ from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
 import itertools
-from chromadb.config import System
+from chromadb.config import System, Component
 from uuid import UUID
 
 
@@ -66,11 +66,11 @@ class TxWrapper(ABC, EnforceOverrides):
         pass
 
 
-class SqlDB(ABC, EnforceOverrides):
+class SqlDB(Component):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
 
     def __init__(self, system: System):
-        pass
+        super().__init__(system)
 
     @abstractmethod
     def tx(self) -> TxWrapper:
