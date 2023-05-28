@@ -1,12 +1,12 @@
 from pydantic import BaseSettings
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, TypeVar, Set, cast, Iterable, Type
 from typing_extensions import Literal
+from abc import ABC
 import importlib
 import logging
-import chromadb.db
-import chromadb.api
-import chromadb.telemetry
-
+from overrides import EnforceOverrides, override
+from graphlib import TopologicalSorter
+import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,13 @@ _legacy_config_values = {
     "clickhouse": "chromadb.db.clickhouse.Clickhouse",
     "rest": "chromadb.api.fastapi.FastAPI",
     "local": "chromadb.api.local.LocalAPI",
+}
+
+# TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
+_abstract_type_keys: Dict[str, str] = {
+    "chromadb.db.DB": "chroma_db_impl",
+    "chromadb.api.API": "chroma_api_impl",
+    "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
 }
 
 
@@ -65,39 +72,93 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
 
-class System:
+T = TypeVar("T", bound="Component")
+
+
+class Component(ABC, EnforceOverrides):
+    _dependencies: Set["Component"]
+    _system: "System"
+
+    def __init__(self, system: "System"):
+        self._dependencies = set()
+        self._system = system
+
+    def require(self, type: Type[T]) -> T:
+        """Get a Component instance of the given type, and register as a dependency of
+        that instance."""
+        inst = self._system.instance(type)
+        self._dependencies.add(inst)
+        return inst
+
+    def dependencies(self) -> Set["Component"]:
+        """Return the full set of components this component depends on."""
+        return self._dependencies
+
+    def stop(self) -> None:
+        """Idempotently stop this component's execution and free all associated
+        resources."""
+        pass
+
+    def start(self) -> None:
+        """Idempotently start this component's execution"""
+        pass
+
+
+class System(Component):
     settings: Settings
 
-    db: Optional[chromadb.db.DB]
-    api: Optional[chromadb.api.API]
-    telemetry: Optional[chromadb.telemetry.Telemetry]
+    _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.db = None
-        self.api = None
-        self.telemetry = None
+        self._instances = {}
 
-    def _instantiate(self, key: str) -> Any:
-        assert self.settings[key], f"Setting '{key}' is required."
-        fqn = self.settings[key]
-        module_name, class_name = fqn.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        cls = getattr(module, class_name)
-        impl = cls(self)
-        return impl
+    def instance(self, type: Type[T]) -> T:
+        """Return an instance of the component type specified."""
 
-    def get_db(self) -> chromadb.db.DB:
-        if self.db is None:
-            self.db = self._instantiate("chroma_db_impl")
-        return self.db
+        if inspect.isabstract(type):
+            type_fqn = get_fqn(type)
+            if type_fqn not in _abstract_type_keys:
+                raise ValueError(f"Cannot instantiate abstract type: {type}")
+            key = _abstract_type_keys[type_fqn]
+            fqn = self.settings.require(key)
+            type = get_class(fqn, type)
 
-    def get_api(self) -> chromadb.api.API:
-        if self.api is None:
-            self.api = self._instantiate("chroma_api_impl")
-        return self.api
+        if type not in self._instances:
+            impl = type(self)
+            self._instances[type] = impl
 
-    def get_telemetry(self) -> chromadb.telemetry.Telemetry:
-        if self.telemetry is None:
-            self.telemetry = self._instantiate("chroma_telemetry_impl")
-        return self.telemetry
+        inst = self._instances[type]
+        return cast(T, inst)
+
+    def components(self) -> Iterable[Component]:
+        """Return the full set of all components and their dependencies in dependency
+        order."""
+        sorter: TopologicalSorter[Component] = TopologicalSorter()
+        for component in self._instances.values():
+            sorter.add(component, *component.dependencies())
+
+        return sorter.static_order()
+
+    @override
+    def start(self) -> None:
+        for component in self.components():
+            component.start()
+
+    @override
+    def stop(self) -> None:
+        for component in reversed(list(self.components())):
+            component.stop()
+
+
+def get_class(fqn: str, type: Type[T]) -> Type[T]:
+    """Given a fully qualifed class name, import the module and return the class"""
+    module_name, class_name = fqn.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    cls = getattr(module, class_name)
+    return cast(Type[T], cls)
+
+
+def get_fqn(cls: Type[T]) -> str:
+    """Given a class, return its fully qualified name"""
+    return f"{cls.__module__}.{cls.__name__}"
