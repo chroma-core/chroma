@@ -8,7 +8,7 @@ from chromadb.db.clickhouse import (
     db_schema_to_keys,
     COLLECTION_TABLE_SCHEMA,
 )
-from typing import List, Optional, Sequence, Dict
+from typing import List, Optional, Sequence
 import pandas as pd
 import json
 import duckdb
@@ -18,6 +18,7 @@ import logging
 import atexit
 from uuid import UUID
 from overrides import override
+from chromadb.api.types import Metadata
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,10 @@ class DuckDB(Clickhouse):
     #
     @override
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        get_or_create: bool = False,
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
@@ -149,7 +153,7 @@ class DuckDB(Clickhouse):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
+        new_metadata: Optional[Metadata] = None,
     ):
         if new_name is not None:
             dupe_check = self.get_collection(new_name)

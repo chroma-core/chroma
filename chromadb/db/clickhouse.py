@@ -11,7 +11,7 @@ from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 import uuid
 import json
-from typing import Dict, Optional, Sequence, List, Tuple, cast
+from typing import Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
@@ -20,6 +20,7 @@ from uuid import UUID
 from chromadb.config import System
 from overrides import override
 import numpy.typing as npt
+from chromadb.api.types import Metadata
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,10 @@ class Clickhouse(DB):
     #
     @override
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        get_or_create: bool = False,
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
@@ -223,7 +227,7 @@ class Clickhouse(DB):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
+        new_metadata: Optional[Metadata] = None,
     ):
         if new_name is not None:
             dupe_check = self.get_collection(new_name)
