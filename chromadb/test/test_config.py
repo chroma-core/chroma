@@ -158,3 +158,36 @@ def test_system_override_order() -> None:
     assert data.starts == ["D", "C", "B", "A"]
     system.stop()
     assert data.stops == ["A", "B", "C", "D"]
+
+
+class ComponentZ(Component):
+    def __init__(self, system: System):
+        super().__init__(system)
+        self.require(ComponentC)
+
+    @overrides
+    def start(self) -> None:
+        pass
+
+    @overrides
+    def stop(self) -> None:
+        pass
+
+
+def test_runtime_dependencies() -> None:
+    settings = Settings()
+    system = System(settings)
+
+    reset()
+
+    # Nothing to do, no components were requested prior to start
+    system.start()
+    assert data.starts == []
+
+    # Constructs dependencies and starts them in the correct order
+    ComponentZ(system)
+    assert data.starts == ["D", "C", "B", "A"]
+
+    assert data.starts == ["D", "C", "B", "A"]
+    system.stop()
+    assert data.stops == ["A", "B", "C", "D"]
