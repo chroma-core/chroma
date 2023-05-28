@@ -1,12 +1,9 @@
 from pydantic import BaseSettings
 from typing import Optional, List, Any, Dict, TypeVar, Set, cast, Iterable, Type
 from typing_extensions import Literal
-from abc import ABC, abstractmethod
+from abc import ABC
 import importlib
 import logging
-import chromadb.db
-import chromadb.api
-import chromadb.telemetry
 from overrides import EnforceOverrides, override
 from graphlib import TopologicalSorter
 import inspect
@@ -21,10 +18,11 @@ _legacy_config_values = {
     "local": "chromadb.api.local.LocalAPI",
 }
 
-_abstract_type_keys: dict[type, str] = {
-    chromadb.db.DB: "chroma_db_impl",
-    chromadb.api.API: "chroma_api_impl",
-    chromadb.telemetry.Telemetry: "chroma_telemetry_impl",
+# TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
+_abstract_type_keys: dict[str, str] = {
+    "chromadb.db.DB": "chroma_db_impl",
+    "chromadb.api.API": "chroma_api_impl",
+    "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
 }
 
 
@@ -85,7 +83,7 @@ class Component(ABC, EnforceOverrides):
         self._dependencies = set()
         self._system = system
 
-    def require(self, type: type[T]) -> T:
+    def require(self, type: Type[T]) -> T:
         """Get a Component instance of the given type, and register as a dependency of
         that instance."""
         inst = self._system.instance(type)
@@ -96,13 +94,11 @@ class Component(ABC, EnforceOverrides):
         """Return the full set of components this component depends on."""
         return self._dependencies
 
-    @abstractmethod
     def stop(self) -> None:
         """Idempotently stop this component's execution and free all associated
         resources."""
         pass
 
-    @abstractmethod
     def start(self) -> None:
         """Idempotently start this component's execution"""
         pass
@@ -111,19 +107,20 @@ class Component(ABC, EnforceOverrides):
 class System(Component):
     settings: Settings
 
-    _instances: Dict[type, Component]
+    _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._instances = {}
 
-    def instance(self, type: type[T]) -> T:
+    def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified."""
 
         if inspect.isabstract(type):
-            if type not in _abstract_type_keys:
+            type_fqn = get_fqn(type)
+            if type_fqn not in _abstract_type_keys:
                 raise ValueError(f"Cannot instantiate abstract type: {type}")
-            key = _abstract_type_keys[type]
+            key = _abstract_type_keys[type_fqn]
             fqn = self.settings.require(key)
             type = get_class(fqn, type)
 
@@ -132,8 +129,7 @@ class System(Component):
             self._instances[type] = impl
 
         inst = self._instances[type]
-        assert isinstance(inst, type)
-        return inst
+        return cast(T, inst)
 
     def components(self) -> Iterable[Component]:
         """Return the full set of all components and their dependencies in dependency
@@ -160,5 +156,9 @@ def get_class(fqn: str, type: Type[T]) -> Type[T]:
     module_name, class_name = fqn.rsplit(".", 1)
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
-    assert issubclass(cls, type)
     return cast(Type[T], cls)
+
+
+def get_fqn(cls: Type[T]) -> str:
+    """Given a class, return its fully qualified name"""
+    return f"{cls.__module__}.{cls.__name__}"

@@ -16,15 +16,10 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
+from chromadb.config import Component
 
-from chromadb.telemetry import Telemetry
 
-
-class API(ABC):
-    @abstractmethod
-    def __init__(self, telemetry_client: Telemetry):
-        pass
-
+class API(Component, ABC):
     @abstractmethod
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive
