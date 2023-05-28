@@ -23,6 +23,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.db.DB": "chroma_db_impl",
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
+    "chromadb.ingest.Producer": "chroma_producer_impl",
+    "chromadb.ingest.Consumer": "chromadb_consumer_impl",
 }
 
 
@@ -32,8 +34,11 @@ class Settings(BaseSettings):
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
+
+    # New architecture components
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_metadb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chromadb_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chromadb_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None

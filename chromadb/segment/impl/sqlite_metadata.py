@@ -38,16 +38,27 @@ class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
-    _topic: str
+    _topic: Optional[str]
     _subscription: Optional[UUID]
 
     def __init__(self, system: System, segment: Segment):
         self._db = system.instance(SqliteDB)
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
+        self._topic = segment["topic"]
 
-        if segment["topic"]:
-            self._begin_consumption(segment["topic"])
+    @override
+    def start(self) -> None:
+        if self._topic:
+            seq_id = self._max_seq_id()
+            self._subscription = self._consumer.subscribe(
+                self._topic, self._write_metadata, start=seq_id
+            )
+
+    @override
+    def stop(self) -> None:
+        if self._subscription:
+            self._consumer.unsubscribe(self._subscription)
 
     @override
     def count_metadata(self) -> int:
