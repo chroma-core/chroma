@@ -19,7 +19,7 @@ _legacy_config_values = {
 }
 
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
-_abstract_type_keys: dict[str, str] = {
+_abstract_type_keys: Dict[str, str] = {
     "chromadb.db.DB": "chroma_db_impl",
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
