@@ -11,7 +11,10 @@ import uuid
 
 def sqlite() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB"""
-    yield SqliteDB(System(Settings(sqlite_database=":memory:", allow_reset=True)))
+    db = SqliteDB(System(Settings(sqlite_database=":memory:", allow_reset=True)))
+    db.start()
+    yield db
+    db.stop()
 
 
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
