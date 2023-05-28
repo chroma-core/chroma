@@ -7,13 +7,13 @@ CREATE TABLE embeddings (
     UNIQUE (segment_id, embedding_id)
 );
 
-CREATE TABLE embedding_metadata {
+CREATE TABLE embedding_metadata (
     id INTEGER REFERENCES embeddings(id),
     key TEXT NOT NULL,
     string_value TEXT,
     int_value INTEGER,
     float_value REAL,
     PRIMARY KEY (id, key)
-};
+);
 
 CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id UNINDEXED, string_value);
