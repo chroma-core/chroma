@@ -48,8 +48,8 @@ class Producer(Component):
     @abstractmethod
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> None:
-        """Add an embedding record to the given topic."""
+    ) -> SeqId:
+        """Add an embedding record to the given topic. Returns the SeqID of the record."""
         pass
 
     @abstractmethod

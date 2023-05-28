@@ -94,7 +94,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @override
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> None:
+    ) -> SeqId:
         if embedding["embedding"]:
             assert embedding["encoding"] is not None
             encoding = embedding["encoding"].value
@@ -133,6 +133,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 operation=embedding["operation"],
             )
             self._notify_all(topic_name, embedding_record)
+            return seq_id
 
     @override
     def subscribe(

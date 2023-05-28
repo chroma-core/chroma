@@ -32,9 +32,10 @@ from pypika import Table
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from itertools import islice
+from chromadb.config import Component
 
 
-class SqliteMetadataSegment(MetadataReader):
+class SqliteMetadataSegment(Component, MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
@@ -50,7 +51,7 @@ class SqliteMetadataSegment(MetadataReader):
     @override
     def start(self) -> None:
         if self._topic:
-            seq_id = self._max_seq_id()
+            seq_id = self.max_seqid()
             self._subscription = self._consumer.subscribe(
                 self._topic, self._write_metadata, start=seq_id
             )
@@ -61,15 +62,33 @@ class SqliteMetadataSegment(MetadataReader):
             self._consumer.unsubscribe(self._subscription)
 
     @override
+    def max_seqid(self) -> SeqId:
+        t = Table("embeddings")
+        q = (
+            self._db.querybuilder()
+            .from_(t)
+            .select(fn.Max(t.seq_id))
+            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+        )
+        sql, params = get_sql(q)
+        with self._db.tx() as cur:
+            result = cur.execute(sql, params).fetchone()[0]
+
+            if result is None:
+                return self._consumer.min_seqid()
+            else:
+                return _decode_seq_id(result)
+
+    @override
     def count_metadata(self) -> int:
         embeddings_t = Table("embeddings")
         q = (
             self._db.querybuilder()
-            .select("COUNT(*)")
             .from_(embeddings_t)
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
+            .select(fn.Count(embeddings_t.id))
         )
         sql, params = get_sql(q)
         with self._db.tx() as cur:
@@ -120,7 +139,7 @@ class SqliteMetadataSegment(MetadataReader):
             q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
 
         if ids:
-            q = q.where(embeddings_t.embedding_id.isin(ids))
+            q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
 
         limit = limit or 2**63 - 1
         offset = offset or 0
@@ -181,9 +200,9 @@ class SqliteMetadataSegment(MetadataReader):
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
             .where(t.embedding_id == ParameterValue(record["id"]))
         ).insert(
-            self._db.uuid_to_db(self._id),
-            record["id"],
-            _encode_seq_id(record["seq_id"]),
+            ParameterValue(self._db.uuid_to_db(self._id)),
+            ParameterValue(record["id"]),
+            ParameterValue(_encode_seq_id(record["seq_id"])),
         )
         sql, params = get_sql(q)
         if upsert:
@@ -205,7 +224,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(t)
             .where(t.id == ParameterValue(id))
-            .where(t.key.isin(to_delete))
+            .where(t.key.isin(ParameterValue(to_delete)))
             .delete()
         )
         sql, params = get_sql(q)
@@ -224,11 +243,29 @@ class SqliteMetadataSegment(MetadataReader):
         )
         for key, value in metadata.items():
             if isinstance(value, str):
-                q = q.insert(id, key, value, None, None)
+                q = q.insert(
+                    ParameterValue(id),
+                    ParameterValue(key),
+                    ParameterValue(value),
+                    None,
+                    None,
+                )
             elif isinstance(value, int):
-                q = q.insert(id, key, None, value, None)
+                q = q.insert(
+                    ParameterValue(id),
+                    ParameterValue(key),
+                    None,
+                    ParameterValue(value),
+                    None,
+                )
             elif isinstance(value, float):
-                q = q.insert(id, key, None, None, value)
+                q = q.insert(
+                    ParameterValue(id),
+                    ParameterValue(key),
+                    None,
+                    None,
+                    ParameterValue(value),
+                )
 
         sql, params = get_sql(q)
         if upsert:
@@ -292,24 +329,6 @@ class SqliteMetadataSegment(MetadataReader):
         "Add where-document clauses to the given Pypika query"
         return q
 
-    def _max_seq_id(self) -> SeqId:
-        """Returns the maximum SeqID that's already been consumed."""
-        t = Table("embeddings")
-        q = (
-            self._db.querybuilder()
-            .from_(t)
-            .select(fn.Max(t.seq_id))
-            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-        )
-        sql, params = get_sql(q)
-        with self._db.tx() as cur:
-            result = cur.execute(sql, params).fetchone()
-
-            if result is None:
-                return self._consumer.min_seqid()
-            else:
-                return _decode_seq_id(result[0])
-
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
@@ -323,15 +342,6 @@ class SqliteMetadataSegment(MetadataReader):
                     self._delete_record(cur, record)
                 elif record["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
-
-    def _begin_consumption(self, topic: str) -> None:
-        """Begin consuming from the consumer, starting with the most recently seen
-        SeqID"""
-
-        seq_id = self._max_seq_id()
-        self._subscription = self._consumer.subscribe(
-            topic, self._write_metadata, start=seq_id
-        )
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
