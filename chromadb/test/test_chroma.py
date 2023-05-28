@@ -4,6 +4,7 @@ from unittest.mock import patch, Mock
 
 import chromadb
 import chromadb.config
+from chromadb.db import DB
 
 
 class GetDBTest(unittest.TestCase):
@@ -12,7 +13,7 @@ class GetDBTest(unittest.TestCase):
         system = chromadb.config.System(
             chromadb.config.Settings(persist_directory="./foo")
         )
-        system.get_db()
+        system.instance(DB)
         assert mock.called
 
     @patch("chromadb.db.duckdb.PersistentDuckDB", autospec=True)
@@ -22,7 +23,7 @@ class GetDBTest(unittest.TestCase):
                 chroma_db_impl="duckdb+parquet", persist_directory="./foo"
             )
         )
-        system.get_db()
+        system.instance(DB)
         assert mock.called
 
     @patch("chromadb.db.clickhouse.Clickhouse", autospec=True)
@@ -35,7 +36,7 @@ class GetDBTest(unittest.TestCase):
                 clickhouse_port="666",
             )
         )
-        system.get_db()
+        system.instance(DB)
         assert mock.called
 
 

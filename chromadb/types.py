@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, Mapping
+from typing import Optional, Union, Sequence, Mapping, Dict
 from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
@@ -109,15 +109,22 @@ class VectorQueryResult(VectorEmbeddingRecord):
 
 # Metadata Query Grammar
 LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = dict[Union[WhereOperator, LogicalOperator], LiteralValue]
+LogicalOperator = Union[Literal["$and"], Literal["$or"]]
+WhereOperator = Union[
+    Literal["$gt"],
+    Literal["$gte"],
+    Literal["$lt"],
+    Literal["$lte"],
+    Literal["$ne"],
+    Literal["$eq"],
+]
+OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
 Where = dict[
     Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, list["Where"]]
 ]
 
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
+WhereDocumentOperator = Union[Literal["$contains"], LogicalOperator]
 WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
 
 

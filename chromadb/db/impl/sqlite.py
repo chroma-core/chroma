@@ -3,7 +3,6 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
-from chromadb.db.mixins.metadb import SqlMetaDB
 import sqlite3
 from overrides import override
 import pypika
@@ -37,10 +36,11 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
-class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB, SqlMetaDB):
+class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn: sqlite3.Connection
     _settings: Settings
     _migration_dirs: Sequence[str]
+    _db_file: str
 
     def __init__(self, system: System):
         self._settings = system.settings
@@ -49,15 +49,19 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB, SqlMetaDB):
             "migrations/sysdb",
             "migrations/metadb",
         ]
-        self._init()
+        self._db_file = self._settings.require("sqlite_database")
         super().__init__(system)
 
-    def _init(self) -> None:
-        sqlite_db = self._settings.require("sqlite_database")
-        self._conn = sqlite3.connect(sqlite_db)
+    @override
+    def start(self) -> None:
+        self._conn = sqlite3.connect(self._db_file)
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
         self.initialize_migrations()
+
+    @override
+    def stop(self) -> None:
+        self._conn.close()
 
     @staticmethod
     @override
@@ -92,7 +96,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB, SqlMetaDB):
         db_file = self._settings.require("sqlite_database")
         if db_file != ":memory:":
             os.remove(db_file)
-        self._init()
+        self.stop()
+        self.start()
 
     @override
     def setup_migrations(self) -> None:

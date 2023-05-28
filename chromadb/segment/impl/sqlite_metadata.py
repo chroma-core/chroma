@@ -15,7 +15,6 @@ from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
 from chromadb.db.base import (
     Cursor,
-    SqlDB,
     ParameterValue,
     get_sql,
 )
@@ -29,7 +28,6 @@ from chromadb.types import (
     UpdateMetadata,
 )
 from uuid import UUID
-from overrides import override
 from pypika import Table
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
@@ -44,8 +42,8 @@ class SqliteMetadataSegment(MetadataReader):
     _subscription: Optional[UUID]
 
     def __init__(self, system: System, segment: Segment):
-        self._db = system.instance("chromadb.db.impl.sqlite.SqliteDB")
-        self._consumer = system.instance("chromadb.ingest.consumer.Consumer")
+        self._db = system.instance(SqliteDB)
+        self._consumer = system.instance(Consumer)
         self._id = segment["id"]
 
         if segment["topic"]:
