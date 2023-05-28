@@ -33,6 +33,7 @@
     "--ignore-missing-imports",
     "--show-column-numbers",
     "--no-pretty",
-    "--strict"
+    "--strict",
+    "--disable-error-code=type-abstract"
   ]
 }
