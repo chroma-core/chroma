@@ -108,13 +108,16 @@ class System(Component):
     settings: Settings
 
     _instances: Dict[Type[Component], Component]
+    _running: bool
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._instances = {}
+        self._running = False
 
     def instance(self, type: Type[T]) -> T:
-        """Return an instance of the component type specified."""
+        """Return an instance of the component type specified. If the system is running,
+        the component will be started as well."""
 
         if inspect.isabstract(type):
             type_fqn = get_fqn(type)
@@ -127,6 +130,8 @@ class System(Component):
         if type not in self._instances:
             impl = type(self)
             self._instances[type] = impl
+            if self._running:
+                impl.start()
 
         inst = self._instances[type]
         return cast(T, inst)
@@ -142,11 +147,13 @@ class System(Component):
 
     @override
     def start(self) -> None:
+        self._running = True
         for component in self.components():
             component.start()
 
     @override
     def stop(self) -> None:
+        self._running = False
         for component in reversed(list(self.components())):
             component.stop()
 

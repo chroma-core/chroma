@@ -12,6 +12,10 @@ from multiprocessing import Process
 import pytest
 from typing import Generator, List, Callable
 import shutil
+import logging
+import socket
+
+logger = logging.getLogger(__name__)
 
 hypothesis.settings.register_profile(
     "dev",
@@ -24,7 +28,14 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
-def _run_server() -> None:
+def find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return s.getsockname()[1]
+
+
+def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
     settings = Settings(
         chroma_api_impl="local",
@@ -32,30 +43,34 @@ def _run_server() -> None:
         persist_directory=tempfile.gettempdir() + "/test_server",
     )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=6666, log_level="error")
+    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
 
 
 def _await_server(api: API, attempts: int = 0) -> None:
     try:
         api.heartbeat()
     except ConnectionError as e:
-        if attempts > 10:
+        if attempts > 15:
+            logger.error("Test server failed to start after 15 attempts")
             raise e
         else:
-            time.sleep(2)
+            logger.info("Waiting for server to start...")
+            time.sleep(4)
             _await_server(api, attempts + 1)
 
 
 def fastapi() -> Generator[API, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
-    proc = Process(target=_run_server, args=(), daemon=True)
+    port = find_free_port()
+    logger.info(f"Running test FastAPI server on port {port}")
+    proc = Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     api = chromadb.Client(
         Settings(
             chroma_api_impl="rest",
             chroma_server_host="localhost",
-            chroma_server_http_port="6666",
+            chroma_server_http_port=str(port),
         )
     )
     _await_server(api)
