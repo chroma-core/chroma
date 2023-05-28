@@ -94,7 +94,7 @@ def test_persist(
 def load_and_check(
     settings: Settings,
     collection_name: str,
-    embeddings_set: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     conn: Connection,
 ) -> None:
     try:
@@ -103,11 +103,11 @@ def load_and_check(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),
         )
-        invariants.count(coll, embeddings_set)
-        invariants.metadatas_match(coll, embeddings_set)
-        invariants.documents_match(coll, embeddings_set)
-        invariants.ids_match(coll, embeddings_set)
-        invariants.ann_accuracy(coll, embeddings_set)
+        invariants.count(coll, record_set)
+        invariants.metadatas_match(coll, record_set)
+        invariants.documents_match(coll, record_set)
+        invariants.ids_match(coll, record_set)
+        invariants.ann_accuracy(coll, record_set)
     except Exception as e:
         conn.send(e)
         raise e
@@ -126,7 +126,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         super().__init__(self.api)
 
     @precondition(
-        lambda self: len(self.embeddings["ids"]) >= 1 and self.last_persist_delay <= 0
+        lambda self: len(self.record_set_state["ids"]) >= 1
+        and self.last_persist_delay <= 0
     )
     @rule()
     def persist(self) -> None:
@@ -139,7 +140,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         conn1, conn2 = multiprocessing.Pipe()
         p = ctx.Process(
             target=load_and_check,
-            args=(self.settings, collection_name, self.embeddings, conn2),
+            args=(self.settings, collection_name, self.record_set_state, conn2),
         )
         p.start()
         p.join()

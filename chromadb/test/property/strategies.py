@@ -56,6 +56,28 @@ class RecordSet(TypedDict):
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
+class NormalizedRecordSet(TypedDict):
+    """
+    A RecordSet, with all fields normalized to lists.
+    """
+
+    ids: List[types.ID]
+    embeddings: Optional[types.Embeddings]
+    metadatas: Optional[List[types.Metadata]]
+    documents: Optional[List[types.Document]]
+
+
+class StateMachineRecordSet(TypedDict):
+    """
+    Represents the internal state of a state machine in hypothesis tests.
+    """
+
+    ids: List[types.ID]
+    embeddings: types.Embeddings
+    metadatas: List[Optional[types.Metadata]]
+    documents: List[Optional[types.Document]]
+
+
 class Record(TypedDict):
     """
     A single generated record.
