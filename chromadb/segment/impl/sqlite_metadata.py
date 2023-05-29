@@ -1,11 +1,4 @@
-from typing import (
-    Optional,
-    Sequence,
-    Any,
-    Tuple,
-    cast,
-    Generator,
-)
+from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
@@ -25,13 +18,17 @@ from chromadb.types import (
     SeqId,
     Operation,
     UpdateMetadata,
+    LiteralValue,
+    WhereOperator,
 )
 from uuid import UUID
 from pypika import Table
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
+import pypika.terms
 from itertools import islice, groupby
 from chromadb.config import Component
+from functools import reduce
 
 
 class SqliteMetadataSegment(Component, MetadataReader):
@@ -107,7 +104,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
 
         embeddings_t = Table("embeddings")
         metadata_t = Table("embedding_metadata")
-        fulltext_t = Table("embedding_fulltext")
+        # fulltext_t = Table("embedding_fulltext")
 
         q = (
             (
@@ -132,10 +129,11 @@ class SqliteMetadataSegment(Component, MetadataReader):
         )
 
         if where:
-            q = self._where_query(q, where, metadata_t)
+            q = _where_map_criterion(q, where, metadata_t)
 
         if where_document:
-            q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
+            pass
+            # q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
 
         if ids:
             q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
@@ -309,10 +307,6 @@ class SqliteMetadataSegment(Component, MetadataReader):
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])
 
-    def _where_query(self, q: QueryBuilder, where: Where, table: Table) -> QueryBuilder:
-        "Add where clauses to the given Pypika query"
-        return q
-
     def _where_document_query(
         self,
         q: QueryBuilder,
@@ -356,3 +350,72 @@ def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
         return int.from_bytes(seq_id_bytes, "big")
     else:
         raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
+
+
+def _where_map_criterion(
+    q: QueryBuilder, where: Where, table: Table, prefix: str = ""
+) -> QueryBuilder:
+    "Given a Where map, construct a Pypika Criterion object"
+
+    for i, (k, v) in enumerate(where.items()):
+        if k == "$and":
+            raise NotImplementedError()
+        elif k == "$or":
+            raise NotImplementedError()
+        else:
+            cond_table = Table("embedding_metadata").as_(f"c{prefix}_{i}")
+            q = q.join(cond_table).on(table.id == cond_table.id)
+            expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
+            q = q.where(_where_clause(k, expr, cond_table))
+    return q
+
+
+def _where_clause(
+    field: str,
+    expr: Union[LiteralValue, Dict[WhereOperator, LiteralValue]],
+    table: Table,
+) -> pypika.terms.Criterion:
+    """Given a field name, an expression, and a table, construct a Pypika Criterion"""
+
+    # Literal value case
+    if isinstance(expr, (str, int, float)):
+        return _where_clause(field, {"$eq": expr}, table)
+
+    # Operator dict case
+    operator, value = next(iter(expr.items()))
+    key_critera = table.key == ParameterValue(field)
+    return key_critera & _value_criterion(value, operator, table)
+
+
+def _value_criterion(
+    value: LiteralValue, op: WhereOperator, table: Table
+) -> pypika.terms.Criterion:
+    """Return a criterion to compare a value with the appropriate columns given its type
+    and the operation type."""
+
+    if isinstance(value, str):
+        cols = [table.string_value]
+    elif isinstance(value, int) and op in ("$eq", "$ne"):
+        cols = [table.int_value]
+    elif isinstance(value, float) and op in ("$eq", "$ne"):
+        cols = [table.float_value]
+    else:
+        cols = [table.int_value, table.float_value]
+
+    if op == "$eq":
+        col_exprs = [col == ParameterValue(value) for col in cols]
+    elif op == "$ne":
+        col_exprs = [col != ParameterValue(value) for col in cols]
+    elif op == "$gt":
+        col_exprs = [col > ParameterValue(value) for col in cols]
+    elif op == "$gte":
+        col_exprs = [col >= ParameterValue(value) for col in cols]
+    elif op == "$lt":
+        col_exprs = [col < ParameterValue(value) for col in cols]
+    elif op == "$lte":
+        col_exprs = [col <= ParameterValue(value) for col in cols]
+
+    if op == "$ne":
+        return reduce(lambda x, y: x & y, col_exprs)
+    else:
+        return reduce(lambda x, y: x | y, col_exprs)

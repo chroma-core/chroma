@@ -44,7 +44,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     def create_record(i: int) -> SubmitEmbeddingRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
         metadata: Optional[Dict[str, Union[str, int, float]]]
-        if i % 2 == 0:
+        if i == 0:
             metadata = None
         else:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
@@ -164,5 +164,37 @@ def test_get(
     assert_equiv_records(embeddings, ret)
 
     # Get with simple where
-    result = segment.get_metadata(where={"div_by_3": "true"})
+    result = segment.get_metadata(where={"div_by_three": "true"})
+    assert len(result) == 3
+
+    # Get with gt/gte/lt/lte on int keys
+    result = segment.get_metadata(where={"int_key": {"$gt": 5}})
+    assert len(result) == 4
+    result = segment.get_metadata(where={"int_key": {"$gte": 5}})
+    assert len(result) == 5
+    result = segment.get_metadata(where={"int_key": {"$lt": 5}})
+    assert len(result) == 4
+    result = segment.get_metadata(where={"int_key": {"$lte": 5}})
+    assert len(result) == 5
+
+    # Get with gt/lt on float keys with float values
+    result = segment.get_metadata(where={"float_key": {"$gt": 5.01}})
+    assert len(result) == 5
+    result = segment.get_metadata(where={"float_key": {"$lt": 4.99}})
+    assert len(result) == 4
+
+    # Get with gt/lt on float keys with int values
+    result = segment.get_metadata(where={"float_key": {"$gt": 5}})
+    assert len(result) == 5
+    result = segment.get_metadata(where={"float_key": {"$lt": 5}})
+    assert len(result) == 4
+
+    # Get with gt/lt on int keys with float values
+    result = segment.get_metadata(where={"int_key": {"$gt": 5.01}})
+    assert len(result) == 4
+    result = segment.get_metadata(where={"int_key": {"$lt": 4.99}})
+    assert len(result) == 4
+
+    # get with multiple heterogenous conditions
+    result = segment.get_metadata(where={"div_by_three": "true", "int_key": {"$gt": 5}})
     assert len(result) == 2
