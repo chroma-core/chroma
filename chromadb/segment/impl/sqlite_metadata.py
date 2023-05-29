@@ -22,10 +22,10 @@ from chromadb.types import (
     WhereOperator,
 )
 from uuid import UUID
-from pypika import Table
+from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
-import pypika.terms
+from pypika.terms import Criterion
 from itertools import islice, groupby
 from chromadb.config import Component
 from functools import reduce
@@ -102,9 +102,9 @@ class SqliteMetadataSegment(Component, MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
-        embeddings_t = Table("embeddings")
-        metadata_t = Table("embedding_metadata")
-        # fulltext_t = Table("embedding_fulltext")
+        embeddings_t, metadata_t, fulltext_t = Tables(
+            "embeddings", "embedding_metadata", "embedding_fulltext"
+        )
 
         q = (
             (
@@ -129,7 +129,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
         )
 
         if where:
-            q = _where_map_criterion(q, where, metadata_t)
+            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
 
         if where_document:
             pass
@@ -151,6 +151,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
         cursor returns rows in ID order."""
 
         sql, params = get_sql(q)
+        print("SQL:", sql)
         cur.execute(sql, params)
 
         cur_iterator = iter(cur.fetchone, None)
@@ -331,6 +332,36 @@ class SqliteMetadataSegment(Component, MetadataReader):
                 elif record["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
+    def _where_map_criterion(
+        self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
+    ) -> Criterion:
+        clause: list[Criterion] = []
+
+        for i, (k, v) in enumerate(where.items()):
+            if k == "$and":
+                criteria = [
+                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    for w in cast(Sequence[Where], v)
+                ]
+                clause.append(reduce(lambda x, y: x & y, criteria))
+            elif k == "$or":
+                criteria = [
+                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    for w in cast(Sequence[Where], v)
+                ]
+                clause.append(reduce(lambda x, y: x | y, criteria))
+            else:
+                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
+                sq = (
+                    self._db.querybuilder()
+                    .from_(metadata_t)
+                    .select(metadata_t.id)
+                    .where(metadata_t.key == ParameterValue(k))
+                    .where(_where_clause(expr, metadata_t))
+                )
+                clause.append(embeddings_t.id.isin(sq))
+        return reduce(lambda x, y: x & y, clause)
+
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
     """Encode a SeqID into a byte array"""
@@ -352,44 +383,22 @@ def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
         raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
 
 
-def _where_map_criterion(
-    q: QueryBuilder, where: Where, table: Table, prefix: str = ""
-) -> QueryBuilder:
-    "Given a Where map, construct a Pypika Criterion object"
-
-    for i, (k, v) in enumerate(where.items()):
-        if k == "$and":
-            raise NotImplementedError()
-        elif k == "$or":
-            raise NotImplementedError()
-        else:
-            cond_table = Table("embedding_metadata").as_(f"c{prefix}_{i}")
-            q = q.join(cond_table).on(table.id == cond_table.id)
-            expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-            q = q.where(_where_clause(k, expr, cond_table))
-    return q
-
-
 def _where_clause(
-    field: str,
     expr: Union[LiteralValue, Dict[WhereOperator, LiteralValue]],
     table: Table,
-) -> pypika.terms.Criterion:
+) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
     if isinstance(expr, (str, int, float)):
-        return _where_clause(field, {"$eq": expr}, table)
+        return _where_clause({"$eq": expr}, table)
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
-    key_critera = table.key == ParameterValue(field)
-    return key_critera & _value_criterion(value, operator, table)
+    return _value_criterion(value, operator, table)
 
 
-def _value_criterion(
-    value: LiteralValue, op: WhereOperator, table: Table
-) -> pypika.terms.Criterion:
+def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
 

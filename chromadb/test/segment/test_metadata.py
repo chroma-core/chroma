@@ -198,3 +198,17 @@ def test_get(
     # get with multiple heterogenous conditions
     result = segment.get_metadata(where={"div_by_three": "true", "int_key": {"$gt": 5}})
     assert len(result) == 2
+
+    # get with OR conditions
+    result = segment.get_metadata(where={"$or": [{"int_key": 1}, {"int_key": 2}]})
+    assert len(result) == 2
+
+    # get with AND conditions
+    result = segment.get_metadata(
+        where={"$and": [{"int_key": 3}, {"float_key": {"$gt": 5}}]}
+    )
+    assert len(result) == 0
+    result = segment.get_metadata(
+        where={"$and": [{"int_key": 3}, {"float_key": {"$lt": 5}}]}
+    )
+    assert len(result) == 1
