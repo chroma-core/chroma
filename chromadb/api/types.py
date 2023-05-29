@@ -28,14 +28,14 @@ Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
 LiteralValue = Union[str, int, float]
 LogicalOperator = Literal["$and", "$or"]
 WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
-]
+LogicalExpression = Dict[LogicalOperator, List["Where"]]
+ConditionExpression = Dict[str, Union[LiteralValue, Dict[WhereOperator, LiteralValue]]]
+Where = Union[LogicalExpression, ConditionExpression]
 
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+WhereDocumentConditionExpression = Dict[Literal["$contains"], str]
+WhereDocumentLogicalExpression = Dict[LogicalOperator, "WhereDocument"]
+WhereDocument = Union[WhereDocumentLogicalExpression, WhereDocumentConditionExpression]
 
 
 class GetResult(TypedDict):
