@@ -151,7 +151,11 @@ collection_metadata = st.one_of(
 
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
-def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings:
+def create_embeddings(
+    dim: int,
+    count: int,
+    dtype: np.dtype[np.floating[Any]],
+) -> types.Embeddings:
     embeddings: types.Embeddings = (
         np.random.uniform(
             low=-1.0,
@@ -166,7 +170,7 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
 
 
 class hashing_embedding_function(types.EmbeddingFunction):
-    def __init__(self, dim: int, dtype: np.dtype) -> None:
+    def __init__(self, dim: int, dtype: np.dtype[np.floating[Any]]) -> None:
         self.dim = dim
         self.dtype = dtype
 
@@ -192,13 +196,11 @@ class hashing_embedding_function(types.EmbeddingFunction):
 
 class not_implemented_embedding_function(types.EmbeddingFunction):
     def __call__(self, texts: Documents) -> Embeddings:
-        raise NotImplementedError(
-            "This embedding function is not implemented - It should never be called"
-        )
+        assert False, "This embedding function is not implemented"
 
 
 def embedding_function_strategy(
-    dim: int, dtype: np.dtype
+    dim: int, dtype: np.dtype[np.floating[Any]]
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
     return st.just(hashing_embedding_function(dim, dtype))
 
@@ -208,7 +210,7 @@ class Collection:
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
-    dtype: np.dtype
+    dtype: np.dtype[np.floating[Any]]
     known_metadata_keys: Dict[str, Union[str, int, float]]
     known_document_keywords: List[str]
     has_documents: bool = False

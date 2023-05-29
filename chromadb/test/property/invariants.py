@@ -1,6 +1,6 @@
 import math
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Any, Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
 import numpy as np
 from chromadb.api import types
@@ -138,8 +138,10 @@ distance_functions = {
 def _exact_distances(
     query: types.Embeddings,
     targets: types.Embeddings,
-    distance_fn: Callable[[np.ndarray, np.ndarray], float] = distance_functions["l2"],
-) -> Tuple[np.ndarray, np.ndarray]:
+    distance_fn: Callable[
+        [np.ndarray[np.floating[Any], Any], np.ndarray[np.floating[Any], Any]], float
+    ] = distance_functions["l2"],
+) -> Tuple[np.ndarray[np.floating[Any], Any], np.ndarray[np.floating[Any], Any]]:
     """Return the ordered indices and distances from each query to each target"""
     np_query = np.array(query)
     np_targets = np.array(targets)
