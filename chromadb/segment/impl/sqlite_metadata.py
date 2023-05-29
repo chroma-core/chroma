@@ -5,7 +5,6 @@ from typing import (
     Tuple,
     cast,
     Generator,
-    List,
 )
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
@@ -31,7 +30,7 @@ from uuid import UUID
 from pypika import Table
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
-from itertools import islice
+from itertools import islice, groupby
 from chromadb.config import Component
 
 
@@ -98,8 +97,8 @@ class SqliteMetadataSegment(Component, MetadataReader):
     @override
     def get_metadata(
         self,
-        where: Optional[Where],
-        where_document: Optional[WhereDocument],
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         ids: Optional[Sequence[str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
@@ -156,18 +155,13 @@ class SqliteMetadataSegment(Component, MetadataReader):
         sql, params = get_sql(q)
         cur.execute(sql, params)
 
-        row = cur.fetchone()
-        record_id: int = row[0] if row else -1
-        current_rows: List[Tuple[Any, ...]] = []
-        while row:
-            current_rows.append(row)
-            if record_id != row[0]:
-                yield self._record(current_rows)
-                current_rows = []
-                record_id = row[0]
-            row = cur.fetchone()
+        cur_iterator = iter(cur.fetchone, None)
+        group_iterator = groupby(cur_iterator, lambda r: int(r[0]))
 
-    def _record(self, rows: List[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
+        for _, group in group_iterator:
+            yield self._record(list(group))
+
+    def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
         _, embedding_id, seq_id = rows[0][:3]

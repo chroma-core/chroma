@@ -1,8 +1,9 @@
 import pytest
-from typing import Generator, List, Callable, Iterator, Dict, Optional, Union
+from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
 from chromadb.config import System, Settings
 from chromadb.types import (
     SubmitEmbeddingRecord,
+    MetadataEmbeddingRecord,
     Operation,
     ScalarEncoding,
     Segment,
@@ -38,7 +39,7 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
     yield next(request.param())
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     def create_record(i: int) -> SubmitEmbeddingRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
@@ -47,6 +48,8 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             metadata = None
         else:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
+            if i % 3 == 0:
+                metadata["div_by_three"] = "true"
 
         record = SubmitEmbeddingRecord(
             id=f"embedding_{i}",
@@ -83,6 +86,7 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
+    system.reset()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -104,3 +108,61 @@ def test_insert_and_count(
     sync(segment, max_id)
 
     assert segment.count_metadata() == 6
+
+
+def assert_equiv_records(
+    expected: Sequence[SubmitEmbeddingRecord], actual: Sequence[MetadataEmbeddingRecord]
+) -> None:
+    assert len(expected) == len(actual)
+    sorted_expected = sorted(expected, key=lambda r: r["id"])
+    sorted_actual = sorted(actual, key=lambda r: r["id"])
+    for e, a in zip(sorted_expected, sorted_actual):
+        assert e["id"] == a["id"]
+        assert e["metadata"] == a["metadata"]
+
+
+def test_get(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+
+    producer = system.instance(Producer)
+    topic = str(segment_definition["topic"])
+
+    embeddings = [next(sample_embeddings) for i in range(10)]
+
+    seq_ids = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    sync(segment, seq_ids[-1])
+
+    # Get all records
+    results = segment.get_metadata()
+    assert seq_ids == [r["seq_id"] for r in results]
+    assert_equiv_records(embeddings, results)
+
+    # get by ID
+    result = segment.get_metadata(ids=[e["id"] for e in embeddings[0:5]])
+    assert_equiv_records(embeddings[0:5], result)
+
+    # Get with limit and offset
+    # Cannot rely on order(yet), but can rely on retrieving exactly the
+    # whole set eventually
+    ret: List[MetadataEmbeddingRecord] = []
+    ret.extend(segment.get_metadata(limit=3))
+    assert len(ret) == 3
+    ret.extend(segment.get_metadata(limit=3, offset=3))
+    assert len(ret) == 6
+    ret.extend(segment.get_metadata(limit=3, offset=6))
+    assert len(ret) == 9
+    ret.extend(segment.get_metadata(limit=3, offset=9))
+    assert len(ret) == 10
+    assert_equiv_records(embeddings, ret)
+
+    # Get with simple where
+    result = segment.get_metadata(where={"div_by_3": "true"})
+    assert len(result) == 2

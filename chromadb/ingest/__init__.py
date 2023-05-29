@@ -10,6 +10,7 @@ from chromadb.types import (
 from chromadb.config import Component
 from uuid import UUID
 import array
+from overrides import override
 
 
 def encode_vector(vector: Vector, encoding: ScalarEncoding) -> bytes:
@@ -53,6 +54,7 @@ class Producer(Component):
         pass
 
     @abstractmethod
+    @override
     def reset(self) -> None:
         """Delete all topics and data. For testing only, implementations intended for
         production may throw an exception instead of implementing this method."""

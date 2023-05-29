@@ -6,9 +6,9 @@ from threading import local
 from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
-import itertools
 from chromadb.config import System, Component
 from uuid import UUID
+from itertools import islice, count
 
 
 class NotFoundError(Exception):
@@ -78,6 +78,7 @@ class SqlDB(Component):
         pass
 
     @abstractmethod
+    @override
     def reset(self) -> None:
         """Reset the database to a clean state. Implementations may throw an exception
         if they do not support reset. In all cases, implementations should respect the
@@ -140,8 +141,15 @@ class ParameterValue(pypika.Parameter):  # type: ignore
 
     @override
     def get_sql(self, **kwargs: Any) -> str:
-        _context.values.append(self.value)
-        val = _context.formatstr.format(next(_context.generator))
+        if isinstance(self.value, (list, tuple)):
+            _context.values.extend(self.value)
+            indexes = islice(_context.generator, len(self.value))
+            placeholders = ", ".join(_context.formatstr.format(i) for i in indexes)
+            val = f"({placeholders})"
+        else:
+            _context.values.append(self.value)
+            val = _context.formatstr.format(next(_context.generator))
+
         return str(val)
 
 
@@ -185,7 +193,7 @@ def get_sql(
     """
 
     _context.values = []
-    _context.generator = itertools.count(1)
+    _context.generator = count(1)
     _context.formatstr = formatstr
     sql = query.get_sql()
     params = tuple(_context.values)

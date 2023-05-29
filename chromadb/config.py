@@ -110,6 +110,11 @@ class Component(ABC, EnforceOverrides):
         """Idempotently start this component's execution"""
         pass
 
+    def reset(self) -> None:
+        """Reset this component's state to its initial blank state. Only intended to be
+        called from tests."""
+        pass
+
 
 class System(Component):
     settings: Settings
@@ -163,6 +168,13 @@ class System(Component):
         self._running = False
         for component in reversed(list(self.components())):
             component.stop()
+
+    @override
+    def reset(self) -> None:
+        if not self.settings.allow_reset:
+            raise ValueError("Resetting is not allowed by this configuration")
+        for component in self.components():
+            component.reset()
 
 
 def get_class(fqn: str, type: Type[T]) -> Type[T]:

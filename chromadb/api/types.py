@@ -13,6 +13,9 @@ from chromadb.types import (
     WhereDocument,
 )
 
+# Re-export types from chromadb.types
+__all__ = ["Metadata", "Where", "WhereDocument"]
+
 ID = str
 IDs = List[ID]
 
