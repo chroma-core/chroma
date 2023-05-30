@@ -367,3 +367,36 @@ def test_update(
 
     assert segment.count() == 3
     assert segment.get_vectors(ids=["no_such_record"]) == []
+
+
+def test_upsert(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+    producer = system.instance(Producer)
+
+    topic = str(segment_definition["topic"])
+
+    segment = LocalHnswSegment(system, segment_definition)
+    segment.start()
+
+    _test_update(producer, topic, segment, sample_embeddings, Operation.UPSERT)
+
+    # test updating a nonexistent record
+    seq_id = producer.submit_embedding(
+        topic,
+        SubmitEmbeddingRecord(
+            id="no_such_record",
+            embedding=[42, 42],
+            encoding=ScalarEncoding.FLOAT32,
+            metadata=None,
+            operation=Operation.UPSERT,
+        ),
+    )
+
+    sync(segment, seq_id)
+
+    assert segment.count() == 4
+    result = segment.get_vectors(ids=["no_such_record"])
+    assert len(result) == 1
+    assert approx_equal_vector(result[0]["embedding"], [42, 42])
