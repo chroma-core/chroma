@@ -15,7 +15,7 @@ from chromadb.segment import MetadataReader
 import uuid
 import time
 
-from chromadb.segment.impl.sqlite_metadata import SqliteMetadataSegment
+from chromadb.segment.impl.metadata.sqlite import SqliteMetadataSegment
 
 from pytest import FixtureRequest
 from itertools import count
