@@ -375,7 +375,60 @@ def test_update(
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
-    embeddings = [next(sample_embeddings) for i in range(10)]
+    _test_update(sample_embeddings, producer, segment, topic, Operation.UPDATE)
+
+    # Update nonexisting ID
+    update_record = SubmitEmbeddingRecord(
+        id="no_such_id",
+        metadata={"foo": "bar"},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["no_such_id"])
+    assert len(results) == 0
+    assert segment.count_metadata() == 3
+
+
+def test_upsert(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+
+    producer = system.instance(Producer)
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    _test_update(sample_embeddings, producer, segment, topic, Operation.UPSERT)
+
+    # upsert previously nonexisting ID
+    update_record = SubmitEmbeddingRecord(
+        id="no_such_id",
+        metadata={"foo": "bar"},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPSERT,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["no_such_id"])
+    assert results[0]["metadata"] == {"foo": "bar"}
+
+
+def _test_update(
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    producer: Producer,
+    segment: MetadataReader,
+    topic: str,
+    op: Operation,
+) -> None:
+    """test code common between update and upsert paths"""
+
+    embeddings = [next(sample_embeddings) for i in range(3)]
 
     max_id = 0
     for e in embeddings:
@@ -392,7 +445,7 @@ def test_update(
         metadata={"document": "foo bar"},
         embedding=None,
         encoding=None,
-        operation=Operation.UPDATE,
+        operation=op,
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -407,7 +460,7 @@ def test_update(
         metadata={"document": "biz buz"},
         embedding=None,
         encoding=None,
-        operation=Operation.UPDATE,
+        operation=op,
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -424,7 +477,7 @@ def test_update(
         metadata={"baz": 42},
         embedding=None,
         encoding=None,
-        operation=Operation.UPDATE,
+        operation=op,
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -437,7 +490,7 @@ def test_update(
         metadata={"document": None},
         embedding=None,
         encoding=None,
-        operation=Operation.UPDATE,
+        operation=op,
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -445,17 +498,3 @@ def test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
-
-    # Update nonexisting ID
-    update_record = SubmitEmbeddingRecord(
-        id="no_such_id",
-        metadata={"foo": "bar"},
-        embedding=None,
-        encoding=None,
-        operation=Operation.UPDATE,
-    )
-    max_id = producer.submit_embedding(topic, update_record)
-    sync(segment, max_id)
-    results = segment.get_metadata(ids=["no_such_id"])
-    assert len(results) == 0
-    assert segment.count_metadata() == 10

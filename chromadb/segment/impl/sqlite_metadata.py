@@ -29,6 +29,7 @@ from pypika.terms import Criterion
 from itertools import islice, groupby
 from chromadb.config import Component
 from functools import reduce
+import sqlite3
 
 import logging
 
@@ -204,10 +205,15 @@ class SqliteMetadataSegment(Component, MetadataReader):
             ParameterValue(_encode_seq_id(record["seq_id"])),
         )
         sql, params = get_sql(q)
-        if upsert:
-            sql = sql.replace("INSERT", "INSERT OR REPLACE")
         sql = sql + "RETURNING id"
-        id = cur.execute(sql, params).fetchone()[0]
+        try:
+            id = cur.execute(sql, params).fetchone()[0]
+        except sqlite3.IntegrityError:
+            # Can't use INSERT OR REPLACE here because it changes the primary key.
+            if upsert:
+                return self._update_record(cur, record)
+            else:
+                raise
 
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])
@@ -216,15 +222,16 @@ class SqliteMetadataSegment(Component, MetadataReader):
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
         to_delete = [k for k, v in metadata.items() if v is None]
-        q = (
-            self._db.querybuilder()
-            .from_(t)
-            .where(t.id == ParameterValue(id))
-            .where(t.key.isin(ParameterValue(to_delete)))
-            .delete()
-        )
-        sql, params = get_sql(q)
-        cur.execute(sql, params)
+        if to_delete:
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .where(t.id == ParameterValue(id))
+                .where(t.key.isin(ParameterValue(to_delete)))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
 
         if "document" in metadata:
             t = Table("embedding_fulltext")
