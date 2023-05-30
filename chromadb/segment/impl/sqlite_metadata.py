@@ -34,8 +34,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-FULLTEXT_KEYS = ["document"]
-
 
 class SqliteMetadataSegment(Component, MetadataReader):
     _consumer: Consumer
@@ -212,10 +210,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
         id = cur.execute(sql, params).fetchone()[0]
 
         if record["metadata"]:
-            if upsert:
-                self._update_metadata(cur, id, record["metadata"])
-            else:
-                self._insert_metadata(cur, id, record["metadata"], False)
+            self._update_metadata(cur, id, record["metadata"])
 
     def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Update the metadata for a single EmbeddingRecord"""
@@ -232,15 +227,19 @@ class SqliteMetadataSegment(Component, MetadataReader):
         cur.execute(sql, params)
 
         if "document" in metadata:
-            self._db.querybuilder().from_(Table("embedding_fulltext")).where(
-                t.id == ParameterValue(id)
-            ).delete()
+            t = Table("embedding_fulltext")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .where(t.id == ParameterValue(id))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
 
-        self._insert_metadata(cur, id, metadata, True)
+        self._insert_metadata(cur, id, metadata)
 
-    def _insert_metadata(
-        self, cur: Cursor, id: int, metadata: UpdateMetadata, upsert: bool
-    ) -> None:
+    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Insert or update each metadata row for a single embedding record"""
         t = Table("embedding_metadata")
         q = (
@@ -275,8 +274,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
                 )
 
         sql, params = get_sql(q)
-        if upsert:
-            sql.replace("INSERT", "INSERT OR REPLACE")
+        sql = sql.replace("INSERT", "INSERT OR REPLACE")
         if sql:
             cur.execute(sql, params)
 
@@ -326,10 +324,10 @@ class SqliteMetadataSegment(Component, MetadataReader):
         t = Table("embeddings")
         q = (
             self._db.querybuilder()
-            .from_(t)
+            .update(t)
+            .set(t.seq_id, ParameterValue(_encode_seq_id(record["seq_id"])))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
             .where(t.embedding_id == ParameterValue(record["id"]))
-            .update(t.seq_id, _encode_seq_id(record["seq_id"]))
         )
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"

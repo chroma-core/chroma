@@ -362,3 +362,86 @@ def test_delete(
     sync(segment, max_id)
     assert segment.count_metadata() == 10
     results = segment.get_metadata(ids=["embedding_0"])
+
+
+def test_update(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+
+    producer = system.instance(Producer)
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings = [next(sample_embeddings) for i in range(10)]
+
+    max_id = 0
+    for e in embeddings:
+        max_id = producer.submit_embedding(topic, e)
+
+    sync(segment, max_id)
+
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+
+    # Update embedding with no metadata
+    update_record = SubmitEmbeddingRecord(
+        id="embedding_0",
+        metadata={"document": "foo bar"},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert results[0]["metadata"] == {"document": "foo bar"}
+    results = segment.get_metadata(where_document={"$contains": "foo"})
+    assert results[0]["metadata"] == {"document": "foo bar"}
+
+    # Update and overrwrite key
+    update_record = SubmitEmbeddingRecord(
+        id="embedding_0",
+        metadata={"document": "biz buz"},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert results[0]["metadata"] == {"document": "biz buz"}
+    results = segment.get_metadata(where_document={"$contains": "biz"})
+    assert results[0]["metadata"] == {"document": "biz buz"}
+    results = segment.get_metadata(where_document={"$contains": "foo"})
+    assert len(results) == 0
+
+    # Update and add key
+    update_record = SubmitEmbeddingRecord(
+        id="embedding_0",
+        metadata={"baz": 42},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert results[0]["metadata"] == {"document": "biz buz", "baz": 42}
+
+    # Update and delete key
+    update_record = SubmitEmbeddingRecord(
+        id="embedding_0",
+        metadata={"document": None},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert results[0]["metadata"] == {"baz": 42}
+    results = segment.get_metadata(where_document={"$contains": "biz"})
+    assert len(results) == 0
