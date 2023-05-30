@@ -66,7 +66,6 @@ class VectorEmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
     embedding: Vector
-    encoding: ScalarEncoding
 
 
 class MetadataEmbeddingRecord(TypedDict):

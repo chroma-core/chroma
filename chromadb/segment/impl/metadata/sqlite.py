@@ -81,7 +81,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
                 return _decode_seq_id(result[0])
 
     @override
-    def count_metadata(self) -> int:
+    def count(self) -> int:
         embeddings_t = Table("embeddings")
         q = (
             self._db.querybuilder()
@@ -213,7 +213,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
             if upsert:
                 return self._update_record(cur, record)
             else:
-                raise
+                logger.warning(f"Insert of existing embedding ID: {record['id']}")
 
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])

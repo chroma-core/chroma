@@ -120,14 +120,14 @@ def test_insert_and_count(
 
     sync(segment, max_id)
 
-    assert segment.count_metadata() == 3
+    assert segment.count() == 3
 
     for i in range(3):
         max_id = producer.submit_embedding(topic, next(sample_embeddings))
 
     sync(segment, max_id)
 
-    assert segment.count_metadata() == 6
+    assert segment.count() == 6
 
 
 def assert_equiv_records(
@@ -320,7 +320,7 @@ def test_delete(
 
     sync(segment, max_id)
 
-    assert segment.count_metadata() == 10
+    assert segment.count() == 10
     results = segment.get_metadata(ids=["embedding_0"])
     assert_equiv_records(embeddings[:1], results)
 
@@ -338,7 +338,7 @@ def test_delete(
 
     sync(segment, max_id)
 
-    assert segment.count_metadata() == 9
+    assert segment.count() == 9
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # Delete is idempotent
@@ -354,13 +354,13 @@ def test_delete(
     )
 
     sync(segment, max_id)
-    assert segment.count_metadata() == 9
+    assert segment.count() == 9
     assert segment.get_metadata(ids=["embedding_0"]) == []
 
     # re-add
     max_id = producer.submit_embedding(topic, embeddings[0])
     sync(segment, max_id)
-    assert segment.count_metadata() == 10
+    assert segment.count() == 10
     results = segment.get_metadata(ids=["embedding_0"])
 
 
@@ -389,7 +389,7 @@ def test_update(
     sync(segment, max_id)
     results = segment.get_metadata(ids=["no_such_id"])
     assert len(results) == 0
-    assert segment.count_metadata() == 3
+    assert segment.count() == 3
 
 
 def test_upsert(
