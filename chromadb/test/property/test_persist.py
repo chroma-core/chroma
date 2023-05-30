@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+from multiprocessing.connection import Connection
 from typing import Generator, Callable
 from hypothesis import given
 import hypothesis.strategies as st
@@ -30,7 +31,7 @@ configurations = [
 
 
 @pytest.fixture(scope="module", params=configurations)
-def settings(request) -> Generator[Settings, None, None]:
+def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     configuration = request.param
     yield configuration
     save_path = configuration.persist_directory
@@ -50,7 +51,7 @@ def test_persist(
     settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
-):
+) -> None:
     api_1 = chromadb.Client(settings)
     api_1.reset()
     coll = api_1.create_collection(
@@ -90,17 +91,23 @@ def test_persist(
     )
 
 
-def load_and_check(settings: Settings, collection_name: str, embeddings_set, conn):
+def load_and_check(
+    settings: Settings,
+    collection_name: str,
+    record_set: strategies.RecordSet,
+    conn: Connection,
+) -> None:
     try:
         api = chromadb.Client(settings)
         coll = api.get_collection(
-            name=collection_name, embedding_function=lambda x: None
+            name=collection_name,
+            embedding_function=strategies.not_implemented_embedding_function(),
         )
-        invariants.count(coll, embeddings_set)
-        invariants.metadatas_match(coll, embeddings_set)
-        invariants.documents_match(coll, embeddings_set)
-        invariants.ids_match(coll, embeddings_set)
-        invariants.ann_accuracy(coll, embeddings_set)
+        invariants.count(coll, record_set)
+        invariants.metadatas_match(coll, record_set)
+        invariants.documents_match(coll, record_set)
+        invariants.ids_match(coll, record_set)
+        invariants.ann_accuracy(coll, record_set)
     except Exception as e:
         conn.send(e)
         raise e
@@ -118,10 +125,12 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.api.reset()
         super().__init__(self.api)
 
-    @precondition(lambda self: len(self.embeddings["ids"]) >= 1)
-    @precondition(lambda self: self.last_persist_delay <= 0)
+    @precondition(
+        lambda self: len(self.record_set_state["ids"]) >= 1
+        and self.last_persist_delay <= 0
+    )
     @rule()
-    def persist(self):
+    def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
         self.api.persist()
         collection_name = self.collection.name
@@ -131,7 +140,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         conn1, conn2 = multiprocessing.Pipe()
         p = ctx.Process(
             target=load_and_check,
-            args=(self.settings, collection_name, self.embeddings, conn2),
+            args=(self.settings, collection_name, self.record_set_state, conn2),
         )
         p.start()
         p.join()
@@ -140,16 +149,18 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
             e = conn1.recv()
             raise e
 
-    def on_state_change(self, new_state):
+    def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:
             self.last_persist_delay = 10
         else:
             self.last_persist_delay -= 1
 
 
-def test_persist_embeddings_state(caplog, settings: Settings):
+def test_persist_embeddings_state(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
     caplog.set_level(logging.ERROR)
     api = chromadb.Client(settings)
     run_state_machine_as_test(
         lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
-    )
+    )  # type: ignore

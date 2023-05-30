@@ -12,6 +12,8 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
+from chromadb.api.types import Documents, Embeddings
+
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
 
@@ -52,6 +54,28 @@ class RecordSet(TypedDict):
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
     metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
+
+
+class NormalizedRecordSet(TypedDict):
+    """
+    A RecordSet, with all fields normalized to lists.
+    """
+
+    ids: List[types.ID]
+    embeddings: Optional[types.Embeddings]
+    metadatas: Optional[List[types.Metadata]]
+    documents: Optional[List[types.Document]]
+
+
+class StateMachineRecordSet(TypedDict):
+    """
+    Represents the internal state of a state machine in hypothesis tests.
+    """
+
+    ids: List[types.ID]
+    embeddings: types.Embeddings
+    metadatas: List[Optional[types.Metadata]]
+    documents: List[Optional[types.Document]]
 
 
 class Record(TypedDict):
@@ -127,7 +151,11 @@ collection_metadata = st.one_of(
 
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
-def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings:
+def create_embeddings(
+    dim: int,
+    count: int,
+    dtype: np.dtype[np.floating[Any]],
+) -> types.Embeddings:
     embeddings: types.Embeddings = (
         np.random.uniform(
             low=-1.0,
@@ -142,7 +170,7 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
 
 
 class hashing_embedding_function(types.EmbeddingFunction):
-    def __init__(self, dim: int, dtype: np.dtype) -> None:
+    def __init__(self, dim: int, dtype: np.dtype[np.floating[Any]]) -> None:
         self.dim = dim
         self.dtype = dtype
 
@@ -166,8 +194,13 @@ class hashing_embedding_function(types.EmbeddingFunction):
         return embeddings
 
 
+class not_implemented_embedding_function(types.EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        assert False, "This embedding function is not implemented"
+
+
 def embedding_function_strategy(
-    dim: int, dtype: np.dtype
+    dim: int, dtype: np.dtype[np.floating[Any]]
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
     return st.just(hashing_embedding_function(dim, dtype))
 
@@ -177,7 +210,7 @@ class Collection:
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
-    dtype: np.dtype
+    dtype: np.dtype[np.floating[Any]]
     known_metadata_keys: Dict[str, Union[str, int, float]]
     known_document_keywords: List[str]
     has_documents: bool = False

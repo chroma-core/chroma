@@ -33,4 +33,11 @@ repos:
       - id: mypy
         args: [--strict, --ignore-missing-imports, --follow-imports=silent]
         additional_dependencies:
-          ["types-requests", "pydantic", "overrides", "hypothesis", "pytest"]
+          [
+            "types-requests",
+            "pydantic",
+            "overrides",
+            "hypothesis",
+            "pytest",
+            "numpy",
+          ]
