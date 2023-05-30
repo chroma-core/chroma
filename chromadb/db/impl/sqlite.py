@@ -62,6 +62,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def start(self) -> None:
+        super().start()
         self._conn = sqlite3.connect(self._db_file)
         self._conn.isolation_level = None  # Handle commits explicitly
         with self.tx() as cur:
@@ -70,6 +71,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def stop(self) -> None:
+        super().stop()
         self._conn.close()
 
     @staticmethod
@@ -107,7 +109,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         db_file = self._settings.require("sqlite_database")
         if db_file != ":memory:":
             os.remove(db_file)
-        self.stop()
         self.start()
         super().reset()
 

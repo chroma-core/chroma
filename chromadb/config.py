@@ -85,10 +85,12 @@ T = TypeVar("T", bound="Component")
 class Component(ABC, EnforceOverrides):
     _dependencies: Set["Component"]
     _system: "System"
+    _running: bool
 
     def __init__(self, system: "System"):
         self._dependencies = set()
         self._system = system
+        self._running = False
 
     def require(self, type: Type[T]) -> T:
         """Get a Component instance of the given type, and register as a dependency of
@@ -104,11 +106,11 @@ class Component(ABC, EnforceOverrides):
     def stop(self) -> None:
         """Idempotently stop this component's execution and free all associated
         resources."""
-        pass
+        self._running = False
 
     def start(self) -> None:
         """Idempotently start this component's execution"""
-        pass
+        self._running = True
 
     def reset(self) -> None:
         """Reset this component's state to its initial blank state. Only intended to be
@@ -120,12 +122,11 @@ class System(Component):
     settings: Settings
 
     _instances: Dict[Type[Component], Component]
-    _running: bool
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._instances = {}
-        self._running = False
+        super().__init__(self)
 
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
@@ -159,13 +160,13 @@ class System(Component):
 
     @override
     def start(self) -> None:
-        self._running = True
+        super().start()
         for component in self.components():
             component.start()
 
     @override
     def stop(self) -> None:
-        self._running = False
+        super().stop()
         for component in reversed(list(self.components())):
             component.stop()
 
