@@ -97,7 +97,7 @@ class System:
     def get_db(self) -> chromadb.db.DB:
         if is_thin_client:
             raise RuntimeError(
-                "Chroma is running in thin client mode, and cannot directly access the database. \
+                "Chroma is running in http-only client mode, and cannot directly access the database. \
                 See https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
             )
 
@@ -106,13 +106,12 @@ class System:
         return self.db
 
     def get_api(self) -> chromadb.api.API:
-        if (
-            is_thin_client
-            and self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI"
+        if is_thin_client and (
+            self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI"
         ):
-            # TODO: show example and link to docs
+            print(self.settings["chroma_api_impl"])
             raise RuntimeError(
-                "Chroma is running in thin client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'rest' as the chroma_api_impl. \
+                "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'rest' as the chroma_api_impl. \
                 see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
             )
 

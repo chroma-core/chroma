@@ -20,6 +20,20 @@ mv "$existing_toml" "$staged_toml"
 staged_readme="staged_README.md"
 mv "$existing_readme" "$staged_readme"
 
+function cleanup {
+  # Teardown: Remove the new toml file and put the old one back
+  rm "$existing_toml"
+  mv "$staged_toml" "$existing_toml"
+
+  rm "$is_thin_client_target"
+
+  # Teardown: Remove the new readme file and put the old one back
+  rm "$existing_readme"
+  mv "$staged_readme" "$existing_readme"
+}
+
+trap cleanup EXIT
+
 # Copy the new toml file in place
 cp "$thin_client_toml" "$existing_toml"
 
@@ -30,13 +44,3 @@ cp "$is_thin_client_py" "$is_thin_client_target"
 cp "$thin_client_readme" "$existing_readme"
 
 python -m build
-
-# Teardown: Remove the new toml file and put the old one back
-rm "$existing_toml"
-mv "$staged_toml" "$existing_toml"
-
-rm "$is_thin_client_target"
-
-# Teardown: Remove the new readme file and put the old one back
-rm "$existing_readme"
-mv "$staged_readme" "$existing_readme"
