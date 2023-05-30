@@ -13,7 +13,7 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
-from chromadb.api.types import Documents, Embeddings
+from chromadb.api.types import Documents, Embeddings, Metadata
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -212,18 +212,18 @@ class Collection:
     metadata: Optional[types.Metadata]
     dimension: int
     dtype: npt.DTypeLike
-    known_metadata_keys: Dict[str, Union[str, int, float]]
+    known_metadata_keys: types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
     embedding_function: Optional[types.EmbeddingFunction] = None
 
 
-@st.composite  # type: ignore
+@st.composite
 def collections(
-    draw,
-    add_filterable_data=False,
-    with_hnsw_params=False,
+    draw: st.DrawFn,
+    add_filterable_data: bool = False,
+    with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
 ) -> Collection:
@@ -301,8 +301,8 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     return metadata
 
 
-@st.composite  # type: ignore
-def document(draw, collection: Collection) -> types.Document:
+@st.composite
+def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
 
     if collection.known_document_keywords:
@@ -315,63 +315,54 @@ def document(draw, collection: Collection) -> types.Document:
     return " ".join(words)
 
 
-@st.composite  # type: ignore
-def record(draw, collection: Collection, id_strategy=safe_text) -> Record:
-    md = draw(metadata(collection))
-
-    if collection.has_embeddings:
-        embedding = create_embeddings(collection.dimension, 1, collection.dtype)[0]
-    else:
-        embedding = None
-    if collection.has_documents:
-        doc = draw(document(collection))
-    else:
-        doc = None
-
-    return {
-        "id": draw(id_strategy),
-        "embedding": embedding,
-        "metadata": md,
-        "document": doc,
-    }
-
-
-@st.composite  # type: ignore
+@st.composite
 def recordsets(
-    draw,
-    collection_strategy=collections(),
-    id_strategy=safe_text,
-    min_size=1,
-    max_size=50,
+    draw: st.DrawFn,
+    collection_strategy: SearchStrategy[Collection] = collections(),
+    id_strategy: SearchStrategy[str] = safe_text,
+    min_size: int = 1,
+    max_size: int = 50,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    records = draw(
-        st.lists(record(collection, id_strategy), min_size=min_size, max_size=max_size)
+    ids = list(
+        draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
-    records = {r["id"]: r for r in records}.values()  # Remove duplicates
-
-    ids = [r["id"] for r in records]
-    embeddings = (
-        [r["embedding"] for r in records] if collection.has_embeddings else None
+    embeddings: Optional[Embeddings] = None
+    if collection.has_embeddings:
+        embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
+    metadatas = draw(
+        st.lists(metadata(collection), min_size=len(ids), max_size=len(ids))
     )
-    metadatas = [r["metadata"] for r in records]
-    documents = [r["document"] for r in records] if collection.has_documents else None
+    documents: Optional[Documents] = None
+    if collection.has_documents:
+        documents = draw(
+            st.lists(document(collection), min_size=len(ids), max_size=len(ids))
+        )
 
     # in the case where we have a single record, sometimes exercise
-    # the code that handles individual values rather than lists
-    if len(records) == 1:
-        if draw(st.booleans()):
-            ids = ids[0]
-        if collection.has_embeddings and draw(st.booleans()):
-            assert embeddings is not None
-            embeddings = embeddings[0]
-        if draw(st.booleans()):
-            metadatas = metadatas[0]
-        if collection.has_documents and draw(st.booleans()):
-            assert documents is not None
-            documents = documents[0]
+    # the code that handles individual values rather than lists.
+    # In this case, any field may be a list or a single value.
+    if len(ids) == 1:
+        single_id: Union[str, List[str]] = ids[0] if draw(st.booleans()) else ids
+        single_embedding = (
+            embeddings[0]
+            if embeddings is not None and draw(st.booleans())
+            else embeddings
+        )
+        single_metadata: Union[Metadata, List[Metadata]] = (
+            metadatas[0] if draw(st.booleans()) else metadatas
+        )
+        single_document = (
+            documents[0] if documents is not None and draw(st.booleans()) else documents
+        )
+        return {
+            "ids": single_id,
+            "embeddings": single_embedding,
+            "metadatas": single_metadata,
+            "documents": single_document,
+        }
 
     return {
         "ids": ids,
@@ -447,7 +438,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
-        value = value + draw(st.sampled_from([1e6, -1e6]))
+        value = value + draw(st.sampled_from([1e-6, -1e-6]))
 
     op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
