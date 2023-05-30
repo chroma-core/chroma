@@ -256,3 +256,91 @@ def test_delete(
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
     assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
+
+
+def _test_update(
+    producer: Producer,
+    topic: str,
+    segment: VectorReader,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    operation: Operation,
+) -> None:
+    """Tests the common code paths between update & upsert"""
+
+    embeddings = [next(sample_embeddings) for i in range(3)]
+
+    seq_ids: List[SeqId] = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    sync(segment, seq_ids[-1])
+    assert segment.count() == 3
+
+    seq_ids.append(
+        producer.submit_embedding(
+            topic,
+            SubmitEmbeddingRecord(
+                id=embeddings[0]["id"],
+                embedding=[10.0, 10.0],
+                encoding=ScalarEncoding.FLOAT32,
+                metadata=None,
+                operation=operation,
+            ),
+        )
+    )
+
+    sync(segment, seq_ids[-1])
+
+    # Test new data from get_vectors
+    assert segment.count() == 3
+    results = segment.get_vectors()
+    assert len(results) == 3
+    results = segment.get_vectors(ids=[embeddings[0]["id"]])
+    assert results[0]["embedding"] == [10.0, 10.0]
+
+    # Test querying at the old location
+    vector = cast(Vector, embeddings[0]["embedding"])
+    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    knn_results = segment.query_vectors(query)[0]
+    assert knn_results[0]["id"] == embeddings[1]["id"]
+    assert knn_results[1]["id"] == embeddings[2]["id"]
+    assert knn_results[2]["id"] == embeddings[0]["id"]
+
+    # Test querying at the new location
+    vector = [10.0, 10.0]
+    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    knn_results = segment.query_vectors(query)[0]
+    assert knn_results[0]["id"] == embeddings[0]["id"]
+    assert knn_results[1]["id"] == embeddings[2]["id"]
+    assert knn_results[2]["id"] == embeddings[1]["id"]
+
+
+def test_update(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+    producer = system.instance(Producer)
+
+    topic = str(segment_definition["topic"])
+
+    segment = LocalHnswSegment(system, segment_definition)
+    segment.start()
+
+    _test_update(producer, topic, segment, sample_embeddings, Operation.UPDATE)
+
+    # test updating a nonexistent record
+    seq_id = producer.submit_embedding(
+        topic,
+        SubmitEmbeddingRecord(
+            id="no_such_record",
+            embedding=[10.0, 10.0],
+            encoding=ScalarEncoding.FLOAT32,
+            metadata=None,
+            operation=Operation.UPDATE,
+        ),
+    )
+
+    sync(segment, seq_id)
+
+    assert segment.count() == 3
+    assert segment.get_vectors(ids=["no_such_record"]) == []
