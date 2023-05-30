@@ -128,7 +128,10 @@ class LocalHnswSegment(Component, VectorReader):
         if ids is None:
             labels = list(self._label_to_id.keys())
         else:
-            labels = [self._id_to_label[id] for id in ids]
+            labels = []
+            for id in ids:
+                if id in self._id_to_label:
+                    labels.append(self._id_to_label[id])
 
         results = []
         if self._index is not None:
@@ -237,7 +240,7 @@ class LocalHnswSegment(Component, VectorReader):
         index = cast(hnswlib.Index, self._index)
 
         label = self._id_to_label[id]
-        index.delete_items([label])
+        index.mark_deleted(label)
         del self._id_to_label[id]
         del self._label_to_id[label]
         del self._id_to_seq_id[id]

@@ -205,3 +205,54 @@ def test_ann_query(
         assert r[0]["id"] == embeddings[i]["id"]
         assert r[1]["id"] == embeddings[i - 1]["id"]
         assert r[2]["id"] == embeddings[i + 1]["id"]
+
+
+def test_delete(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+    producer = system.instance(Producer)
+
+    topic = str(segment_definition["topic"])
+
+    segment = LocalHnswSegment(system, segment_definition)
+    segment.start()
+
+    embeddings = [next(sample_embeddings) for i in range(5)]
+
+    seq_ids: List[SeqId] = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    sync(segment, seq_ids[-1])
+    assert segment.count() == 5
+
+    seq_ids.append(
+        producer.submit_embedding(
+            topic,
+            SubmitEmbeddingRecord(
+                id=embeddings[0]["id"],
+                embedding=None,
+                encoding=None,
+                metadata=None,
+                operation=Operation.DELETE,
+            ),
+        )
+    )
+
+    sync(segment, seq_ids[-1])
+    assert segment.count() == 4
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
+    assert len(results) == 4
+    for actual, expected in zip(results, embeddings[1:]):
+        assert actual["id"] == expected["id"]
+        assert approx_equal_vector(
+            actual["embedding"], cast(Vector, expected["embedding"])
+        )
+
+    vector = cast(Vector, embeddings[0]["embedding"])
+    query = VectorQuery(vectors=[vector], k=10, allowed_ids=None, options=None)
+    knn_results = segment.query_vectors(query)
+    assert len(results) == 4
+    assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
