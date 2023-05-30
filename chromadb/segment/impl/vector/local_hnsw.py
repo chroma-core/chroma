@@ -1,5 +1,5 @@
 from overrides import override
-from typing import Optional, Sequence, Dict, Callable, Union, cast
+from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
@@ -145,11 +145,51 @@ class LocalHnswSegment(Component, VectorReader):
 
     @override
     def query_vectors(
-        self, queries: Sequence[VectorQuery]
+        self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
-        """Given a list of vector queries, return the top-k nearest
-        neighbors for each query."""
-        raise NotImplementedError()
+        if self._index is None:
+            return [[] for _ in range(len(query["vectors"]))]
+
+        k = query["k"]
+        size = len(self._id_to_label)
+
+        if k > size:
+            logger.warning(
+                f"Number of requested results {k} is greater than number of elements in index {size}, updating n_results = {size}"
+            )
+            k = size
+
+        labels: Set[int] = set()
+        ids = query["allowed_ids"]
+        if ids is not None:
+            labels = {self._id_to_label[id] for id in ids}
+            if len(labels) < k:
+                k = len(labels)
+
+        def filter_function(label: int) -> bool:
+            return label in labels
+
+        query_vectors = query["vectors"]
+
+        result_labels, distances = self._index.knn_query(
+            query_vectors, k=k, filter=filter_function if ids else None
+        )
+
+        distances = cast(List[List[float]], distances)
+        result_labels = cast(List[List[int]], result_labels)
+
+        all_results: List[List[VectorQueryResult]] = []
+        for result_i in range(len(result_labels)):
+            results: List[VectorQueryResult] = []
+            for label, distance in zip(result_labels[result_i], distances[result_i]):
+                id = self._label_to_id[label]
+                seq_id = self._id_to_seq_id[id]
+                results.append(
+                    VectorQueryResult(id=id, seq_id=seq_id, distance=distance)
+                )
+            all_results.append(results)
+
+        return all_results
 
     @override
     def max_seqid(self) -> SeqId:

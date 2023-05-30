@@ -94,15 +94,17 @@ class SubmitEmbeddingRecord(TypedDict):
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
-    vector: Vector
+    vectors: Sequence[Vector]
     k: int
     allowed_ids: Optional[Sequence[str]]
     options: Optional[dict[str, Union[str, int, float]]]
 
 
-class VectorQueryResult(VectorEmbeddingRecord):
+class VectorQueryResult(TypedDict):
     """A KNN/ANN query result"""
 
+    id: str
+    seq_id: SeqId
     distance: float
 
 

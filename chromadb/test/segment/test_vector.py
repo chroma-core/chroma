@@ -1,13 +1,15 @@
 import pytest
-from typing import Generator, List, Callable, Iterator
+from typing import Generator, List, Callable, Iterator, cast
 from chromadb.config import System, Settings
 from chromadb.types import (
     SubmitEmbeddingRecord,
+    VectorQuery,
     Operation,
     ScalarEncoding,
     Segment,
     SegmentScope,
     SeqId,
+    Vector,
 )
 from chromadb.ingest import Producer
 from chromadb.segment import VectorReader
@@ -40,8 +42,12 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 
 @pytest.fixture(scope="function")
 def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
+    """Generate a sequence of embeddings with the property that for each embedding
+    (other than the first and last), it's nearest neighbor is the previous in the
+    sequence, and it's second nearest neighbor is the subsequent"""
+
     def create_record(i: int) -> SubmitEmbeddingRecord:
-        vector = [i + i * 0.5, i + i * 0.5]
+        vector = [i**1.1, i**1.1]
         record = SubmitEmbeddingRecord(
             id=f"embedding_{i}",
             embedding=vector,
@@ -99,6 +105,14 @@ def test_insert_and_count(
     assert segment.count() == 6
 
 
+def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:
+    return abs(a - b) < epsilon
+
+
+def approx_equal_vector(a: Vector, b: Vector, epsilon: float = 0.0001) -> bool:
+    return all(approx_equal(x, y, epsilon) for x, y in zip(a, b))
+
+
 def test_get_vectors(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
@@ -124,7 +138,9 @@ def test_get_vectors(
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings, seq_ids):
         assert actual["id"] == expected["id"]
-        assert actual["embedding"] == expected["embedding"]
+        assert approx_equal_vector(
+            actual["embedding"], cast(Vector, expected["embedding"])
+        )
         assert actual["seq_id"] == seq_id
 
     # Get selected IDs
@@ -134,5 +150,58 @@ def test_get_vectors(
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings[5:], seq_ids[5:]):
         assert actual["id"] == expected["id"]
-        assert actual["embedding"] == expected["embedding"]
+        assert approx_equal_vector(
+            actual["embedding"], cast(Vector, expected["embedding"])
+        )
         assert actual["seq_id"] == seq_id
+
+
+def test_ann_query(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+    producer = system.instance(Producer)
+
+    topic = str(segment_definition["topic"])
+
+    segment = LocalHnswSegment(system, segment_definition)
+    segment.start()
+
+    embeddings = [next(sample_embeddings) for i in range(100)]
+
+    seq_ids: List[SeqId] = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    sync(segment, seq_ids[-1])
+
+    # Each item is its own nearest neighbor (one at a time)
+    for e in embeddings:
+        vector = cast(Vector, e["embedding"])
+        query = VectorQuery(vectors=[vector], k=1, allowed_ids=None, options=None)
+        results = segment.query_vectors(query)
+        assert len(results) == 1
+        assert len(results[0]) == 1
+        assert results[0][0]["id"] == e["id"]
+
+    # Each item is its own nearest neighbor (all at once)
+    vectors = [cast(Vector, e["embedding"]) for e in embeddings]
+    query = VectorQuery(vectors=vectors, k=1, allowed_ids=None, options=None)
+    results = segment.query_vectors(query)
+    assert len(results) == len(embeddings)
+    for r, e in zip(results, embeddings):
+        assert len(r) == 1
+        assert r[0]["id"] == e["id"]
+
+    # Each item's 3 nearest neighbors are itself and the item before and after
+    test_embeddings = embeddings[1:-1]
+    vectors = [cast(Vector, e["embedding"]) for e in test_embeddings]
+    query = VectorQuery(vectors=vectors, k=3, allowed_ids=None, options=None)
+    results = segment.query_vectors(query)
+    assert len(results) == len(test_embeddings)
+
+    for r, e, i in zip(results, test_embeddings, range(1, len(test_embeddings))):
+        assert len(r) == 3
+        assert r[0]["id"] == embeddings[i]["id"]
+        assert r[1]["id"] == embeddings[i - 1]["id"]
+        assert r[2]["id"] == embeddings[i + 1]["id"]

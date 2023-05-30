@@ -50,16 +50,16 @@ class VectorReader(SegmentImplementation):
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        """Get embeddings from the segment. If no IDs are provided,
-        all embeddings are returned."""
+        """Get embeddings from the segment. If no IDs are provided, all embeddings are
+        returned."""
         pass
 
     @abstractmethod
     def query_vectors(
-        self, queries: Sequence[VectorQuery]
+        self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
-        """Given a list of vector queries, return the top-k nearest
-        neighbors for each query."""
+        """Given a vector query, return the top-k nearest neighbors for vector in the
+        query."""
         pass
 
 
