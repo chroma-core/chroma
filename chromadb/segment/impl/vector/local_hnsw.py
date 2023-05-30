@@ -68,6 +68,42 @@ class HnswParams:
         self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
 
+class Batch:
+    """Used to model the set of changes as an atomic operation"""
+
+    labels: List[Optional[int]]
+    vectors: List[Vector]
+    seq_ids: List[SeqId]
+    ids: List[str]
+    delete_labels: List[int]
+    delete_ids: List[str]
+    add_count: int
+    delete_count: int
+
+    def __init__(self) -> None:
+        self.labels = []
+        self.vectors = []
+        self.seq_ids = []
+        self.ids = []
+        self.delete_labels = []
+        self.delete_ids = []
+        self.add_count = 0
+        self.delete_count = 0
+
+    def add(self, label: Optional[int], record: EmbeddingRecord) -> None:
+        self.labels.append(label)
+        self.vectors.append(cast(Vector, record["embedding"]))
+        self.seq_ids.append(record["seq_id"])
+        self.ids.append(record["id"])
+        if not label:
+            self.add_count += 1
+
+    def delete(self, label: int, id: str) -> None:
+        self.delete_labels.append(label)
+        self.delete_ids.append(id)
+        self.delete_count += 1
+
+
 class LocalHnswSegment(Component, VectorReader):
     _id: UUID
     _consumer: Consumer
@@ -219,95 +255,109 @@ class LocalHnswSegment(Component, VectorReader):
         self._index = index
         self._dimensionality = dimensionality
 
-    def _check_dimensionality(self, data: Vector) -> None:
-        """Assert that the given data matches the index dimensionality"""
-        if len(data) != self._dimensionality:
-            raise InvalidDimensionException(
-                f"Dimensionality of ({len(data)}) does not match index"
-                + f"dimensionality ({self._dimensionality})"
-            )
+    def _ensure_index(self, n: int, dim: int) -> None:
+        """Create or resize the index as necessary to accomodate N new records"""
+        if not self._index:
+            self._dimensionality = dim
+            self._init_index(dim)
+        else:
+            if dim != self._dimensionality:
+                raise InvalidDimensionException(
+                    f"Dimensionality of ({dim}) does not match index"
+                    + f"dimensionality ({self._dimensionality})"
+                )
 
-    def _resize_index(self) -> None:
-        """Resize the index (if necessary)"""
         index = cast(hnswlib.Index, self._index)
 
-        if self._total_elements_added > index.get_max_elements():
-            new_size = int(self._total_elements_added * self._params.resize_factor)
+        if (self._total_elements_added + n) > index.get_max_elements():
+            new_size = int(
+                (self._total_elements_added + n) * self._params.resize_factor
+            )
             index.resize_index(max(new_size, DEFAULT_CAPACITY))
 
-    def _delete_vector_from_index(self, id: str) -> None:
-        """Delete a vector from the index"""
-        index = cast(hnswlib.Index, self._index)
+    def _apply_batch(self, batch: Batch) -> None:
+        """Apply a batch of changes, as atomically as possible."""
 
-        label = self._id_to_label[id]
-        index.mark_deleted(label)
-        del self._id_to_label[id]
-        del self._label_to_id[label]
-        del self._id_to_seq_id[id]
+        if batch.delete_ids:
+            index = cast(hnswlib.Index, self._index)
+            for i in range(len(batch.delete_ids)):
+                label = batch.delete_labels[i]
+                id = batch.delete_ids[i]
 
-    def _add_vector_to_index(self, id: str, seq_id: SeqId, embedding: Vector) -> None:
-        """Add a vector to the index"""
-        if not self._index:
-            self._init_index(len(embedding))
+                index.mark_deleted(label)
+                del self._id_to_label[id]
+                del self._label_to_id[label]
+                del self._id_to_seq_id[id]
 
-        index = cast(hnswlib.Index, self._index)
+        if batch.ids:
+            self._ensure_index(batch.add_count, len(batch.vectors[0]))
 
-        self._check_dimensionality(embedding)
+            next_label = self._total_elements_added + 1
+            for i in range(len(batch.labels)):
+                if batch.labels[i] is None:
+                    batch.labels[i] = next_label
+                    next_label += 1
 
-        if id in self._id_to_label:
-            label = self._id_to_label[id]
-        else:
-            self._total_elements_added += 1
-            label = self._total_elements_added
-            self._id_to_label[id] = label
-            self._label_to_id[label] = id
-            self._id_to_seq_id[id] = seq_id
+            labels = cast(List[int], batch.labels)
 
-        self._resize_index()
-        index.add_items([embedding], [label])
+            index = cast(hnswlib.Index, self._index)
 
-    def _write_record(self, record: EmbeddingRecord) -> None:
-        """Add a single embedding to the index"""
+            # First, update the index
+            index.add_items(batch.vectors, labels)
 
-        # let's be safe, just in case
-        with self._lock:
-            self._max_seq_id = max(self._max_seq_id, record["seq_id"])
+            # If that succeeds, update the mappings
+            for id, label, seq_id in zip(batch.ids, labels, batch.seq_ids):
+                self._id_to_seq_id[id] = seq_id
+                self._id_to_label[id] = label
+                self._label_to_id[label] = id
 
-            if record["operation"] == Operation.DELETE:
-                if record["id"] in self._id_to_label:
-                    return self._delete_vector_from_index(record["id"])
-                else:
-                    logger.warning(
-                        f"Delete of nonexisting embedding ID: {record['id']}"
-                    )
-                    return
+            # If that succeeds, update the total count
+            self._total_elements_added += batch.add_count
 
-            if record["id"] in self._id_to_label:
-                if record["operation"] == Operation.ADD:
-                    logger.warning(f"Insert of existing embedding ID: {record['id']}")
-                    return
-            else:
-                if record["operation"] == Operation.UPDATE:
-                    logger.warning(
-                        f"Update of nonexisting embedding ID: {record['id']}"
-                    )
-                    return
-
-            # Might be false for updates
-            if record["embedding"]:
-                self._add_vector_to_index(
-                    record["id"], record["seq_id"], record["embedding"]
-                )
+            # If that succeeds, finally the seq ID
+            self._max_seq_id = max(self._max_seq_id, max(batch.seq_ids))
 
     def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
 
-        for record in records:
-            self._write_record(record)
+        # Avoid all sorts of potential problems by ensuring single-threaded access
+        with self._lock:
+            batch = Batch()
+
+            for record in records:
+                self._max_seq_id = max(self._max_seq_id, record["seq_id"])
+                id = record["id"]
+                op = record["operation"]
+                label = self._id_to_label.get(id, None)
+
+                if op == Operation.DELETE:
+                    if label:
+                        batch.delete(label, id)
+                    else:
+                        logger.warning(f"Delete of nonexisting embedding ID: {id}")
+
+                elif op == Operation.UPDATE:
+                    if record["embedding"] is not None:
+                        if label is not None:
+                            batch.add(label, record)
+                        else:
+                            logger.warning(
+                                f"Update of nonexisting embedding ID: {record['id']}"
+                            )
+                elif op == Operation.ADD:
+                    if not label:
+                        batch.add(label, record)
+                    else:
+                        logger.warning(f"Add of existing embedding ID: {id}")
+                elif op == Operation.UPSERT:
+                    batch.add(label, record)
+
+            self._apply_batch(batch)
 
 
-# TODO: Implement this
+# TODO: Implement this as a performance improvement, if rebuilding the
+# index on startup is too slow. But test this first.
 class PersistentLocalHnswSegment(LocalHnswSegment):
     pass
