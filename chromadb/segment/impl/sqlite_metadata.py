@@ -331,9 +331,13 @@ class SqliteMetadataSegment(Component, MetadataReader):
         )
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"
-        id = cur.execute(sql, params).fetchone()[0]
-        if record["metadata"]:
-            self._update_metadata(cur, id, record["metadata"])
+        result = cur.execute(sql, params).fetchone()
+        if result is None:
+            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
+        else:
+            id = result[0]
+            if record["metadata"]:
+                self._update_metadata(cur, id, record["metadata"])
 
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure

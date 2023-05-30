@@ -445,3 +445,17 @@ def test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+    # Update nonexisting ID
+    update_record = SubmitEmbeddingRecord(
+        id="no_such_id",
+        metadata={"foo": "bar"},
+        embedding=None,
+        encoding=None,
+        operation=Operation.UPDATE,
+    )
+    max_id = producer.submit_embedding(topic, update_record)
+    sync(segment, max_id)
+    results = segment.get_metadata(ids=["no_such_id"])
+    assert len(results) == 0
+    assert segment.count_metadata() == 10
