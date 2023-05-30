@@ -299,3 +299,66 @@ def test_fulltext(
     # test partial words
     result = segment.get_metadata(where_document={"$contains": "zer"})
     assert len(result) == 9
+
+
+def test_delete(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+
+    producer = system.instance(Producer)
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings = [next(sample_embeddings) for i in range(10)]
+
+    max_id = 0
+    for e in embeddings:
+        max_id = producer.submit_embedding(topic, e)
+
+    sync(segment, max_id)
+
+    assert segment.count_metadata() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+
+    # Delete by ID
+    max_id = producer.submit_embedding(
+        topic,
+        SubmitEmbeddingRecord(
+            id="embedding_0",
+            embedding=None,
+            encoding=None,
+            metadata=None,
+            operation=Operation.DELETE,
+        ),
+    )
+
+    sync(segment, max_id)
+
+    assert segment.count_metadata() == 9
+    assert segment.get_metadata(ids=["embedding_0"]) == []
+
+    # Delete is idempotent
+    max_id = producer.submit_embedding(
+        topic,
+        SubmitEmbeddingRecord(
+            id="embedding_0",
+            embedding=None,
+            encoding=None,
+            metadata=None,
+            operation=Operation.DELETE,
+        ),
+    )
+
+    sync(segment, max_id)
+    assert segment.count_metadata() == 9
+    assert segment.get_metadata(ids=["embedding_0"]) == []
+
+    # re-add
+    max_id = producer.submit_embedding(topic, embeddings[0])
+    sync(segment, max_id)
+    assert segment.count_metadata() == 10
+    results = segment.get_metadata(ids=["embedding_0"])

@@ -30,6 +30,10 @@ from itertools import islice, groupby
 from chromadb.config import Component
 from functools import reduce
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 FULLTEXT_KEYS = ["document"]
 
 
@@ -61,21 +65,21 @@ class SqliteMetadataSegment(Component, MetadataReader):
 
     @override
     def max_seqid(self) -> SeqId:
-        t = Table("embeddings")
+        t = Table("max_seq_id")
         q = (
             self._db.querybuilder()
             .from_(t)
-            .select(fn.Max(t.seq_id))
+            .select(t.seq_id)
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
         )
         sql, params = get_sql(q)
         with self._db.tx() as cur:
-            result = cur.execute(sql, params).fetchone()[0]
+            result = cur.execute(sql, params).fetchone()
 
             if result is None:
                 return self._consumer.min_seqid()
             else:
-                return _decode_seq_id(result)
+                return _decode_seq_id(result[0])
 
     @override
     def count_metadata(self) -> int:
@@ -299,19 +303,23 @@ class SqliteMetadataSegment(Component, MetadataReader):
         )
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"
-        id = cur.execute(sql, params).fetchone()[0]
+        result = cur.execute(sql, params).fetchone()
+        if result is None:
+            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
+        else:
+            id = result[0]
 
-        # Manually delete metadata; cannot use cascade because
-        # that triggers on replace
-        metadata_t = Table("embedding_metadata")
-        q = (
-            self._db.querybuilder()
-            .from_(metadata_t)
-            .where(metadata_t.id == ParameterValue(id))
-            .delete()
-        )
-        sql, params = get_sql(q)
-        cur.execute(sql, params)
+            # Manually delete metadata; cannot use cascade because
+            # that triggers on replace
+            metadata_t = Table("embedding_metadata")
+            q = (
+                self._db.querybuilder()
+                .from_(metadata_t)
+                .where(metadata_t.id == ParameterValue(id))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
 
     def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Update a single EmbeddingRecord in the DB"""
@@ -334,6 +342,19 @@ class SqliteMetadataSegment(Component, MetadataReader):
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:
             for record in records:
+                q = (
+                    self._db.querybuilder()
+                    .into(Table("max_seq_id"))
+                    .columns("segment_id", "seq_id")
+                    .insert(
+                        ParameterValue(self._db.uuid_to_db(self._id)),
+                        ParameterValue(_encode_seq_id(record["seq_id"])),
+                    )
+                )
+                sql, params = get_sql(q)
+                sql = sql.replace("INSERT", "INSERT OR REPLACE")
+                cur.execute(sql, params)
+
                 if record["operation"] == Operation.ADD:
                     self._insert_record(cur, record, False)
                 elif record["operation"] == Operation.UPSERT:

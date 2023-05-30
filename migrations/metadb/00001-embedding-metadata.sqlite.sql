@@ -16,4 +16,9 @@ CREATE TABLE embedding_metadata (
     PRIMARY KEY (id, key)
 );
 
+CREATE TABLE max_seq_id (
+    segment_id TEXT PRIMARY KEY,
+    seq_id BLOB NOT NULL
+);
+
 CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id, string_value, tokenize="trigram");
