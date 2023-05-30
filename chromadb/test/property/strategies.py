@@ -4,6 +4,7 @@ import hypothesis.strategies as st
 from typing import Any, Optional, List, Dict, Union
 from typing_extensions import TypedDict
 import numpy as np
+import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
@@ -154,7 +155,7 @@ collection_metadata = st.one_of(
 def create_embeddings(
     dim: int,
     count: int,
-    dtype: np.dtype[np.floating[Any]],
+    dtype: npt.DTypeLike,
 ) -> types.Embeddings:
     embeddings: types.Embeddings = (
         np.random.uniform(
@@ -170,7 +171,7 @@ def create_embeddings(
 
 
 class hashing_embedding_function(types.EmbeddingFunction):
-    def __init__(self, dim: int, dtype: np.dtype[np.floating[Any]]) -> None:
+    def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
         self.dtype = dtype
 
@@ -200,7 +201,7 @@ class not_implemented_embedding_function(types.EmbeddingFunction):
 
 
 def embedding_function_strategy(
-    dim: int, dtype: np.dtype[np.floating[Any]]
+    dim: int, dtype: npt.DTypeLike
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
     return st.just(hashing_embedding_function(dim, dtype))
 
@@ -210,7 +211,7 @@ class Collection:
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
-    dtype: np.dtype[np.floating[Any]]
+    dtype: npt.DTypeLike
     known_metadata_keys: Dict[str, Union[str, int, float]]
     known_document_keywords: List[str]
     has_documents: bool = False

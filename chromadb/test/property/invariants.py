@@ -1,8 +1,9 @@
 import math
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Any, Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Dict
 from typing_extensions import Literal
 import numpy as np
+import numpy.typing as npt
 from chromadb.api import types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
@@ -127,21 +128,20 @@ def no_duplicates(collection: Collection) -> None:
 # This epsilon is used to prevent division by zero and the value is the same
 # https://github.com/nmslib/hnswlib/blob/359b2ba87358224963986f709e593d799064ace6/python_bindings/bindings.cpp#L238
 NORM_EPS = 1e-30
-distance_functions = {
-    "l2": lambda x, y: np.linalg.norm(x - y) ** 2,
-    "cosine": lambda x, y: 1
-    - np.dot(x, y) / ((np.linalg.norm(x) + NORM_EPS) * (np.linalg.norm(y) + NORM_EPS)),
-    "ip": lambda x, y: 1 - np.dot(x, y),
+distance_functions: Dict[str, Callable[[npt.ArrayLike, npt.ArrayLike], float]] = {
+    "l2": lambda x, y: np.linalg.norm(x - y) ** 2,  # type: ignore
+    "cosine": lambda x, y: 1 - np.dot(x, y) / ((np.linalg.norm(x) + NORM_EPS) * (np.linalg.norm(y) + NORM_EPS)),  # type: ignore
+    "ip": lambda x, y: 1 - np.dot(x, y),  # type: ignore
 }
 
 
 def _exact_distances(
     query: types.Embeddings,
     targets: types.Embeddings,
-    distance_fn: Callable[
-        [np.ndarray[np.floating[Any], Any], np.ndarray[np.floating[Any], Any]], float
-    ] = distance_functions["l2"],
-) -> Tuple[np.ndarray[np.floating[Any], Any], np.ndarray[np.floating[Any], Any]]:
+    distance_fn: Callable[[npt.ArrayLike, npt.ArrayLike], float] = distance_functions[
+        "l2"
+    ],
+) -> Tuple[List[List[int]], List[List[float]]]:
     """Return the ordered indices and distances from each query to each target"""
     np_query = np.array(query)
     np_targets = np.array(targets)
@@ -153,7 +153,7 @@ def _exact_distances(
         np_query,
     )
     # Sort the distances and return the indices
-    return np.argsort(distances), distances
+    return np.argsort(distances).tolist(), distances.tolist()
 
 
 def ann_accuracy(
