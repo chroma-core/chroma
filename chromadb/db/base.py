@@ -77,14 +77,6 @@ class SqlDB(Component):
         """Return a transaction wrapper"""
         pass
 
-    @abstractmethod
-    @override
-    def reset(self) -> None:
-        """Reset the database to a clean state. Implementations may throw an exception
-        if they do not support reset. In all cases, implementations should respect the
-        `allow_reset` config setting and throw an exception if it is set to False."""
-        pass
-
     @staticmethod
     @abstractmethod
     def querybuilder() -> Type[pypika.Query]:

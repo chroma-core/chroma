@@ -109,6 +109,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             os.remove(db_file)
         self.stop()
         self.start()
+        super().reset()
 
     @override
     def setup_migrations(self) -> None:

@@ -74,6 +74,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().__init__(system)
 
     @override
+    def reset(self) -> None:
+        self._subscriptions = defaultdict(set)
+
+    @override
     def create_topic(self, topic_name: str) -> None:
         # Topic creation is implicit for this impl
         pass

@@ -16,4 +16,4 @@ CREATE TABLE embedding_metadata (
     PRIMARY KEY (id, key)
 );
 
-CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id UNINDEXED, string_value);
+CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id, string_value, tokenize="trigram");

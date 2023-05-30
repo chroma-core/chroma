@@ -30,6 +30,8 @@ from itertools import islice, groupby
 from chromadb.config import Component
 from functools import reduce
 
+FULLTEXT_KEYS = ["document"]
+
 
 class SqliteMetadataSegment(Component, MetadataReader):
     _consumer: Consumer
@@ -132,6 +134,9 @@ class SqliteMetadataSegment(Component, MetadataReader):
             q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
 
         if where_document:
+            q = q.where(
+                self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
+            )
             pass
             # q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
 
@@ -151,7 +156,6 @@ class SqliteMetadataSegment(Component, MetadataReader):
         cursor returns rows in ID order."""
 
         sql, params = get_sql(q)
-        print("SQL:", sql)
         cur.execute(sql, params)
 
         cur_iterator = iter(cur.fetchone, None)
@@ -222,6 +226,12 @@ class SqliteMetadataSegment(Component, MetadataReader):
         )
         sql, params = get_sql(q)
         cur.execute(sql, params)
+
+        if "document" in metadata:
+            self._db.querybuilder().from_(Table("embedding_fulltext")).where(
+                t.id == ParameterValue(id)
+            ).delete()
+
         self._insert_metadata(cur, id, metadata, True)
 
     def _insert_metadata(
@@ -266,6 +276,17 @@ class SqliteMetadataSegment(Component, MetadataReader):
         if sql:
             cur.execute(sql, params)
 
+        if "document" in metadata:
+            t = Table("embedding_fulltext")
+            q = (
+                self._db.querybuilder()
+                .into(t)
+                .columns(t.id, t.string_value)
+                .insert(ParameterValue(id), ParameterValue(metadata["document"]))
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
         t = Table("embeddings")
@@ -308,16 +329,6 @@ class SqliteMetadataSegment(Component, MetadataReader):
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])
 
-    def _where_document_query(
-        self,
-        q: QueryBuilder,
-        where_document: WhereDocument,
-        embeddings_table: Table,
-        fulltext_table: Table,
-    ) -> QueryBuilder:
-        "Add where-document clauses to the given Pypika query"
-        return q
-
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
@@ -337,7 +348,7 @@ class SqliteMetadataSegment(Component, MetadataReader):
     ) -> Criterion:
         clause: list[Criterion] = []
 
-        for i, (k, v) in enumerate(where.items()):
+        for k, v in where.items():
             if k == "$and":
                 criteria = [
                     self._where_map_criterion(q, w, embeddings_t, metadata_t)
@@ -361,6 +372,39 @@ class SqliteMetadataSegment(Component, MetadataReader):
                 )
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
+
+    def _where_doc_criterion(
+        self,
+        q: QueryBuilder,
+        where: WhereDocument,
+        embeddings_t: Table,
+        fulltext_t: Table,
+    ) -> Criterion:
+        for k, v in where.items():
+            if k == "$and":
+                criteria = [
+                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    for w in cast(Sequence[WhereDocument], v)
+                ]
+                return reduce(lambda x, y: x & y, criteria)
+            elif k == "$or":
+                criteria = [
+                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    for w in cast(Sequence[WhereDocument], v)
+                ]
+                return reduce(lambda x, y: x | y, criteria)
+            elif k == "$contains":
+                search_term = f"%{v}%"
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.id)
+                    .where(fulltext_t.string_value.like(ParameterValue(search_term)))
+                )
+                return embeddings_t.id.isin(sq)
+            else:
+                raise ValueError(f"Unknown where_doc operator {k}")
+        raise ValueError("Empty where_doc")
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:

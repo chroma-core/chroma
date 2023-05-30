@@ -50,6 +50,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
             if i % 3 == 0:
                 metadata["div_by_three"] = "true"
+            metadata["document"] = _build_document(i)
 
         record = SubmitEmbeddingRecord(
             id=f"embedding_{i}",
@@ -61,6 +62,25 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
         return record
 
     return (create_record(i) for i in count())
+
+
+_digit_map = {
+    "0": "zero",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+}
+
+
+def _build_document(i: int) -> str:
+    digits = list(str(i))
+    return " ".join(_digit_map[d] for d in digits)
 
 
 segment_definition = Segment(
@@ -195,6 +215,11 @@ def test_get(
     result = segment.get_metadata(where={"int_key": {"$lt": 4.99}})
     assert len(result) == 4
 
+    # Get with $ne
+    # Returns metadata that has an int_key, but not equal to 5
+    result = segment.get_metadata(where={"int_key": {"$ne": 5}})
+    assert len(result) == 8
+
     # get with multiple heterogenous conditions
     result = segment.get_metadata(where={"div_by_three": "true", "int_key": {"$gt": 5}})
     assert len(result) == 2
@@ -212,3 +237,65 @@ def test_get(
         where={"$and": [{"int_key": 3}, {"float_key": {"$lt": 5}}]}
     )
     assert len(result) == 1
+
+
+def test_fulltext(
+    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    system.reset()
+
+    producer = system.instance(Producer)
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    max_id = 0
+    for i in range(100):
+        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+
+    sync(segment, max_id)
+
+    result = segment.get_metadata(where={"document": "four two"})
+    result2 = segment.get_metadata(ids=["embedding_42"])
+    assert result == result2
+
+    # Test single result
+    result = segment.get_metadata(where_document={"$contains": "four two"})
+    assert len(result) == 1
+
+    # Test many results
+    result = segment.get_metadata(where_document={"$contains": "zero"})
+    assert len(result) == 9
+
+    # test $and
+    result = segment.get_metadata(
+        where_document={"$and": [{"$contains": "four"}, {"$contains": "two"}]}
+    )
+    assert len(result) == 2
+    assert set([r["id"] for r in result]) == {"embedding_42", "embedding_24"}
+
+    # test $or
+    result = segment.get_metadata(
+        where_document={"$or": [{"$contains": "zero"}, {"$contains": "one"}]}
+    )
+    ones = [i for i in range(1, 100) if "one" in _build_document(i)]
+    zeros = [i for i in range(1, 100) if "zero" in _build_document(i)]
+    expected = set([f"embedding_{i}" for i in set(ones + zeros)])
+    assert set([r["id"] for r in result]) == expected
+
+    # test combo with where clause (negative case)
+    result = segment.get_metadata(
+        where={"int_key": {"$eq": 42}}, where_document={"$contains": "zero"}
+    )
+    assert len(result) == 0
+
+    # test combo with where clause (positive case)
+    result = segment.get_metadata(
+        where={"int_key": {"$eq": 42}}, where_document={"$contains": "four"}
+    )
+    assert len(result) == 1
+
+    # test partial words
+    result = segment.get_metadata(where_document={"$contains": "zer"})
+    assert len(result) == 9
