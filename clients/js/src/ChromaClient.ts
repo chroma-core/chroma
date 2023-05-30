@@ -223,6 +223,9 @@ export class ChromaClient {
             .then(handleSuccess)
             .catch(handleError);
 
+        if (response.error !== undefined) {
+            throw new Error(response.error)
+        }
         return new Collection(
             response.name,
             response.id,
@@ -230,6 +233,7 @@ export class ChromaClient {
             response.metadata,
             embeddingFunction
         );
+
     }
 
     /**

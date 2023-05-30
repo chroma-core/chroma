@@ -155,7 +155,7 @@ export class Collection {
      * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
      * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
      * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-     * @returns {Promise<AddResponse>} - The response from the API. True if successful.
+    * @returns {Promise<AddResponse>} - The response from the API. True if successful.
      *
      * @example
      * ```typescript
