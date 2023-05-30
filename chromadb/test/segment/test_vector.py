@@ -241,7 +241,11 @@ def test_delete(
     )
 
     sync(segment, seq_ids[-1])
+
+    # Assert that the record is gone using `count`
     assert segment.count() == 4
+
+    # Assert that the record is gone using `get`
     assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
     results = segment.get_vectors()
     assert len(results) == 4
@@ -251,11 +255,30 @@ def test_delete(
             actual["embedding"], cast(Vector, expected["embedding"])
         )
 
+    # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
     query = VectorQuery(vectors=[vector], k=10, allowed_ids=None, options=None)
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
     assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
+
+    # Delete is idempotent
+    seq_ids.append(
+        producer.submit_embedding(
+            topic,
+            SubmitEmbeddingRecord(
+                id=embeddings[0]["id"],
+                embedding=None,
+                encoding=None,
+                metadata=None,
+                operation=Operation.DELETE,
+            ),
+        )
+    )
+
+    sync(segment, seq_ids[-1])
+
+    assert segment.count() == 4
 
 
 def _test_update(
