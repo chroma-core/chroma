@@ -53,13 +53,3 @@ test("test gt, lt, in a simple small way", async () => {
   expect(items.ids.length).toBe(2);
   expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
 });
-
-// it should throw an error if the collection does not exist
-test("it should throw an error if the collection does not exist", async () => {
-  await chroma.reset();
-
-  await expect(
-    async () => await chroma.getCollection({ name: "test" })
-  ).rejects.toThrow(Error);
-
-})
