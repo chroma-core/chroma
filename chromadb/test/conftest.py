@@ -13,7 +13,8 @@ import pytest
 from typing import Generator, List, Callable
 import shutil
 import logging
-import socket
+
+# import socket
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,11 @@ hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
 def find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # return s.getsockname()[1]
-        return 6666
+    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    #     s.bind(("", 0))
+    #     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # return s.getsockname()[1]
+    return 6666
 
 
 def _run_server(port: int) -> None:
