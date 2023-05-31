@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Set, TypeVar, Type
 from abc import ABC, abstractmethod
 from chromadb.types import (
     Collection,
@@ -11,12 +11,16 @@ from chromadb.types import (
     Segment,
     SeqId,
 )
-from chromadb.config import Component
+from chromadb.config import Component, System
 from overrides import EnforceOverrides
 from uuid import UUID
 
 
 class SegmentImplementation(ABC, EnforceOverrides):
+    @abstractmethod
+    def __init__(self, sytstem: System, segment: Segment):
+        pass
+
     @abstractmethod
     def count(self) -> int:
         """Get the number of embeddings in this segment"""
@@ -69,24 +73,25 @@ class SegmentManager(Component):
     segments as required"""
 
     @abstractmethod
-    def create_collection(self, collection: Collection) -> None:
-        """Create and initialize the components (topics and segments) required for a new
-        collection"""
+    def create_segments(self, collection: Collection) -> Set[Segment]:
+        """Create the segments required for a new collection."""
         pass
 
     @abstractmethod
-    def delete_collection(self, id: UUID) -> None:
-        """Delete all the components associated with a collection"""
+    def delete_segments(self, collection_id: UUID) -> None:
+        """Delete all the segments associated with a collection"""
         pass
 
-    @abstractmethod
-    def get_instance(self, segment: Segment) -> SegmentImplementation:
-        """Return an instance of the given segment, initializing if necessary"""
-        pass
+    T = TypeVar("T", bound="SegmentImplementation")
 
+    # Future Note: To support time travel, add optional parameters to this method to
+    # retrieve Segment instances that are bounded to events from a specific range of
+    # time
     @abstractmethod
-    def reset(self) -> None:
-        """Delete all segments. Should be used for testing only, implementations
-        intended for production may throw an exception instead of implementing this
-        method."""
+    def get_segment(self, collection_id: UUID, type: Type[T]) -> SegmentImplementation:
+        """Return the segment that should be used for servicing queries to a collection.
+        Implementations should cache appropriately; clients are intended to call this
+        method repeatedly rather than storing the result (thereby giving this
+        implementation full control over which segment impls are in or out of memory at
+        a given time.)"""
         pass
