@@ -17,7 +17,6 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component
-from overrides import override
 
 
 class API(Component, ABC):
@@ -282,19 +281,6 @@ class API(Component, ABC):
             embedding: The embedding to find the nearest neighbors of
             n_results: The number of nearest neighbors to return. Defaults to 10.
             where: A dictionary of key-value pairs to filter the embeddings by. Defaults to {}.
-        """
-        pass
-
-    @override
-    @abstractmethod
-    def reset(self) -> None:
-        """Resets the database
-        ⚠️ This is destructive and will delete all data in the database.
-        Args:
-            None
-
-        Returns:
-            None
         """
         pass
 

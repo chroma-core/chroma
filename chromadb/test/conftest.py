@@ -123,8 +123,25 @@ def integration_api() -> Generator[API, None, None]:
     system.stop()
 
 
+def sqlite() -> Generator[API, None, None]:
+    """Fixture generator for segment-based API using in-memory Sqlite"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        sqlite_database=":memory:",
+    )
+    system = System(settings)
+    api = system.instance(API)
+    system.start()
+    yield api
+    system.stop()
+
+
 def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
-    api_fixtures = [duckdb, duckdb_parquet, fastapi]
+    api_fixtures = [duckdb, duckdb_parquet, fastapi, sqlite]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         api_fixtures.append(integration_api)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:

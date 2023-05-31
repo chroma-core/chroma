@@ -37,11 +37,11 @@ class LocalSegmentManager(SegmentManager):
     _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
 
     def __init__(self, system: System):
+        super().__init__(system)
         self._sysdb = self.require(SysDB)
         self._system = system
         self._instances = {}
         self._segment_cache = defaultdict(dict)
-        super().__init__(system)
 
     @override
     def start(self) -> None:

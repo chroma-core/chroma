@@ -25,6 +25,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
+    "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
 }
 
 
@@ -39,6 +41,9 @@ class Settings(BaseSettings):
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_segment_manager_impl: str = (
+        "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
