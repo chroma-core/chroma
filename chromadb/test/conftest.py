@@ -13,6 +13,8 @@ import pytest
 from typing import Generator, List, Callable
 import shutil
 import logging
+import sys
+import random
 
 # import socket
 
@@ -39,7 +41,11 @@ def find_free_port() -> int:
 
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
-    persist_directory = tempfile.gettempdir() + "/test_server"
+    sys.stdout = open(str(os.getpid()) + ".out", "a", buffering=0)
+    sys.stderr = open(str(os.getpid()) + "_error.out", "a", buffering=0)
+    persist_directory = (
+        tempfile.gettempdir() + "/test_server" + str(random.randint(0, 100000))
+    )
     settings = Settings(
         chroma_api_impl="local",
         chroma_db_impl="duckdb",
