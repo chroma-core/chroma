@@ -65,7 +65,6 @@ export type QueryResponse = {
   documents: (null | Document)[][];
   metadatas: (null | Metadata)[][];
   distances: null | number[][][];
-  error: null | string;
 }
 
 export type AddResponse = {
