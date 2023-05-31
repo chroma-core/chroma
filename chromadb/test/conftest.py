@@ -39,10 +39,11 @@ def find_free_port() -> int:
 
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
+    persist_directory = tempfile.gettempdir() + "/test_server"
     settings = Settings(
         chroma_api_impl="local",
         chroma_db_impl="duckdb",
-        persist_directory=tempfile.gettempdir() + "/test_server",
+        persist_directory=persist_directory,
     )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
