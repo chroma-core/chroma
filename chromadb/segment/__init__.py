@@ -11,6 +11,7 @@ from chromadb.types import (
     Segment,
     SeqId,
 )
+from chromadb.config import Component
 from overrides import EnforceOverrides
 from uuid import UUID
 
@@ -63,7 +64,7 @@ class VectorReader(SegmentImplementation):
         pass
 
 
-class SegmentManager(ABC, EnforceOverrides):
+class SegmentManager(Component):
     """Interface for a pluggable strategy for creating, retrieving and instantiating
     segments as required"""
 

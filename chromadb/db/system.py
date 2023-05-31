@@ -10,9 +10,10 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+from chromadb.config import Component
 
 
-class SysDB(ABC, EnforceOverrides):
+class SysDB(Component):
     """Data interface for Chroma's System database"""
 
     @abstractmethod
