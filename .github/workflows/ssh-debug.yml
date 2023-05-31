@@ -9,7 +9,7 @@ jobs:
   debug:
     strategy:
         matrix:
-          python: ['3.7']
+          python: ['3.10']
           platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
