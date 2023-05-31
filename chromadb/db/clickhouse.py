@@ -125,6 +125,10 @@ class Clickhouse(DB):
             SELECT uuid FROM collections WHERE name = '{name}'
         """
         )
+
+        if len(res.result_rows) == 0:
+            raise ValueError(f"Collection with name '{name}' does not exist")
+
         return res.result_rows[0][0]
 
     def _create_where_clause(

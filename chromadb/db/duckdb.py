@@ -70,9 +70,14 @@ class DuckDB(Clickhouse):
     #  UTILITY METHODS
     #
     def get_collection_uuid_from_name(self, name):
-        return self._conn.execute(
+        result = self._conn.execute(
             "SELECT uuid FROM collections WHERE name = ?", [name]
-        ).fetchall()[0][0]
+        ).fetchall()
+
+        if (len(result)) == 0:
+            raise ValueError(f"Collection with name '{name}' does not exist")
+
+        return result[0][0]
 
     #
     #  COLLECTION METHODS

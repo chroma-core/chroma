@@ -251,10 +251,16 @@ export class ChromaClient {
     }: {
         name: string
     }): Promise<void> {
-        return await this.api
+        const response = await this.api
             .deleteCollection(name)
             .then(handleSuccess)
             .catch(handleError);
+
+        if (response.error) {
+            throw new Error(response.error);
+        }
+
+        return
     }
 
 }
