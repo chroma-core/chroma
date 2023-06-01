@@ -177,7 +177,7 @@ class DuckDB(Clickhouse):
         data_to_insert = [
             [
                 collection_uuid,
-                "this is a uuid hahahaha",
+                "61b872cb-058a-4386-9aca-38c601985668",
                 embedding,
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
