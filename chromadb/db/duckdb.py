@@ -173,12 +173,10 @@ class DuckDB(Clickhouse):
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
     @override
     def add(self, collection_uuid, embeddings, metadatas, documents, ids) -> List[UUID]:
-        # breakpoint()
-        uuids = [str(uuid.uuid4()) for _ in range(len(embeddings))]
         data_to_insert = [
             [
                 collection_uuid,
-                uuids[i],
+                str(uuid.uuid4()),
                 embedding,
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,

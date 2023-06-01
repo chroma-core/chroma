@@ -1,9 +1,0 @@
-Starting FastAPI server...
-INFO:     127.0.0.1:61085 - "GET /api/v1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61087 - "POST /api/v1/reset HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61089 - "POST /api/v1/collections HTTP/1.1" 200 OK
-> /Users/hammad/Documents/chroma/chromadb/db/duckdb.py(178)add()
--> data_to_insert = [
-(Pdb)
-EXCEPTION in catch_exceptions_middleware handler for request:  <starlette.requests.Request object at 0x12dc2c280>
-INFO:     127.0.0.1:61091 - "POST /api/v1/collections/85967b88-7d01-4423-941e-c3a7e2573b47/add HTTP/1.1" 500 Internal Server Error

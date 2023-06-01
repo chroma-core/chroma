@@ -2,8 +2,7 @@ from chromadb.config import Settings
 from chromadb import Client
 from chromadb.api import API
 import chromadb.server.fastapi
-
-# from requests.exceptions import ConnectionError
+from requests.exceptions import ConnectionError
 import hypothesis
 import tempfile
 import os
@@ -14,10 +13,7 @@ import pytest
 from typing import Generator, List, Callable
 import shutil
 import logging
-import sys
-import random
 import socket
-import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +32,24 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return s.getsockname()[1]  # type: ignore
+        return s.getsockname()[1]
 
 
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
-    sys.stdin = open(0)
-    # sys.stdout = open(str(os.getpid()) + ".out", "a")
-    # sys.stderr = open(str(os.getpid()) + "_error.out", "a")
-    persist_directory = (
-        tempfile.gettempdir() + "/test_server" + str(random.randint(0, 100000))
-    )
     settings = Settings(
         chroma_api_impl="local",
         chroma_db_impl="duckdb",
-        persist_directory=persist_directory,
+        persist_directory=tempfile.gettempdir() + "/test_server",
     )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
 
 
 def _await_server(api: API, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    except Exception as e:
+    except ConnectionError as e:
         if attempts > 15:
             logger.error("Test server failed to start after 15 attempts")
             raise e
@@ -73,10 +63,8 @@ def fastapi() -> Generator[API, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
     port = find_free_port()
-    print("STARTING A SERVER")
     logger.info(f"Running test FastAPI server on port {port}")
-    ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
+    proc = Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     api = chromadb.Client(
         Settings(
@@ -92,28 +80,26 @@ def fastapi() -> Generator[API, None, None]:
 
 def duckdb() -> Generator[API, None, None]:
     """Fixture generator for duckdb"""
-    client = Client(
+    yield Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
-            persist_directory=tempfile.gettempdir() + "/test_memory",
+            persist_directory=tempfile.gettempdir(),
         )
     )
-    yield client
 
 
 def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
 
-    save_path = tempfile.gettempdir() + "/test_persist"
-    client = Client(
+    save_path = tempfile.gettempdir() + "/tests"
+    yield Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb+parquet",
             persist_directory=save_path,
         )
     )
-    yield client
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
