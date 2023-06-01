@@ -1,5 +1,5 @@
 from typing import Optional, Sequence, TypeVar, Type
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from chromadb.types import (
     Collection,
     MetadataEmbeddingRecord,
@@ -12,11 +12,10 @@ from chromadb.types import (
     SeqId,
 )
 from chromadb.config import Component, System
-from overrides import EnforceOverrides
 from uuid import UUID
 
 
-class SegmentImplementation(ABC, EnforceOverrides):
+class SegmentImplementation(Component):
     @abstractmethod
     def __init__(self, sytstem: System, segment: Segment):
         pass

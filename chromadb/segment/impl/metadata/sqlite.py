@@ -27,7 +27,6 @@ from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion
 from itertools import islice, groupby
-from chromadb.config import Component
 from functools import reduce
 import sqlite3
 
@@ -36,7 +35,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class SqliteMetadataSegment(Component, MetadataReader):
+class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID

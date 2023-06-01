@@ -3,7 +3,7 @@ from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
-from chromadb.config import Component, System, Settings
+from chromadb.config import System, Settings
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -104,7 +104,7 @@ class Batch:
         self.delete_count += 1
 
 
-class LocalHnswSegment(Component, VectorReader):
+class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _topic: Optional[str]
@@ -140,7 +140,7 @@ class LocalHnswSegment(Component, VectorReader):
         self._label_to_id = {}
 
         self._lock = Lock()
-        super().__init__(system)
+        super().__init__(system, segment)
 
     @override
     def start(self) -> None:

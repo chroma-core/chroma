@@ -46,14 +46,20 @@ class LocalSegmentManager(SegmentManager):
 
     @override
     def start(self) -> None:
+        for instance in self._instances.values():
+            instance.start()
         super().start()
 
     @override
     def stop(self) -> None:
+        for instance in self._instances.values():
+            instance.stop()
         super().stop()
 
     @override
     def reset(self) -> None:
+        for instance in self._instances.values():
+            instance.stop()
         self._instances = {}
         self._segment_cache = defaultdict(dict)
         super().reset()
@@ -102,7 +108,9 @@ class LocalSegmentManager(SegmentManager):
         if segment["id"] not in self._instances:
             classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
             cls = get_class(classname, SegmentImplementation)
-            self._instances[segment["id"]] = cls(self._system, segment)
+            instance = cls(self._system, segment)
+            instance.start()
+            self._instances[segment["id"]] = instance
         return self._instances[segment["id"]]
 
 
