@@ -1,8 +1,9 @@
-from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
+from typing import Optional, Union, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
     Metadata,
+    UpdateMetadata,
     Vector,
     LiteralValue,
     LogicalOperator,
@@ -24,7 +25,8 @@ Embeddings = List[Embedding]
 
 Metadatas = List[Metadata]
 
-CollectionMetadata = Dict[Any, Any]
+CollectionMetadata = Metadata
+UpdateCollectionMetadata = UpdateMetadata
 
 Document = str
 Documents = List[Document]
@@ -128,6 +130,20 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
         if not isinstance(value, (str, int, float)):
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value}"
+            )
+    return metadata
+
+
+def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            raise ValueError(f"Expected metadata key to be a str, got {key}")
+        if not isinstance(value, (str, int, float, type(None))):
             raise ValueError(
                 f"Expected metadata value to be a str, int, or float, got {value}"
             )

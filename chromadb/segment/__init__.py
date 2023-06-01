@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Set, TypeVar, Type
+from typing import Optional, Sequence, TypeVar, Type
 from abc import ABC, abstractmethod
 from chromadb.types import (
     Collection,
@@ -30,6 +30,9 @@ class SegmentImplementation(ABC, EnforceOverrides):
     def max_seqid(self) -> SeqId:
         """Get the maximum SeqID currently indexed by this segment"""
         pass
+
+
+S = TypeVar("S", bound=SegmentImplementation)
 
 
 class MetadataReader(SegmentImplementation):
@@ -73,7 +76,7 @@ class SegmentManager(Component):
     segments as required"""
 
     @abstractmethod
-    def create_segments(self, collection: Collection) -> Set[Segment]:
+    def create_segments(self, collection: Collection) -> Sequence[Segment]:
         """Create the segments required for a new collection."""
         pass
 
@@ -82,13 +85,11 @@ class SegmentManager(Component):
         """Delete all the segments associated with a collection"""
         pass
 
-    T = TypeVar("T", bound="SegmentImplementation")
-
     # Future Note: To support time travel, add optional parameters to this method to
     # retrieve Segment instances that are bounded to events from a specific range of
     # time
     @abstractmethod
-    def get_segment(self, collection_id: UUID, type: Type[T]) -> SegmentImplementation:
+    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         """Return the segment that should be used for servicing queries to a collection.
         Implementations should cache appropriately; clients are intended to call this
         method repeatedly rather than storing the result (thereby giving this

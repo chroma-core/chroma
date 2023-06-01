@@ -3,13 +3,14 @@ from chromadb.segment import (
     SegmentManager,
     MetadataReader,
     VectorReader,
+    S,
 )
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
 from chromadb.types import Collection, Segment, SegmentScope
-from typing import Dict, Set, Type, TypeVar
+from typing import Dict, Type, Sequence, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
 import re
@@ -21,7 +22,7 @@ class SegmentType(Enum):
 
 
 SEGMENT_TYPE_IMPLS = {
-    SegmentType.SQLITE: "chromadb.segment.impl.sqlite.SqliteMetadataReader",
+    SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
 }
 
@@ -58,7 +59,7 @@ class LocalSegmentManager(SegmentManager):
         super().reset()
 
     @override
-    def create_segments(self, collection: Collection) -> Set[Segment]:
+    def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
             SegmentType.HNSW_LOCAL_MEMORY, SegmentScope.VECTOR, collection
         )
@@ -67,7 +68,7 @@ class LocalSegmentManager(SegmentManager):
         )
         self._sysdb.create_segment(vector_segment)
         self._sysdb.create_segment(metadata_segment)
-        return {vector_segment, metadata_segment}
+        return [vector_segment, metadata_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> None:
@@ -78,13 +79,11 @@ class LocalSegmentManager(SegmentManager):
             del self._segment_cache[collection_id][segment["scope"]]
             del self._segment_cache[collection_id]
 
-    T = TypeVar("T", bound="SegmentImplementation")
-
     @override
-    def get_segment(self, collection_id: UUID, type: Type[T]) -> SegmentImplementation:
-        if type == Type[MetadataReader]:
+    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
+        if type == MetadataReader:
             scope = SegmentScope.METADATA
-        elif type == Type[VectorReader]:
+        elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
             raise ValueError(f"Invalid segment type: {type}")
@@ -96,7 +95,8 @@ class LocalSegmentManager(SegmentManager):
             segment = next(filter(lambda s: s["type"] in known_types, segments))
             self._segment_cache[collection_id][scope] = segment
 
-        return self._instance(self._segment_cache[collection_id][scope])
+        instance = self._instance(self._segment_cache[collection_id][scope])
+        return cast(S, instance)
 
     def _instance(self, segment: Segment) -> SegmentImplementation:
         if segment["id"] not in self._instances:

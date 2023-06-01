@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
 
+    tenant_id: str = "default"
+    topic_namespace: str = "default"
+
     persist_directory: str = ".chroma"
 
     chroma_server_host: Optional[str] = None
