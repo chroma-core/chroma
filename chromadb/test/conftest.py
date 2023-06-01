@@ -2,7 +2,8 @@ from chromadb.config import Settings
 from chromadb import Client
 from chromadb.api import API
 import chromadb.server.fastapi
-from requests.exceptions import ConnectionError
+
+# from requests.exceptions import ConnectionError
 import hypothesis
 import tempfile
 import os
@@ -58,7 +59,7 @@ def _run_server(port: int) -> None:
 def _await_server(api: API, attempts: int = 0) -> None:
     try:
         api.heartbeat()
-    except ConnectionError as e:
+    except Exception as e:
         if attempts > 15:
             logger.error("Test server failed to start after 15 attempts")
             raise e
