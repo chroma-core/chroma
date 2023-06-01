@@ -1,7 +1,7 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Set, cast, Union
+from typing import Set, cast, Union, DefaultDict
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
@@ -25,7 +25,7 @@ import chromadb.test.property.invariants as invariants
 import numpy as np
 
 
-traces: defaultdict[str, int] = defaultdict(lambda: 0)
+traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
 
 def trace(key: str) -> None:
