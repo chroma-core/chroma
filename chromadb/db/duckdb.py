@@ -18,6 +18,7 @@ import logging
 import atexit
 from uuid import UUID
 from overrides import override
+import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,7 @@ class DuckDB(Clickhouse):
     # the execute many syntax is different than clickhouse, the (?,?) syntax is different than clickhouse
     @override
     def add(self, collection_uuid, embeddings, metadatas, documents, ids) -> List[UUID]:
+        pdb.set_trace()
         data_to_insert = [
             [
                 collection_uuid,

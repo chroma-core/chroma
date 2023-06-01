@@ -40,8 +40,9 @@ def find_free_port() -> int:
 
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
-    sys.stdout = open(str(os.getpid()) + ".out", "a")
-    sys.stderr = open(str(os.getpid()) + "_error.out", "a")
+    sys.stdin = open(0)
+    # sys.stdout = open(str(os.getpid()) + ".out", "a")
+    # sys.stderr = open(str(os.getpid()) + "_error.out", "a")
     persist_directory = (
         tempfile.gettempdir() + "/test_server" + str(random.randint(0, 100000))
     )
@@ -120,7 +121,7 @@ def integration_api() -> Generator[API, None, None]:
 
 
 def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
-    api_fixtures = [duckdb, duckdb_parquet, fastapi]
+    api_fixtures = [fastapi]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         api_fixtures.append(integration_api)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
