@@ -187,13 +187,13 @@ class DuckDB(Clickhouse):
             for i, embedding in enumerate(embeddings)
         ]
 
-        insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
+        # insert_string = "collection_uuid, uuid, embedding, metadata, document, id"
 
-        self._conn.executemany(
-            f"""
-         INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?)""",
-            data_to_insert,
-        )
+        # self._conn.executemany(
+        #     f"""
+        #  INSERT INTO embeddings ({insert_string}) VALUES (?,?,?,?,?,?)""",
+        #     data_to_insert,
+        # )
 
         return [uuid.UUID(x[1]) for x in data_to_insert]  # return uuids
 

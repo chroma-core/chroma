@@ -1,0 +1,74 @@
+INFO:     Started server process [23042]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:61080 (Press CTRL+C to quit)
+No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+
+Traceback (most recent call last):
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/streams/memory.py", line 98, in receive
+    return self.receive_nowait()
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/streams/memory.py", line 93, in receive_nowait
+    raise WouldBlock
+anyio.WouldBlock
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/middleware/base.py", line 43, in call_next
+    message = await recv_stream.receive()
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/streams/memory.py", line 118, in receive
+    raise EndOfStream
+anyio.EndOfStream
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/hammad/Documents/chroma/chromadb/server/fastapi/__init__.py", line 58, in catch_exceptions_middleware
+    return await call_next(request)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/middleware/base.py", line 46, in call_next
+    raise app_exc
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/middleware/base.py", line 36, in coro
+    await self.app(scope, request.receive, send_stream.send)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/middleware/exceptions.py", line 75, in __call__
+    raise exc
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/middleware/exceptions.py", line 64, in __call__
+    await self.app(scope, receive, sender)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/fastapi/middleware/asyncexitstack.py", line 21, in __call__
+    raise e
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/routing.py", line 680, in __call__
+    await route.handle(scope, receive, send)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/routing.py", line 275, in handle
+    await self.app(scope, receive, send)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/routing.py", line 65, in app
+    response = await func(request)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/fastapi/routing.py", line 231, in app
+    raw_response = await run_endpoint_function(
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/fastapi/routing.py", line 162, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/starlette/concurrency.py", line 41, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func, *args)
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/to_thread.py", line 33, in run_sync
+    return await get_asynclib().run_sync_in_worker_thread(
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/_backends/_asyncio.py", line 877, in run_sync_in_worker_thread
+    return await future
+  File "/Users/hammad/Documents/chroma/chroma_env/lib/python3.10/site-packages/anyio/_backends/_asyncio.py", line 807, in run
+    result = context.run(func, *args)
+  File "/Users/hammad/Documents/chroma/chromadb/server/fastapi/__init__.py", line 203, in add
+    result = self._api._add(
+  File "/Users/hammad/Documents/chroma/chromadb/api/local.py", line 251, in _add
+    added_uuids = self._db.add(
+  File "/Users/hammad/Documents/chroma/chromadb/db/duckdb.py", line 178, in add
+    data_to_insert = [
+  File "/Users/hammad/Documents/chroma/chromadb/db/duckdb.py", line 178, in add
+    data_to_insert = [
+  File "/Users/hammad/.pyenv/versions/3.10.8/lib/python3.10/bdb.py", line 90, in trace_dispatch
+    return self.dispatch_line(frame)
+  File "/Users/hammad/.pyenv/versions/3.10.8/lib/python3.10/bdb.py", line 115, in dispatch_line
+    if self.quitting: raise BdbQuit
+bdb.BdbQuit
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [23042]

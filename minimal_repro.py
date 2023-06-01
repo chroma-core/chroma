@@ -1,3 +1,4 @@
+from typing import Generator
 import chromadb
 import sys
 import os
@@ -35,10 +36,10 @@ def _await_server(api: API, attempts: int = 0) -> None:
         api.heartbeat()
     except Exception as e:
         if attempts > 15:
-            print("Test server failed to start after 15 attempts")
+            logger.error("Test server failed to start after 15 attempts")
             raise e
         else:
-            print("Waiting for server to start...")
+            logger.info("Waiting for server to start...")
             time.sleep(4)
             _await_server(api, attempts + 1)
 
