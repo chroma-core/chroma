@@ -18,7 +18,6 @@ import logging
 import atexit
 from uuid import UUID
 from overrides import override
-import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +177,7 @@ class DuckDB(Clickhouse):
         data_to_insert = [
             [
                 collection_uuid,
-                str(uuid.uuid4()),
+                "this is a uuid hahahaha",
                 embedding,
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
