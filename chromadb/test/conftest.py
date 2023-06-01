@@ -72,6 +72,7 @@ def fastapi() -> Generator[API, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
     port = find_free_port()
+    print("STARTING A SERVER")
     logger.info(f"Running test FastAPI server on port {port}")
     proc = Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
@@ -93,17 +94,16 @@ def duckdb() -> Generator[API, None, None]:
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
-            persist_directory=tempfile.gettempdir(),
+            persist_directory=tempfile.gettempdir() + "/test_memory",
         )
     )
     yield client
-    client._db._conn.close()  # type: ignore
 
 
 def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
 
-    save_path = tempfile.gettempdir() + "/tests"
+    save_path = tempfile.gettempdir() + "/test_persist"
     client = Client(
         Settings(
             chroma_api_impl="local",
@@ -112,7 +112,6 @@ def duckdb_parquet() -> Generator[API, None, None]:
         )
     )
     yield client
-    client._db._conn.close()  # type: ignore
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
