@@ -89,26 +89,30 @@ def fastapi() -> Generator[API, None, None]:
 
 def duckdb() -> Generator[API, None, None]:
     """Fixture generator for duckdb"""
-    yield Client(
+    client = Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb",
             persist_directory=tempfile.gettempdir(),
         )
     )
+    yield client
+    client._db._conn.close()  # type: ignore
 
 
 def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
 
     save_path = tempfile.gettempdir() + "/tests"
-    yield Client(
+    client = Client(
         Settings(
             chroma_api_impl="local",
             chroma_db_impl="duckdb+parquet",
             persist_directory=save_path,
         )
     )
+    yield client
+    client._db._conn.close()  # type: ignore
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
