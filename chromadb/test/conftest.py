@@ -42,8 +42,8 @@ def find_free_port() -> int:
 
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
-    sys.stdout = open(str(os.getpid()) + ".out", "a", buffering=0)
-    sys.stderr = open(str(os.getpid()) + "_error.out", "a", buffering=0)
+    sys.stdout = open(str(os.getpid()) + ".out", "a")
+    sys.stderr = open(str(os.getpid()) + "_error.out", "a")
     persist_directory = (
         tempfile.gettempdir() + "/test_server" + str(random.randint(0, 100000))
     )
