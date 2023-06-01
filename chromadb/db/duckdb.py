@@ -408,8 +408,9 @@ class PersistentDuckDB(DuckDB):
 
         self._save_folder = system.settings.persist_directory
         self.load()
-        # https://docs.python.org/3/library/atexit.html
-        atexit.register(self.persist)
+        if system.settings.auto_persist:
+            # https://docs.python.org/3/library/atexit.html
+            atexit.register(self.persist)
 
     def set_save_folder(self, path):
         self._save_folder = path

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     clickhouse_port: Optional[str] = None
 
     persist_directory: str = ".chroma"
+    auto_persist: bool = True
 
     chroma_server_host: Optional[str] = None
     chroma_server_http_port: Optional[str] = None
