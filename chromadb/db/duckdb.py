@@ -174,10 +174,11 @@ class DuckDB(Clickhouse):
     @override
     def add(self, collection_uuid, embeddings, metadatas, documents, ids) -> List[UUID]:
         # breakpoint()
+        uuids = [str(uuid.uuid4()) for _ in range(len(embeddings))]
         data_to_insert = [
             [
                 collection_uuid,
-                "61b872cb-058a-4386-9aca-38c601985668",
+                uuids[i],
                 embedding,
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
