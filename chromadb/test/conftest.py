@@ -121,7 +121,7 @@ def integration_api() -> Generator[API, None, None]:
 
 
 def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
-    api_fixtures = [duckdb_parquet, fastapi]
+    api_fixtures = [duckdb, duckdb_parquet, fastapi]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         api_fixtures.append(integration_api)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
