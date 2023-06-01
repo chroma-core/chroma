@@ -114,16 +114,18 @@ class Component(ABC, EnforceOverrides):
     def stop(self) -> None:
         """Idempotently stop this component's execution and free all associated
         resources."""
+        logger.debug(f"Stopping component {self.__class__.__name__}")
         self._running = False
 
     def start(self) -> None:
         """Idempotently start this component's execution"""
+        logger.debug(f"Starting component {self.__class__.__name__}")
         self._running = True
 
     def reset(self) -> None:
         """Reset this component's state to its initial blank state. Only intended to be
         called from tests."""
-        pass
+        logger.debug(f"Resetting component {self.__class__.__name__}")
 
 
 class System(Component):

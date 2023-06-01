@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, TypeVar, List
+from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -15,7 +15,7 @@ from chromadb.types import (
 )
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument"]
+__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
 ID = str
 IDs = List[ID]
@@ -25,7 +25,7 @@ Embeddings = List[Embedding]
 
 Metadatas = List[Metadata]
 
-CollectionMetadata = Metadata
+CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
 Document = str

@@ -22,7 +22,6 @@ from chromadb.api.types import (
     QueryResult,
     validate_metadata,
     validate_update_metadata,
-    UpdateCollectionMetadata,
 )
 
 import chromadb.types as t
@@ -60,6 +59,9 @@ class SegmentAPI(API):
     def heartbeat(self) -> int:
         return int(1000 * time.time_ns())
 
+    # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
+    # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
+    # causes the system to somehow convert all values to strings.
     @override
     def create_collection(
         self,
@@ -79,7 +81,7 @@ class SegmentAPI(API):
                     client=self,
                     id=existing[0]["id"],
                     name=existing[0]["name"],
-                    metadata=existing[0]["metadata"],
+                    metadata=existing[0]["metadata"],  # type: ignore
                     embedding_function=embedding_function,
                 )
             else:
@@ -119,6 +121,9 @@ class SegmentAPI(API):
             get_or_create=True,
         )
 
+    # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
+    # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
+    # causes the system to somehow convert all values to strings
     @override
     def get_collection(
         self,
@@ -132,7 +137,7 @@ class SegmentAPI(API):
                 client=self,
                 id=existing[0]["id"],
                 name=existing[0]["name"],
-                metadata=existing[0]["metadata"],
+                metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
             )
         else:
@@ -148,7 +153,7 @@ class SegmentAPI(API):
                     client=self,
                     id=db_collection["id"],
                     name=db_collection["name"],
-                    metadata=db_collection["metadata"],
+                    metadata=db_collection["metadata"],  # type: ignore
                 )
             )
         return collections
@@ -158,7 +163,7 @@ class SegmentAPI(API):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[UpdateCollectionMetadata] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
