@@ -8,6 +8,7 @@ from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
     Documents,
+    EmbeddingFunction,
     Embeddings,
     GetResult,
     IDs,
@@ -18,11 +19,10 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     CollectionMetadata,
-    EmbeddingFunction,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
-
+import chromadb.utils.embedding_functions as ef
 import re
 
 from chromadb.telemetry import Telemetry
@@ -79,7 +79,7 @@ class LocalAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -121,7 +121,7 @@ class LocalAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -146,7 +146,7 @@ class LocalAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection with the given name.
         Args:
