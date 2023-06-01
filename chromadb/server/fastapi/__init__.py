@@ -60,6 +60,9 @@ async def catch_exceptions_middleware(
             content={"error": e.name(), "message": e.message()}, status_code=e.code()
         )
     except Exception as e:
+        print(
+            "EXCEPTION in catch_exceptions_middleware handler for request: ", request, e
+        )
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
@@ -73,6 +76,7 @@ def _uuid(uuid_str: str) -> UUID:
 
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
+        print("Starting FastAPI server...")
         super().__init__(settings)
         Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
