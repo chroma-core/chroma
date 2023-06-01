@@ -8,12 +8,12 @@ import tempfile
 import os
 import uvicorn
 import time
-from multiprocessing import Process
 import pytest
 from typing import Generator, List, Callable
 import shutil
 import logging
 import socket
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return s.getsockname()[1]
+        return s.getsockname()[1]  # type: ignore
 
 
 def _run_server(port: int) -> None:
@@ -64,7 +64,8 @@ def fastapi() -> Generator[API, None, None]:
     fastapi client connect to it"""
     port = find_free_port()
     logger.info(f"Running test FastAPI server on port {port}")
-    proc = Process(target=_run_server, args=(port,), daemon=True)
+    ctx = multiprocessing.get_context("spawn")
+    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     api = chromadb.Client(
         Settings(
