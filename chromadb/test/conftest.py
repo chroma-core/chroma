@@ -17,6 +17,7 @@ import logging
 import sys
 import random
 import socket
+import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,8 @@ def fastapi() -> Generator[API, None, None]:
     port = find_free_port()
     print("STARTING A SERVER")
     logger.info(f"Running test FastAPI server on port {port}")
-    proc = Process(target=_run_server, args=(port,), daemon=True)
+    ctx = multiprocessing.get_context("spawn")
+    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     api = chromadb.Client(
         Settings(
