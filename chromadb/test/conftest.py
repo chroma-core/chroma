@@ -16,8 +16,7 @@ import shutil
 import logging
 import sys
 import random
-
-# import socket
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +32,10 @@ hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
 def find_free_port() -> int:
-    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    #     s.bind(("", 0))
-    #     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # return s.getsockname()[1]
-    return 6666
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    return s.getsockname()[1]  # type: ignore
 
 
 def _run_server(port: int) -> None:
@@ -53,7 +51,7 @@ def _run_server(port: int) -> None:
         persist_directory=persist_directory,
     )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
+    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="info")
 
 
 def _await_server(api: API, attempts: int = 0) -> None:
