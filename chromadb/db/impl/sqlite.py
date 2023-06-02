@@ -11,15 +11,19 @@ from typing_extensions import Literal
 from types import TracebackType
 import os
 from uuid import UUID
+from threading import local
 
 
 class TxWrapper(base.TxWrapper):
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, stack: local) -> None:
+        self._tx_stack = stack
         self._conn = conn
 
     @override
     def __enter__(self) -> base.Cursor:
-        self._conn.execute("BEGIN;")
+        if len(self._tx_stack.stack) == 0:
+            self._conn.execute("BEGIN;")
+        self._tx_stack.stack.append(self)
         return self._conn.cursor()  # type: ignore
 
     @override
@@ -29,12 +33,13 @@ class TxWrapper(base.TxWrapper):
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Literal[False]:
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
+        self._tx_stack.stack.pop()
+        if len(self._tx_stack.stack) == 0:
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
         return False
-
 
 
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
@@ -42,22 +47,31 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _settings: Settings
     _migration_dirs: Sequence[str]
     _db_file: str
+    _tx_stack: local
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = ["migrations/embeddings_queue", "migrations/sysdb"]
+        self._migration_dirs = [
+            "migrations/embeddings_queue",
+            "migrations/sysdb",
+            "migrations/metadb",
+        ]
         self._db_file = self._settings.require("sqlite_database")
+        self._tx_stack = local()
         super().__init__(system)
 
     @override
     def start(self) -> None:
+        super().start()
         self._conn = sqlite3.connect(self._db_file)
+        self._conn.isolation_level = None  # Handle commits explicitly
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
         self.initialize_migrations()
 
     @override
     def stop(self) -> None:
+        super().stop()
         self._conn.close()
 
     @staticmethod
@@ -81,7 +95,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def tx(self) -> TxWrapper:
-        return TxWrapper(self._conn)
+        if not hasattr(self._tx_stack, "stack"):
+            self._tx_stack.stack = []
+        return TxWrapper(self._conn, stack=self._tx_stack)
 
     @override
     def reset(self) -> None:
@@ -93,8 +109,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         db_file = self._settings.require("sqlite_database")
         if db_file != ":memory:":
             os.remove(db_file)
-        self.stop()
         self.start()
+        super().reset()
 
     @override
     def setup_migrations(self) -> None:

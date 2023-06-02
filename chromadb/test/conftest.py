@@ -1,5 +1,4 @@
-from chromadb.config import Settings
-from chromadb import Client
+from chromadb.config import Settings, System
 from chromadb.api import API
 import chromadb.server.fastapi
 from requests.exceptions import ConnectionError
@@ -32,7 +31,7 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return s.getsockname()[1]
+        return int(s.getsockname()[1])
 
 
 def _run_server(port: int) -> None:
@@ -66,40 +65,48 @@ def fastapi() -> Generator[API, None, None]:
     logger.info(f"Running test FastAPI server on port {port}")
     proc = Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
-    api = chromadb.Client(
-        Settings(
-            chroma_api_impl="rest",
-            chroma_server_host="localhost",
-            chroma_server_http_port=str(port),
-        )
+    settings = Settings(
+        chroma_api_impl="rest",
+        chroma_server_host="localhost",
+        chroma_server_http_port=str(port),
     )
+    system = System(settings)
+    api = system.instance(API)
     _await_server(api)
+    system.start()
     yield api
+    system.stop()
     proc.kill()
 
 
 def duckdb() -> Generator[API, None, None]:
     """Fixture generator for duckdb"""
-    yield Client(
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb",
-            persist_directory=tempfile.gettempdir(),
-        )
+    settings = Settings(
+        chroma_api_impl="local",
+        chroma_db_impl="duckdb",
+        persist_directory=tempfile.gettempdir(),
     )
+    system = System(settings)
+    api = system.instance(API)
+    system.start()
+    yield api
+    system.stop()
 
 
 def duckdb_parquet() -> Generator[API, None, None]:
     """Fixture generator for duckdb+parquet"""
 
     save_path = tempfile.gettempdir() + "/tests"
-    yield Client(
-        Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=save_path,
-        )
+    settings = Settings(
+        chroma_api_impl="local",
+        chroma_db_impl="duckdb+parquet",
+        persist_directory=save_path,
     )
+    system = System(settings)
+    api = system.instance(API)
+    system.start()
+    yield api
+    system.stop()
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
@@ -108,7 +115,12 @@ def integration_api() -> Generator[API, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
-    yield chromadb.Client()
+    settings = Settings()
+    system = System(settings)
+    api = system.instance(API)
+    system.start()
+    yield api
+    system.stop()
 
 
 def fixtures() -> List[Callable[[], Generator[API, None, None]]]:

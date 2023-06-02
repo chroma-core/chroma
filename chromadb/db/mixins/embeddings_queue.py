@@ -74,6 +74,11 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().__init__(system)
 
     @override
+    def reset(self) -> None:
+        super().reset()
+        self._subscriptions = defaultdict(set)
+
+    @override
     def create_topic(self, topic_name: str) -> None:
         # Topic creation is implicit for this impl
         pass
@@ -94,11 +99,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @override
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> None:
+    ) -> SeqId:
+        if not self._running:
+            raise RuntimeError("Component not running")
+
         if embedding["embedding"]:
             encoding_type = cast(ScalarEncoding, embedding["encoding"])
             encoding = encoding_type.value
             embedding_bytes = encode_vector(embedding["embedding"], encoding_type)
+
         else:
             embedding_bytes = None
             encoding = None
@@ -131,6 +140,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 operation=embedding["operation"],
             )
             self._notify_all(topic_name, embedding_record)
+            return seq_id
 
     @override
     def subscribe(
@@ -141,6 +151,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         end: Optional[SeqId] = None,
         id: Optional[UUID] = None,
     ) -> UUID:
+        if not self._running:
+            raise RuntimeError("Component not running")
+
         subscription_id = id or uuid.uuid4()
         start, end = self._validate_range(start, end)
 
@@ -231,8 +244,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
     def _notify_all(self, topic: str, embedding: EmbeddingRecord) -> None:
         """Send a notification to each subscriber of the given topic."""
-        for sub in self._subscriptions[topic]:
-            self._notify_one(sub, embedding)
+        if self._running:
+            for sub in self._subscriptions[topic]:
+                self._notify_one(sub, embedding)
 
     def _notify_one(self, sub: Subscription, embedding: EmbeddingRecord) -> None:
         """Send a notification to a single subscriber."""

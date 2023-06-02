@@ -9,6 +9,7 @@ from chromadb.types import (
     VectorQuery,
     VectorQueryResult,
     Segment,
+    SeqId,
 )
 from overrides import EnforceOverrides
 from uuid import UUID
@@ -24,10 +25,9 @@ class MetadataReader(SegmentImplementation):
     @abstractmethod
     def get_metadata(
         self,
-        where: Optional[Where],
-        where_document: Optional[WhereDocument],
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         ids: Optional[Sequence[str]] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
@@ -37,6 +37,11 @@ class MetadataReader(SegmentImplementation):
     @abstractmethod
     def count_metadata(self) -> int:
         """Get the number of embeddings in this segment."""
+        pass
+
+    @abstractmethod
+    def max_seqid(self) -> SeqId:
+        """Get the maximum SeqID currently indexed by this segment"""
         pass
 
 
@@ -57,6 +62,11 @@ class VectorReader(SegmentImplementation):
     ) -> Sequence[Sequence[VectorQueryResult]]:
         """Given a list of vector queries, return the top-k nearest
         neighbors for each query."""
+        pass
+
+    @abstractmethod
+    def max_seqid(self) -> SeqId:
+        """Get the maximum SeqID currently indexed by this segment"""
         pass
 
 

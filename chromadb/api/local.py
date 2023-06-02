@@ -435,7 +435,7 @@ class LocalAPI(API):
         return self._db.count(collection_id)
 
     @override
-    def reset(self) -> bool:
+    def reset(self) -> None:
         """Reset the database. This will delete all collections and items.
 
         Returns:
@@ -443,7 +443,6 @@ class LocalAPI(API):
 
         """
         self._db.reset()
-        return True
 
     @override
     def _query(

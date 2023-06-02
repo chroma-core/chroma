@@ -17,6 +17,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component
+from overrides import override
 
 
 class API(Component, ABC):
@@ -284,15 +285,16 @@ class API(Component, ABC):
         """
         pass
 
+    @override
     @abstractmethod
-    def reset(self) -> bool:
+    def reset(self) -> None:
         """Resets the database
         ⚠️ This is destructive and will delete all data in the database.
         Args:
             None
 
         Returns:
-            True if the reset was successful
+            None
         """
         pass
 

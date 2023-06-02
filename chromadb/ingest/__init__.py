@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Callable, Optional, Sequence
-from overrides import EnforceOverrides
 from chromadb.types import (
     SubmitEmbeddingRecord,
     EmbeddingRecord,
@@ -8,8 +7,10 @@ from chromadb.types import (
     Vector,
     ScalarEncoding,
 )
+from chromadb.config import Component
 from uuid import UUID
 import array
+from overrides import override
 
 
 def encode_vector(vector: Vector, encoding: ScalarEncoding) -> bytes:
@@ -34,7 +35,7 @@ def decode_vector(vector: bytes, encoding: ScalarEncoding) -> Vector:
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 
 
-class Producer(ABC, EnforceOverrides):
+class Producer(Component):
     """Interface for writing embeddings to an ingest stream"""
 
     @abstractmethod
@@ -48,11 +49,12 @@ class Producer(ABC, EnforceOverrides):
     @abstractmethod
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
-    ) -> None:
-        """Add an embedding record to the given topic."""
+    ) -> SeqId:
+        """Add an embedding record to the given topic. Returns the SeqID of the record."""
         pass
 
     @abstractmethod
+    @override
     def reset(self) -> None:
         """Delete all topics and data. For testing only, implementations intended for
         production may throw an exception instead of implementing this method."""
@@ -62,7 +64,7 @@ class Producer(ABC, EnforceOverrides):
 ConsumerCallbackFn = Callable[[Sequence[EmbeddingRecord]], None]
 
 
-class Consumer(ABC, EnforceOverrides):
+class Consumer(Component):
     """Interface for reading embeddings off an ingest stream"""
 
     @abstractmethod
