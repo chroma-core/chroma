@@ -232,7 +232,7 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        if "document" in metadata:
+        if "chroma:document" in metadata:
             t = Table("embedding_fulltext")
             q = (
                 self._db.querybuilder()
@@ -284,13 +284,13 @@ class SqliteMetadataSegment(MetadataReader):
         if sql:
             cur.execute(sql, params)
 
-        if "document" in metadata:
+        if "chroma:document" in metadata:
             t = Table("embedding_fulltext")
             q = (
                 self._db.querybuilder()
                 .into(t)
                 .columns(t.id, t.string_value)
-                .insert(ParameterValue(id), ParameterValue(metadata["document"]))
+                .insert(ParameterValue(id), ParameterValue(metadata["chroma:document"]))
             )
             sql, params = get_sql(q)
             cur.execute(sql, params)

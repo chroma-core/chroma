@@ -290,7 +290,7 @@ class SegmentAPI(API):
         return GetResult(
             ids=[r["id"] for r in records],
             embeddings=[r["embedding"] for r in vectors] if vectors else None,
-            metadatas=metadatas if metadatas else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas) if metadatas else None,  # type: ignore
             documents=documents if documents else None,  # type: ignore
         )
 
@@ -376,7 +376,7 @@ class SegmentAPI(API):
             for id_list in ids:
                 metadata_list = [metadata_by_id[id] for id in id_list]
                 if "metadatas" in include:
-                    metadatas.append(metadata_list)  # type: ignore
+                    metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
@@ -468,3 +468,23 @@ def _doc(metadata: Optional[t.Metadata]) -> Optional[str]:
     if metadata and "chroma:document" in metadata:
         return str(metadata["chroma:document"])
     return None
+
+
+def _clean_metadatas(
+    metadata: List[Optional[t.Metadata]],
+) -> List[Optional[t.Metadata]]:
+    """Remove any chroma-specific metadata keys that the client shouldn't see from a
+    list of metadata maps."""
+    return [_clean_metadata(m) for m in metadata]
+
+
+def _clean_metadata(metadata: Optional[t.Metadata]) -> Optional[t.Metadata]:
+    """Remove any chroma-specific metadata keys that the client shouldn't see from a
+    metadata map."""
+    if not metadata:
+        return None
+    result = {}
+    for k, v in metadata.items():
+        if not k.startswith("chroma:"):
+            result[k] = v
+    return result
