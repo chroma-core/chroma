@@ -123,6 +123,14 @@ class System(Component):
         self._instances = {}
         self._running = False
 
+        if is_thin_client:
+            # The thin client is a system with only the API component
+            if self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
+                raise RuntimeError(
+                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'rest' as the chroma_api_impl. \
+            see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
+                )
+
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
         the component will be started as well."""
@@ -177,26 +185,3 @@ def get_class(fqn: str, type: Type[T]) -> Type[T]:
 def get_fqn(cls: Type[T]) -> str:
     """Given a class, return its fully qualified name"""
     return f"{cls.__module__}.{cls.__name__}"
-
-
-# TODO: merge this in properly
-# def get_db(self) -> chromadb.db.DB:
-#         if is_thin_client:
-#             raise RuntimeError(
-#                 "Chroma is running in http-only client mode, and cannot directly access the database. \
-#                 See https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
-#             )
-
-#         if self.db is None:
-#             self.db = self._instantiate("chroma_db_impl")
-#         return self.db
-
-# def get_api(self) -> chromadb.api.API:
-#     if is_thin_client and (
-#         self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI"
-#     ):
-#         print(self.settings["chroma_api_impl"])
-#         raise RuntimeError(
-#             "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'rest' as the chroma_api_impl. \
-#             see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
-#         )
