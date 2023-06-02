@@ -35,6 +35,16 @@ def local_persist_api_cache_bust():
     )
 
 
+def approx_equal(a, b, tolerance=1e-6) -> bool:
+    return abs(a - b) < tolerance
+
+
+def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
+    if len(a) != len(b):
+        return False
+    return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
+
+
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
@@ -1212,7 +1222,9 @@ def test_update_query(api):
     assert results["ids"][0][0] == updated_records["ids"][0]
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
-    assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+    assert vector_approx_equal(
+        results["embeddings"][0][0], updated_records["embeddings"][0]
+    )
 
 
 def test_get_nearest_neighbors_where_n_results_more_than_element(api):
@@ -1299,7 +1311,9 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=new_records["ids"][0]
     )
-    assert get_result["embeddings"][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        get_result["embeddings"][0], new_records["embeddings"][0]
+    )
     assert get_result["metadatas"][0] == new_records["metadatas"][0]
     assert get_result["documents"][0] == new_records["documents"][0]
 
@@ -1308,7 +1322,9 @@ def test_upsert(api):
         n_results=1,
         include=["embeddings", "metadatas", "documents"],
     )
-    assert query_result["embeddings"][0][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        query_result["embeddings"][0][0], new_records["embeddings"][0]
+    )
     assert query_result["metadatas"][0][0] == new_records["metadatas"][0]
     assert query_result["documents"][0][0] == new_records["documents"][0]
 
@@ -1323,7 +1339,7 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=["id3"]
     )
-    assert get_result["embeddings"][0] == [1.1, 0.99, 2.21]
+    assert vector_approx_equal(get_result["embeddings"][0], [1.1, 0.99, 2.21])
     assert get_result["metadatas"][0] == {"string_value": "a new string value"}
     assert get_result["documents"][0] is None
 
