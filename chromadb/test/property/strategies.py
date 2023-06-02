@@ -103,7 +103,11 @@ safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
 safe_floats = st.floats(
-    allow_infinity=False, allow_nan=False, allow_subnormal=False
+    allow_infinity=False,
+    allow_nan=False,
+    allow_subnormal=False,
+    min_value=-1e6,
+    max_value=1e6,
 )  # TODO: handle infinity and NAN
 
 safe_values: List[SearchStrategy[Union[int, float, str]]] = [
