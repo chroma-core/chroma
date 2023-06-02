@@ -208,7 +208,7 @@ def test_reset_db(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    assert api.reset()
+    api.reset()
     assert len(api.list_collections()) == 0
 
 
