@@ -7,6 +7,7 @@ from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
 import itertools
+from chromadb.config import Component
 
 
 class Cursor(Protocol):
@@ -49,7 +50,7 @@ class TxWrapper(ABC, EnforceOverrides):
         pass
 
 
-class SqlDB(ABC, EnforceOverrides):
+class SqlDB(Component):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
 
     @abstractmethod

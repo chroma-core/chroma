@@ -22,19 +22,37 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
+# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
+# However, this provokes an incompatibility with the Overrides library and Python 3.7
+Include = List[
+    Union[
+        Literal["documents"],
+        Literal["embeddings"],
+        Literal["metadatas"],
+        Literal["distances"],
+    ]
+]
 
 # Grammar for where expressions
 LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
+
+# See comment on Include type
+LogicalOperator = Union[Literal["$and"], Literal["$or"]]
+WhereOperator = Union[
+    Literal["$gt"],
+    Literal["$gte"],
+    Literal["$lt"],
+    Literal["$lte"],
+    Literal["$ne"],
+    Literal["$eq"],
+]
 OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
 Where = Dict[
     Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
 ]
 
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
+WhereDocumentOperator = Union[Literal["$contains"], LogicalOperator]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
 
 
