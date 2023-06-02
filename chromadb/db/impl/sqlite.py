@@ -36,6 +36,7 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
+
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn: sqlite3.Connection
     _settings: Settings

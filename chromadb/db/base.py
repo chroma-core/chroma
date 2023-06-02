@@ -8,20 +8,6 @@ import pypika
 import pypika.queries
 import itertools
 from chromadb.config import System, Component
-from uuid import UUID
-
-
-class NotFoundError(Exception):
-    """Raised when a delete or update operation affects no rows"""
-
-    pass
-
-
-class UniqueConstraintError(Exception):
-    """Raised when an insert operation would violate a unique constraint"""
-
-    pass
-
 
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
@@ -101,6 +87,7 @@ class SqlDB(Component):
         """
         pass
 
+
     @staticmethod
     @abstractmethod
     def uuid_to_db(uuid: Optional[UUID]) -> Optional[Any]:
@@ -119,6 +106,7 @@ class SqlDB(Component):
         """Return the exception type that the DB raises when a unique constraint is
         violated"""
         pass
+
 
     def param(self, idx: int) -> pypika.Parameter:
         """Return a PyPika Parameter object for the given index"""

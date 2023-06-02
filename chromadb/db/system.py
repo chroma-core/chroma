@@ -4,6 +4,7 @@ from uuid import UUID
 from overrides import EnforceOverrides
 from chromadb.types import (
     Collection,
+    Metadata,
     Segment,
     SegmentScope,
     OptionalArgument,

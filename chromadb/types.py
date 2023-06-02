@@ -47,7 +47,6 @@ class Segment(TypedDict):
 # "support" __eq__ and __lt__ so using a protocol won't work.
 SeqId = Any
 
-
 class Operation(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
