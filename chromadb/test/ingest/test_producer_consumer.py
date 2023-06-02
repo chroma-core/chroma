@@ -21,8 +21,7 @@ from chromadb.types import (
 )
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
-from asyncio import Event, wait_for
-from asyncio.exceptions import TimeoutError
+from asyncio import Event, wait_for, TimeoutError
 
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:

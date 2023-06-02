@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, Dict, Mapping
+from typing import Optional, Union, Sequence, Dict, Mapping, List
 from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
@@ -123,12 +123,12 @@ WhereOperator = Union[
 ]
 OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
-Where = dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, list["Where"]]
+Where = Dict[
+    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
 ]
 
 WhereDocumentOperator = Union[Literal["$contains"], LogicalOperator]
-WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
+WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
 
 
 class Unspecified:

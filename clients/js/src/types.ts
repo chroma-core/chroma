@@ -61,10 +61,10 @@ export type GetResponse = {
 
 export type QueryResponse = {
   ids: IDs[];
-  embeddings: null | Embeddings[][];
+  embeddings: null | Embeddings[];
   documents: (null | Document)[][];
   metadatas: (null | Metadata)[][];
-  distances: null | number[][][];
+  distances: null | number[][];
 }
 
 export type AddResponse = {
