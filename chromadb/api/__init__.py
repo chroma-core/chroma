@@ -286,7 +286,7 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
-    def reset(self) -> None:
+    def reset(self) -> bool:
         """Resets the database
         ⚠️ This is destructive and will delete all data in the database.
         Args:
