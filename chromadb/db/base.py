@@ -11,6 +11,18 @@ from uuid import UUID
 from itertools import islice, count
 
 
+class NotFoundError(Exception):
+    """Raised when a delete or update operation affects no rows"""
+
+    pass
+
+
+class UniqueConstraintError(Exception):
+    """Raised when an insert operation would violate a unique constraint"""
+
+    pass
+
+
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
 
