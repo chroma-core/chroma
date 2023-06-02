@@ -1,11 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Sequence
+from typing import Optional, Sequence
 from uuid import UUID
 from overrides import EnforceOverrides
 from chromadb.types import (
     Collection,
     Metadata,
     Segment,
+    SegmentScope,
+    OptionalArgument,
+    Unspecified,
+    UpdateMetadata,
 )
 
 
@@ -13,7 +17,13 @@ class SysDB(ABC, EnforceOverrides):
     """Data interface for Chroma's System database"""
 
     @abstractmethod
-    def create_segment(self, segment: Segment) -> Segment:
+    def create_segment(self, segment: Segment) -> None:
+        """Create a new segment in the System database. Raises DuplicateError if the ID
+        already exists."""
+        pass
+
+    @abstractmethod
+    def delete_segment(self, id: UUID) -> None:
         """Create a new segment in the System database."""
         pass
 
@@ -21,23 +31,25 @@ class SysDB(ABC, EnforceOverrides):
     def get_segments(
         self,
         id: Optional[UUID] = None,
-        scope: Optional[str] = None,
+        type: Optional[str] = None,
+        scope: Optional[SegmentScope] = None,
         topic: Optional[str] = None,
         collection: Optional[UUID] = None,
-        metadata: Optional[Dict[str, Metadata]] = None,
     ) -> Sequence[Segment]:
-        """Find segments by id, embedding function, and/or metadata"""
+        """Find segments by id, type, scope, topic or collection."""
         pass
 
     @abstractmethod
-    def get_collections(
+    def update_segment(
         self,
-        id: Optional[UUID] = None,
-        topic: Optional[str] = None,
-        name: Optional[str] = None,
-        metadata: Optional[dict[str, Metadata]] = None,
-    ) -> Sequence[Collection]:
-        """Get collections by name, embedding function and/or metadata"""
+        id: UUID,
+        topic: OptionalArgument[Optional[str]] = Unspecified(),
+        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        """Update a segment. Unspecified fields will be left unchanged. For the
+        metadata, keys with None values will be removed and keys not present in the
+        UpdateMetadata dict will be left unchanged."""
         pass
 
     @abstractmethod
@@ -48,6 +60,29 @@ class SysDB(ABC, EnforceOverrides):
     @abstractmethod
     def delete_collection(self, id: UUID) -> None:
         """Delete a topic and all associated segments from the SysDB"""
+        pass
+
+    @abstractmethod
+    def get_collections(
+        self,
+        id: Optional[UUID] = None,
+        topic: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> Sequence[Collection]:
+        """Find collections by id, topic or name"""
+        pass
+
+    @abstractmethod
+    def update_collection(
+        self,
+        id: UUID,
+        topic: OptionalArgument[str] = Unspecified(),
+        name: OptionalArgument[str] = Unspecified(),
+        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+    ) -> None:
+        """Update a collection. Unspecified fields will be left unchanged. For metadata,
+        keys with None values will be removed and keys not present in the UpdateMetadata
+        dict will be left unchanged."""
         pass
 
     @abstractmethod

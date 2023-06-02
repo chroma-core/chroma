@@ -2,13 +2,15 @@ from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
+from chromadb.db.mixins.sysdb import SqlSysDB
 import sqlite3
 from overrides import override
 import pypika
-from typing import Sequence, cast, Optional, Type
+from typing import Sequence, cast, Optional, Type, Any
 from typing_extensions import Literal
 from types import TracebackType
 import os
+from uuid import UUID
 
 
 class TxWrapper(base.TxWrapper):
@@ -34,7 +36,8 @@ class TxWrapper(base.TxWrapper):
         return False
 
 
-class SqliteDB(MigratableDB, SqlEmbeddingsQueue):
+
+class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn: sqlite3.Connection
     _settings: Settings
     _migration_dirs: Sequence[str]
@@ -42,13 +45,15 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue):
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = ["migrations/embeddings_queue"]
+        self._migration_dirs = ["migrations/embeddings_queue", "migrations/sysdb"]
         self._db_file = self._settings.require("sqlite_database")
         super().__init__(system)
 
     @override
     def start(self) -> None:
         self._conn = sqlite3.connect(self._db_file)
+        with self.tx() as cur:
+            cur.execute("PRAGMA foreign_keys = ON")
         self.initialize_migrations()
 
     @override
@@ -154,7 +159,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue):
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        cur.execute(migration["sql"])
+        cur.executescript(migration["sql"])
         cur.execute(
             """
             INSERT INTO migrations (dir, version, filename, sql, hash)
@@ -168,3 +173,18 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue):
                 migration["hash"],
             ),
         )
+
+    @staticmethod
+    @override
+    def uuid_from_db(value: Optional[Any]) -> Optional[UUID]:
+        return UUID(value) if value is not None else None
+
+    @staticmethod
+    @override
+    def uuid_to_db(uuid: Optional[UUID]) -> Optional[Any]:
+        return str(uuid) if uuid is not None else None
+
+    @staticmethod
+    @override
+    def unique_constraint_error() -> Type[BaseException]:
+        return sqlite3.IntegrityError

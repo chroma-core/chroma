@@ -1,9 +1,9 @@
-from typing import Optional, Union, Sequence, Dict, Any
-from typing_extensions import Literal, TypedDict
+from typing import Optional, Union, Sequence, Dict, Any, Mapping
+from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Dict[str, Union[str, int, float]]
+Metadata = Mapping[str, Union[str, int, float]]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -46,7 +46,6 @@ class Segment(TypedDict):
 # This is surprisingly difficult to express in Python. ints, for example, do not
 # "support" __eq__ and __lt__ so using a protocol won't work.
 SeqId = Any
-
 
 class Operation(Enum):
     ADD = "ADD"
@@ -122,3 +121,21 @@ Where = dict[
 
 WhereDocumentOperator = Union[Literal["$contains"], LogicalOperator]
 WhereDocument = dict[WhereDocumentOperator, Union[str, list["WhereDocument"]]]
+
+
+class Unspecified:
+    """A sentinel value used to indicate that a value should not be updated"""
+
+    _instance: Optional["Unspecified"] = None
+
+    def __new__(cls) -> "Unspecified":
+        if cls._instance is None:
+            cls._instance = super(Unspecified, cls).__new__(cls)
+
+        return cls._instance
+
+
+T = TypeVar("T")
+OptionalArgument = Union[T, Unspecified]
+
+UpdateMetadata = Mapping[str, Union[int, float, str, None]]
