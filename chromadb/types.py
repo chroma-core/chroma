@@ -1,5 +1,5 @@
-from typing import TypeVar, Optional, Union, Sequence, Dict, Any
-from typing_extensions import Literal, Protocol, TypedDict
+from typing import Optional, Union, Sequence, Dict, Any
+from typing_extensions import Literal, TypedDict
 from uuid import UUID
 from enum import Enum
 
@@ -18,14 +18,6 @@ class ScalarEncoding(Enum):
 class SegmentScope(Enum):
     VECTOR = "VECTOR"
     METADATA = "METADATA"
-
-
-# Note: This is the data model for identifying and describing an embedding function,
-# not the actual function implementation.
-class EmbeddingFunction(TypedDict):
-    name: NamespacedName
-    dimension: int
-    scalar_encoding: ScalarEncoding
 
 
 class Collection(TypedDict):
@@ -48,21 +40,19 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
 
 
-S = TypeVar("S", bound="SeqId")
+# The desire here is for SeqID to be any type that can be compared to other values of
+# the same type to establish a linear order.
+
+# This is surprisingly difficult to express in Python. ints, for example, do not
+# "support" __eq__ and __lt__ so using a protocol won't work.
+SeqId = Any
 
 
-class SeqId(Protocol):
-    def __eq__(self, other: Any) -> bool:
-        ...
-
-    def __lt__(self: S, other: S) -> bool:
-        ...
-
-
-class InsertType(Enum):
+class Operation(Enum):
     ADD = "ADD"
     UPDATE = "UPDATE"
     UPSERT = "UPSERT"
+    DELETE = "DELETE"
 
 
 Vector = Union[Sequence[float], Sequence[int]]
@@ -72,6 +62,7 @@ class VectorEmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
     embedding: Vector
+    encoding: ScalarEncoding
 
 
 class MetadataEmbeddingRecord(TypedDict):
@@ -83,15 +74,18 @@ class MetadataEmbeddingRecord(TypedDict):
 class EmbeddingRecord(TypedDict):
     id: str
     seq_id: SeqId
-    embedding: Vector
+    embedding: Optional[Vector]
+    encoding: Optional[ScalarEncoding]
     metadata: Optional[Metadata]
+    operation: Operation
 
 
-class InsertEmbeddingRecord(TypedDict):
+class SubmitEmbeddingRecord(TypedDict):
     id: str
-    embedding: Vector
+    embedding: Optional[Vector]
+    encoding: Optional[ScalarEncoding]
     metadata: Optional[Metadata]
-    insert_type: InsertType
+    operation: Operation
 
 
 class VectorQuery(TypedDict):

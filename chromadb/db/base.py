@@ -7,7 +7,7 @@ from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
 import itertools
-from chromadb.config import Component
+from chromadb.config import System, Component
 
 
 class Cursor(Protocol):
@@ -53,6 +53,9 @@ class TxWrapper(ABC, EnforceOverrides):
 class SqlDB(Component):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
 
+    def __init__(self, system: System):
+        super().__init__(system)
+
     @abstractmethod
     def tx(self) -> TxWrapper:
         """Return a transaction wrapper"""
@@ -81,6 +84,10 @@ class SqlDB(Component):
         Will be called with str.format(i) where i is the numeric index of the parameter.
         """
         pass
+
+    def param(self, idx: int) -> pypika.Parameter:
+        """Return a PyPika Parameter object for the given index"""
+        return pypika.Parameter(self.parameter_format().format(idx))
 
 
 _context = local()
