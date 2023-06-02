@@ -178,15 +178,25 @@ def test_ann_query(
     # Each item is its own nearest neighbor (one at a time)
     for e in embeddings:
         vector = cast(Vector, e["embedding"])
-        query = VectorQuery(vectors=[vector], k=1, allowed_ids=None, options=None)
+        query = VectorQuery(
+            vectors=[vector],
+            k=1,
+            allowed_ids=None,
+            options=None,
+            include_embeddings=True,
+        )
         results = segment.query_vectors(query)
         assert len(results) == 1
         assert len(results[0]) == 1
         assert results[0][0]["id"] == e["id"]
+        assert results[0][0]["embedding"] is not None
+        assert approx_equal_vector(results[0][0]["embedding"], vector)
 
     # Each item is its own nearest neighbor (all at once)
     vectors = [cast(Vector, e["embedding"]) for e in embeddings]
-    query = VectorQuery(vectors=vectors, k=1, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=vectors, k=1, allowed_ids=None, options=None, include_embeddings=False
+    )
     results = segment.query_vectors(query)
     assert len(results) == len(embeddings)
     for r, e in zip(results, embeddings):
@@ -196,7 +206,9 @@ def test_ann_query(
     # Each item's 3 nearest neighbors are itself and the item before and after
     test_embeddings = embeddings[1:-1]
     vectors = [cast(Vector, e["embedding"]) for e in test_embeddings]
-    query = VectorQuery(vectors=vectors, k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=vectors, k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     results = segment.query_vectors(query)
     assert len(results) == len(test_embeddings)
 
@@ -257,7 +269,9 @@ def test_delete(
 
     # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
-    query = VectorQuery(vectors=[vector], k=10, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
     assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
@@ -323,7 +337,9 @@ def _test_update(
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
-    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[1]["id"]
     assert knn_results[1]["id"] == embeddings[2]["id"]
@@ -331,7 +347,9 @@ def _test_update(
 
     # Test querying at the new location
     vector = [10.0, 10.0]
-    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[0]["id"]
     assert knn_results[1]["id"] == embeddings[2]["id"]

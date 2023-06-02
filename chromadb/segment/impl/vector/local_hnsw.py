@@ -223,8 +223,14 @@ class LocalHnswSegment(VectorReader):
             for label, distance in zip(result_labels[result_i], distances[result_i]):
                 id = self._label_to_id[label]
                 seq_id = self._id_to_seq_id[id]
+                if query["include_embeddings"]:
+                    embedding = self._index.get_items([label])[0]
+                else:
+                    embedding = None
                 results.append(
-                    VectorQueryResult(id=id, seq_id=seq_id, distance=distance)
+                    VectorQueryResult(
+                        id=id, seq_id=seq_id, distance=distance, embedding=embedding
+                    )
                 )
             all_results.append(results)
 
