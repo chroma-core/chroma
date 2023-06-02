@@ -22,7 +22,7 @@ This readme is helpful for local dev.
 
 The goal of the design is that this will be added to our github action releases so that the JS API is always up to date and pinned against the python backend API.
 
-`npm publish` pushes the `package.json` defined packaged to the package manager for authenticated users.
+`yarn release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
 
 ### Useful links
 
