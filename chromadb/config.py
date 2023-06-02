@@ -31,6 +31,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.db.DB": "chroma_db_impl",
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
+    "chromadb.ingest.Producer": "chroma_producer_impl",
+    "chromadb.ingest.Consumer": "chroma_consumer_impl",
 }
 
 
@@ -40,6 +42,11 @@ class Settings(BaseSettings):
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
     chroma_api_impl: str = "chromadb.api.local.LocalAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
+
+    # New architecture components
+    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
@@ -86,10 +93,12 @@ T = TypeVar("T", bound="Component")
 class Component(ABC, EnforceOverrides):
     _dependencies: Set["Component"]
     _system: "System"
+    _running: bool
 
     def __init__(self, system: "System"):
         self._dependencies = set()
         self._system = system
+        self._running = False
 
     def require(self, type: Type[T]) -> T:
         """Get a Component instance of the given type, and register as a dependency of
@@ -105,10 +114,15 @@ class Component(ABC, EnforceOverrides):
     def stop(self) -> None:
         """Idempotently stop this component's execution and free all associated
         resources."""
-        pass
+        self._running = False
 
     def start(self) -> None:
         """Idempotently start this component's execution"""
+        self._running = True
+
+    def reset(self) -> None:
+        """Reset this component's state to its initial blank state. Only intended to be
+        called from tests."""
         pass
 
 
@@ -116,12 +130,11 @@ class System(Component):
     settings: Settings
 
     _instances: Dict[Type[Component], Component]
-    _running: bool
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._instances = {}
-        self._running = False
+        super().__init__(self)
 
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
@@ -155,25 +168,35 @@ class System(Component):
 
     @override
     def start(self) -> None:
-        self._running = True
+        super().start()
         for component in self.components():
             component.start()
 
     @override
     def stop(self) -> None:
-        self._running = False
+        super().stop()
         for component in reversed(list(self.components())):
             component.stop()
 
+    @override
+    def reset(self) -> None:
+        if not self.settings.allow_reset:
+            raise ValueError("Resetting is not allowed by this configuration")
+        for component in self.components():
+            component.reset()
 
-def get_class(fqn: str, type: Type[T]) -> Type[T]:
+
+C = TypeVar("C")
+
+
+def get_class(fqn: str, type: Type[C]) -> Type[C]:
     """Given a fully qualifed class name, import the module and return the class"""
     module_name, class_name = fqn.rsplit(".", 1)
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
-    return cast(Type[T], cls)
+    return cast(Type[C], cls)
 
 
-def get_fqn(cls: Type[T]) -> str:
+def get_fqn(cls: Type[object]) -> str:
     """Given a class, return its fully qualified name"""
     return f"{cls.__module__}.{cls.__name__}"

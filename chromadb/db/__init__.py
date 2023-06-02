@@ -12,6 +12,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component
+from overrides import override
 
 
 class DB(Component):
@@ -107,6 +108,7 @@ class DB(Component):
         pass
 
     @abstractmethod
+    @override
     def reset(self) -> None:
         pass
 
