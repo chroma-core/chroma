@@ -16,7 +16,7 @@ from chromadb.types import (
 from chromadb.config import System
 from overrides import override
 from collections import defaultdict
-from typing import Tuple, Optional, Dict, Set
+from typing import Tuple, Optional, Dict, Set, cast
 from uuid import UUID
 from pypika import Table, functions
 import uuid
@@ -96,11 +96,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         self, topic_name: str, embedding: SubmitEmbeddingRecord
     ) -> None:
         if embedding["embedding"]:
-            assert embedding["encoding"] is not None
-            encoding = embedding["encoding"].value
-            embedding_bytes = encode_vector(
-                embedding["embedding"], embedding["encoding"]
-            )
+            encoding_type = cast(ScalarEncoding, embedding["encoding"])
+            encoding = encoding_type.value
+            embedding_bytes = encode_vector(embedding["embedding"], encoding_type)
         else:
             embedding_bytes = None
             encoding = None
