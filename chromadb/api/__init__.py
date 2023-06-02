@@ -18,7 +18,7 @@ from chromadb.api.types import (
 )
 from chromadb.config import Component
 import chromadb.utils.embedding_functions as ef
-
+from overrides import override
 
 class API(Component, ABC):
     @abstractmethod
