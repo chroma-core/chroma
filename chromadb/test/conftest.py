@@ -145,8 +145,7 @@ def sqlite() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    # fixtures = [duckdb, duckdb_parquet, fastapi]
-    fixtures = [sqlite]
+    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
