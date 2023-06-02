@@ -1,7 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Optional, Sequence
 from uuid import UUID
-from overrides import EnforceOverrides
 from chromadb.types import (
     Collection,
     Segment,
@@ -10,9 +9,10 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+from chromadb.config import Component
 
 
-class SysDB(ABC, EnforceOverrides):
+class SysDB(Component):
     """Data interface for Chroma's System database"""
 
     @abstractmethod
@@ -82,11 +82,4 @@ class SysDB(ABC, EnforceOverrides):
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
-        pass
-
-    @abstractmethod
-    def reset(self) -> None:
-        """Delete all data. Should be used for testing only, implementations
-        intended for production may throw an exception instead of implementing this
-        method."""
         pass

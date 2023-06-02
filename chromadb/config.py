@@ -178,14 +178,17 @@ class System(Component):
             component.reset()
 
 
-def get_class(fqn: str, type: Type[T]) -> Type[T]:
+C = TypeVar("C")
+
+
+def get_class(fqn: str, type: Type[C]) -> Type[C]:
     """Given a fully qualifed class name, import the module and return the class"""
     module_name, class_name = fqn.rsplit(".", 1)
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
-    return cast(Type[T], cls)
+    return cast(Type[C], cls)
 
 
-def get_fqn(cls: Type[T]) -> str:
+def get_fqn(cls: Type[object]) -> str:
     """Given a class, return its fully qualified name"""
     return f"{cls.__module__}.{cls.__name__}"
