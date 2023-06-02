@@ -285,6 +285,17 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
+    def reset(self) -> None:
+        """Resets the database
+        ⚠️ This is destructive and will delete all data in the database.
+        Args:
+            None
+        Returns:
+            None
+        """
+        pass
+
+    @abstractmethod
     def raw_sql(self, sql: str) -> pd.DataFrame:
         """Runs a raw SQL query against the database
         ⚠️ This method should not be used directly.
@@ -313,11 +324,6 @@ class API(Component, ABC):
 
     @abstractmethod
     def persist(self) -> bool:
-        """Persist the database to disk"""
-        pass
-
-    @abstractmethod
-    def reset(self) -> bool:
         """Persist the database to disk"""
         pass
 
