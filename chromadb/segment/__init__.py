@@ -16,7 +16,15 @@ from uuid import UUID
 
 
 class SegmentImplementation(ABC, EnforceOverrides):
-    pass
+    @abstractmethod
+    def count(self) -> int:
+        """Get the number of embeddings in this segment"""
+        pass
+
+    @abstractmethod
+    def max_seqid(self) -> SeqId:
+        """Get the maximum SeqID currently indexed by this segment"""
+        pass
 
 
 class MetadataReader(SegmentImplementation):
@@ -34,39 +42,24 @@ class MetadataReader(SegmentImplementation):
         """Query for embedding metadata."""
         pass
 
-    @abstractmethod
-    def count_metadata(self) -> int:
-        """Get the number of embeddings in this segment."""
-        pass
-
-    @abstractmethod
-    def max_seqid(self) -> SeqId:
-        """Get the maximum SeqID currently indexed by this segment"""
-        pass
-
 
 class VectorReader(SegmentImplementation):
     """Embedding Vector segment interface"""
 
     @abstractmethod
     def get_vectors(
-        self, ids: Optional[Sequence[str]]
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        """Get embeddings from the segment. If no IDs are provided,
-        all embeddings are returned."""
+        """Get embeddings from the segment. If no IDs are provided, all embeddings are
+        returned."""
         pass
 
     @abstractmethod
     def query_vectors(
-        self, queries: Sequence[VectorQuery]
+        self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
-        """Given a list of vector queries, return the top-k nearest
-        neighbors for each query."""
-        pass
-
-    @abstractmethod
-    def max_seqid(self) -> SeqId:
-        """Get the maximum SeqID currently indexed by this segment"""
+        """Given a vector query, return the top-k nearest neighbors for vector in the
+        query."""
         pass
 
 
