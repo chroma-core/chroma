@@ -992,7 +992,7 @@ def test_get_include(api):
     items = collection.get(include=["embeddings", "documents"])
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
-    assert items["embeddings"][1][0] == 1.2
+    assert approx_equal(items["embeddings"][1][0], 1.2)
 
     items = collection.get(include=[])
     assert items["documents"] is None
