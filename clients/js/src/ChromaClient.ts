@@ -223,6 +223,10 @@ export class ChromaClient {
             .then(handleSuccess)
             .catch(handleError);
 
+        if (response.error) {
+            throw new Error(response.error);
+        }
+
         return new Collection(
             response.name,
             response.id,

@@ -17,7 +17,8 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component
-from overrides import override
+import chromadb.utils.embedding_functions as ef
+
 
 
 class API(Component, ABC):
@@ -52,7 +53,7 @@ class API(Component, ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a new collection in the database
@@ -86,7 +87,7 @@ class API(Component, ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Calls create_collection with get_or_create=True.
            If the collection exists, but with different metadata, the metadata will be replaced.
@@ -105,7 +106,7 @@ class API(Component, ABC):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Gets a collection from the database by either name or uuid
 
