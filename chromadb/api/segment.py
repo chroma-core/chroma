@@ -457,7 +457,7 @@ def _records(
             embedding=embeddings[i] if embeddings else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
-            operation=t.Operation.ADD,
+            operation=operation,
         )
         yield record
 
