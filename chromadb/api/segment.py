@@ -290,8 +290,8 @@ class SegmentAPI(API):
         return GetResult(
             ids=[r["id"] for r in records],
             embeddings=[r["embedding"] for r in vectors] if vectors else None,
-            metadatas=_clean_metadatas(metadatas) if metadatas else None,  # type: ignore
-            documents=documents if documents else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            documents=documents if "documents" in include else None,  # type: ignore
         )
 
     @override
