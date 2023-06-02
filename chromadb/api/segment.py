@@ -13,6 +13,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     IDs,
     Embeddings,
+    Embedding,
     Metadatas,
     Documents,
     Where,
@@ -26,7 +27,7 @@ from chromadb.api.types import (
 
 import chromadb.types as t
 
-from typing import Optional, Sequence, Generator
+from typing import Optional, Sequence, Generator, List, cast, Set
 from overrides import override
 from uuid import UUID, uuid4
 import pandas as pd
@@ -281,11 +282,16 @@ class SegmentAPI(API):
         # It is possible to have a set of records, some with metadata and some without
         # Same with documents
 
+        metadatas = [r["metadata"] for r in records]
+
+        if "documents" in include:
+            documents = [_doc(m) for m in metadatas]
+
         return GetResult(
             ids=[r["id"] for r in records],
             embeddings=[r["embedding"] for r in vectors] if vectors else None,
-            metadatas=[r["metadata"] for r in records],  # type: ignore
-            documents=[_doc(r) for r in records] if "documents" in include else None,  # type: ignore
+            metadatas=metadatas if metadatas else None,  # type: ignore
+            documents=documents if documents else None,  # type: ignore
         )
 
     @override
@@ -327,7 +333,61 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
-        raise NotImplementedError()
+        allowed_ids = None
+
+        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
+
+        if where or where_document:
+            records = metadata_reader.get_metadata(
+                where=where, where_document=where_document
+            )
+            allowed_ids = [r["id"] for r in records]
+
+        query = t.VectorQuery(
+            vectors=query_embeddings,
+            k=n_results,
+            allowed_ids=allowed_ids,
+            include_embeddings="embeddings" in include,
+            options=None,
+        )
+
+        vector_reader = self._manager.get_segment(collection_id, VectorReader)
+        results = vector_reader.query_vectors(query)
+
+        ids: List[List[str]] = []
+        distances: List[List[float]] = []
+        embeddings: List[List[Embedding]] = []
+        documents: List[List[str]] = []
+        metadatas: List[List[t.Metadata]] = []
+
+        for result in results:
+            ids.append([r["id"] for r in result])
+            if "distances" in include:
+                distances.append([r["distance"] for r in result])
+            if "embeddings" in include:
+                embeddings.append([cast(Embedding, r["embedding"]) for r in result])
+
+        if "documents" in include or "metadatas" in include:
+            all_ids: Set[str] = set()
+            for id_list in ids:
+                all_ids.update(id_list)
+            records = metadata_reader.get_metadata(ids=list(all_ids))
+            metadata_by_id = {r["id"]: r["metadata"] for r in records}
+            for id_list in ids:
+                metadata_list = [metadata_by_id[id] for id in id_list]
+                if "metadatas" in include:
+                    metadatas.append(metadata_list)  # type: ignore
+                if "documents" in include:
+                    doc_list = [_doc(m) for m in metadata_list]
+                    documents.append(doc_list)  # type: ignore
+
+        return QueryResult(
+            ids=ids,
+            distances=distances if distances else None,
+            metadatas=metadatas if metadatas else None,
+            embeddings=embeddings if embeddings else None,
+            documents=documents if documents else None,
+        )
 
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
@@ -402,10 +462,9 @@ def _records(
         yield record
 
 
-def _doc(record: t.MetadataEmbeddingRecord) -> Optional[str]:
-    """Retrieve the document (if any) from a MetadataEmbeddingRecord"""
-    if "metadata" in record:
-        metadata = record["metadata"]
-        if metadata and "chroma:document" in metadata:
-            return str(metadata["chroma:document"])
+def _doc(metadata: Optional[t.Metadata]) -> Optional[str]:
+    """Retrieve the document (if any) from a Metadata map"""
+
+    if metadata and "chroma:document" in metadata:
+        return str(metadata["chroma:document"])
     return None
