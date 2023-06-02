@@ -8,6 +8,14 @@ from overrides import EnforceOverrides, override
 from graphlib import TopologicalSorter
 import inspect
 
+# The thin client will have a flag to control which implementations to use
+is_thin_client = False
+try:
+    from chromadb.is_thin_client import is_thin_client  # type: ignore
+except ImportError:
+    is_thin_client = False
+
+
 logger = logging.getLogger(__name__)
 
 _legacy_config_values = {

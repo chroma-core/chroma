@@ -9,6 +9,11 @@ import numpy.typing as npt
 import importlib
 from typing import Optional
 
+try:
+    from chromadb.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
+
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
     # Since we do dynamic imports we have to type this as Any
@@ -309,7 +314,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
                 tar.extractall(self.DOWNLOAD_PATH)
 
 
-DefaultEmbeddingFunction = ONNXMiniLM_L6_V2
+def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction]:
+    if is_thin_client:
+        return None
+    else:
+        return ONNXMiniLM_L6_V2()
 
 
 class GooglePalmEmbeddingFunction(EmbeddingFunction):

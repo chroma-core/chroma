@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, Mapping, Dict
+from typing import Optional, Union, Sequence, Dict, Mapping
 from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum

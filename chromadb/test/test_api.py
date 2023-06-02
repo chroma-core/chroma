@@ -8,7 +8,6 @@ import tempfile
 import numpy as np
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
-    ONNXMiniLM_L6_V2,
 )
 
 
@@ -1168,10 +1167,6 @@ def test_default_embedding():
     docs = ["this is a test" for _ in range(64)]
     embeddings = embedding_function(docs)
     assert len(embeddings) == 64
-
-
-def test_default_ef_is_onnx_mini_l6_v2():
-    assert DefaultEmbeddingFunction == ONNXMiniLM_L6_V2
 
 
 def test_multiple_collections(api):
