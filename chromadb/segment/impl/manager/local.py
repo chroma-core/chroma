@@ -81,9 +81,12 @@ class LocalSegmentManager(SegmentManager):
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
             self._sysdb.delete_segment(segment["id"])
-            del self._instances[segment["id"]]
-            del self._segment_cache[collection_id][segment["scope"]]
-            del self._segment_cache[collection_id]
+            if segment["id"] in self._instances:
+                del self._instances[segment["id"]]
+            if collection_id in self._segment_cache:
+                if segment["scope"] in self._segment_cache[collection_id]:
+                    del self._segment_cache[collection_id][segment["scope"]]
+                del self._segment_cache[collection_id]
 
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
