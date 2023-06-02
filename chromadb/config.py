@@ -122,7 +122,7 @@ class Component(ABC, EnforceOverrides):
         logger.debug(f"Starting component {self.__class__.__name__}")
         self._running = True
 
-    def reset(self) -> None:
+    def reset_state(self) -> None:
         """Reset this component's state to its initial blank state. Only intended to be
         called from tests."""
         logger.debug(f"Resetting component {self.__class__.__name__}")
@@ -181,11 +181,12 @@ class System(Component):
             component.stop()
 
     @override
-    def reset(self) -> None:
+    def reset_state(self) -> None:
+        """Reset the state of this system and all constituents in reverse dependency order"""
         if not self.settings.allow_reset:
             raise ValueError("Resetting is not allowed by this configuration")
-        for component in self.components():
-            component.reset()
+        for component in reversed(list(self.components())):
+            component.reset_state()
 
 
 C = TypeVar("C")

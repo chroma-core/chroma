@@ -409,7 +409,7 @@ class DuckDB(Clickhouse):
 
     # TODO: This method should share logic with clickhouse impl
     @override
-    def reset(self):
+    def reset_state(self):
         self._conn.execute("DROP TABLE collections")
         self._conn.execute("DROP TABLE embeddings")
         self._create_table_collections(self._conn)
@@ -524,8 +524,8 @@ class PersistentDuckDB(DuckDB):
         pass
 
     @override
-    def reset(self):
-        super().reset()
+    def reset_state(self):
+        super().reset_state()
         # empty the save folder
         import shutil
         import os

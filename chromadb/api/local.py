@@ -435,14 +435,15 @@ class LocalAPI(API):
         return self._db.count(collection_id)
 
     @override
-    def reset(self) -> None:
+    def reset(self) -> bool:
         """Reset the database. This will delete all collections and items.
 
         Returns:
             True if the database was reset successfully
 
         """
-        self._db.reset()
+        self._db.reset_state()
+        return True
 
     @override
     def _query(

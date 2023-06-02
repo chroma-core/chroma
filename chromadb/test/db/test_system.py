@@ -49,7 +49,7 @@ sample_collections = [
 
 
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
-    sysdb.reset()
+    sysdb.reset_state()
 
     for collection in sample_collections:
         sysdb.create_collection(collection)
@@ -118,7 +118,7 @@ def test_update_collections(sysdb: SysDB) -> None:
         metadata=metadata,
     )
 
-    sysdb.reset()
+    sysdb.reset_state()
 
     sysdb.create_collection(coll)
 
@@ -188,7 +188,7 @@ sample_segments = [
 
 
 def test_create_get_delete_segments(sysdb: SysDB) -> None:
-    sysdb.reset()
+    sysdb.reset_state()
 
     for collection in sample_collections:
         sysdb.create_collection(collection)
@@ -262,7 +262,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         metadata=metadata,
     )
 
-    sysdb.reset()
+    sysdb.reset_state()
     for c in sample_collections:
         sysdb.create_collection(c)
 

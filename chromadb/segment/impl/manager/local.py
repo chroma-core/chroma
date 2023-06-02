@@ -57,12 +57,12 @@ class LocalSegmentManager(SegmentManager):
         super().stop()
 
     @override
-    def reset(self) -> None:
+    def reset_state(self) -> None:
         for instance in self._instances.values():
             instance.stop()
         self._instances = {}
         self._segment_cache = defaultdict(dict)
-        super().reset()
+        super().reset_state()
 
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:

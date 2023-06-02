@@ -317,6 +317,11 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
+    def reset(self) -> bool:
+        """Persist the database to disk"""
+        pass
+
+    @abstractmethod
     def get_version(self) -> str:
         """Get the version of Chroma.
 

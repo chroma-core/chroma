@@ -338,6 +338,11 @@ class SegmentAPI(API):
         return __version__
 
     @override
+    def reset(self) -> bool:
+        self._system.reset_state()
+        return True
+
+    @override
     def raw_sql(self, sql: str) -> pd.DataFrame:
         raise NotImplementedError()
 

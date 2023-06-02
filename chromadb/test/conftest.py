@@ -161,6 +161,6 @@ def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
 
 @pytest.fixture(scope="function")
 def api(system: System) -> Generator[API, None, None]:
-    system.reset()
+    system.reset_state()
     api = system.instance(API)
     yield api

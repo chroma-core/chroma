@@ -83,7 +83,7 @@ def sync(segment: VectorReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -116,7 +116,7 @@ def approx_equal_vector(a: Vector, b: Vector, epsilon: float = 0.0001) -> bool:
 def test_get_vectors(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -159,7 +159,7 @@ def test_get_vectors(
 def test_ann_query(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -210,7 +210,7 @@ def test_ann_query(
 def test_delete(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -341,7 +341,7 @@ def _test_update(
 def test_update(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -372,7 +372,7 @@ def test_update(
 def test_upsert(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])

@@ -100,7 +100,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         return TxWrapper(self._conn, stack=self._tx_stack)
 
     @override
-    def reset(self) -> None:
+    def reset_state(self) -> None:
         if not self._settings.require("allow_reset"):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
@@ -110,7 +110,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         if db_file != ":memory:":
             os.remove(db_file)
         self.start()
-        super().reset()
+        super().reset_state()
 
     @override
     def setup_migrations(self) -> None:

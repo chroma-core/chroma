@@ -106,7 +106,7 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -144,7 +144,7 @@ def assert_equiv_records(
 def test_get(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -242,7 +242,7 @@ def test_get(
 def test_fulltext(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -304,7 +304,7 @@ def test_fulltext(
 def test_delete(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -367,7 +367,7 @@ def test_delete(
 def test_update(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -395,7 +395,7 @@ def test_update(
 def test_upsert(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
