@@ -99,7 +99,7 @@ class VectorQuery(TypedDict):
     k: int
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
-    options: Optional[dict[str, Union[str, int, float]]]
+    options: Optional[Dict[str, Union[str, int, float]]]
 
 
 class VectorQueryResult(TypedDict):
