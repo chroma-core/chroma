@@ -32,18 +32,21 @@ sample_collections = [
         name="test_collection_1",
         topic="test_topic_1",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+        dimension=128,
     ),
     Collection(
         id=uuid.uuid4(),
         name="test_collection_2",
         topic="test_topic_2",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
+        dimension=None,
     ),
     Collection(
         id=uuid.uuid4(),
         name="test_collection_3",
         topic="test_topic_3",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
+        dimension=None,
     ),
 ]
 
@@ -116,6 +119,7 @@ def test_update_collections(sysdb: SysDB) -> None:
         name="test_collection_1",
         topic="test_topic_1",
         metadata=metadata,
+        dimension=None,
     )
 
     sysdb.reset_state()
@@ -132,6 +136,12 @@ def test_update_collections(sysdb: SysDB) -> None:
     coll["topic"] = "new_topic"
     sysdb.update_collection(coll["id"], topic=coll["topic"])
     result = sysdb.get_collections(topic=coll["topic"])
+    assert result == [coll]
+
+    # Update dimension
+    coll["dimension"] = 128
+    sysdb.update_collection(coll["id"], dimension=coll["dimension"])
+    result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
     # Reset the metadata

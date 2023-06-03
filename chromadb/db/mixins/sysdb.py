@@ -76,11 +76,17 @@ class SqlSysDB(SqlDB, SysDB):
             insert_collection = (
                 self.querybuilder()
                 .into(collections)
-                .columns(collections.id, collections.topic, collections.name)
+                .columns(
+                    collections.id,
+                    collections.topic,
+                    collections.name,
+                    collections.dimension,
+                )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["topic"]),
                     ParameterValue(collection["name"]),
+                    ParameterValue(collection["dimension"]),
                 )
             )
             sql, params = get_sql(insert_collection, self.parameter_format())
@@ -185,6 +191,7 @@ class SqlSysDB(SqlDB, SysDB):
                 collections_t.id,
                 collections_t.name,
                 collections_t.topic,
+                collections_t.dimension,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -211,6 +218,7 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(collection_rows)
                 name = str(rows[0][1])
                 topic = str(rows[0][2])
+                dimension = int(rows[0][3]) if rows[0][3] else None
                 metadata = self._metadata_from_rows(rows)
                 collections.append(
                     Collection(
@@ -218,6 +226,7 @@ class SqlSysDB(SqlDB, SysDB):
                         topic=topic,
                         name=name,
                         metadata=metadata,
+                        dimension=dimension,
                     )
                 )
 
@@ -317,6 +326,7 @@ class SqlSysDB(SqlDB, SysDB):
         id: UUID,
         topic: OptionalArgument[Optional[str]] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
+        dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         collections_t = Table("collections")
@@ -333,6 +343,9 @@ class SqlSysDB(SqlDB, SysDB):
 
         if not name == Unspecified():
             q = q.set(collections_t.name, ParameterValue(name))
+
+        if not dimension == Unspecified():
+            q = q.set(collections_t.dimension, ParameterValue(dimension))
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())

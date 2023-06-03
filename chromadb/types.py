@@ -26,6 +26,7 @@ class Collection(TypedDict):
     name: str
     topic: str
     metadata: Optional[Metadata]
+    dimension: Optional[int]
 
 
 class Segment(TypedDict):

@@ -7,6 +7,7 @@ from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 import chromadb.api.local as old_api
 from chromadb import __version__
+from chromadb.errors import InvalidDimensionException, InvalidCollectionException
 
 from chromadb.api.types import (
     CollectionMetadata,
@@ -27,7 +28,7 @@ from chromadb.api.types import (
 
 import chromadb.types as t
 
-from typing import Optional, Sequence, Generator, List, cast, Set
+from typing import Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
 import pandas as pd
@@ -46,6 +47,7 @@ class SegmentAPI(API):
     _telemetry_client: Telemetry
     _tenant_id: str
     _topic_ns: str
+    _collection_cache: Dict[UUID, t.Collection]
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -55,6 +57,7 @@ class SegmentAPI(API):
         self._producer = self.require(Producer)
         self._tenant_id = system.settings.tenant_id
         self._topic_ns = system.settings.topic_namespace
+        self._collection_cache = {}
 
     @override
     def heartbeat(self) -> int:
@@ -95,7 +98,9 @@ class SegmentAPI(API):
             validate_metadata(metadata)
 
         id = uuid4()
-        coll = t.Collection(id=id, name=name, metadata=metadata, topic=self._topic(id))
+        coll = t.Collection(
+            id=id, name=name, metadata=metadata, topic=self._topic(id), dimension=None
+        )
         self._producer.create_topic(coll["topic"])
         segments = self._manager.create_segments(coll)
         self._sysdb.create_collection(coll)
@@ -193,6 +198,8 @@ class SegmentAPI(API):
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
             self._producer.delete_topic(existing[0]["topic"])
+            if existing and existing[0]["id"] in self._collection_cache:
+                del self._collection_cache[existing[0]["id"]]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -206,10 +213,11 @@ class SegmentAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        topic = self._topic(collection_id)
+        coll = self._get_collection(collection_id)
 
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
-            self._producer.submit_embedding(topic, r)
+            self._validate_embedding_record(coll, r)
+            self._producer.submit_embedding(coll["topic"], r)
 
         return True
 
@@ -222,9 +230,11 @@ class SegmentAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        topic = self._topic(collection_id)
+        coll = self._get_collection(collection_id)
+
         for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
-            self._producer.submit_embedding(topic, r)
+            self._validate_embedding_record(coll, r)
+            self._producer.submit_embedding(coll["topic"], r)
 
         return True
 
@@ -238,9 +248,10 @@ class SegmentAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        topic = self._topic(collection_id)
+        coll = self._get_collection(collection_id)
         for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
-            self._producer.submit_embedding(topic, r)
+            self._validate_embedding_record(coll, r)
+            self._producer.submit_embedding(coll["topic"], r)
 
         return True
 
@@ -305,6 +316,8 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
+        coll = self._get_collection(collection_id)
+
         # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
         # time a bad idea?
         if (where or where_document) or not ids:
@@ -317,7 +330,8 @@ class SegmentAPI(API):
             ids_to_delete = ids
 
         for r in _records(t.Operation.DELETE, ids_to_delete):
-            self._producer.submit_embedding(self._topic(collection_id), r)
+            self._validate_embedding_record(coll, r)
+            self._producer.submit_embedding(coll["topic"], r)
 
         return ids_to_delete
 
@@ -337,6 +351,10 @@ class SegmentAPI(API):
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
         allowed_ids = None
+
+        coll = self._get_collection(collection_id)
+        for embedding in query_embeddings:
+            self._validate_dimension(coll, len(embedding), update=False)
 
         metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
 
@@ -401,6 +419,10 @@ class SegmentAPI(API):
         return __version__
 
     @override
+    def reset_state(self) -> None:
+        self._collection_cache = {}
+
+    @override
     def reset(self) -> bool:
         self._system.reset_state()
         return True
@@ -425,6 +447,45 @@ class SegmentAPI(API):
 
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
+
+    # TODO: This could potentially cause race conditions in a distributed version of the
+    # system, since the cache is only local.
+    def _validate_embedding_record(
+        self, collection: t.Collection, record: t.SubmitEmbeddingRecord
+    ) -> None:
+        """Validate the dimension of an embedding record before submitting it to the system."""
+        if record["embedding"]:
+            self._validate_dimension(collection, len(record["embedding"]), update=True)
+
+    def _validate_dimension(
+        self, collection: t.Collection, dim: int, update: bool
+    ) -> None:
+        """Validate that a collection supports records of the given dimension. If update
+        is true, update the collection if the collection doesn't already have a
+        dimension."""
+
+        if collection["dimension"] is None:
+            if update:
+                id = collection["id"]
+                self._sysdb.update_collection(id=id, dimension=dim)
+                self._collection_cache[id]["dimension"] = dim
+        elif collection["dimension"] != dim:
+            raise InvalidDimensionException(
+                f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
+            )
+        else:
+            return  # all is well
+
+    def _get_collection(self, collection_id: UUID) -> t.Collection:
+        """Read-through cache for collection data"""
+        if collection_id not in self._collection_cache:
+            collections = self._sysdb.get_collections(id=collection_id)
+            if not collections:
+                raise InvalidCollectionException(
+                    f"Collection {collection_id} does not exist."
+                )
+            self._collection_cache[collection_id] = collections[0]
+        return self._collection_cache[collection_id]
 
 
 def _records(
