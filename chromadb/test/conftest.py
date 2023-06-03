@@ -121,7 +121,7 @@ def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
-    settings = Settings()
+    settings = Settings(allow_reset=True)
     system = System(settings)
     system.start()
     yield system
