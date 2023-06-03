@@ -9,11 +9,10 @@ from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
-from chromadb.types import Collection, Segment, SegmentScope
-from typing import Dict, Type, Sequence, cast
+from chromadb.types import Collection, Segment, SegmentScope, Metadata
+from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
-import re
 
 
 class SegmentType(Enum):
@@ -24,10 +23,6 @@ class SegmentType(Enum):
 SEGMENT_TYPE_IMPLS = {
     SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
-}
-
-PROPAGATE_METADATA = {
-    SegmentType.HNSW_LOCAL_MEMORY: [r"^hnsw:.*"],
 }
 
 
@@ -72,21 +67,19 @@ class LocalSegmentManager(SegmentManager):
         metadata_segment = _segment(
             SegmentType.SQLITE, SegmentScope.METADATA, collection
         )
-        self._sysdb.create_segment(vector_segment)
-        self._sysdb.create_segment(metadata_segment)
         return [vector_segment, metadata_segment]
 
     @override
-    def delete_segments(self, collection_id: UUID) -> None:
+    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
-            self._sysdb.delete_segment(segment["id"])
             if segment["id"] in self._instances:
                 del self._instances[segment["id"]]
             if collection_id in self._segment_cache:
                 if segment["scope"] in self._segment_cache[collection_id]:
                     del self._segment_cache[collection_id][segment["scope"]]
                 del self._segment_cache[collection_id]
+        return [s["id"] for s in segments]
 
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
@@ -107,10 +100,14 @@ class LocalSegmentManager(SegmentManager):
         instance = self._instance(self._segment_cache[collection_id][scope])
         return cast(S, instance)
 
+    def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
+        classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
+        cls = get_class(classname, SegmentImplementation)
+        return cls
+
     def _instance(self, segment: Segment) -> SegmentImplementation:
         if segment["id"] not in self._instances:
-            classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
-            cls = get_class(classname, SegmentImplementation)
+            cls = self._cls(segment)
             instance = cls(self._system, segment)
             instance.start()
             self._instances[segment["id"]] = instance
@@ -119,14 +116,11 @@ class LocalSegmentManager(SegmentManager):
 
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
-    metadata = {}
-    regexes = PROPAGATE_METADATA.get(type, [])
-    if collection["metadata"]:
-        for key, value in collection["metadata"].items():
-            for regex in regexes:
-                if re.match(regex, key):
-                    metadata[key] = value
-                    break
+    cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
+    collection_metadata = collection.get("metadata", None)
+    metadata: Optional[Metadata] = None
+    if collection_metadata:
+        metadata = cls.propagate_collection_metadata(collection_metadata)
 
     return Segment(
         id=uuid4(),

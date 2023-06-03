@@ -48,16 +48,6 @@ class HnswParams:
 
     def __init__(self, metadata: Metadata):
         metadata = metadata or {}
-
-        for param, value in metadata.items():
-            if param.startswith("hnsw:"):
-                if param not in param_validators:
-                    raise ValueError(f"Unknown HNSW parameter: {param}")
-                if not param_validators[param](value):
-                    raise ValueError(
-                        f"Invalid value for HNSW parameter: {param} = {value}"
-                    )
-
         self.space = str(metadata.get("hnsw:space", "l2"))
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
         self.search_ef = int(metadata.get("hnsw:search_ef", 10))
@@ -141,6 +131,24 @@ class LocalHnswSegment(VectorReader):
 
         self._lock = Lock()
         super().__init__(system, segment)
+
+    @staticmethod
+    @override
+    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
+        # Extract relevant metadata
+        segment_metadata = {}
+        for param, value in metadata.items():
+            if param.startswith("hnsw:"):
+                segment_metadata[param] = value
+
+        # Validate it
+        for param, value in segment_metadata.items():
+            if param not in param_validators:
+                raise ValueError(f"Unknown HNSW parameter: {param}")
+            if not param_validators[param](value):
+                raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+
+        return segment_metadata
 
     @override
     def start(self) -> None:

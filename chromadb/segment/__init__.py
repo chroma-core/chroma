@@ -10,6 +10,7 @@ from chromadb.types import (
     VectorQueryResult,
     Segment,
     SeqId,
+    Metadata,
 )
 from chromadb.config import Component, System
 from uuid import UUID
@@ -29,6 +30,13 @@ class SegmentImplementation(Component):
     def max_seqid(self) -> SeqId:
         """Get the maximum SeqID currently indexed by this segment"""
         pass
+
+    @staticmethod
+    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
+        """Given an arbitrary metadata map (e.g, from a collection), validate it and
+        return metadata (if any) that is applicable and should be applied to the
+        segment. Validation errors will be reported to the user."""
+        return None
 
 
 S = TypeVar("S", bound=SegmentImplementation)
@@ -76,12 +84,14 @@ class SegmentManager(Component):
 
     @abstractmethod
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
-        """Create the segments required for a new collection."""
+        """Return the segments required for a new collection. Returns only segment data,
+        does not persist to the SysDB"""
         pass
 
     @abstractmethod
-    def delete_segments(self, collection_id: UUID) -> None:
-        """Delete all the segments associated with a collection"""
+    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
+        """Delete any local state for all the segments associated with a collection, and
+        returns a sequence of their IDs. Does not update the SysDB."""
         pass
 
     # Future Note: To support time travel, add optional parameters to this method to

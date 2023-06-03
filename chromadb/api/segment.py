@@ -96,9 +96,11 @@ class SegmentAPI(API):
 
         id = uuid4()
         coll = t.Collection(id=id, name=name, metadata=metadata, topic=self._topic(id))
-        self._sysdb.create_collection(coll)
-        self._manager.create_segments(coll)
         self._producer.create_topic(coll["topic"])
+        segments = self._manager.create_segments(coll)
+        self._sysdb.create_collection(coll)
+        for segment in segments:
+            self._sysdb.create_segment(segment)
 
         return Collection(
             client=self,
@@ -188,7 +190,8 @@ class SegmentAPI(API):
 
         if existing:
             self._sysdb.delete_collection(existing[0]["id"])
-            self._manager.delete_segments(existing[0]["id"])
+            for s in self._manager.delete_segments(existing[0]["id"]):
+                self._sysdb.delete_segment(s)
             self._producer.delete_topic(existing[0]["topic"])
         else:
             raise ValueError(f"Collection {name} does not exist.")
