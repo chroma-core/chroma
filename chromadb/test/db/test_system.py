@@ -134,21 +134,9 @@ def test_update_collections(sysdb: SysDB) -> None:
     result = sysdb.get_collections(topic=coll["topic"])
     assert result == [coll]
 
-    # Add a new metadata key
-    metadata["test_str2"] = "str2"
-    sysdb.update_collection(coll["id"], metadata={"test_str2": "str2"})
-    result = sysdb.get_collections(id=coll["id"])
-    assert result == [coll]
-
-    # Update a metadata key
-    metadata["test_str"] = "str3"
-    sysdb.update_collection(coll["id"], metadata={"test_str": "str3"})
-    result = sysdb.get_collections(id=coll["id"])
-    assert result == [coll]
-
-    # Delete a metadata key
-    del metadata["test_str"]
-    sysdb.update_collection(coll["id"], metadata={"test_str": None})
+    # Reset the metadata
+    coll["metadata"] = {"test_str2": "str2"}
+    sysdb.update_collection(coll["id"], metadata=coll["metadata"])
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 

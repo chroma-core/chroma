@@ -339,7 +339,11 @@ class SqlSysDB(SqlDB, SysDB):
             if sql:  # pypika emits a blank string if nothing to do
                 cur.execute(sql, params)
 
-            if metadata is None:
+            # TODO: Update to use better semantics where it's possible to update
+            # individual keys without wiping all the existing metadata.
+
+            # For now, follow current legancy semantics where metadata is fully reset
+            if metadata != Unspecified():
                 q = (
                     self.querybuilder()
                     .from_(metadata_t)
@@ -350,16 +354,16 @@ class SqlSysDB(SqlDB, SysDB):
                 )
                 sql, params = get_sql(q, self.parameter_format())
                 cur.execute(sql, params)
-            elif metadata != Unspecified():
-                metadata = cast(UpdateMetadata, metadata)
-                self._insert_metadata(
-                    cur,
-                    metadata_t,
-                    metadata_t.collection_id,
-                    id,
-                    metadata,
-                    set(metadata.keys()),
-                )
+                if metadata is not None:
+                    metadata = cast(UpdateMetadata, metadata)
+                    self._insert_metadata(
+                        cur,
+                        metadata_t,
+                        metadata_t.collection_id,
+                        id,
+                        metadata,
+                        set(metadata.keys()),
+                    )
 
     def _metadata_from_rows(
         self, rows: Sequence[Tuple[Any, ...]]
