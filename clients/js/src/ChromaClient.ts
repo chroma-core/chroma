@@ -1,9 +1,8 @@
-import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
+import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import { handleSuccess, handleError } from "./utils";
-import { Collection } from './Collection';
-import { CollectionMetadata, CollectionType } from './types';
-
+import { Collection } from "./Collection";
+import { CollectionMetadata, CollectionType } from "./types";
 
 export class ChromaClient {
     /**
@@ -73,16 +72,31 @@ export class ChromaClient {
     public async heartbeat(): Promise<number> {
         const response = await this.api.heartbeat();
         let ret = await handleSuccess(response);
-        return ret["nanosecond heartbeat"]
+        return ret["nanosecond heartbeat"];
     }
 
     /**
-     * @ignore
+     * Persists the current state of the database to persistent storage, if applicable.
+     * Throws exception if the database does not require explicit persistence.
+     *
+     * @returns {Promise<Api.Persist200Response>} A promise that resolves when the persist operation is complete.
+     *
+     * @example
+     * ```typescript
+     * await client.persist();
+     * ```
      */
-    public async persist(): Promise<never> {
-        throw new Error("Not implemented in JS client");
+    public async persist(): Promise<Api.Persist200Response> {
+        const response = await this.api
+            .persist()
+            .then(handleSuccess)
+            .catch(handleError);
+        if (response.error) {
+            throw new Error(response.error);
+        } else {
+            return response;
+        }
     }
-
     /**
      * Creates a new collection with the specified properties.
      *
@@ -107,11 +121,11 @@ export class ChromaClient {
     public async createCollection({
         name,
         metadata,
-        embeddingFunction
+        embeddingFunction,
     }: {
-        name: string,
-        metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
+        name: string;
+        metadata?: CollectionMetadata;
+        embeddingFunction?: IEmbeddingFunction;
     }): Promise<Collection> {
         const newCollection = await this.api
             .createCollection({
@@ -125,7 +139,13 @@ export class ChromaClient {
             throw new Error(newCollection.error);
         }
 
-        return new Collection(name, newCollection.id, this.api, metadata, embeddingFunction);
+        return new Collection(
+            name,
+            newCollection.id,
+            this.api,
+            metadata,
+            embeddingFunction
+        );
     }
 
     /**
@@ -152,17 +172,17 @@ export class ChromaClient {
     public async getOrCreateCollection({
         name,
         metadata,
-        embeddingFunction
+        embeddingFunction,
     }: {
-        name: string,
-        metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
+        name: string;
+        metadata?: CollectionMetadata;
+        embeddingFunction?: IEmbeddingFunction;
     }): Promise<Collection> {
         const newCollection = await this.api
             .createCollection({
                 name,
                 metadata,
-                'get_or_create': true
+                get_or_create: true,
             })
             .then(handleSuccess)
             .catch(handleError);
@@ -213,10 +233,10 @@ export class ChromaClient {
      */
     public async getCollection({
         name,
-        embeddingFunction
+        embeddingFunction,
     }: {
         name: string;
-        embeddingFunction?: IEmbeddingFunction
+        embeddingFunction?: IEmbeddingFunction;
     }): Promise<Collection> {
         const response = await this.api
             .getCollection(name)
@@ -250,15 +270,10 @@ export class ChromaClient {
      * });
      * ```
      */
-    public async deleteCollection({
-        name
-    }: {
-        name: string
-    }): Promise<void> {
+    public async deleteCollection({ name }: { name: string }): Promise<void> {
         return await this.api
             .deleteCollection(name)
             .then(handleSuccess)
             .catch(handleError);
     }
-
 }
