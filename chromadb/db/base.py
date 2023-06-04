@@ -6,13 +6,30 @@ from threading import local
 from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
-import itertools
+from chromadb.config import System, Component
+from uuid import UUID
+from itertools import islice, count
+
+
+class NotFoundError(Exception):
+    """Raised when a delete or update operation affects no rows"""
+
+    pass
+
+
+class UniqueConstraintError(Exception):
+    """Raised when an insert operation would violate a unique constraint"""
+
+    pass
 
 
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
 
     def execute(self, sql: str, params: Optional[Tuple[Any, ...]] = None) -> Self:
+        ...
+
+    def executescript(self, script: str) -> Self:
         ...
 
     def executemany(
@@ -49,19 +66,15 @@ class TxWrapper(ABC, EnforceOverrides):
         pass
 
 
-class SqlDB(ABC, EnforceOverrides):
+class SqlDB(Component):
     """DBAPI 2.0 interface wrapper to ensure consistent behavior between implementations"""
+
+    def __init__(self, system: System):
+        super().__init__(system)
 
     @abstractmethod
     def tx(self) -> TxWrapper:
         """Return a transaction wrapper"""
-        pass
-
-    @abstractmethod
-    def reset(self) -> None:
-        """Reset the database to a clean state. Implementations may throw an exception
-        if they do not support reset. In all cases, implementations should respect the
-        `allow_reset` config setting and throw an exception if it is set to False."""
         pass
 
     @staticmethod
@@ -81,6 +94,29 @@ class SqlDB(ABC, EnforceOverrides):
         """
         pass
 
+    @staticmethod
+    @abstractmethod
+    def uuid_to_db(uuid: Optional[UUID]) -> Optional[Any]:
+        """Convert a UUID to a value that can be passed to the DB driver"""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def uuid_from_db(value: Optional[Any]) -> Optional[UUID]:
+        """Convert a value from the DB driver to a UUID"""
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def unique_constraint_error() -> Type[BaseException]:
+        """Return the exception type that the DB raises when a unique constraint is
+        violated"""
+        pass
+
+    def param(self, idx: int) -> pypika.Parameter:
+        """Return a PyPika Parameter object for the given index"""
+        return pypika.Parameter(self.parameter_format().format(idx))
+
 
 _context = local()
 
@@ -97,8 +133,15 @@ class ParameterValue(pypika.Parameter):  # type: ignore
 
     @override
     def get_sql(self, **kwargs: Any) -> str:
-        _context.values.append(self.value)
-        val = _context.formatstr.format(next(_context.generator))
+        if isinstance(self.value, (list, tuple)):
+            _context.values.extend(self.value)
+            indexes = islice(_context.generator, len(self.value))
+            placeholders = ", ".join(_context.formatstr.format(i) for i in indexes)
+            val = f"({placeholders})"
+        else:
+            _context.values.append(self.value)
+            val = _context.formatstr.format(next(_context.generator))
+
         return str(val)
 
 
@@ -142,7 +185,7 @@ def get_sql(
     """
 
     _context.values = []
-    _context.generator = itertools.count(1)
+    _context.generator = count(1)
     _context.formatstr = formatstr
     sql = query.get_sql()
     params = tuple(_context.values)

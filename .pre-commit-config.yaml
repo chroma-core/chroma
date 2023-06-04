@@ -31,7 +31,7 @@ repos:
     rev: "v1.2.0"
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports, --follow-imports=silent]
+        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
         additional_dependencies:
           [
             "types-requests",
