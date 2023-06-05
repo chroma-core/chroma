@@ -1,15 +1,19 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Optional, List, Dict, Union
+from typing import Any, Optional, List, Dict, Union
 from typing_extensions import TypedDict
 import numpy as np
+import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.errors import InvalidDefinition
+from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
+
+from chromadb.api.types import Documents, Embeddings, Metadata
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -53,6 +57,39 @@ class RecordSet(TypedDict):
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
+class NormalizedRecordSet(TypedDict):
+    """
+    A RecordSet, with all fields normalized to lists.
+    """
+
+    ids: List[types.ID]
+    embeddings: Optional[types.Embeddings]
+    metadatas: Optional[List[types.Metadata]]
+    documents: Optional[List[types.Document]]
+
+
+class StateMachineRecordSet(TypedDict):
+    """
+    Represents the internal state of a state machine in hypothesis tests.
+    """
+
+    ids: List[types.ID]
+    embeddings: types.Embeddings
+    metadatas: List[Optional[types.Metadata]]
+    documents: List[Optional[types.Document]]
+
+
+class Record(TypedDict):
+    """
+    A single generated record.
+    """
+
+    id: types.ID
+    embedding: Optional[types.Embedding]
+    metadata: Optional[types.Metadata]
+    document: Optional[types.Document]
+
+
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
 # TODO: support empty strings everywhere
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
@@ -66,13 +103,23 @@ safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1
 )  # TODO: handle longs
 safe_floats = st.floats(
-    allow_infinity=False, allow_nan=False, allow_subnormal=False
+    allow_infinity=False,
+    allow_nan=False,
+    allow_subnormal=False,
+    min_value=-1e6,
+    max_value=1e6,
 )  # TODO: handle infinity and NAN
 
-safe_values = [safe_text, safe_integers, safe_floats]
+safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+    safe_text,
+    safe_integers,
+    safe_floats,
+]
 
 
-def one_or_both(strategy_a, strategy_b):
+def one_or_both(
+    strategy_a: st.SearchStrategy[Any], strategy_b: st.SearchStrategy[Any]
+) -> st.SearchStrategy[Any]:
     return st.one_of(
         st.tuples(strategy_a, strategy_b),
         st.tuples(strategy_a, st.none()),
@@ -90,12 +137,12 @@ int_types = [np.int16, np.int32, np.int64]  # TODO: handle int types
 
 
 @st.composite
-def collection_name(draw) -> str:
+def collection_name(draw: st.DrawFn) -> str:
     _collection_name_re = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{1,60}[a-zA-Z0-9]$")
     _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
     _two_periods_re = re.compile(r"\.\.")
 
-    name = draw(st.from_regex(_collection_name_re))
+    name: str = draw(st.from_regex(_collection_name_re))
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
 
@@ -109,8 +156,12 @@ collection_metadata = st.one_of(
 
 # TODO: Use a hypothesis strategy while maintaining embedding uniqueness
 #       Or handle duplicate embeddings within a known epsilon
-def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings:
-    return (
+def create_embeddings(
+    dim: int,
+    count: int,
+    dtype: npt.DTypeLike,
+) -> types.Embeddings:
+    embeddings: types.Embeddings = (
         np.random.uniform(
             low=-1.0,
             high=1.0,
@@ -120,9 +171,11 @@ def create_embeddings(dim: int, count: int, dtype: np.dtype) -> types.Embeddings
         .tolist()
     )
 
+    return embeddings
+
 
 class hashing_embedding_function(types.EmbeddingFunction):
-    def __init__(self, dim: int, dtype: np.dtype) -> None:
+    def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
         self.dtype = dtype
 
@@ -138,14 +191,21 @@ class hashing_embedding_function(types.EmbeddingFunction):
         ]
 
         # Convert the hex strings to dtype
-        return np.array(
+        embeddings: types.Embeddings = np.array(
             [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
             dtype=self.dtype,
         ).tolist()
 
+        return embeddings
+
+
+class not_implemented_embedding_function(types.EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        assert False, "This embedding function is not implemented"
+
 
 def embedding_function_strategy(
-    dim: int, dtype: np.dtype
+    dim: int, dtype: npt.DTypeLike
 ) -> st.SearchStrategy[types.EmbeddingFunction]:
     return st.just(hashing_embedding_function(dim, dtype))
 
@@ -155,8 +215,8 @@ class Collection:
     name: str
     metadata: Optional[types.Metadata]
     dimension: int
-    dtype: np.dtype
-    known_metadata_keys: Dict[str, st.SearchStrategy]
+    dtype: npt.DTypeLike
+    known_metadata_keys: types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
@@ -165,9 +225,9 @@ class Collection:
 
 @st.composite
 def collections(
-    draw,
-    add_filterable_data=False,
-    with_hnsw_params=False,
+    draw: st.DrawFn,
+    add_filterable_data: bool = False,
+    with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
 ) -> Collection:
@@ -190,14 +250,15 @@ def collections(
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
             metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
-    known_metadata_keys = {}
+    known_metadata_keys: Dict[str, Union[int, str, float]] = {}
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
-            known_metadata_keys[key] = draw(st.sampled_from(safe_values))
+            known_metadata_keys[key] = draw(st.one_of(*safe_values))
 
     if has_documents is None:
         has_documents = draw(st.booleans())
+    assert has_documents is not None
     if has_documents and add_filterable_data:
         known_document_keywords = draw(st.lists(safe_text, min_size=5, max_size=5))
     else:
@@ -208,6 +269,7 @@ def collections(
     else:
         if has_embeddings is None:
             has_embeddings = draw(st.booleans())
+    assert has_embeddings is not None
 
     embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
@@ -225,25 +287,26 @@ def collections(
 
 
 @st.composite
-def metadata(draw, collection: Collection):
+def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
-    md = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
+    metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
     # Then, remove keys that overlap with the known keys for the coll
     # to avoid type errors when comparing.
     if collection.known_metadata_keys:
         for key in collection.known_metadata_keys.keys():
-            if key in md:
-                del md[key]
+            if key in metadata:
+                del metadata[key]
         # Finally, add in some of the known keys for the collection
-        md.update(
-            draw(st.fixed_dictionaries({}, optional=collection.known_metadata_keys))
-        )
-    return md
+        sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
+            k: st.just(v) for k, v in collection.known_metadata_keys.items()
+        }
+        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))
+    return metadata
 
 
 @st.composite
-def document(draw, collection: Collection):
+def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
 
     if collection.known_document_keywords:
@@ -257,60 +320,53 @@ def document(draw, collection: Collection):
 
 
 @st.composite
-def record(draw, collection: Collection, id_strategy=safe_text):
-    md = draw(metadata(collection))
-
-    if collection.has_embeddings:
-        embedding = create_embeddings(collection.dimension, 1, collection.dtype)[0]
-    else:
-        embedding = None
-    if collection.has_documents:
-        doc = draw(document(collection))
-    else:
-        doc = None
-
-    return {
-        "id": draw(id_strategy),
-        "embedding": embedding,
-        "metadata": md,
-        "document": doc,
-    }
-
-
-@st.composite
 def recordsets(
-    draw,
-    collection_strategy=collections(),
-    id_strategy=safe_text,
-    min_size=1,
-    max_size=50,
+    draw: st.DrawFn,
+    collection_strategy: SearchStrategy[Collection] = collections(),
+    id_strategy: SearchStrategy[str] = safe_text,
+    min_size: int = 1,
+    max_size: int = 50,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    records = draw(
-        st.lists(record(collection, id_strategy), min_size=min_size, max_size=max_size)
+    ids = list(
+        draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
-    records = {r["id"]: r for r in records}.values()  # Remove duplicates
-
-    ids = [r["id"] for r in records]
-    embeddings = (
-        [r["embedding"] for r in records] if collection.has_embeddings else None
+    embeddings: Optional[Embeddings] = None
+    if collection.has_embeddings:
+        embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
+    metadatas = draw(
+        st.lists(metadata(collection), min_size=len(ids), max_size=len(ids))
     )
-    metadatas = [r["metadata"] for r in records]
-    documents = [r["document"] for r in records] if collection.has_documents else None
+    documents: Optional[Documents] = None
+    if collection.has_documents:
+        documents = draw(
+            st.lists(document(collection), min_size=len(ids), max_size=len(ids))
+        )
 
     # in the case where we have a single record, sometimes exercise
-    # the code that handles individual values rather than lists
-    if len(records) == 1:
-        if draw(st.booleans()):
-            ids = ids[0]
-        if collection.has_embeddings and draw(st.booleans()):
-            embeddings = embeddings[0]
-        if draw(st.booleans()):
-            metadatas = metadatas[0]
-        if collection.has_documents and draw(st.booleans()):
-            documents = documents[0]
+    # the code that handles individual values rather than lists.
+    # In this case, any field may be a list or a single value.
+    if len(ids) == 1:
+        single_id: Union[str, List[str]] = ids[0] if draw(st.booleans()) else ids
+        single_embedding = (
+            embeddings[0]
+            if embeddings is not None and draw(st.booleans())
+            else embeddings
+        )
+        single_metadata: Union[Metadata, List[Metadata]] = (
+            metadatas[0] if draw(st.booleans()) else metadatas
+        )
+        single_document = (
+            documents[0] if documents is not None and draw(st.booleans()) else documents
+        )
+        return {
+            "ids": single_id,
+            "embeddings": single_embedding,
+            "metadatas": single_metadata,
+            "documents": single_document,
+        }
 
     return {
         "ids": ids,
@@ -325,11 +381,11 @@ def recordsets(
 # enable/disable rules. Disabled rules cause the entire test to be marked invalida and,
 # combined with the complexity of our other strategies, leads to an
 # unacceptably increased incidence of hypothesis.errors.Unsatisfiable.
-class DeterministicRuleStrategy(SearchStrategy):
-    def __init__(self, machine):
-        super().__init__()
+class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
+    def __init__(self, machine: RuleBasedStateMachine) -> None:
+        super().__init__()  # type: ignore
         self.machine = machine
-        self.rules = list(machine.rules())
+        self.rules = list(machine.rules())  # type: ignore
 
         # The order is a bit arbitrary. Primarily we're trying to group rules
         # that write to the same location together, and to put rules with no
@@ -346,13 +402,13 @@ class DeterministicRuleStrategy(SearchStrategy):
             )
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{}(machine={}({{...}}))".format(
             self.__class__.__name__,
             self.machine.__class__.__name__,
         )
 
-    def do_draw(self, data):
+    def do_draw(self, data):  # type: ignore
         if not any(self.is_valid(rule) for rule in self.rules):
             msg = f"No progress can be made from state {self.machine!r}"
             raise InvalidDefinition(msg) from None
@@ -361,31 +417,34 @@ class DeterministicRuleStrategy(SearchStrategy):
         argdata = data.draw(rule.arguments_strategy)
         return (rule, argdata)
 
-    def is_valid(self, rule):
+    def is_valid(self, rule) -> bool:  # type: ignore
         if not all(precond(self.machine) for precond in rule.preconditions):
             return False
 
         for b in rule.bundles:
-            bundle = self.machine.bundle(b.name)
+            bundle = self.machine.bundle(b.name)  # type: ignore
             if not bundle:
                 return False
         return True
 
 
 @st.composite
-def where_clause(draw, collection):
+def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
 
     known_keys = sorted(collection.known_metadata_keys.keys())
 
     key = draw(st.sampled_from(known_keys))
-    value = draw(collection.known_metadata_keys[key])
+    value = collection.known_metadata_keys[key]
 
-    legal_ops = [None, "$eq", "$ne"]
+    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
     if not isinstance(value, str):
-        legal_ops = ["$gt", "$lt", "$lte", "$gte"] + legal_ops
+        legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
+    if isinstance(value, float):
+        # Add or subtract a small number to avoid floating point rounding errors
+        value = value + draw(st.sampled_from([1e-6, -1e-6]))
 
-    op = draw(st.sampled_from(legal_ops))
+    op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
     if op is None:
         return {key: value}
@@ -394,7 +453,7 @@ def where_clause(draw, collection):
 
 
 @st.composite
-def where_doc_clause(draw, collection):
+def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
     if collection.known_document_keywords:
         word = draw(st.sampled_from(collection.known_document_keywords))
@@ -403,36 +462,60 @@ def where_doc_clause(draw, collection):
     return {"$contains": word}
 
 
-@st.composite
-def binary_operator_clause(draw, base_st):
-    op = draw(st.sampled_from(["$and", "$or"]))
-    return {op: [draw(base_st), draw(base_st)]}
+def binary_operator_clause(
+    base_st: SearchStrategy[types.Where],
+) -> SearchStrategy[types.Where]:
+    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    return st.dictionaries(
+        keys=op,
+        values=st.lists(base_st, max_size=2, min_size=2),
+        min_size=1,
+        max_size=1,
+    )
+
+
+def binary_document_operator_clause(
+    base_st: SearchStrategy[types.WhereDocument],
+) -> SearchStrategy[types.WhereDocument]:
+    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    return st.dictionaries(
+        keys=op,
+        values=st.lists(base_st, max_size=2, min_size=2),
+        min_size=1,
+        max_size=1,
+    )
 
 
 @st.composite
-def recursive_where_clause(draw, collection):
+def recursive_where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     base_st = where_clause(collection)
-    return draw(st.recursive(base_st, binary_operator_clause))
+    where: types.Where = draw(st.recursive(base_st, binary_operator_clause))
+    return where
 
 
 @st.composite
-def recursive_where_doc_clause(draw, collection):
+def recursive_where_doc_clause(
+    draw: st.DrawFn, collection: Collection
+) -> types.WhereDocument:
     base_st = where_doc_clause(collection)
-    return draw(st.recursive(base_st, binary_operator_clause))
+    where: types.WhereDocument = draw(
+        st.recursive(base_st, binary_document_operator_clause)
+    )
+    return where
 
 
 class Filter(TypedDict):
-    where: Optional[Dict[str, Union[str, int, float]]]
+    where: Optional[types.Where]
     ids: Optional[Union[str, List[str]]]
     where_document: Optional[types.WhereDocument]
 
 
 @st.composite
 def filters(
-    draw,
+    draw: st.DrawFn,
     collection_st: st.SearchStrategy[Collection],
     recordset_st: st.SearchStrategy[RecordSet],
-    include_all_ids=False,
+    include_all_ids: bool = False,
 ) -> Filter:
     collection = draw(collection_st)
     recordset = draw(recordset_st)
@@ -442,10 +525,12 @@ def filters(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
 
-    ids = recordset["ids"]
+    ids: Optional[Union[List[types.ID], types.ID]]
     # Record sets can be a value instead of a list of values if there is only one record
-    if isinstance(ids, str):
-        ids = [ids]
+    if isinstance(recordset["ids"], str):
+        ids = [recordset["ids"]]
+    else:
+        ids = recordset["ids"]
 
     if not include_all_ids:
         ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
