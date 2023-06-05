@@ -13,14 +13,11 @@ repos:
       - id: check-case-conflict
       - id: check-docstring-first
 
-
   - repo: https://github.com/psf/black
     # https://github.com/psf/black/issues/2493
-    rev: 'refs/tags/23.3.0:refs/tags/23.3.0'
+    rev: "refs/tags/23.3.0:refs/tags/23.3.0"
     hooks:
       - id: black
-
-
 
   - repo: https://github.com/PyCQA/flake8
     rev: 6.0.0
@@ -31,8 +28,16 @@ repos:
           - "--max-line-length=88"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.2.0'
+    rev: "v1.2.0"
     hooks:
-    -   id: mypy
+      - id: mypy
         args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
-        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest"]
+        additional_dependencies:
+          [
+            "types-requests",
+            "pydantic",
+            "overrides",
+            "hypothesis",
+            "pytest",
+            "numpy",
+          ]

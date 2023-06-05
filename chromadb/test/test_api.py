@@ -860,24 +860,23 @@ def test_where_logical_operators(api):
 
     items = collection.get(
         where={
-            "$or": [
+            "$and": [
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 3}},
-                        {"string_value": {"$eq": "three"}},
+                    "$or": [
+                        {"int_value": {"$eq": 1}},
+                        {"string_value": {"$eq": "two"}},
                     ]
                 },
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 4}},
-                        {"string_value": {"$eq": "four"}},
+                    "$or": [
+                        {"int_value": {"$eq": 2}},
+                        {"string_value": {"$eq": "one"}},
                     ]
                 },
-            ],
-            "$and": [{"is": "doc"}, {"string_value": "four"}],
+            ]
         }
     )
-    assert len(items["metadatas"]) == 1
+    assert len(items["metadatas"]) == 2
 
 
 def test_where_document_logical_operators(api):
