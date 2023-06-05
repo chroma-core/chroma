@@ -76,10 +76,10 @@ class Collection(BaseModel):
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
-            embedding: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
-            metadata: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
-            ids: The ids to associate with the embeddings. Optional.
+            increment_index: Whether or not to increment the index. Defaults to True. Optional.
 
         Returns:
             None
