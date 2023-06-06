@@ -156,32 +156,32 @@ class FastAPI(chromadb.server.Server):
     def app(self) -> fastapi.FastAPI:
         return self._app
 
-    def root(self) -> Dict[str, int]:
+    async def root(self) -> Dict[str, int]:
         return {"nanosecond heartbeat": self._api.heartbeat()}
 
-    def heartbeat(self) -> Dict[str, int]:
+    async def heartbeat(self) -> Dict[str, int]:
         return self.root()
 
-    def persist(self) -> None:
+    async def persist(self) -> None:
         self._api.persist()
 
-    def version(self) -> str:
+    async def version(self) -> str:
         return self._api.get_version()
 
-    def list_collections(self) -> Sequence[Collection]:
+    async def list_collections(self) -> Sequence[Collection]:
         return self._api.list_collections()
 
-    def create_collection(self, collection: CreateCollection) -> Collection:
+    async def create_collection(self, collection: CreateCollection) -> Collection:
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
         )
 
-    def get_collection(self, collection_name: str) -> Collection:
+    async def get_collection(self, collection_name: str) -> Collection:
         return self._api.get_collection(collection_name)
 
-    def update_collection(
+    async def update_collection(
         self, collection_id: str, collection: UpdateCollection
     ) -> None:
         return self._api._modify(
@@ -190,10 +190,10 @@ class FastAPI(chromadb.server.Server):
             new_metadata=collection.new_metadata,
         )
 
-    def delete_collection(self, collection_name: str) -> None:
+    async def delete_collection(self, collection_name: str) -> None:
         return self._api.delete_collection(collection_name)
 
-    def add(self, collection_id: str, add: AddEmbedding) -> None:
+    async def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:
             result = self._api._add(
                 collection_id=_uuid(collection_id),
@@ -207,7 +207,7 @@ class FastAPI(chromadb.server.Server):
             raise HTTPException(status_code=500, detail=str(e))
         return result
 
-    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
+    async def update(self, collection_id: str, add: UpdateEmbedding) -> None:
         return self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
@@ -216,7 +216,7 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
-    def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
+    async def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
         return self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
@@ -226,7 +226,7 @@ class FastAPI(chromadb.server.Server):
             increment_index=upsert.increment_index,
         )
 
-    def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
+    async def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
         return self._api._get(
             collection_id=_uuid(collection_id),
             ids=get.ids,
@@ -238,7 +238,7 @@ class FastAPI(chromadb.server.Server):
             include=get.include,
         )
 
-    def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
+    async def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
         return self._api._delete(
             where=delete.where,
             ids=delete.ids,
@@ -246,13 +246,13 @@ class FastAPI(chromadb.server.Server):
             where_document=delete.where_document,
         )
 
-    def count(self, collection_id: str) -> int:
+    async def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
 
-    def reset(self) -> bool:
+    async def reset(self) -> bool:
         return self._api.reset()
 
-    def get_nearest_neighbors(
+    async def get_nearest_neighbors(
         self, collection_id: str, query: QueryEmbedding
     ) -> QueryResult:
         nnresult = self._api._query(
@@ -265,8 +265,8 @@ class FastAPI(chromadb.server.Server):
         )
         return nnresult
 
-    def raw_sql(self, raw_sql: RawSql) -> pd.DataFrame:
+    async def raw_sql(self, raw_sql: RawSql) -> pd.DataFrame:
         return self._api.raw_sql(raw_sql.raw_sql)
 
-    def create_index(self, collection_name: str) -> bool:
+    async def create_index(self, collection_name: str) -> bool:
         return self._api.create_index(collection_name)
