@@ -350,6 +350,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction):
             for text in texts
         ]
 
+
 class GoogleVertexEmbeddingFunction(EmbeddingFunction):
     # Follow API Quickstart for Google Vertex AI
     # https://cloud.google.com/vertex-ai/docs/generative-ai/start/quickstarts/api-quickstart
