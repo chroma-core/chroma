@@ -78,7 +78,7 @@ class MigratableDB(SqlDB):
 
     def __init__(self, system: System) -> None:
         self._settings = system.settings
-        super().__init__()
+        super().__init__(system)
 
     @staticmethod
     @abstractmethod

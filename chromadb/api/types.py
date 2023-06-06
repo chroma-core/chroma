@@ -1,16 +1,27 @@
 from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.types import (
+    Metadata,
+    Vector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+)
+
+# Re-export types from chromadb.types
+__all__ = ["Metadata", "Where", "WhereDocument"]
 
 ID = str
 IDs = List[ID]
 
-Number = Union[int, float]
-Embedding = List[Number]
+Embedding = Vector
 Embeddings = List[Embedding]
 
-
-Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
 CollectionMetadata = Dict[Any, Any]
@@ -22,20 +33,24 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
-
-# Grammar for where expressions
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
+# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
+# However, this provokes an incompatibility with the Overrides library and Python 3.7
+Include = List[
+    Union[
+        Literal["documents"],
+        Literal["embeddings"],
+        Literal["metadatas"],
+        Literal["distances"],
+    ]
 ]
 
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+# Re-export types from chromadb.types
+LiteralValue = LiteralValue
+LogicalOperator = LogicalOperator
+WhereOperator = WhereOperator
+OperatorExpression = OperatorExpression
+Where = Where
+WhereDocumentOperator = WhereDocumentOperator
 
 
 class GetResult(TypedDict):
@@ -135,6 +150,8 @@ def validate_where(where: Where) -> Where:
     """
     if not isinstance(where, dict):
         raise ValueError(f"Expected where to be a dict, got {where}")
+    if len(where) != 1:
+        raise ValueError(f"Expected where to have exactly one operator, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")

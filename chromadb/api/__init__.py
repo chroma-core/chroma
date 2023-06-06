@@ -16,15 +16,12 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
+from chromadb.config import Component
 import chromadb.utils.embedding_functions as ef
-from chromadb.telemetry import Telemetry
+from overrides import override
 
 
-class API(ABC):
-    @abstractmethod
-    def __init__(self, telemetry_client: Telemetry):
-        pass
-
+class API(Component, ABC):
     @abstractmethod
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive
@@ -289,15 +286,16 @@ class API(ABC):
         """
         pass
 
+    @override
     @abstractmethod
-    def reset(self) -> bool:
+    def reset(self) -> None:
         """Resets the database
         ⚠️ This is destructive and will delete all data in the database.
         Args:
             None
 
         Returns:
-            True if the reset was successful
+            None
         """
         pass
 

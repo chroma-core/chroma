@@ -1,15 +1,18 @@
+from multiprocessing.connection import Connection
 import sys
 import os
 import shutil
 import subprocess
 import tempfile
-from typing import Generator, Tuple
+from types import ModuleType
+from typing import Callable, Generator, List, Tuple
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
 from chromadb.api import API
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -25,28 +28,30 @@ version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 def _patch_uppercase_coll_name(
     collection: strategies.Collection, embeddings: strategies.RecordSet
-):
+) -> None:
     """Old versions didn't handle uppercase characters in collection names"""
     collection.name = collection.name.lower()
 
 
 def _patch_empty_dict_metadata(
     collection: strategies.Collection, embeddings: strategies.RecordSet
-):
+) -> None:
     """Old versions do the wrong thing when metadata is a single empty dict"""
     if embeddings["metadatas"] == {}:
         embeddings["metadatas"] = None
 
 
-version_patches = [
+version_patches: List[
+    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
+] = [
     ("0.3.21", _patch_uppercase_coll_name),
     ("0.3.21", _patch_empty_dict_metadata),
 ]
 
 
 def patch_for_version(
-    version, collection: strategies.Collection, embeddings: strategies.RecordSet
-):
+    version: str, collection: strategies.Collection, embeddings: strategies.RecordSet
+) -> None:
     """Override aspects of the collection and embeddings, before testing, to account for
     breaking changes in old versions."""
 
@@ -57,7 +62,7 @@ def patch_for_version(
             patch(collection, embeddings)
 
 
-def versions():
+def versions() -> List[str]:
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
     data = json.load(request.urlopen(request.Request(url)))
@@ -68,7 +73,7 @@ def versions():
     return [MINIMUM_VERSION, versions[-1]]
 
 
-def configurations(versions):
+def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
     return [
         (
             version,
@@ -88,7 +93,7 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
-@pytest.fixture(scope="module", params=configurations(test_old_versions))
+@pytest.fixture(scope="module", params=configurations(test_old_versions))  # type: ignore
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
@@ -103,15 +108,15 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
         shutil.rmtree(data_path)
 
 
-def get_path_to_version_install(version):
+def get_path_to_version_install(version: str) -> str:
     return base_install_dir + "/" + version
 
 
-def get_path_to_version_library(version):
+def get_path_to_version_library(version: str) -> str:
     return get_path_to_version_install(version) + "/chromadb/__init__.py"
 
 
-def install_version(version):
+def install_version(version: str) -> None:
     # Check if already installed
     version_library = get_path_to_version_library(version)
     if os.path.exists(version_library):
@@ -120,7 +125,7 @@ def install_version(version):
     install(f"chromadb=={version}", path)
 
 
-def install(pkg, path):
+def install(pkg: str, path: str) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
     print(f"Installing chromadb version {pkg} to {path}")
@@ -138,7 +143,7 @@ def install(pkg, path):
     )
 
 
-def switch_to_version(version):
+def switch_to_version(version: str) -> ModuleType:
     module_name = "chromadb"
     # Remove old version from sys.modules, except test modules
     old_modules = {
@@ -158,13 +163,18 @@ def switch_to_version(version):
     return chromadb
 
 
+class not_implemented_ef(EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        assert False, "Embedding function should not be called"
+
+
 def persist_generated_data_with_old_version(
-    version,
-    settings,
+    version: str,
+    settings: Settings,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
-    conn,
-):
+    conn: Connection,
+) -> None:
     try:
         old_module = switch_to_version(version)
         api: API = old_module.Client(settings)
@@ -172,7 +182,8 @@ def persist_generated_data_with_old_version(
         coll = api.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
-            embedding_function=lambda x: None,
+            # In order to test old versions, we can't rely on the not_implemented function
+            embedding_function=not_implemented_ef(),
         )
         coll.add(**embeddings_strategy)
         # We can't use the invariants module here because it uses the current version
@@ -195,7 +206,7 @@ def persist_generated_data_with_old_version(
 
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
-collection_st = st.shared(
+collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )
 
@@ -214,7 +225,7 @@ def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
-):
+) -> None:
     # # Test backwards compatibility
     # # For the current version, ensure that we can load a collection from
     # # the previous versions
@@ -246,7 +257,8 @@ def test_cycle_versions(
     # are preserved for the collection
     api = Client(settings)
     coll = api.get_collection(
-        name=collection_strategy.name, embedding_function=lambda x: None
+        name=collection_strategy.name,
+        embedding_function=not_implemented_ef(),
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
