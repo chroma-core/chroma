@@ -6,6 +6,7 @@ on:
       - '*'
     branches:
       - main
+      - feat/303-docker-hub
 
 env:
   GCR_URI: ghcr.io
