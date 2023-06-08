@@ -10,7 +10,7 @@ on:
 
 env:
   GCR_URI: ghcr.io
-  GCR_IMAGE_NAME: "ghcr.io/buddhikajay/chroma"
+  GCR_IMAGE_NAME: "buddhikajay/chroma"
   DOCKER_HUB_IMAGE_NAME: "buddhikajay/chroma"
 
 jobs:
@@ -55,21 +55,19 @@ jobs:
       run: python -m pip install setuptools_scm
     - name: Get Docker Tag
       id: tag
-      run: echo "tag_name=$GCR_IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
-    - name: Build and push prerelease Docker image
-      if: "!startsWith(github.ref, 'refs/tags/')"
-      uses: docker/build-push-action@v3.2.0
-      with:
-        context: .
-        push: true
-        tags: ${{ steps.tag.outputs.tag_name}}
+      run: echo "tag_name=:$(bin/version)" >> $GITHUB_OUTPUT
     - name: Build and push release Docker image
       if: "startsWith(github.ref, 'refs/tags/')"
       uses: docker/build-push-action@v3.2.0
       with:
         context: .
         push: true
-        tags: "${{ steps.tag.outputs.tag_name }},${{ env.GCR_IMAGE_NAME }}:latest"
+        # tags: "${{ steps.tag.outputs.tag_name }},${{ env.GCR_IMAGE_NAME }}:latest"
+        tags: |
+          $DOCKER_HUB_IMAGE_NAME:${{ steps.tag.outputs.tag_name}}
+          $env.GCR_URI/$env.GCR_IMAGE_NAME:${{ steps.tag.outputs.tag_name}}
+          ${{ startsWith(github.ref, 'refs/tags/') && DOCKER_HUB_IMAGE_NAME + ':latest' }}
+          ${{ startsWith(github.ref, 'refs/tags/') && env.GCR_URI + '/'+ env.GCR_IMAGE_NAME + ':latest' }}"
     - name: Get Release Version
       id: version
       run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
