@@ -63,8 +63,8 @@ jobs:
           context: .
           push: true
           tags: |
-            - ${{ format('{0}:{1}', env.DOCKER_HUB_IMAGE_NAME, steps.tag.outputs.tag_name)}}
-            - ${{ format('{0}/{1}:{2}', env.GCR_URI, env.GCR_IMAGE_NAME, steps.tag.outputs.tag_name)}}
+            ${{ format('{0}:{1}', env.DOCKER_HUB_IMAGE_NAME, steps.tag.outputs.tag_name)}}
+            ${{ format('{0}/{1}:{2}', env.GCR_URI, env.GCR_IMAGE_NAME, steps.tag.outputs.tag_name)}}
       - name: Build and push release Docker image
         if: "startsWith(github.ref, 'refs/tags/')"
         uses: docker/build-push-action@v3.2.0
@@ -72,10 +72,10 @@ jobs:
           context: .
           push: true
           tags: |
-            - ${{ format('{0}:{1}', env.DOCKER_HUB_IMAGE_NAME, steps.tag.outputs.tag_name)}}
-            - ${{ format('{0}/{1}:{2}', env.GCR_URI, env.GCR_IMAGE_NAME, steps.tag.outputs.tag_name)}}
-            - ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:latest', env.DOCKER_HUB_IMAGE_NAME) }}
-            - ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:latest', env.GCR_URI, env.GCR_IMAGE_NAME)}}"
+            ${{ format('{0}:{1}', env.DOCKER_HUB_IMAGE_NAME, steps.tag.outputs.tag_name)}}
+            ${{ format('{0}/{1}:{2}', env.GCR_URI, env.GCR_IMAGE_NAME, steps.tag.outputs.tag_name)}}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:latest', env.DOCKER_HUB_IMAGE_NAME) }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:latest', env.GCR_URI, env.GCR_IMAGE_NAME)}}"
       - name: Get Release Version
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
