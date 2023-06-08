@@ -10,8 +10,8 @@ on:
 
 env:
   GCR_URI: ghcr.io
-  GCR_IMAGE_NAME: "buddhikajay/chroma"
-  DOCKER_HUB_IMAGE_NAME: "buddhikajay/chroma"
+  GCR_IMAGE_NAME: "chroma-core/chroma"
+  DOCKER_HUB_IMAGE_NAME: "chromadb/chroma"
 
 jobs:
   build-and-release:
