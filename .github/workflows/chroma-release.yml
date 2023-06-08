@@ -10,8 +10,8 @@ on:
 
 env:
   GCR_URI: ghcr.io
-  GCR_IMAGE_NAME: "chroma-core/chroma"
-  DOCKER_HUB_IMAGE_NAME: "chromadb/chroma"
+  GCR_IMAGE_NAME: ${{ vars.GCR_IMAGE_NAME || 'chroma-core/chroma' }}
+  DOCKER_HUB_IMAGE_NAME: ${{ vars.DOCKER_HUB_IMAGE_NAME || 'chromadb/chroma' }}
 
 jobs:
   build-and-release:
