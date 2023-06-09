@@ -1,0 +1,25 @@
+name: Test ChromaDB action
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+    - name: Start ChromaDB
+      uses: ./
+    - name: Use Node.js 18.x
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18.x'
+    - name: Install dev dependencies
+      run: npm install --save-dev typescript jest
+      working-directory: ./clients/js
+    - name: Build TypeScript files
+      run: tsc
+      working-directory: ./clients/js
+    - name: Run tests
+      run: npm run test:run -- --testPathPattern=test/action
+      working-directory: ./clients/js
