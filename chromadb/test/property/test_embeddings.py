@@ -7,6 +7,7 @@ from chromadb.api.types import Include
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
+from chromadb.db.impl.sqlite import SqliteDB
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
@@ -226,8 +227,12 @@ def test_multi_add(api: API):
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
-    with pytest.raises(errors.IDAlreadyExistsError):
+    # The SQLite backend silently ignores duplicates, no exception is raised
+    if hasattr(api, "_sysdb") and type(api._sysdb) == SqliteDB:
         coll.add(ids=["a"], embeddings=[[0.0]])
+    else:
+        with pytest.raises(errors.IDAlreadyExistsError):
+            coll.add(ids=["a"], embeddings=[[0.0]])
 
     assert coll.count() == 1
 
