@@ -1,0 +1,23 @@
+name: 'ChromaDB'
+description: 'Instantiates a chroma database server.'
+branding:
+  icon: 'database'
+  color: 'yellow'
+  
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout current repository
+      uses: actions/checkout@v2
+
+    - name: Start server by running docker-compose
+      run: docker-compose up -d
+      shell: bash
+
+    - name: Wait for server to be ready
+      run: |
+        while ! curl -s http://localhost:8000 > /dev/null; do
+          echo "Waiting for server..."
+          sleep 5
+        done
+      shell: bash
