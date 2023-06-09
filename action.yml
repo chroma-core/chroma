@@ -10,6 +10,12 @@ runs:
     - name: Checkout current repository
       uses: actions/checkout@v2
 
+    - name: Setup C++ compiler
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++
+      shell: bash
+
     - name: Start server by running docker-compose
       run: docker-compose up -d
       shell: bash
