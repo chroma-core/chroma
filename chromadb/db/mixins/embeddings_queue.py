@@ -111,7 +111,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         else:
             embedding_bytes = None
             encoding = None
-        metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
+        metadata = json.dumps(embedding["metadata"])
 
         t = Table("embeddings_queue")
         insert = (

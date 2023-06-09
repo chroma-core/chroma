@@ -545,8 +545,6 @@ def _clean_metadatas(
 def _clean_metadata(metadata: Optional[t.Metadata]) -> Optional[t.Metadata]:
     """Remove any chroma-specific metadata keys that the client shouldn't see from a
     metadata map."""
-    if not metadata:
-        return None
     result = {}
     for k, v in metadata.items():
         if not k.startswith("chroma:"):
