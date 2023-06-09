@@ -7,8 +7,11 @@ branding:
 runs:
   using: 'composite'
   steps:
-    - name: Checkout current repository
+    - name: Checkout ChromaDB repository
       uses: actions/checkout@v2
+      with:
+        repository: 'CakeCrusher/chroma'
+        path: './chroma' # Clones the repo to a 'chroma' subdirectory
 
     - name: Setup C++ compiler
       run: |
@@ -17,7 +20,7 @@ runs:
       shell: bash
 
     - name: Start server by running docker-compose
-      run: docker-compose up -d
+      run: cd ./chroma && docker-compose up -d
       shell: bash
 
     - name: Wait for server to be ready
