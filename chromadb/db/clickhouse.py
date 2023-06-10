@@ -167,7 +167,7 @@ class Clickhouse(DB):
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
-
+ 
         if len(dupe_check) > 0:
             if get_or_create:
                 if dupe_check[0][2] != metadata:
@@ -393,6 +393,10 @@ class Clickhouse(DB):
             elif type(value) == float:
                 result.append(
                     has_key_and(f" JSONExtractFloat(metadata,'{key}') = {value}")
+                )
+            elif type(value) == bool:
+                result.append(
+                    has_key_and(f" JSONExtractBool(metadata,'{key}') = {value}")
                 )
             # Operator expression
             elif type(value) == dict:

@@ -255,7 +255,7 @@ class Hnswlib(Index):
                 max(curr_elements * self._params.resize_factor, DEFAULT_CAPACITY)
             ),
         )
-        self._index.set_ef(self._params.search_ef)
+        self._index.set_ef(self._params.search_ef) 
         self._index.set_num_threads(self._params.num_threads)
 
     def get_nearest_neighbors(

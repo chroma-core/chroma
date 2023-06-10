@@ -118,7 +118,7 @@ class DuckDB(Clickhouse):
         )
         return [[str(collection_uuid), name, metadata]]
 
-    @override
+    @override 
     def get_collection(self, name: str) -> Sequence:
         res = self._conn.execute(
             """SELECT * FROM collections WHERE name = ?""", [name]
@@ -219,6 +219,10 @@ class DuckDB(Clickhouse):
             if type(value) == float:
                 result.append(
                     f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
+                )
+            if type(value) == bool:
+                result.append(
+                    f" CAST(json_extract(metadata,'$.{key}') AS BOOLEAN) = {value}"
                 )
             # Operator expression
             elif type(value) == dict:

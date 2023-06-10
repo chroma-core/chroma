@@ -115,7 +115,7 @@ class DB(Component):
     @abstractmethod
     def get_nearest_neighbors(
         self,
-        collection_uuid: UUID,
+        collection_uuid: UUID, 
         where: Where = {},
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,

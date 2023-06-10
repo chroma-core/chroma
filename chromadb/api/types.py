@@ -127,9 +127,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float)):
+        if not isinstance(value, (str, int, float, bool)):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata value to be a str, int, float or bool, got {value}"
             )
     return metadata
 

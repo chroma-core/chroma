@@ -25,7 +25,7 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
     key, expr = list(clause.items())[0]
 
     # Handle the shorthand for equal: {key: val} where val is a simple value
-    if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float):
+    if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float) or isinstance(expr, bool):
         return _filter_where_clause({key: {"$eq": expr}}, metadata)
 
     # expr is a list of clauses
