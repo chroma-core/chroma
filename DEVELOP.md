@@ -66,7 +66,7 @@ To run unit tests using your current environment, run `pytest`.
 Github action for running Chroma database server in your workflow:
 ```yml
 - name: Start ChromaDB
-  uses: CakeCrusher/chroma@v1.0.2
+  uses: chroma-core/chroma@v1.0.0
 ```
 Runs the Chroma database server on port `8000`.
 

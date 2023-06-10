@@ -10,8 +10,8 @@ runs:
     - name: Checkout ChromaDB repository
       uses: actions/checkout@v2
       with:
-        repository: 'CakeCrusher/chroma'
-        path: './chroma' # Clones the repo to a 'chroma' subdirectory
+        repository: 'chroma-core/chroma'
+        path: './chroma'
 
     - name: Setup C++ compiler
       run: |
