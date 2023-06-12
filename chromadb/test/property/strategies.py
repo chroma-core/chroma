@@ -246,12 +246,20 @@ def metadata(draw, collection: Collection):
 def document(draw, collection: Collection):
     """Strategy for generating documents that could be a part of the given collection"""
 
+    # Blacklist certain unicode characters that affect sqlite processing.
+    # For example, the null (/x00) character makes sqlite stop processing a string.
+    blacklist_categories = ("Cc", "Cs")
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
-        known_words_st = safe_text
+        known_words_st = st.text(
+            min_size=1,
+            alphabet=st.characters(blacklist_categories=blacklist_categories),
+        )
 
-    random_words_st = safe_text
+    random_words_st = st.text(
+        min_size=1, alphabet=st.characters(blacklist_categories=blacklist_categories)
+    )
     words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
 
