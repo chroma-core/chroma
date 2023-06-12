@@ -35,4 +35,4 @@ repos:
     hooks:
     -   id: mypy
         args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
-        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest"]
+        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika"]

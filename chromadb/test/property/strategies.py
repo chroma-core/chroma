@@ -249,9 +249,9 @@ def document(draw, collection: Collection):
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
-        known_words_st = st.text(min_size=1)
+        known_words_st = safe_text
 
-    random_words_st = st.text(min_size=1)
+    random_words_st = safe_text
     words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
 
