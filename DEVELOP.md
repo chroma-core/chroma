@@ -62,6 +62,14 @@ Unit tests are in the `/chromadb/test` directory.
 
 To run unit tests using your current environment, run `pytest`.
 
+## Github Action
+Github action for running Chroma database server in your workflow:
+```yml
+- name: Start ChromaDB
+  uses: CakeCrusher/chroma@v1.0.2
+```
+Runs the Chroma database server on port `8000`.
+
 ## Manual Build
 
 To manually build a distribution, run `python -m build`.

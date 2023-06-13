@@ -1,8 +1,7 @@
 import { expect, test } from '@jest/globals';
-import { ChromaClient } from "../src/ChromaClient";
+import chroma from './initClient'
 
 test("verify that server is running and functional within runner", async () => {
-  const chroma = new ChromaClient({ path: "http://localhost:8000" });
   const collection = await chroma.createCollection({ name: "test" });
   const preliminaryCount = await collection.count();
   expect(preliminaryCount).toBe(0);

@@ -3,7 +3,7 @@ description: 'Instantiates a chroma database server.'
 branding:
   icon: 'database'
   color: 'yellow'
-  
+
 runs:
   using: 'composite'
   steps:
@@ -11,7 +11,11 @@ runs:
       uses: actions/checkout@v2
       with:
         repository: 'CakeCrusher/chroma'
-        path: './chroma' # Clones the repo to a 'chroma' subdirectory
+        path: './chroma'
+
+    - name: Remove clients directory
+      run: rm -rf ./chroma/clients
+      shell: bash
 
     - name: Setup C++ compiler
       run: |
