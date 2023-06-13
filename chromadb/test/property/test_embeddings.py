@@ -236,7 +236,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                 if normalized_record_set["metadatas"] is not None:
                     # Sqlite merges the metadata, as opposed to old
                     # implementations which overwrites it
-                    # TODO: change to metadb to check for the type
                     record_set_state = self.record_set_state["metadatas"][target_idx]
                     if (
                         hasattr(self.api, "_sysdb")
