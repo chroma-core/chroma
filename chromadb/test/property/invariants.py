@@ -258,13 +258,6 @@ def ann_accuracy(
                     == query_results["documents"][i][j]
                 )
             if normalized_record_set["metadatas"] is not None:
-                if (
-                    normalized_record_set["metadatas"][index]
-                    != query_results["metadatas"][i][j]
-                ):
-                    print(
-                        f"expected: {normalized_record_set['metadatas'][index]}, got: {query_results['metadatas'][i][j]}"
-                    )
                 assert (
                     normalized_record_set["metadatas"][index]
                     == query_results["metadatas"][i][j]
