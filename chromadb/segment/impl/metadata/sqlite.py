@@ -25,7 +25,7 @@ from uuid import UUID
 from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
-from pypika.terms import Criterion
+from pypika.terms import Criterion, Function
 from itertools import islice, groupby
 from functools import reduce
 import sqlite3
@@ -402,6 +402,16 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
+    class EscapedLike(Function):  # type: ignore
+        def __init__(self, column_name: str, search_term: str, escape_char: str = "\\"):
+            self.column_name = column_name
+            self.search_term = search_term
+            self.escape_char = escape_char
+            super().__init__("LIKE", column_name, search_term)
+
+        def get_function_sql(self, **kwargs: Any) -> str:
+            return f"{self.column_name} LIKE {self.search_term} ESCAPE '{self.escape_char}'"
+
     def _where_doc_criterion(
         self,
         q: QueryBuilder,
@@ -423,17 +433,35 @@ class SqliteMetadataSegment(MetadataReader):
                 ]
                 return reduce(lambda x, y: x | y, criteria)
             elif k == "$contains":
-                search_term = f"%{v}%"
+                v = cast(str, v)
+                search_term = f"%{_escape_characters(v)}%"
+
                 sq = (
                     self._db.querybuilder()
                     .from_(fulltext_t)
                     .select(fulltext_t.id)
-                    .where(fulltext_t.string_value.like(ParameterValue(search_term)))
+                    .where(
+                        self.EscapedLike(
+                            fulltext_t.string_value,
+                            ParameterValue(search_term),
+                        )
+                    )
                 )
                 return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
+
+
+def _escape_characters(string: str) -> str:
+    """Escape % and _ characters in a string with a backslash as they are reserved in
+    LIKE clauses"""
+    escaped_string = ""
+    for char in string:
+        if char == "%" or char == "_":
+            escaped_string += "\\"
+        escaped_string += char
+    return escaped_string
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
