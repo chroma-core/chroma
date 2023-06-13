@@ -3,7 +3,6 @@ import time
 from uuid import UUID
 from typing import List, Optional, Sequence, cast
 from chromadb import __version__
-import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
