@@ -3,7 +3,7 @@ description: 'Instantiates a chroma database server.'
 branding:
   icon: 'database'
   color: 'yellow'
-  
+
 runs:
   using: 'composite'
   steps:
@@ -12,6 +12,10 @@ runs:
       with:
         repository: 'chroma-core/chroma'
         path: './chroma'
+
+    - name: Remove clients directory
+      run: rm -rf ./chroma/clients
+      shell: bash
 
     - name: Setup C++ compiler
       run: |
