@@ -19,6 +19,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     CollectionMetadata,
+    validate_metadata,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -107,6 +108,9 @@ class LocalAPI(API):
         """
         check_index_name(name)
 
+        if metadata is not None:
+            validate_metadata(metadata)
+
         res = self._db.create_collection(name, metadata, get_or_create)
         return Collection(
             client=self,
@@ -138,6 +142,10 @@ class LocalAPI(API):
             # collection(name="my_collection", metadata={})
             ```
         """
+
+        if metadata is not None:
+            validate_metadata(metadata)
+
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
         )

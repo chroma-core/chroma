@@ -76,6 +76,9 @@ class SegmentAPI(API):
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
+        if metadata is not None:
+            validate_metadata(metadata)
+
         if existing:
             if get_or_create:
                 if metadata and existing[0]["metadata"] != metadata:
@@ -93,9 +96,6 @@ class SegmentAPI(API):
 
         # backwards compatibility in naming requirements (for now)
         old_api.check_index_name(name)
-
-        if metadata:
-            validate_metadata(metadata)
 
         id = uuid4()
         coll = t.Collection(

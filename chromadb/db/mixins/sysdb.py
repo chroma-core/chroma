@@ -386,11 +386,11 @@ class SqlSysDB(SqlDB, SysDB):
         metadata: Dict[str, Union[str, int, float]] = {}
         for row in rows:
             key = str(row[-4])
-            if row[-3]:
+            if row[-3] is not None:
                 metadata[key] = str(row[-3])
-            elif row[-2]:
+            elif row[-2] is not None:
                 metadata[key] = int(row[-2])
-            elif row[-1]:
+            elif row[-1] is not None:
                 metadata[key] = float(row[-1])
         return metadata or None
 
