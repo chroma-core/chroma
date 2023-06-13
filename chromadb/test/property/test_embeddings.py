@@ -98,7 +98,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         if len(normalized_record_set["ids"]) > 0:
             trace("add_more_embeddings")
 
-        if not self._is_metadata_valid(normalized_record_set):
+        if not invariants.is_metadata_valid(normalized_record_set):
             with pytest.raises(Exception):
                 self.collection.add(**normalized_record_set)
             return multiple()
@@ -159,7 +159,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
-        if not self._is_metadata_valid(normalized_record_set):
+        if not invariants.is_metadata_valid(normalized_record_set):
             with pytest.raises(Exception):
                 self.collection.update(**normalized_record_set)
             return
@@ -184,7 +184,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
-        if not self._is_metadata_valid(normalized_record_set):
+        if not invariants.is_metadata_valid(normalized_record_set):
             with pytest.raises(Exception):
                 self.collection.upsert(**normalized_record_set)
             return
@@ -234,9 +234,20 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                         0
                     ]
                 if normalized_record_set["metadatas"] is not None:
-                    self.record_set_state["metadatas"][
-                        target_idx
-                    ] = normalized_record_set["metadatas"][idx]
+                    # Sqlite merges the metadata, as opposed to old
+                    # implementations which overwrites it
+                    # TODO: change to metadb to check for the type
+                    record_set_state = self.record_set_state["metadatas"][target_idx]
+                    if (
+                        hasattr(self.api, "_sysdb")
+                        and type(self.api._sysdb) == SqliteDB
+                        and record_set_state is not None
+                    ):
+                        record_set_state.update(normalized_record_set["metadatas"][idx])
+                    else:
+                        self.record_set_state["metadatas"][
+                            target_idx
+                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
                     self.record_set_state["documents"][
                         target_idx
@@ -279,13 +290,6 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             del self.record_set_state["metadatas"][i]
             del self.record_set_state["documents"][i]
 
-    def _is_metadata_valid(
-        self, normalized_record_set: strategies.NormalizedRecordSet
-    ) -> bool:
-        if normalized_record_set["metadatas"] is None:
-            return True
-        return not any([len(m) == 0 for m in normalized_record_set["metadatas"]])
-
     def on_state_change(self, new_state: str) -> None:
         pass
 
@@ -302,12 +306,9 @@ def test_multi_add(api: API) -> None:
     coll.add(ids=["a"], embeddings=[[0.0]])
     assert coll.count() == 1
 
-    # The SQLite backend silently ignores duplicates, no exception is raised
-    if hasattr(api, "_sysdb") and type(api._sysdb) == SqliteDB:
-        coll.add(ids=["a"], embeddings=[[0.0]])
-    else:
-        with pytest.raises(errors.IDAlreadyExistsError):
-            coll.add(ids=["a"], embeddings=[[0.0]])
+    # after the sqlite refactor - add silently ignores duplicates, no exception is raised
+    # partial adds are supported - i.e we will add whatever we can in the request
+    coll.add(ids=["a"], embeddings=[[0.0]])
 
     assert coll.count() == 1
 
@@ -352,65 +353,3 @@ def test_escape_chars_in_ids(api: API) -> None:
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
-
-
-import numpy
-
-
-def test_fail(api: API):
-    state = EmbeddingStateMachine(api)
-    state.initialize(
-        collection=strategies.Collection(
-            name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-            },
-            dimension=2,
-            dtype=numpy.float16,
-            known_metadata_keys={},
-            known_document_keywords=[],
-            has_documents=False,
-            has_embeddings=True,
-            embedding_function=lambda texts: [1, 2, 3],
-        )
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    (v1,) = state.add_embeddings(
-        record_set={
-            "ids": ["0"],
-            "embeddings": [[0.09765625, 0.430419921875]],
-            "metadatas": [{"0": "0"}],
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    v2, v3 = state.add_embeddings(
-        record_set={
-            "ids": ["1", "2"],
-            "embeddings": [
-                [0.20556640625, 0.08978271484375],
-                [-0.1527099609375, 0.291748046875],
-            ],
-            "metadatas": [{v1: v1}, {"1": v1}],
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.no_duplicates()
-    state.upsert_embeddings(
-        record_set={
-            "ids": [v3],
-            "embeddings": [[-0.12481689453125, 0.78369140625]],
-            "metadatas": [{v1: v1}],
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.teardown()

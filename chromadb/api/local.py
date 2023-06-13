@@ -252,9 +252,16 @@ class LocalAPI(API):
     ) -> bool:
         existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
         if len(existing_ids) > 0:
-            raise errors.IDAlreadyExistsError(
-                f"IDs {existing_ids} already exist in collection {collection_id}"
-            )
+            # Partially add the items that don't already exist
+            valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
+            if len(valid_indices) == 0:
+                return False
+            ids = [ids[i] for i in valid_indices]
+            embeddings = [embeddings[i] for i in valid_indices]
+            if metadatas is not None:
+                metadatas = [metadatas[i] for i in valid_indices]
+            if documents is not None:
+                documents = [documents[i] for i in valid_indices]
 
         added_uuids = self._db.add(
             collection_id,
