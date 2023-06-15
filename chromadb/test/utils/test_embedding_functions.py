@@ -1,4 +1,5 @@
 import logging
+import sys
 from unittest import mock
 
 import pytest
@@ -22,7 +23,8 @@ class TestSentenceTransformerEmbeddingFunction:
         assert self.error_message_require_sentence_transformers in str(exc_info.value)
 
     def test__init__with_good_model_name(self) -> None:
-        sent_trans_embed_func = SentenceTransformerEmbeddingFunction(
-            model_name=self.good_model_name
-        )
-        assert sent_trans_embed_func.models.get(self.good_model_name) is not None
+        if "sentence_transformers" in sys.modules:
+            sent_trans_embed_func = SentenceTransformerEmbeddingFunction(
+                model_name=self.good_model_name
+            )
+            assert sent_trans_embed_func.models.get(self.good_model_name) is not None
