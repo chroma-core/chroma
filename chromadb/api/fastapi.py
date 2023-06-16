@@ -14,6 +14,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
 )
+import chromadb.utils.embedding_functions as ef
 import pandas as pd
 import requests
 import json
@@ -21,22 +22,27 @@ from typing import Sequence
 from chromadb.api.models.Collection import Collection
 import chromadb.errors as errors
 from uuid import UUID
+from chromadb.telemetry import Telemetry
+from overrides import override
 
 
 class FastAPI(API):
     def __init__(self, system: System):
+        super().__init__(system)
         url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
         self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}:{system.settings.chroma_server_http_port}/api/v1"
-        self._telemetry_client = system.get_telemetry()
+        self._telemetry_client = self.require(Telemetry)
 
+    @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
         resp = requests.get(self._api_url)
         raise_chroma_error(resp)
         return int(resp.json()["nanosecond heartbeat"])
 
+    @override
     def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = requests.get(self._api_url + "/collections")
@@ -48,11 +54,12 @@ class FastAPI(API):
 
         return collections
 
+    @override
     def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
@@ -72,10 +79,11 @@ class FastAPI(API):
             metadata=resp_json["metadata"],
         )
 
+    @override
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Returns a collection"""
         resp = requests.get(self._api_url + "/collections/" + name)
@@ -89,11 +97,12 @@ class FastAPI(API):
             metadata=resp_json["metadata"],
         )
 
+    @override
     def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection, or return it if it exists"""
 
@@ -101,6 +110,7 @@ class FastAPI(API):
             name, metadata, embedding_function, get_or_create=True
         )
 
+    @override
     def _modify(
         self,
         id: UUID,
@@ -114,11 +124,13 @@ class FastAPI(API):
         )
         raise_chroma_error(resp)
 
+    @override
     def delete_collection(self, name: str) -> None:
         """Deletes a collection"""
         resp = requests.delete(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
 
+    @override
     def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database"""
         resp = requests.get(
@@ -127,13 +139,15 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(int, resp.json())
 
-    def _peek(self, collection_id: UUID, limit: int = 10) -> GetResult:
+    @override
+    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(
             collection_id,
-            limit=limit,
+            limit=n,
             include=["embeddings", "documents", "metadatas"],
         )
 
+    @override
     def _get(
         self,
         collection_id: UUID,
@@ -176,6 +190,7 @@ class FastAPI(API):
             documents=body.get("documents", None),
         )
 
+    @override
     def _delete(
         self,
         collection_id: UUID,
@@ -195,6 +210,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(IDs, resp.json())
 
+    @override
     def _add(
         self,
         ids: IDs,
@@ -222,6 +238,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return True
 
+    @override
     def _update(
         self,
         collection_id: UUID,
@@ -250,6 +267,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
+    @override
     def _upsert(
         self,
         collection_id: UUID,
@@ -278,6 +296,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
+    @override
     def _query(
         self,
         collection_id: UUID,
@@ -313,18 +332,20 @@ class FastAPI(API):
             documents=body.get("documents", None),
         )
 
-    def reset(self) -> bool:
+    @override
+    def reset(self) -> None:
         """Resets the database"""
         resp = requests.post(self._api_url + "/reset")
         raise_chroma_error(resp)
-        return cast(bool, resp.json())
 
+    @override
     def persist(self) -> bool:
         """Persists the database"""
         resp = requests.post(self._api_url + "/persist")
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
+    @override
     def raw_sql(self, sql: str) -> pd.DataFrame:
         """Runs a raw SQL query against the database"""
         resp = requests.post(
@@ -333,6 +354,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return pd.DataFrame.from_dict(resp.json())
 
+    @override
     def create_index(self, collection_name: str) -> bool:
         """Creates an index for the given space key"""
         resp = requests.post(
@@ -341,6 +363,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
+    @override
     def get_version(self) -> str:
         """Returns the version of the server"""
         resp = requests.get(self._api_url + "/version")

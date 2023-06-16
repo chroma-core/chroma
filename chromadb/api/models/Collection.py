@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Tuple, cast, List
 from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
+import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     CollectionMetadata,
@@ -45,19 +46,11 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         metadata: Optional[CollectionMetadata] = None,
     ):
         self._client = client
-        if embedding_function is not None:
-            self._embedding_function = embedding_function
-        else:
-            import chromadb.utils.embedding_functions as ef
-
-            logger.warning(
-                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
-            )
-            self._embedding_function = ef.DefaultEmbeddingFunction()
+        self._embedding_function = embedding_function
         super().__init__(name=name, metadata=metadata, id=id)
 
     def __repr__(self) -> str:
