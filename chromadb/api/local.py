@@ -29,6 +29,9 @@ from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 from overrides import override
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # mimics s3 bucket requirements for naming
@@ -249,18 +252,26 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
         if len(existing_ids) > 0:
+            logger.info(f"Adding {len(existing_ids)} items with ids that already exist")
             # Partially add the items that don't already exist
             valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
             if len(valid_indices) == 0:
                 return False
-            ids = [ids[i] for i in valid_indices]
-            embeddings = [embeddings[i] for i in valid_indices]
+            ids = []
+            embeddings = []
             if metadatas is not None:
-                metadatas = [metadatas[i] for i in valid_indices]
+                metadatas = []
             if documents is not None:
-                documents = [documents[i] for i in valid_indices]
+                documents = []
+            for index in valid_indices:
+                ids.append(ids[index])
+                embeddings.append(embeddings[index])
+                if metadatas is not None:
+                    metadatas.append(metadatas[index])
+                if documents is not None:
+                    documents.append(documents[index])
 
         added_uuids = self._db.add(
             collection_id,
