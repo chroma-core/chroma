@@ -150,7 +150,7 @@ class Clickhouse(DB):
         if ids is not None:
             where_clauses.append(
                 f" id IN {tuple(ids)}".replace("'", "''").replace('"', "'")
-                if '"' in str(ids)
+                if '"' in f" id IN {tuple(ids)}"
                 else f" id IN {tuple(ids)}"
                 )
 
