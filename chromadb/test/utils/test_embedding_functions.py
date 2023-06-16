@@ -15,6 +15,14 @@ class TestSentenceTransformerEmbeddingFunction:
         " Please install it with `pip install sentence_transformers`"
     )
     good_model_name = "all-MiniLM-L6-v2"
+    documents = ["document 1", "document 2", "document 3"]
+    embedding_dim = 384
+
+    # this is to add sentence_transformers to sys.modules
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ModuleNotFoundError:
+        pass
 
     def test__init__require_sentence_transformers(self) -> None:
         with mock.patch.dict("sys.modules", sentence_transformers=None):
@@ -28,3 +36,14 @@ class TestSentenceTransformerEmbeddingFunction:
                 model_name=self.good_model_name
             )
             assert sent_trans_embed_func.models.get(self.good_model_name) is not None
+
+    def test_callable_instances(self) -> None:
+        if "sentence_transformers" in sys.modules:
+            sent_trans_embed_func = SentenceTransformerEmbeddingFunction(
+                model_name=self.good_model_name
+            )
+
+            embeddings = sent_trans_embed_func(self.documents)
+            assert len(embeddings) == len(self.documents)
+            for embedding in embeddings:
+                assert len(embedding) == self.embedding_dim
