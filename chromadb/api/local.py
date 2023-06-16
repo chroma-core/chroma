@@ -259,19 +259,25 @@ class LocalAPI(API):
             valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
             if len(valid_indices) == 0:
                 return False
-            ids = []
-            embeddings = []
+            filtered_ids: IDs = []
+            filtered_embeddings: Embeddings = []
             if metadatas is not None:
-                metadatas = []
+                filtered_metadatas: Metadatas = []
             if documents is not None:
-                documents = []
+                filtered_documents: Documents = []
             for index in valid_indices:
-                ids.append(ids[index])
-                embeddings.append(embeddings[index])
+                filtered_ids.append(ids[index])
+                filtered_embeddings.append(embeddings[index])
                 if metadatas is not None:
-                    metadatas.append(metadatas[index])
+                    filtered_metadatas.append(metadatas[index])
                 if documents is not None:
-                    documents.append(documents[index])
+                    filtered_documents.append(documents[index])
+            ids = filtered_ids
+            embeddings = filtered_embeddings
+            if metadatas is not None:
+                metadatas = filtered_metadatas
+            if documents is not None:
+                documents = filtered_documents
 
         added_uuids = self._db.add(
             collection_id,
