@@ -42,7 +42,7 @@ class TestSentenceTransformerEmbeddingFunction:
             sent_trans_embed_func = SentenceTransformerEmbeddingFunction(
                 model_name=self.good_model_name
             )
-
+            assert callable(sent_trans_embed_func)
             embeddings = sent_trans_embed_func(self.documents)
             assert len(embeddings) == len(self.documents)
             for embedding in embeddings:
