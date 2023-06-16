@@ -148,7 +148,11 @@ class Clickhouse(DB):
             where_clauses.extend(where_document_clauses)
 
         if ids is not None:
-            where_clauses.append(f" id IN {tuple(ids)}".replace("'", "''").replace('"', "'"))
+            where_clauses.append(
+                f" id IN {tuple(ids)}".replace("'", "''").replace('"', "'")
+                if '"' in str(ids)
+                else f" id IN {tuple(ids)}"
+                )
 
         where_clauses.append(f"collection_uuid = '{collection_uuid}'")
         where_str = " AND ".join(where_clauses)
