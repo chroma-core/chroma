@@ -1,10 +1,12 @@
 import logging
+import os
 import sys
 from unittest import mock
 
 import pytest
 
 from chromadb.utils.embedding_functions import (
+    OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
     Text2VecEmbeddingFunction,
 )
@@ -93,3 +95,80 @@ class TestText2VecEmbeddingFunction:
             assert len(embeddings) == len(self.documents)
             for embedding in embeddings:
                 assert len(embedding) == self.embedding_dim
+
+
+class TestOpenAIEmbeddingFunction:
+    error_message_require_openai = (
+        "The openai python package is not installed. "
+        "Please install it with `pip install openai`"
+    )
+    error_message_require_openai_api_key = (
+        "Please provide an OpenAI API key. "
+        "You can get one at https://platform.openai.com/account/api-keys"
+    )
+    api_key = os.getenv("OPENAI_API_KEY", default="thisisanapikey")
+    organization_id = "organization_id"
+    api_base = "api_base"
+    api_type = "azure"
+    embedding_dim = 1536
+
+    documents = ["document \n 2"]
+    openai_response = {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": embedding_dim
+                * [
+                    0.00230642,
+                ],
+                "index": 0,
+            }
+        ],
+        "model": "text-embedding-ada-002",
+        "usage": {"prompt_tokens": 2, "total_tokens": 2},
+    }
+
+    try:
+        import openai
+    except ModuleNotFoundError:
+        pass
+
+    def test__init__require_openai(self) -> None:
+        with mock.patch.dict("sys.modules", openai=None):
+            with pytest.raises(ValueError) as exc_info:
+                OpenAIEmbeddingFunction()
+        assert self.error_message_require_openai in str(exc_info.value)
+
+    def test_openai_api_key_is_not_set(self) -> None:
+        if "openai" in sys.modules:
+            with pytest.raises(ValueError) as exc_info:
+                OpenAIEmbeddingFunction()
+            assert self.error_message_require_openai_api_key in str(exc_info.value)
+
+    def test_openai_api_args_are_set(self) -> None:
+        if "openai" in sys.modules:
+            import openai
+
+            OpenAIEmbeddingFunction(
+                api_key=self.api_key,
+                organization_id=self.organization_id,
+                api_base=self.api_base,
+                api_type=self.api_type,
+            )
+
+            assert openai.api_key == self.api_key
+            assert openai.organization == self.organization_id
+            assert openai.api_type == self.api_type
+            assert openai.api_base == self.api_base
+
+    def test_callable_instances(self) -> None:
+        if "openai" in sys.modules:
+            with mock.patch("openai.Embedding.create") as patched_call:
+                patched_call.return_value = self.openai_response
+                openai_embed_func = OpenAIEmbeddingFunction(api_key=self.api_key)
+                assert callable(openai_embed_func)
+                embeddings = openai_embed_func(texts=self.documents)
+                assert len(embeddings) == len(self.documents)
+                for embedding in embeddings:
+                    assert len(embedding) == self.embedding_dim
