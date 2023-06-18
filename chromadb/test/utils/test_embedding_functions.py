@@ -186,7 +186,7 @@ class TestCohereEmbeddingFunction:
 
     cohere_api_response = {
         "id": "7f37d160-945a-4aba-a3cd-3da4d3552eac",
-        "texts": ["document 1", "document 2"],
+        "texts": documents,
         "embeddings": [
             embedding_dim * [0.71386],
             embedding_dim * [-0.40307],
