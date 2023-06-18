@@ -6,6 +6,7 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
@@ -140,7 +141,12 @@ def test_persist(api_fixture, request):
 
 
 def test_heartbeat(api):
-    assert isinstance(api.heartbeat(), int)
+    heartbeat_ns = api.heartbeat()
+    assert isinstance(heartbeat_ns, int)
+
+    heartbeat_s = heartbeat_ns // 10**9
+    heartbeat = datetime.fromtimestamp(heartbeat_s)
+    assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
 batch_records = {
