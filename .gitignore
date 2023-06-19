@@ -22,3 +22,6 @@ dist
 terraform.tfstate
 .hypothesis/
 .idea
+
+# coverage
+.coverage
