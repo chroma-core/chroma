@@ -7,6 +7,7 @@ import pytest
 
 from chromadb.utils.embedding_functions import (
     CohereEmbeddingFunction,
+    HuggingFaceEmbeddingFunction,
     OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
     Text2VecEmbeddingFunction,
@@ -218,6 +219,59 @@ class TestCohereEmbeddingFunction:
                 cohere_embed_func = CohereEmbeddingFunction(api_key=self.api_key)
                 assert callable(cohere_embed_func)
                 embeddings = cohere_embed_func(texts=self.documents)
+                assert len(embeddings) == len(self.documents)
+                for embedding in embeddings:
+                    assert len(embedding) == self.embedding_dim
+
+
+class TestHuggingFaceEmbeddingFunction:
+    error_message_require_requests = (
+        "The requests python package is not installed. "
+        "Please install it with `pip install requests`"
+    )
+    api_key = os.getenv("HUGGINGFACE_TOKEN", default="thisisanapikey")
+    good_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{good_model_name}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    documents = ["document 1", "document 2"]
+    embedding_dim = 10
+    embeddings = [
+        embedding_dim * [0.020755],
+        embedding_dim * [-0.00542279],
+    ]
+
+    try:
+        import requests
+    except ModuleNotFoundError:
+        pass
+
+    def test__init__require_requests(self) -> None:
+        with mock.patch.dict("sys.modules", requests=None):
+            with pytest.raises(ValueError) as exc_info:
+                HuggingFaceEmbeddingFunction(api_key=self.api_key)
+        assert self.error_message_require_requests in str(exc_info.value)
+
+    def test_huggingface_api_args_are_set(self) -> None:
+        if "requests" in sys.modules:
+            huggingface_embed_func = HuggingFaceEmbeddingFunction(api_key=self.api_key)
+            assert huggingface_embed_func._api_url == self.api_url
+            assert huggingface_embed_func._session.headers.get(
+                "Authorization"
+            ) == self.headers.get("Authorization")
+
+    def test_callable_instances(self) -> None:
+        if "requests" in sys.modules:
+            import requests
+
+            huggingface_api_response = requests.models.Response()
+            huggingface_api_response._content = f"{self.embeddings}".encode("ascii")
+            with mock.patch("requests.Session.post") as patched_call:
+                patched_call.return_value = huggingface_api_response
+                huggingface_embed_func = HuggingFaceEmbeddingFunction(
+                    api_key=self.api_key
+                )
+                assert callable(huggingface_embed_func)
+                embeddings = huggingface_embed_func(texts=self.documents)
                 assert len(embeddings) == len(self.documents)
                 for embedding in embeddings:
                     assert len(embedding) == self.embedding_dim
