@@ -5,7 +5,8 @@ from typing import Any, Optional, List, Dict, Union
 from typing_extensions import TypedDict
 import numpy as np
 import numpy.typing as npt
-import chromadb.api.types as types
+import chromadb.api.types as api_types
+import chromadb.types as chromadb_types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from hypothesis.errors import InvalidDefinition
@@ -51,10 +52,10 @@ class RecordSet(TypedDict):
     represent what a user would pass to the API.
     """
 
-    ids: Union[types.ID, List[types.ID]]
-    embeddings: Optional[Union[types.Embeddings, types.Embedding]]
-    metadatas: Optional[Union[List[types.Metadata], types.Metadata]]
-    documents: Optional[Union[List[types.Document], types.Document]]
+    ids: Union[api_types.ID, List[api_types.ID]]
+    embeddings: Optional[Union[api_types.Embeddings, api_types.Embedding]]
+    metadatas: Optional[Union[List[api_types.Metadata], api_types.Metadata]]
+    documents: Optional[Union[List[api_types.Document], api_types.Document]]
 
 
 class NormalizedRecordSet(TypedDict):
@@ -62,10 +63,10 @@ class NormalizedRecordSet(TypedDict):
     A RecordSet, with all fields normalized to lists.
     """
 
-    ids: List[types.ID]
-    embeddings: Optional[types.Embeddings]
-    metadatas: Optional[List[types.Metadata]]
-    documents: Optional[List[types.Document]]
+    ids: List[api_types.ID]
+    embeddings: Optional[api_types.Embeddings]
+    metadatas: Optional[List[api_types.Metadata]]
+    documents: Optional[List[api_types.Document]]
 
 
 class StateMachineRecordSet(TypedDict):
@@ -73,10 +74,10 @@ class StateMachineRecordSet(TypedDict):
     Represents the internal state of a state machine in hypothesis tests.
     """
 
-    ids: List[types.ID]
-    embeddings: types.Embeddings
-    metadatas: List[Optional[types.Metadata]]
-    documents: List[Optional[types.Document]]
+    ids: List[api_types.ID]
+    embeddings: api_types.Embeddings
+    metadatas: List[Optional[api_types.Metadata]]
+    documents: List[Optional[api_types.Document]]
 
 
 class Record(TypedDict):
@@ -84,10 +85,10 @@ class Record(TypedDict):
     A single generated record.
     """
 
-    id: types.ID
-    embedding: Optional[types.Embedding]
-    metadata: Optional[types.Metadata]
-    document: Optional[types.Document]
+    id: api_types.ID
+    embedding: Optional[api_types.Embedding]
+    metadata: Optional[api_types.Metadata]
+    document: Optional[api_types.Document]
 
 
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
@@ -160,8 +161,8 @@ def create_embeddings(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> types.Embeddings:
-    embeddings: types.Embeddings = (
+) -> api_types.Embeddings:
+    embeddings: api_types.Embeddings = (
         np.random.uniform(
             low=-1.0,
             high=1.0,
@@ -174,12 +175,12 @@ def create_embeddings(
     return embeddings
 
 
-class hashing_embedding_function(types.EmbeddingFunction):
+class hashing_embedding_function(api_types.EmbeddingFunction):
     def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
         self.dtype = dtype
 
-    def __call__(self, texts: types.Documents) -> types.Embeddings:
+    def __call__(self, texts: api_types.Documents) -> api_types.Embeddings:
         # Hash the texts and convert to hex strings
         hashed_texts = [
             list(hashlib.sha256(text.encode("utf-8")).hexdigest()) for text in texts
@@ -191,7 +192,7 @@ class hashing_embedding_function(types.EmbeddingFunction):
         ]
 
         # Convert the hex strings to dtype
-        embeddings: types.Embeddings = np.array(
+        embeddings: api_types.Embeddings = np.array(
             [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
             dtype=self.dtype,
         ).tolist()
@@ -199,28 +200,28 @@ class hashing_embedding_function(types.EmbeddingFunction):
         return embeddings
 
 
-class not_implemented_embedding_function(types.EmbeddingFunction):
+class not_implemented_embedding_function(api_types.EmbeddingFunction):
     def __call__(self, texts: Documents) -> Embeddings:
         assert False, "This embedding function is not implemented"
 
 
 def embedding_function_strategy(
     dim: int, dtype: npt.DTypeLike
-) -> st.SearchStrategy[types.EmbeddingFunction]:
+) -> st.SearchStrategy[api_types.EmbeddingFunction]:
     return st.just(hashing_embedding_function(dim, dtype))
 
 
 @dataclass
 class Collection:
     name: str
-    metadata: Optional[types.Metadata]
+    metadata: Optional[api_types.Metadata]
     dimension: int
     dtype: npt.DTypeLike
-    known_metadata_keys: types.Metadata
+    known_metadata_keys: api_types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
-    embedding_function: Optional[types.EmbeddingFunction] = None
+    embedding_function: Optional[api_types.EmbeddingFunction] = None
 
 
 @st.composite
@@ -287,17 +288,17 @@ def collections(
 
 
 @st.composite
-def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
+def metadata(draw: st.DrawFn, collection: Collection) -> api_types.Metadata:
     """Strategy for generating metadata that could be a part of the given collection"""
-    # First draw a random dictionary.
-    metadata: types.Metadata = draw(st.dictionaries(safe_text, st.one_of(*safe_values)))
-    # Then, remove keys that overlap with the known keys for the coll
-    # to avoid type errors when comparing.
+    # First draw a random dictionary, excluding known keys
+    metadata: Dict[str, Union[str, int, float]] = draw(
+        st.dictionaries(
+            safe_text.filter(lambda x: x not in collection.known_metadata_keys.keys()),
+            st.one_of(*safe_values),
+        )
+    )
+    # Then, add in some of the known keys for the collection
     if collection.known_metadata_keys:
-        for key in collection.known_metadata_keys.keys():
-            if key in metadata:
-                del metadata[key]
-        # Finally, add in some of the known keys for the collection
         sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
@@ -306,7 +307,7 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
 
 
 @st.composite
-def document(draw: st.DrawFn, collection: Collection) -> types.Document:
+def document(draw: st.DrawFn, collection: Collection) -> api_types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
 
     # Blacklist certain unicode characters that affect sqlite processing.
@@ -437,7 +438,7 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
 
 
 @st.composite
-def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
+def where_clause(draw: st.DrawFn, collection: Collection) -> api_types.Where:
     """Generate a filter that could be used in a query against the given collection"""
 
     known_keys = sorted(collection.known_metadata_keys.keys())
@@ -452,7 +453,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
 
-    op: types.WhereOperator = draw(st.sampled_from(legal_ops))
+    op: chromadb_types.WhereOperator = draw(st.sampled_from(legal_ops))
 
     if op is None:
         return {key: value}
@@ -461,7 +462,9 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 
 
 @st.composite
-def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
+def where_doc_clause(
+    draw: st.DrawFn, collection: Collection
+) -> api_types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
     if collection.known_document_keywords:
         word = draw(st.sampled_from(collection.known_document_keywords))
@@ -471,9 +474,11 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
 
 
 def binary_operator_clause(
-    base_st: SearchStrategy[types.Where],
-) -> SearchStrategy[types.Where]:
-    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    base_st: SearchStrategy[api_types.Where],
+) -> SearchStrategy[api_types.Where]:
+    op: SearchStrategy[chromadb_types.LogicalOperator] = st.sampled_from(
+        ["$and", "$or"]
+    )
     return st.dictionaries(
         keys=op,
         values=st.lists(base_st, max_size=2, min_size=2),
@@ -483,9 +488,11 @@ def binary_operator_clause(
 
 
 def binary_document_operator_clause(
-    base_st: SearchStrategy[types.WhereDocument],
-) -> SearchStrategy[types.WhereDocument]:
-    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    base_st: SearchStrategy[api_types.WhereDocument],
+) -> SearchStrategy[api_types.WhereDocument]:
+    op: SearchStrategy[chromadb_types.LogicalOperator] = st.sampled_from(
+        ["$and", "$or"]
+    )
     return st.dictionaries(
         keys=op,
         values=st.lists(base_st, max_size=2, min_size=2),
@@ -495,27 +502,27 @@ def binary_document_operator_clause(
 
 
 @st.composite
-def recursive_where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
+def recursive_where_clause(draw: st.DrawFn, collection: Collection) -> api_types.Where:
     base_st = where_clause(collection)
-    where: types.Where = draw(st.recursive(base_st, binary_operator_clause))
+    where: api_types.Where = draw(st.recursive(base_st, binary_operator_clause))
     return where
 
 
 @st.composite
 def recursive_where_doc_clause(
     draw: st.DrawFn, collection: Collection
-) -> types.WhereDocument:
+) -> api_types.WhereDocument:
     base_st = where_doc_clause(collection)
-    where: types.WhereDocument = draw(
+    where: api_types.WhereDocument = draw(
         st.recursive(base_st, binary_document_operator_clause)
     )
     return where
 
 
 class Filter(TypedDict):
-    where: Optional[types.Where]
+    where: Optional[api_types.Where]
     ids: Optional[Union[str, List[str]]]
-    where_document: Optional[types.WhereDocument]
+    where_document: Optional[api_types.WhereDocument]
 
 
 @st.composite
@@ -533,7 +540,7 @@ def filters(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
 
-    ids: Optional[Union[List[types.ID], types.ID]]
+    ids: Optional[Union[List[api_types.ID], api_types.ID]]
     # Record sets can be a value instead of a list of values if there is only one record
     if isinstance(recordset["ids"], str):
         ids = [recordset["ids"]]
