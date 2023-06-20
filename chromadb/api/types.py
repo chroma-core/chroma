@@ -33,7 +33,7 @@ Documents = List[Document]
 
 Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
-OneOrMany = Union[T, List[T]]
+OneOrMany = Union[T, Sequence[T]]
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
@@ -100,7 +100,7 @@ def maybe_cast_one_to_many(
             return [target]  # type: ignore
     # One Metadata dict
     if isinstance(target, dict):
-        return [target]
+        return [target]  # type: ignore
     # Already a sequence
     return target  # type: ignore
 
