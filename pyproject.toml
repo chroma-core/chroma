@@ -41,6 +41,9 @@ target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+  "requires: mark tests that need a specific library"
+]
 
 [project.urls]
 "Homepage" = "https://github.com/chroma-core/chroma"

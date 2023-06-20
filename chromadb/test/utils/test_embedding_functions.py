@@ -17,8 +17,9 @@ from chromadb.utils.embedding_functions import (
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.requires("sentence_transformers")
 class TestSentenceTransformerEmbeddingFunction:
-    error_message_require_sentence_transformers = (
+    error_message_requires_sentence_transformers = (
         "The sentence_transformers python package is not installed."
         " Please install it with `pip install sentence_transformers`"
     )
@@ -32,11 +33,11 @@ class TestSentenceTransformerEmbeddingFunction:
     except ModuleNotFoundError:
         pass
 
-    def test__init__require_sentence_transformers(self) -> None:
+    def test__init__requires_sentence_transformers(self) -> None:
         with mock.patch.dict("sys.modules", sentence_transformers=None):
             with pytest.raises(ValueError) as exc_info:
                 SentenceTransformerEmbeddingFunction(model_name=self.good_model_name)
-        assert self.error_message_require_sentence_transformers in str(exc_info.value)
+        assert self.error_message_requires_sentence_transformers in str(exc_info.value)
 
     def test__init__with_good_model_name(self) -> None:
         if "sentence_transformers" in sys.modules:
@@ -57,8 +58,9 @@ class TestSentenceTransformerEmbeddingFunction:
                 assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires("text2vec")
 class TestText2VecEmbeddingFunction:
-    error_message_require_text2vec = (
+    error_message_requires_text2vec = (
         "The text2vec python package is not installed. "
         "Please install it with `pip install text2vec`"
     )
@@ -71,11 +73,11 @@ class TestText2VecEmbeddingFunction:
     except ModuleNotFoundError:
         pass
 
-    def test__init__require_text2vec(self) -> None:
+    def test__init__requires_text2vec(self) -> None:
         with mock.patch.dict("sys.modules", text2vec=None):
             with pytest.raises(ValueError) as exc_info:
                 Text2VecEmbeddingFunction(model_name=self.good_model_name)
-        assert self.error_message_require_text2vec in str(exc_info.value)
+        assert self.error_message_requires_text2vec in str(exc_info.value)
 
     def test__init__with_good_model_name(self) -> None:
         if "text2vec" in sys.modules:
@@ -100,12 +102,13 @@ class TestText2VecEmbeddingFunction:
                 assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires("openai")
 class TestOpenAIEmbeddingFunction:
-    error_message_require_openai = (
+    error_message_requires_openai = (
         "The openai python package is not installed. "
         "Please install it with `pip install openai`"
     )
-    error_message_require_openai_api_key = (
+    error_message_requires_openai_api_key = (
         "Please provide an OpenAI API key. "
         "You can get one at https://platform.openai.com/account/api-keys"
     )
@@ -137,19 +140,19 @@ class TestOpenAIEmbeddingFunction:
     except ModuleNotFoundError:
         pass
 
-    def test__init__require_openai(self) -> None:
+    def test__init__requires_openai(self) -> None:
         with mock.patch.dict("sys.modules", openai=None):
             with pytest.raises(ValueError) as exc_info:
                 OpenAIEmbeddingFunction()
-        assert self.error_message_require_openai in str(exc_info.value)
+        assert self.error_message_requires_openai in str(exc_info.value)
 
     def test_openai_api_key_is_not_set(self) -> None:
         if "openai" in sys.modules:
             with pytest.raises(ValueError) as exc_info:
                 OpenAIEmbeddingFunction()
-            assert self.error_message_require_openai_api_key in str(exc_info.value)
+            assert self.error_message_requires_openai_api_key in str(exc_info.value)
 
-    def test_openai_api_args_are_set(self) -> None:
+    def test_openai_api_attribs_are_set(self) -> None:
         if "openai" in sys.modules:
             import openai
 
@@ -177,8 +180,9 @@ class TestOpenAIEmbeddingFunction:
                     assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires("cohere")
 class TestCohereEmbeddingFunction:
-    error_message_require_cohere = (
+    error_message_requires_cohere = (
         "The cohere python package is not installed. "
         "Please install it with `pip install cohere`"
     )
@@ -201,11 +205,11 @@ class TestCohereEmbeddingFunction:
     except ModuleNotFoundError:
         pass
 
-    def test__init__require_cohere(self) -> None:
+    def test__init__requires_cohere(self) -> None:
         with mock.patch.dict("sys.modules", cohere=None):
             with pytest.raises(ValueError) as exc_info:
                 CohereEmbeddingFunction(api_key=self.api_key)
-        assert self.error_message_require_cohere in str(exc_info.value)
+        assert self.error_message_requires_cohere in str(exc_info.value)
 
     # TODO: getting cohore embeddings can be achieved by :
     #  `self._client.embed(texts=texts, model=self._model_name).embeddings` without adding a new loop.
@@ -225,8 +229,9 @@ class TestCohereEmbeddingFunction:
                     assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires("requests")
 class TestHuggingFaceEmbeddingFunction:
-    error_message_require_requests = (
+    error_message_requires_requests = (
         "The requests python package is not installed. "
         "Please install it with `pip install requests`"
     )
@@ -246,13 +251,13 @@ class TestHuggingFaceEmbeddingFunction:
     except ModuleNotFoundError:
         pass
 
-    def test__init__require_requests(self) -> None:
+    def test__init__requires_requests(self) -> None:
         with mock.patch.dict("sys.modules", requests=None):
             with pytest.raises(ValueError) as exc_info:
                 HuggingFaceEmbeddingFunction(api_key=self.api_key)
-        assert self.error_message_require_requests in str(exc_info.value)
+        assert self.error_message_requires_requests in str(exc_info.value)
 
-    def test_huggingface_api_args_are_set(self) -> None:
+    def test_huggingface_api_attribs_are_set(self) -> None:
         if "requests" in sys.modules:
             huggingface_embed_func = HuggingFaceEmbeddingFunction(api_key=self.api_key)
             assert huggingface_embed_func._api_url == self.api_url
@@ -278,6 +283,7 @@ class TestHuggingFaceEmbeddingFunction:
                     assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires("InstructorEmbedding")
 class TestInstructorEmbeddingFunction:
     error_message_requires_instructor = (
         "The InstructorEmbedding python package is not installed. "
