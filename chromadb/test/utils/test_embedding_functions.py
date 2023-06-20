@@ -8,6 +8,7 @@ import pytest
 from chromadb.utils.embedding_functions import (
     CohereEmbeddingFunction,
     HuggingFaceEmbeddingFunction,
+    InstructorEmbeddingFunction,
     OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
     Text2VecEmbeddingFunction,
@@ -275,3 +276,60 @@ class TestHuggingFaceEmbeddingFunction:
                 assert len(embeddings) == len(self.documents)
                 for embedding in embeddings:
                     assert len(embedding) == self.embedding_dim
+
+
+class TestInstructorEmbeddingFunction:
+    error_message_requires_instructor = (
+        "The InstructorEmbedding python package is not installed. "
+        "Please install it with `pip install InstructorEmbedding`"
+    )
+    good_model_name = "hkunlp/instructor-base"
+    instruction = "instruction"
+    documents = ["document 1", "document 2"]
+    embedding_dim = 768
+
+    try:
+        from InstructorEmbedding import INSTRUCTOR
+    except ModuleNotFoundError:
+        pass
+
+    def test__init__requires_instructor(self) -> None:
+        with mock.patch.dict("sys.modules", InstructorEmbedding=None):
+            with pytest.raises(ValueError) as exc_info:
+                InstructorEmbeddingFunction()
+        assert self.error_message_requires_instructor in str(exc_info.value)
+
+    def test_instructor_attribs_are_set(self) -> None:
+        if "InstructorEmbedding" in sys.modules:
+            from InstructorEmbedding import INSTRUCTOR
+
+            instructor_embed_func = InstructorEmbeddingFunction(
+                instruction=self.instruction
+            )
+            assert isinstance(instructor_embed_func._model, INSTRUCTOR)
+            assert instructor_embed_func._instruction == self.instruction
+
+    # TODO: At this level some refactoring is needed to remove duplicate code and speedup the loading
+    #       of pretrained models.
+    #       This also suggests that `embedding_functions.py` can be refactored as well
+    def test_callable_instances_without_instructions(self) -> None:
+        if "InstructorEmbedding" in sys.modules:
+            instructor_embed_func = InstructorEmbeddingFunction()
+
+            assert callable(instructor_embed_func)
+            embeddings = instructor_embed_func(texts=self.documents)
+            assert len(embeddings) == len(self.documents)
+            for embedding in embeddings:
+                assert len(embedding) == self.embedding_dim
+
+    def test_callable_instances_with_instructions(self) -> None:
+        if "InstructorEmbedding" in sys.modules:
+            instructor_embed_func = InstructorEmbeddingFunction(
+                instruction=self.instruction
+            )
+
+            assert callable(instructor_embed_func)
+            embeddings = instructor_embed_func(texts=self.documents)
+            assert len(embeddings) == len(self.documents)
+            for embedding in embeddings:
+                assert len(embedding) == self.embedding_dim
