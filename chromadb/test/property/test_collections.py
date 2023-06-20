@@ -3,7 +3,7 @@ import logging
 import hypothesis.strategies as st
 import chromadb.test.property.strategies as strategies
 from chromadb.api import API
-import chromadb.api.types as types
+import chromadb.types as chromadb_types
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -19,7 +19,7 @@ from typing import Dict, Optional
 
 class CollectionStateMachine(RuleBasedStateMachine):
     collections: Bundle[strategies.Collection]
-    model: Dict[str, Optional[types.CollectionMetadata]]
+    model: Dict[str, Optional[chromadb_types.Metadata]]
 
     collections = Bundle("collections")
 
@@ -94,7 +94,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def get_or_create_coll(
         self,
         coll: strategies.Collection,
-        new_metadata: Optional[types.Metadata],
+        new_metadata: Optional[chromadb_types.Metadata],
     ) -> MultipleResults[strategies.Collection]:
         # Cases for get_or_create
 
@@ -151,7 +151,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def modify_coll(
         self,
         coll: strategies.Collection,
-        new_metadata: types.Metadata,
+        new_metadata: chromadb_types.Metadata,
         new_name: Optional[str],
     ) -> MultipleResults[strategies.Collection]:
         if coll.name not in self.model:

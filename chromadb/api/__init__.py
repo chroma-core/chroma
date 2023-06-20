@@ -4,7 +4,6 @@ import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
-    CollectionMetadata,
     Documents,
     EmbeddingFunction,
     Embeddings,
@@ -16,6 +15,7 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
+from chromadb.types import Metadata
 from chromadb.config import Component
 import chromadb.utils.embedding_functions as ef
 
@@ -51,7 +51,7 @@ class API(Component, ABC):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
@@ -85,7 +85,7 @@ class API(Component, ABC):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Calls create_collection with get_or_create=True.
@@ -123,7 +123,7 @@ class API(Component, ABC):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
+        new_metadata: Optional[Metadata] = None,
     ) -> None:
         """Modify a collection in the database - can update the name and/or metadata
 

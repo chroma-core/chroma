@@ -4,7 +4,6 @@ from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
-    CollectionMetadata,
     Embedding,
     Include,
     Metadata,
@@ -37,7 +36,7 @@ if TYPE_CHECKING:
 class Collection(BaseModel):
     name: str
     id: UUID
-    metadata: Optional[CollectionMetadata] = None
+    metadata: Optional[Metadata] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -47,7 +46,7 @@ class Collection(BaseModel):
         name: str,
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
     ):
         self._client = client
         self._embedding_function = embedding_function
@@ -230,7 +229,7 @@ class Collection(BaseModel):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self, name: Optional[str] = None, metadata: Optional[Metadata] = None
     ) -> None:
         """Modify the collection name or metadata
 
