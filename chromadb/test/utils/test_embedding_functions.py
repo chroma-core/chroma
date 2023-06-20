@@ -309,25 +309,10 @@ class TestInstructorEmbeddingFunction:
             assert isinstance(instructor_embed_func._model, INSTRUCTOR)
             assert instructor_embed_func._instruction == self.instruction
 
-    # TODO: At this level some refactoring is needed to remove duplicate code and speedup the loading
-    #       of pretrained models.
-    #       This also suggests that `embedding_functions.py` can be refactored as well
-    def test_callable_instances_without_instructions(self) -> None:
+    @pytest.mark.parametrize("instruction", [None, instruction])
+    def test_callable_instances(self, instruction: str) -> None:
         if "InstructorEmbedding" in sys.modules:
-            instructor_embed_func = InstructorEmbeddingFunction()
-
-            assert callable(instructor_embed_func)
-            embeddings = instructor_embed_func(texts=self.documents)
-            assert len(embeddings) == len(self.documents)
-            for embedding in embeddings:
-                assert len(embedding) == self.embedding_dim
-
-    def test_callable_instances_with_instructions(self) -> None:
-        if "InstructorEmbedding" in sys.modules:
-            instructor_embed_func = InstructorEmbeddingFunction(
-                instruction=self.instruction
-            )
-
+            instructor_embed_func = InstructorEmbeddingFunction(instruction=instruction)
             assert callable(instructor_embed_func)
             embeddings = instructor_embed_func(texts=self.documents)
             assert len(embeddings) == len(self.documents)
