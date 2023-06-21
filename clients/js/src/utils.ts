@@ -1,5 +1,7 @@
 import { Api } from "./generated"
 import Count200Response = Api.Count200Response;
+import { CollectionItem, CollectionItems, ID, IDs, Embeddings, Documents, Metadatas, QueryResponse } from "./types";
+import { Collection } from "./Collection";
 
 // a function to convert a non-Array object to an Array
 export function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -62,4 +64,48 @@ export async function handleSuccess(response: Response | string | Count200Respon
         default:
             return repack(response);
     }
+}
+
+export function addCollectionItems(items: CollectionItem | CollectionItems): {
+    ids: IDs,
+    embeddings: Embeddings,
+    documents: Documents,
+    metadatas: Metadatas,
+} {
+    const ids: IDs = [];
+    const embeddings: Embeddings = [];
+    const documents: Documents = [];
+    const metadatas: Metadatas = [];
+
+    if (!Array.isArray(items)) {
+        items = [items];
+    }
+
+    for (const item of items) {
+        ids.push(item.id);
+        embeddings.push(item.embedding || []);
+        documents.push(item.document || "");
+        metadatas.push(item.metadata || {});
+    }
+
+    return { ids, embeddings, documents, metadatas };
+}
+
+export function asCollectionItems(queryResponse: QueryResponse): CollectionItems[] {
+    const queryResponseItems: CollectionItems[] = [];
+    for (let i = 0; i < queryResponse.ids.length; i++) {
+        const items: CollectionItems = [];
+        for (let j = 0; j < queryResponse.ids[i].length; j++) {
+            var collectionItem: CollectionItem = {
+                id: queryResponse.ids[i][j],
+                embedding: queryResponse.embeddings ? queryResponse.embeddings[i][j] : null,
+                document: queryResponse.documents ? queryResponse.documents[i][j] : null,
+                metadata: queryResponse.metadatas ? queryResponse.metadatas[i][j] : null,
+                distance: queryResponse.distances ? queryResponse.distances[i][j] : null,
+            };
+            items.push(collectionItem);
+        }
+        queryResponseItems.push(items);
+    }
+    return queryResponseItems;
 }

@@ -72,3 +72,13 @@ export type AddResponse = {
 }
 
 export type CollectionMetadata = Record<string, unknown>;
+
+export type CollectionItem = {
+  id: ID,
+  embedding?: Embedding | null,
+  metadata?: Metadata | null,
+  document?: Document | null,
+  distance?: number | null,
+}
+
+export type CollectionItems = CollectionItem[];
