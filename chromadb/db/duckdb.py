@@ -418,7 +418,7 @@ class DuckDB(Clickhouse):
         self.reset_indexes()
 
     def __del__(self):
-        logger.info("Exiting: Cleaning up .chroma directory")
+        logger.info("Exiting: Cleaning up persist directory")
         self.reset_indexes()
 
     @override
@@ -435,11 +435,6 @@ class PersistentDuckDB(DuckDB):
         super().__init__(system=system)
 
         system.settings.require("persist_directory")
-
-        if system.settings.persist_directory == ".chroma":
-            raise ValueError(
-                "You cannot use chroma's cache directory .chroma/, please set a different directory"
-            )
 
         self._save_folder = system.settings.persist_directory
         self.load()

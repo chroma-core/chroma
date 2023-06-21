@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
 
-    persist_directory: str = ".chroma"
+    persist_directory: str = "./chromadb"
 
     chroma_server_host: Optional[str] = None
     chroma_server_http_port: Optional[str] = None
