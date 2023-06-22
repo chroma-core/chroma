@@ -37,7 +37,7 @@ type LogicalWhere = {
   [key in LogicalOperator]?: Where[];
 };
 
-export type Where = BaseWhere & LogicalWhere;
+export type Where = BaseWhere | LogicalWhere;
 
 type WhereDocumentOperator = "$contains" | LogicalOperator;
 

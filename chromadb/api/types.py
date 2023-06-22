@@ -126,10 +126,13 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         raise ValueError(f"Expected metadata to be a dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
-            raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float)):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata key to be a str, got {key} which is a {type(key)}"
+            )
+        # isinstance(True, int) evaluates to True, so we need to check for bools separately
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value} which is a {type(value)}"
             )
     return metadata
 
