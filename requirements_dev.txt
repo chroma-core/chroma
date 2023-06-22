@@ -7,4 +7,5 @@ pre-commit
 pytest
 pytest-asyncio
 setuptools_scm
+types-psycopg2==2.9.21.10
 types-requests==2.30.0.0

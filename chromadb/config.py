@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
 
+    postgres_username: Optional[str] = None
+    postgres_password: Optional[str] = None
+    postgres_hostname: Optional[str] = None
+    postgres_port: Optional[str] = None
+    postgres_databasename: Optional[str] = None
+
     persist_directory: str = ".chroma"
 
     chroma_server_host: Optional[str] = None
