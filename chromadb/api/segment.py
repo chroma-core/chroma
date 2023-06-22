@@ -8,9 +8,8 @@ from chromadb.api.models.Collection import Collection
 import chromadb.api.local as old_api
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
-
+from chromadb.types import Metadata
 from chromadb.api.types import (
-    CollectionMetadata,
     EmbeddingFunction,
     IDs,
     Embeddings,
@@ -70,7 +69,7 @@ class SegmentAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
         get_or_create: bool = False,
     ) -> Collection:
@@ -85,7 +84,7 @@ class SegmentAPI(API):
                     client=self,
                     id=existing[0]["id"],
                     name=existing[0]["name"],
-                    metadata=existing[0]["metadata"],  # type: ignore
+                    metadata=existing[0]["metadata"],
                     embedding_function=embedding_function,
                 )
             else:
@@ -119,7 +118,7 @@ class SegmentAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = None,
     ) -> Collection:
         return self.create_collection(
@@ -145,7 +144,7 @@ class SegmentAPI(API):
                 client=self,
                 id=existing[0]["id"],
                 name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
+                metadata=existing[0]["metadata"],
                 embedding_function=embedding_function,
             )
         else:
@@ -161,7 +160,7 @@ class SegmentAPI(API):
                     client=self,
                     id=db_collection["id"],
                     name=db_collection["name"],
-                    metadata=db_collection["metadata"],  # type: ignore
+                    metadata=db_collection["metadata"],
                 )
             )
         return collections
@@ -171,7 +170,7 @@ class SegmentAPI(API):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
+        new_metadata: Optional[Metadata] = None,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)

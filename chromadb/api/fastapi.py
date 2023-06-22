@@ -1,6 +1,7 @@
 from typing import Optional, cast
 from chromadb.api import API
 from chromadb.config import System
+from chromadb.types import Metadata
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -12,7 +13,6 @@ from chromadb.api.types import (
     WhereDocument,
     GetResult,
     QueryResult,
-    CollectionMetadata,
 )
 import chromadb.utils.embedding_functions as ef
 import pandas as pd
@@ -58,7 +58,7 @@ class FastAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
@@ -101,7 +101,7 @@ class FastAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection, or return it if it exists"""
@@ -115,7 +115,7 @@ class FastAPI(API):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
+        new_metadata: Optional[Metadata] = None,
     ) -> None:
         """Updates a collection"""
         resp = requests.put(

@@ -6,6 +6,7 @@ from chromadb import __version__
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
+from chromadb.types import Metadata
 from chromadb.api.types import (
     Documents,
     EmbeddingFunction,
@@ -13,12 +14,10 @@ from chromadb.api.types import (
     GetResult,
     IDs,
     Include,
-    Metadata,
     Metadatas,
     QueryResult,
     Where,
     WhereDocument,
-    CollectionMetadata,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -78,7 +77,7 @@ class LocalAPI(API):
     def create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
@@ -120,7 +119,7 @@ class LocalAPI(API):
     def get_or_create_collection(
         self,
         name: str,
-        metadata: Optional[CollectionMetadata] = None,
+        metadata: Optional[Metadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
@@ -206,7 +205,7 @@ class LocalAPI(API):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
+        new_metadata: Optional[Metadata] = None,
     ) -> None:
         if new_name is not None:
             check_index_name(new_name)
