@@ -261,7 +261,6 @@ def test_empty_filter(api: API) -> None:
     assert res["metadatas"] == [[], []]
 
 
-@pytest.mark.xfail(reason="Boolean metadata is not supported yet")
 def test_boolean_metadata(api: API) -> None:
     """Test that metadata with boolean values is correctly filtered"""
     api.reset()
