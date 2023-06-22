@@ -66,10 +66,10 @@ class LocalAPI(API):
         """Ping the database to ensure it is alive
 
         Returns:
-            The current time in milliseconds
+            The current time in nanoseconds since epoch
 
         """
-        return int(1000 * time.time_ns())
+        return int(time.time_ns())
 
     #
     # COLLECTION METHODS
