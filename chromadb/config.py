@@ -22,6 +22,7 @@ _legacy_config_values = {
     "duckdb": "chromadb.db.duckdb.DuckDB",
     "duckdb+parquet": "chromadb.db.duckdb.PersistentDuckDB",
     "clickhouse": "chromadb.db.clickhouse.Clickhouse",
+    "postgres": "chromadb.db.postgres.Postgres",
     "rest": "chromadb.api.fastapi.FastAPI",
     "local": "chromadb.api.local.LocalAPI",
 }
