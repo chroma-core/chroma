@@ -105,3 +105,17 @@ Actions and the flow definitions in `.github/workflows` for details.
 ## Continuous Delivery
 
 Not yet implemented.
+
+## Docker backup and restore
+
+To create a backup:
+``cd bin && sh backup.sh`
+
+You can specify a backup name by passing `--backup_name`, eg `sh backup.sh --backup_name myFirstBackup`
+
+The format of backup names is `"$backup_name-$(date +%Y_%m_%d-%H_%M_%S)"`
+
+To restore from a backup:
+``cd bin && sh restore.sh --backup_name backup-2023_06_22-21_51_53`
+
+Please note that restoring will not cleanly merge with existing data. You will want to restore into a clean DB.
