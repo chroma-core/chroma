@@ -9,11 +9,13 @@ import copy
 
 def sqlite() -> Generator[migrations.MigratableDB, None, None]:
     """Fixture generator for sqlite DB"""
-    yield SqliteDB(
+    db = SqliteDB(
         System(
             Settings(sqlite_database=":memory:", migrations="none", allow_reset=True)
         )
     )
+    db.start()
+    yield db
 
 
 def db_fixtures() -> List[Callable[[], Generator[migrations.MigratableDB, None, None]]]:

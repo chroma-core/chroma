@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -37,6 +37,7 @@
     "build:main": "tsc -p tsconfig.json",
     "build:module": "tsc -p tsconfig.module.json",
     "genapi": "./genapi.sh",
-    "prettier": "prettier --write ."
+    "prettier": "prettier --write .",
+    "release": "run-s build test:run && npm publish"
   }
 }

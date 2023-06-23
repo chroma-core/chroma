@@ -6,9 +6,9 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
-    ONNXMiniLM_L6_V2,
 )
 
 
@@ -141,7 +141,12 @@ def test_persist(api_fixture, request):
 
 
 def test_heartbeat(api):
-    assert isinstance(api.heartbeat(), int)
+    heartbeat_ns = api.heartbeat()
+    assert isinstance(heartbeat_ns, int)
+
+    heartbeat_s = heartbeat_ns // 10**9
+    heartbeat = datetime.fromtimestamp(heartbeat_s)
+    assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
 batch_records = {
@@ -209,7 +214,7 @@ def test_reset_db(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    assert api.reset()
+    api.reset()
     assert len(api.list_collections()) == 0
 
 
@@ -861,24 +866,23 @@ def test_where_logical_operators(api):
 
     items = collection.get(
         where={
-            "$or": [
+            "$and": [
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 3}},
-                        {"string_value": {"$eq": "three"}},
+                    "$or": [
+                        {"int_value": {"$eq": 1}},
+                        {"string_value": {"$eq": "two"}},
                     ]
                 },
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 4}},
-                        {"string_value": {"$eq": "four"}},
+                    "$or": [
+                        {"int_value": {"$eq": 2}},
+                        {"string_value": {"$eq": "one"}},
                     ]
                 },
-            ],
-            "$and": [{"is": "doc"}, {"string_value": "four"}],
+            ]
         }
     )
-    assert len(items["metadatas"]) == 1
+    assert len(items["metadatas"]) == 2
 
 
 def test_where_document_logical_operators(api):
@@ -1158,10 +1162,6 @@ def test_default_embedding():
     docs = ["this is a test" for _ in range(64)]
     embeddings = embedding_function(docs)
     assert len(embeddings) == 64
-
-
-def test_default_ef_is_onnx_mini_l6_v2():
-    assert DefaultEmbeddingFunction == ONNXMiniLM_L6_V2
 
 
 def test_multiple_collections(api):

@@ -11,13 +11,16 @@ from chromadb.db import DB
 from chromadb.db.index.hnswlib import Hnswlib, delete_all_indexes
 import uuid
 import json
-from typing import Dict, Optional, Sequence, List, Tuple, cast
+from typing import Optional, Sequence, List, Tuple, cast
 import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect import common
 import logging
 from uuid import UUID
 from chromadb.config import System
+from overrides import override
+import numpy.typing as npt
+from chromadb.api.types import Metadata
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,7 @@ class Clickhouse(DB):
     #  INIT METHODS
     #
     def __init__(self, system: System):
+        super().__init__(system)
         self._conn = None
         self._settings = system.settings
 
@@ -114,20 +118,22 @@ class Clickhouse(DB):
     #
     #  UTILITY METHODS
     #
+    @override
     def persist(self):
         raise NotImplementedError(
             "Clickhouse is a persistent database, this method is not needed"
         )
 
-    def get_collection_uuid_from_name(self, name: str) -> UUID:
+    @override
+    def get_collection_uuid_from_name(self, collection_name: str) -> UUID:
         res = self._get_conn().query(
             f"""
-            SELECT uuid FROM collections WHERE name = '{name}'
+            SELECT uuid FROM collections WHERE name = '{collection_name}'
         """
         )
 
         if len(res.result_rows) == 0:
-            raise ValueError(f"Collection with name '{name}' does not exist")
+            raise ValueError(f"Collection with name '{collection_name}' does not exist")
 
         return res.result_rows[0][0]
 
@@ -156,8 +162,12 @@ class Clickhouse(DB):
     #
     #  COLLECTION METHODS
     #
+    @override
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
+        self,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        get_or_create: bool = False,
     ) -> Sequence:
         # poor man's unique constraint
         dupe_check = self.get_collection(name)
@@ -184,7 +194,8 @@ class Clickhouse(DB):
         )
         return [[collection_uuid, name, metadata]]
 
-    def get_collection(self, name: str):
+    @override
+    def get_collection(self, name: str) -> Sequence:
         res = (
             self._get_conn()
             .query(
@@ -210,15 +221,17 @@ class Clickhouse(DB):
         # json.loads the metadata
         return [[x[0], x[1], json.loads(x[2])] for x in res][0]
 
+    @override
     def list_collections(self) -> Sequence:
         res = self._get_conn().query("SELECT * FROM collections").result_rows
         return [[x[0], x[1], json.loads(x[2])] for x in res]
 
+    @override
     def update_collection(
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
+        new_metadata: Optional[Metadata] = None,
     ):
         if new_name is not None:
             dupe_check = self.get_collection(new_name)
@@ -236,6 +249,7 @@ class Clickhouse(DB):
                 parameters={"new_metadata": json.dumps(new_metadata), "uuid": id},
             )
 
+    @override
     def delete_collection(self, name: str):
         collection_uuid = self.get_collection_uuid_from_name(name)
         self._get_conn().command(
@@ -255,8 +269,8 @@ class Clickhouse(DB):
     #
     #  ITEM METHODS
     #
-
-    def add(self, collection_uuid, embeddings, metadatas, documents, ids):
+    @override
+    def add(self, collection_uuid, embeddings, metadatas, documents, ids) -> List[UUID]:
         data_to_insert = [
             [
                 collection_uuid,
@@ -317,6 +331,7 @@ class Clickhouse(DB):
             f"ALTER TABLE embeddings {update_clauses}", parameters=parameters
         )
 
+    @override
     def update(
         self,
         collection_uuid,
@@ -324,7 +339,7 @@ class Clickhouse(DB):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> bool:
         # Verify all IDs exist
         existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
         if len(existing_items) != len(ids):
@@ -456,6 +471,7 @@ class Clickhouse(DB):
         else:
             raise ValueError(f"Expected one of $contains, $and, $or, got {operator}")
 
+    @override
     def get(
         self,
         where: Where = {},
@@ -499,8 +515,9 @@ class Clickhouse(DB):
 
         return val
 
-    def count(self, collection_uuid: UUID) -> int:
-        where_string = f"WHERE collection_uuid = '{collection_uuid}'"
+    @override
+    def count(self, collection_id: UUID) -> int:
+        where_string = f"WHERE collection_uuid = '{collection_id}'"
         return (
             self._get_conn()
             .query(f"SELECT COUNT() FROM embeddings {where_string}")
@@ -522,13 +539,14 @@ class Clickhouse(DB):
         )
         return [res[0] for res in deleted_uuids] if len(deleted_uuids) > 0 else []
 
+    @override
     def delete(
         self,
         where: Where = {},
-        collection_uuid: Optional[str] = None,
+        collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ) -> List:
+    ) -> List[str]:
         where_str = self._create_where_clause(
             # collection_uuid must be defined at this point, cast it for typechecker
             cast(str, collection_uuid),
@@ -544,32 +562,36 @@ class Clickhouse(DB):
 
         return deleted_uuids
 
-    def get_by_ids(self, ids: list, columns: Optional[List] = None):
+    @override
+    def get_by_ids(
+        self, uuids: List[UUID], columns: Optional[List[str]] = None
+    ) -> Sequence:
         columns = columns + ["uuid"] if columns else ["uuid"]
         select_columns = db_schema_to_keys() if columns is None else columns
         response = (
             self._get_conn()
             .query(
                 f"""
-        SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({[id.hex for id in ids]})
+        SELECT {",".join(select_columns)} FROM embeddings WHERE uuid IN ({[id.hex for id in uuids]})
         """
             )
             .result_rows
         )
 
         # sort db results by the order of the uuids
-        response = sorted(response, key=lambda obj: ids.index(obj[len(columns) - 1]))
+        response = sorted(response, key=lambda obj: uuids.index(obj[len(columns) - 1]))
 
         return response
 
+    @override
     def get_nearest_neighbors(
         self,
         collection_uuid: UUID,
-        where: Where,
-        where_document: WhereDocument,
-        embeddings: Embeddings,
-        n_results: int,
-    ) -> Tuple[List[List[uuid.UUID]], List[List[float]]]:
+        where: Where = {},
+        embeddings: Optional[Embeddings] = None,
+        n_results: int = 10,
+        where_document: WhereDocument = {},
+    ) -> Tuple[List[List[UUID]], npt.NDArray]:
         # Either the collection name or the collection uuid must be provided
         if collection_uuid is None:
             raise TypeError("Argument collection_uuid cannot be None")
@@ -596,7 +618,8 @@ class Clickhouse(DB):
 
         return uuids, distances
 
-    def create_index(self, collection_uuid: str):
+    @override
+    def create_index(self, collection_uuid: UUID):
         """Create an index for a collection_uuid and optionally scoped to a dataset.
         Args:
             collection_uuid (str): The collection_uuid to create an index for
@@ -612,14 +635,18 @@ class Clickhouse(DB):
         index = self._index(collection_uuid)
         index.add(uuids, embeddings)
 
-    def add_incremental(self, collection_uuid, uuids, embeddings):
+    @override
+    def add_incremental(
+        self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
+    ) -> None:
         index = self._index(collection_uuid)
-        index.add(uuids, embeddings)
+        index.add(ids, embeddings)
 
     def reset_indexes(self):
         delete_all_indexes(self._settings)
         self.index_cache = {}
 
+    @override
     def reset(self):
         conn = self._get_conn()
         conn.command("DROP TABLE collections")
@@ -629,5 +656,6 @@ class Clickhouse(DB):
 
         self.reset_indexes()
 
-    def raw_sql(self, sql):
-        return self._get_conn().query(sql).result_rows
+    @override
+    def raw_sql(self, raw_sql):
+        return self._get_conn().query(raw_sql).result_rows
