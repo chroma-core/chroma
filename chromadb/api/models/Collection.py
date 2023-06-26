@@ -72,7 +72,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         increment_index: bool = True,
-    ) -> None:
+    ) -> bool:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
@@ -96,7 +96,7 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents
         )
 
-        self._client._add(
+        return self._client._add(
             ids, self.id, embeddings, metadatas, documents, increment_index
         )
 

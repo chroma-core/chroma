@@ -28,7 +28,6 @@ import re
 from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 from overrides import override
-import pandas as pd
 
 
 # mimics s3 bucket requirements for naming
@@ -514,10 +513,6 @@ class LocalAPI(API):
             query_result["ids"].append(ids)
 
         return query_result
-
-    @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        return self._db.raw_sql(sql)  # type: ignore
 
     @override
     def create_index(self, collection_name: str) -> bool:

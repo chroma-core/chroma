@@ -120,17 +120,13 @@ class DB(Component):
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
         where_document: WhereDocument = {},
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[UUID]], npt.NDArray]:  # type: ignore
         pass
 
     @abstractmethod
     def get_by_ids(
         self, uuids: List[UUID], columns: Optional[List[str]] = None
     ) -> Sequence:  # type: ignore
-        pass
-
-    @abstractmethod
-    def raw_sql(self, raw_sql):  # type: ignore
         pass
 
     @abstractmethod

@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
-import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -242,7 +241,7 @@ class API(Component, ABC):
             page_size: The number of embeddings to return per page. Defaults to None.
 
         Returns:
-            pd.DataFrame: A pandas dataframe containing the embeddings and metadata
+            List: Lists of the requested information: eg ids, embeddings, metadatas, and documents
 
         """
         pass
@@ -296,19 +295,6 @@ class API(Component, ABC):
 
         Returns:
             None
-        """
-        pass
-
-    @abstractmethod
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database
-        ⚠️ This method should not be used directly.
-
-        Args:
-            sql: The SQL query to run
-
-        Returns:
-            pd.DataFrame: A pandas dataframe containing the results of the query
         """
         pass
 

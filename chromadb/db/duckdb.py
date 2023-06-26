@@ -9,7 +9,6 @@ from chromadb.db.clickhouse import (
     COLLECTION_TABLE_SCHEMA,
 )
 from typing import List, Optional, Sequence
-import pandas as pd
 import json
 import duckdb
 import uuid
@@ -379,8 +378,8 @@ class DuckDB(Clickhouse):
             raise TypeError(f"Expected ids to be a list, got {uuids}")
 
         if not uuids:
-            # create an empty pandas dataframe
-            return pd.DataFrame()
+            # return an empty sequence
+            return []
 
         columns = columns + ["uuid"] if columns else ["uuid"]
 
@@ -402,10 +401,6 @@ class DuckDB(Clickhouse):
         )
 
         return response
-
-    @override
-    def raw_sql(self, raw_sql):
-        return self._conn.execute(raw_sql).df()
 
     # TODO: This method should share logic with clickhouse impl
     @override

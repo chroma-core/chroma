@@ -47,3 +47,24 @@ test("it should get embedding with matching documents", async () => {
   expect(results2.embeddings![0].length).toBe(1);
   expect(results2.embeddings![0][0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
+
+test('deep where types should work', async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+  const results = await collection.query({
+    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    nResults: 3,
+    whereDocument: { $contains: "This is a test" },
+    where: {
+      $and: [
+        {
+          c_date: {
+            $lt: 234
+          }
+        }
+      ]
+    }
+  });
+})

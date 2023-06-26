@@ -651,7 +651,3 @@ class Clickhouse(DB):
         self._create_table_embeddings(conn)
 
         self.reset_indexes()
-
-    @override
-    def raw_sql(self, raw_sql):
-        return self._get_conn().query(raw_sql).result_rows
