@@ -72,3 +72,7 @@ export type AddResponse = {
 }
 
 export type CollectionMetadata = Record<string, unknown>;
+
+export type ConfigOptions = {
+  options?: RequestInit;
+};
