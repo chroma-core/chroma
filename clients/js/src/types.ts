@@ -1,8 +1,8 @@
 export enum IncludeEnum {
-  Documents = 'documents',
-  Embeddings = 'embeddings',
-  Metadatas = 'metadatas',
-  Distances = 'distances'
+  Documents = "documents",
+  Embeddings = "embeddings",
+  Metadatas = "metadatas",
+  Distances = "distances",
 }
 
 type Number = number;
@@ -42,7 +42,10 @@ export type Where = BaseWhere | LogicalWhere;
 type WhereDocumentOperator = "$contains" | LogicalOperator;
 
 export type WhereDocument = {
-  [key in WhereDocumentOperator]?: LiteralValue | LiteralNumber | WhereDocument[];
+  [key in WhereDocumentOperator]?:
+    | LiteralValue
+    | LiteralNumber
+    | WhereDocument[];
 };
 
 export type CollectionType = {
@@ -65,10 +68,14 @@ export type QueryResponse = {
   documents: (null | Document)[][];
   metadatas: (null | Metadata)[][];
   distances: null | number[][];
-}
+};
 
 export type AddResponse = {
   error: string;
-}
+};
 
 export type CollectionMetadata = Record<string, unknown>;
+
+export type ConfigOptions = {
+  options?: RequestInit;
+};
