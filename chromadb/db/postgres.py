@@ -168,7 +168,6 @@ class Postgres(DB):
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2]] for x in res]
 
-    @override
     def get_collection_by_id(self, collection_uuid: UUID) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE uuid = '{collection_uuid}'"
         res = self._execute_query_with_response(query)

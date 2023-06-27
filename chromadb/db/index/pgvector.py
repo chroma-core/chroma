@@ -31,7 +31,7 @@ PGVECTOR_OPERATIONS = {
 # an external hnswlib index. This means that we need to
 # execute queries through this vector index class.
 class Pgvector(Index):
-    @override
+    @override(check_signature=False)
     def __init__(
         self,
         id: UUID,
@@ -79,25 +79,25 @@ class Pgvector(Index):
         )
         self._execute_query(query)
 
-    @override
+    @override(check_signature=False)
     def delete(self) -> None:
         # Concurrent drop is necessary to avoid locking the table
         query = f"DROP INDEX CONCURRENTLY {self._index_name};"
         self._execute_query(query)
 
-    @override
+    @override(check_signature=False)
     def delete_from_index(self, ids: List[UUID]) -> None:
         raise NotImplementedError(
             "Pgvector will automatically delete embeddings from index"
         )
 
-    @override
+    @override(check_signature=False)
     def add(
         self, ids: List[UUID], embeddings: Embeddings, update: bool = False
     ) -> None:
         raise NotImplementedError("Pgvector will automatically add embeddings to index")
 
-    @override
+    @override(check_signature=False)
     def get_nearest_neighbors(
         self,
         embeddings: Optional[Embeddings],
@@ -137,7 +137,8 @@ class Pgvector(Index):
             curs.execute(query)
         self._conn.commit()
 
-    def _execute_query_with_response(self, query: str) -> List[Tuple[Any, ...]]:
+    # def _execute_query_with_response(self, query: str) -> list[tuple[Any, ...]]:
+    def _execute_query_with_response(self, query: str):  # type: ignore
         with self._conn.cursor() as curs:
             curs.execute(query)
             res = curs.fetchall()
