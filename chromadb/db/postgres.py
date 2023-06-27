@@ -228,7 +228,32 @@ class Postgres(DB):
         documents: Optional[Documents],
         ids: List[str],
     ) -> List[UUID]:
-        raise NotImplementedError
+        embeddings_table = f"embeddings{len(embeddings[0])}"
+        data_to_insert = [
+            [
+                collection_uuid,
+                uuid.uuid4(),
+                embedding,
+                json.dumps(metadatas[i]) if metadatas else None,
+                documents[i] if documents else None,
+                ids[i],
+            ]
+            for i, embedding in enumerate(embeddings)
+        ]
+        queries = [
+            Query.into(Table(embeddings_table))
+            .columns(
+                "collection_uuid", "uuid", "embedding", "metadata", "document", "id"
+            )
+            .insert(data[0], data[1], data[2], data[3], data[4], data[5])
+            for data in data_to_insert
+        ]
+        insert_query = ""
+        for query in queries:
+            insert_query += str(query) + ";"
+        self._execute_query(insert_query)
+
+        return [x[1] for x in data_to_insert]  # type: ignore
 
     @override
     def add_incremental(
