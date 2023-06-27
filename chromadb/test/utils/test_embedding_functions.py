@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -13,6 +14,7 @@ from chromadb.api.types import Documents, EmbeddingFunction
 from chromadb.utils.embedding_functions import (
     CohereEmbeddingFunction,
     GooglePalmEmbeddingFunction,
+    GoogleVertexEmbeddingFunction,
     HuggingFaceEmbeddingFunction,
     InstructorEmbeddingFunction,
     ONNXMiniLM_L6_V2,
@@ -447,3 +449,50 @@ class TestGooglePalmEmbeddingFunction(_TestEmbeddingFunction):
     def test_embeddings(self) -> None:
         self.good_model_name = "models/embedding-gecko-001"
         self._test_callable_instances()
+
+
+class TestGoogleVertexEmbeddingFunction(_TestEmbeddingFunction):
+    required_package = "requests"
+    api_key = os.getenv("VORTEX_TOKEN", default="thisisanapikey")
+    good_model_name = "textembedding-gecko-001"
+    project_id = "cloud-large-language-models"
+    region = "us-central1"
+    api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/endpoints/{good_model_name}:predict"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    documents = ["document 1", "document 2"]
+    embedding_function = GoogleVertexEmbeddingFunction
+    embedding_dim = 10
+    embeddings = {
+        "predictions": [embedding_dim * [0.020755], embedding_dim * [-0.00542279]]
+    }
+
+    try:
+        import requests
+
+        vortex_api_response = requests.models.Response()
+        vortex_api_response._content = json.dumps(embeddings).encode(
+            "ascii"
+        )  # to parse correctly json
+        patched_method = f"{required_package}.Session.post"
+        patched_response = vortex_api_response
+
+    except ModuleNotFoundError:
+        pass
+
+    def test_vortex_api_attribs_are_set(self) -> None:
+        if self.required_package in sys.modules:
+            vortex_embed_func = self.embedding_function(api_key=self.api_key)
+            assert vortex_embed_func._api_url == self.api_url
+            assert vortex_embed_func._session.headers.get(
+                "Authorization"
+            ) == self.headers.get("Authorization")
+            logger.info(self.patched_response.json()["predictions"])
+
+    def test_embeddings(self) -> None:
+        self._test_callable_instances()
+        # if predictions are None
+        if self.required_package in sys.modules:
+            self.vortex_api_response._content = json.dumps("").encode("ascii")
+            self.documents = []
+            self.embedding_dim = 0
+            self._test_callable_instances()
