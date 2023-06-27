@@ -1,11 +1,14 @@
-from typing import List, Sequence, Optional, Tuple, cast
+from typing import Any, Dict, List, Sequence, Optional, Tuple, cast
 import uuid
 from uuid import UUID
 import numpy.typing as npt
 import psycopg2 as pg
-from psycopg2.extras import Json
+from chromadb.db.index.pgvector import Pgvector, delete_all_indexes
+
 from psycopg2.extensions import cursor, connection
 import json
+
+from pypika import Query, Table
 
 from chromadb.api.types import (
     Embeddings,
@@ -92,7 +95,7 @@ class Postgres(DB):
             curs.execute(query)
         self._conn.commit()
 
-    def _execute_query_with_response(self, query: str) -> List[Tuple]:
+    def _execute_query_with_response(self, query: str) -> List[Tuple[Any, ...]]:
         with self._get_conn().cursor() as curs:
             curs.execute(query)
             res = curs.fetchall()
@@ -148,22 +151,33 @@ class Postgres(DB):
 
         collection_uuid = uuid.uuid4()
         data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
-
-        insert_query = f"""INSERT INTO collections (uuid, name, metadata) VALUES {data_to_insert[0][0], 
-        data_to_insert[0][1], data_to_insert[0][2]}"""
-        self._execute_query(insert_query)
+        insert_query = (
+            Query.into(Table("collections"))
+            .columns("uuid", "name", "metadata")
+            .insert(data_to_insert[0][0], data_to_insert[0][1], data_to_insert[0][2])
+        )
+        self._execute_query(str(insert_query))
         return [[collection_uuid, name, metadata]]
 
     @override
-    def get_collection(self, name: str) -> Sequence:
+    def get_collection(self, name: str) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE name = '{name}'"
         res = self._execute_query_with_response(query)
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2]] for x in res]
 
     @override
+    def get_collection_by_id(self, collection_uuid: UUID) -> Sequence[Any]:
+        query = f"SELECT * FROM collections WHERE uuid = '{collection_uuid}'"
+        res = self._execute_query_with_response(query)
+        # json.loads for metadata not needed, psycopg2 does it automatically
+        return [[x[0], x[1], x[2]] for x in res]
+
+    @override
     def list_collections(self) -> Sequence:  # type: ignore
-        raise NotImplementedError
+        query = "SELECT * FROM collections"
+        res = self._execute_query_with_response(query)
+        return [[x[0], x[1], x[2]] for x in res]
 
     @override
     def update_collection(
@@ -176,7 +190,28 @@ class Postgres(DB):
 
     @override
     def delete_collection(self, name: str) -> None:
+        collection_uuid = self.get_collection_uuid_from_name(name)
+        query = (
+            f"SELECT uuid FROM embeddings WHERE collection_uuid = '{collection_uuid}'"
+        )
+        self._execute_query(query)
+
+        if self.index_cache.get(collection_uuid) is not None:
+            self._delete_index(collection_uuid)
+
+        query = f"DELETE FROM collections WHERE name = '{name}'"
+        self._execute_query(query)
         raise NotImplementedError
+
+    def _delete_index(self, collection_id) -> None:
+        """Delete an index from the cache"""
+        index = self._index(collection_id)
+        index.delete()
+        del self.index_cache[collection_id]
+
+    def reset_indexes(self) -> None:
+        delete_all_indexes(self._settings)
+        self.index_cache = {}
 
     @override
     def get_collection_uuid_from_name(self, collection_name: str) -> UUID:
@@ -200,6 +235,16 @@ class Postgres(DB):
     ) -> None:
         raise NotImplementedError
 
+    def _add_where_clause(
+        self,
+        query: Query,
+        collection_uuid: Optional[UUID],
+        ids: Optional[List[str]] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
+    ) -> Query:
+        return query
+
     @override
     def get(
         self,
@@ -212,7 +257,7 @@ class Postgres(DB):
         offset: Optional[int] = None,
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
-    ) -> Sequence:
+    ) -> Sequence[Any]:
         if collection_name is None and collection_uuid is None:
             raise TypeError(
                 "Arguments collection_name and collection_uuid cannot both be None"
@@ -221,28 +266,29 @@ class Postgres(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        where_str = self._create_where_clause(
-            # collection_uuid must be defined at this point, cast it for typechecker
-            cast(str, collection_uuid),
-            ids=ids,
-            where=where,
-            where_document=where_document,
-        )
+        get_query = Query.from_(Table("collections")).select("*")
+
+        # get_query: Query = self._add_where_clause(
+        #     get_query,
+        #     collection_uuid=collection_uuid,
+        #     ids=ids,
+        #     where=where,
+        #     where_document=where_document,
+        # )
 
         if sort is not None:
-            where_str += f" ORDER BY {sort}"
+            get_query.orderby(sort)
         else:
-            where_str += " ORDER BY collection_uuid"  # stable ordering
+            get_query.orderby("collection_uuid")  # stable ordering
 
         if limit is not None or isinstance(limit, int):
-            where_str += f" LIMIT {limit}"
+            get_query.limit(limit)
 
         if offset is not None or isinstance(offset, int):
-            where_str += f" OFFSET {offset}"
+            get_query.offset(offset)
 
-        val = self._get(where=where_str, columns=columns)
-
-        return val
+        res = self._execute_query_with_response(str(get_query))
+        return [[x[0], x[1], x[2]] for x in res]
 
     @override
     def update(
@@ -297,6 +343,28 @@ class Postgres(DB):
     @override
     def create_index(self, collection_uuid: UUID):
         raise NotImplementedError
+
+    # TODO: implement this cache on the DB level
+    # to offload state from the server
+    index_cache: Dict[UUID, Pgvector] = {}
+
+    def _index(self, collection_id: UUID) -> Pgvector:
+        """Retrieve an Pgvector index instance for the given collection"""
+
+        if collection_id not in self.index_cache:
+            coll = self.get_collection_by_id(collection_id)
+            collection_metadata = coll[2]
+            index = Pgvector(
+                collection_id,
+                self._settings,
+                collection_metadata,
+                self._conn,
+                100
+                # self.count(collection_id),
+            )
+            self.index_cache[collection_id] = index
+
+        return self.index_cache[collection_id]
 
     @override
     def persist(self) -> None:
