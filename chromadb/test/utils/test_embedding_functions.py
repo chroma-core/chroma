@@ -342,10 +342,11 @@ class TestInstructorEmbeddingFunction(_TestEmbeddingFunction):
                     assert len(embedding) == self.embedding_dim
 
 
+@pytest.mark.requires(["onnxruntime", "tokenizers", "tqdm"])
 class TestONNXMiniLM_L6_V2(_TestEmbeddingFunction):
     required_packages = ["onnxruntime", "tokenizers", "tqdm"]
     good_model_name = "all-MiniLM-L6-v2"
-    documents = ["The cat sat on mat", "The dog sits on mat"]
+    documents = ["The cat sat on the mat", "The dog sits on the mat"]
     embedding_function = ONNXMiniLM_L6_V2
     embedding_dim = 384
     extracted_filenames = {
