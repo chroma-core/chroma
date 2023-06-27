@@ -141,11 +141,12 @@ class TestText2VecEmbeddingFunction(_TestEmbeddingFunction):
                 )
 
     def test_embeddings(self) -> None:
-        with mock.patch("text2vec.SentenceModel") as patched_call_:
-            patched_call_.return_value = mock.MagicMock(
-                encode=lambda *args, **kwargs: self.patched_response
-            )
-            self._test_callable_instances()
+        if self.required_package in sys.modules:
+            with mock.patch("text2vec.SentenceModel") as patched_call_:
+                patched_call_.return_value = mock.MagicMock(
+                    encode=lambda *args, **kwargs: self.patched_response
+                )
+                self._test_callable_instances()
 
 
 @pytest.mark.requires("openai")
