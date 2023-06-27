@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any, Optional, Type
 from unittest import mock
 
@@ -13,6 +14,7 @@ from chromadb.utils.embedding_functions import (
     CohereEmbeddingFunction,
     HuggingFaceEmbeddingFunction,
     InstructorEmbeddingFunction,
+    ONNXMiniLM_L6_V2,
     OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
     Text2VecEmbeddingFunction,
@@ -338,3 +340,63 @@ class TestInstructorEmbeddingFunction(_TestEmbeddingFunction):
                 assert len(embeddings) == len(self.documents)
                 for embedding in embeddings:
                     assert len(embedding) == self.embedding_dim
+
+
+class TestONNXMiniLM_L6_V2(_TestEmbeddingFunction):
+    required_packages = ["onnxruntime", "tokenizers", "tqdm"]
+    good_model_name = "all-MiniLM-L6-v2"
+    documents = ["The cat sat on mat", "The dog sits on mat"]
+    embedding_function = ONNXMiniLM_L6_V2
+    embedding_dim = 384
+    extracted_filenames = {
+        "config.json",
+        "model.onnx",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.txt",
+    }
+
+    def test__init__requires_packages(self) -> None:
+        for package in self.required_packages:
+            self.required_package = package
+            with mock.patch.dict("sys.modules", {self.required_package: None}):
+                with pytest.raises(ValueError) as exc_info:
+                    self.embedding_function()
+            assert self.coin_required_package_error_message() in str(exc_info.value)
+
+    def test_model_is_downloaded(self) -> None:
+        model = self.embedding_function()
+        model._download_model_if_not_exists()
+        assert Path(model.DOWNLOAD_PATH / model.ARCHIVE_FILENAME).exists()
+        extracted_files = list(
+            Path(model.DOWNLOAD_PATH / model.EXTRACTED_FOLDER_NAME).glob("**/*")
+        )
+        assert len(extracted_files) == len(self.extracted_filenames)
+
+        for extracted_file in extracted_files:
+            assert extracted_file.name in self.extracted_filenames
+
+    def test_embeddings_are_normalized(self) -> None:
+        model = self.embedding_function()
+        model._init_model_and_tokenizer()
+        embeddings = model._forward(self.documents)
+        for embedding in embeddings:
+            assert abs(np.linalg.norm(embedding) - 1) < 0.0001
+
+    def test_embeddings(self) -> None:
+        model = self.embedding_function()
+        model._init_model_and_tokenizer()
+        embeddings = model(self.documents)
+        assert len(embeddings) == len(self.documents)
+        for embedding in embeddings:
+            assert len(embedding) == self.embedding_dim
+
+    # Here we expect that the produced embeddings are capturing some semantics
+    # We will just compute the cosine similarity and we are expecting a score greater than 0.5
+    # The cosine similarity, in our case is just the dot product, because the vectors are normalized
+    def test_embeddings_quality(self) -> None:
+        model = self.embedding_function()
+        model._init_model_and_tokenizer()
+        embeddings = model._forward(self.documents)
+        assert embeddings[0] @ embeddings[1] > 0.5
