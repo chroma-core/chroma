@@ -69,7 +69,7 @@ class Pgvector(Index):
 
     def _create_index(
         self,
-        lists: int = 100,
+        lists: int = 5,
     ) -> None:
         # Pypika has no index creation support - we need to use raw SQL
         query = (

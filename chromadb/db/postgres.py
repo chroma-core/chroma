@@ -54,7 +54,7 @@ class Postgres(DB):
         with self._conn.cursor() as curs:
             self._create_extensions(curs)
             self._create_table_collections(curs)
-            self._create_table_embeddings_with_vector_size(curs, 100)
+            self._create_table_embeddings_with_vector_size(curs, 5)
         self._conn.commit()
 
     def _get_conn(self) -> connection:
@@ -385,7 +385,7 @@ class Postgres(DB):
                 self._settings,
                 collection_metadata,
                 self._conn,
-                100
+                5
                 # self.count(collection_id),
             )
             self.index_cache[collection_id] = index
