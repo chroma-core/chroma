@@ -240,6 +240,7 @@ class Postgres(DB):
             ]
             for i, embedding in enumerate(embeddings)
         ]
+        # TODO: use bulk insert down the line rather than looping
         queries = [
             Query.into(Table(embeddings_table))
             .columns(
