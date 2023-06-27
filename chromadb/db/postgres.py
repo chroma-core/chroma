@@ -3,6 +3,7 @@ import uuid
 from uuid import UUID
 import numpy.typing as npt
 import psycopg2 as pg
+
 from chromadb.db.index.pgvector import Pgvector, delete_all_indexes
 
 from psycopg2.extensions import cursor, connection
@@ -95,7 +96,8 @@ class Postgres(DB):
             curs.execute(query)
         self._conn.commit()
 
-    def _execute_query_with_response(self, query: str) -> List[Tuple[Any, ...]]:
+    # def _execute_query_with_response(self, query: str) -> list[tuple[Any, ...]]:
+    def _execute_query_with_response(self, query: str):  # type: ignore
         with self._get_conn().cursor() as curs:
             curs.execute(query)
             res = curs.fetchall()
@@ -203,7 +205,7 @@ class Postgres(DB):
         self._execute_query(query)
         raise NotImplementedError
 
-    def _delete_index(self, collection_id) -> None:
+    def _delete_index(self, collection_id: UUID) -> None:
         """Delete an index from the cache"""
         index = self._index(collection_id)
         index.delete()
@@ -327,7 +329,7 @@ class Postgres(DB):
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
         where_document: WhereDocument = {},
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[UUID]], npt.NDArray[Any]]:
         raise NotImplementedError
 
     @override
@@ -341,7 +343,7 @@ class Postgres(DB):
         raise NotImplementedError
 
     @override
-    def create_index(self, collection_uuid: UUID):
+    def create_index(self, collection_uuid: UUID) -> None:
         raise NotImplementedError
 
     # TODO: implement this cache on the DB level
