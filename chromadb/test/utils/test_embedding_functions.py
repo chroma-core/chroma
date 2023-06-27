@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any, Type
 from unittest import mock
 
 import numpy as np
@@ -12,6 +12,7 @@ from chromadb.api.types import Documents, EmbeddingFunction
 
 from chromadb.utils.embedding_functions import (
     CohereEmbeddingFunction,
+    GooglePalmEmbeddingFunction,
     HuggingFaceEmbeddingFunction,
     InstructorEmbeddingFunction,
     ONNXMiniLM_L6_V2,
@@ -31,7 +32,7 @@ class _TestEmbeddingFunction:
     embedding_function: Type[EmbeddingFunction]
     patched_method: str
     patched_response: Any
-    api_key: Optional[str] = None
+    api_key: str = ""
 
     def coin_required_package_error_message(self) -> str:
         return (
@@ -286,9 +287,7 @@ class TestHuggingFaceEmbeddingFunction(_TestEmbeddingFunction):
 
     def test_huggingface_api_attribs_are_set(self) -> None:
         if self.required_package in sys.modules:
-            huggingface_embed_func = self.embedding_function(
-                api_key=str(self.api_key)
-            )  # Optional[str] -> str
+            huggingface_embed_func = self.embedding_function(api_key=self.api_key)
             assert huggingface_embed_func._api_url == self.api_url
             assert huggingface_embed_func._session.headers.get(
                 "Authorization"
@@ -401,3 +400,50 @@ class TestONNXMiniLM_L6_V2(_TestEmbeddingFunction):
         model._init_model_and_tokenizer()
         embeddings = model._forward(self.documents)
         assert embeddings[0] @ embeddings[1] > 0.5
+
+
+@pytest.mark.requires(["google-generativeai"])
+class TestGooglePalmEmbeddingFunction(_TestEmbeddingFunction):
+    required_package = "google.generativeai"
+    error_message_requires_api_key = "Please provide a PaLM API key."
+    error_message_requires_model_name = "Please provide the model name."
+    error_message_requires_package = (
+        "The Google Generative AI python package is not installed. "
+        "Please install it with `pip install google-generativeai`"
+    )
+    good_model_name = ""
+    api_key = os.getenv("PALM_TOKEN", default="thisisanapikey")
+    embedding_function = GooglePalmEmbeddingFunction
+    documents = ["document 1", "document 2"]
+    embedding_dim = 15
+    patched_method = f"{required_package}.generate_embeddings"
+    patched_response = dict(embedding=embedding_dim * [0.020755])
+
+    try:
+        import google.generativeai as palm
+    except ModuleNotFoundError:
+        pass
+
+    def test_api_key_is_not_set(self) -> None:
+        if self.required_package in sys.modules:
+            with pytest.raises(ValueError) as exc_info:
+                self.embedding_function(api_key="")
+            assert self.error_message_requires_api_key in str(exc_info.value)
+
+    def test_model_name_is_not_provided(self) -> None:
+        if self.required_package in sys.modules:
+            with pytest.raises(ValueError) as exc_info:
+                self.embedding_function(
+                    api_key=self.api_key, model_name=self.good_model_name
+                )
+            assert self.error_message_requires_model_name in str(exc_info.value)
+
+    def test__init__requires_palm(self) -> None:
+        with mock.patch.dict("sys.modules", {self.required_package: None}):
+            with pytest.raises(ValueError) as exc_info:
+                self.embedding_function(api_key=self.api_key)
+        assert self.error_message_requires_package in str(exc_info.value)
+
+    def test_embeddings(self) -> None:
+        self.good_model_name = "models/embedding-gecko-001"
+        self._test_callable_instances()
