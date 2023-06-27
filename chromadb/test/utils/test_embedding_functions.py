@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import sys
 from pathlib import Path
@@ -22,8 +21,6 @@ from chromadb.utils.embedding_functions import (
     SentenceTransformerEmbeddingFunction,
     Text2VecEmbeddingFunction,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class _TestEmbeddingFunction:
@@ -486,7 +483,6 @@ class TestGoogleVertexEmbeddingFunction(_TestEmbeddingFunction):
             assert vortex_embed_func._session.headers.get(
                 "Authorization"
             ) == self.headers.get("Authorization")
-            logger.info(self.patched_response.json()["predictions"])
 
     def test_embeddings(self) -> None:
         self._test_callable_instances()
