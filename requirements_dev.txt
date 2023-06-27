@@ -3,6 +3,7 @@ build
 httpx
 hypothesis
 hypothesis[numpy]
+numpy==1.21.6
 pre-commit
 pytest
 pytest-asyncio
