@@ -5,6 +5,9 @@
   ],
   "editor.formatOnSave": true,
   "python.formatting.provider": "black",
+  "python.formatting.blackArgs": [
+    "--experimental-string-processing"
+  ],
   "files.exclude": {
     "**/__pycache__": true,
     "**/.ipynb_checkpoints": true,
