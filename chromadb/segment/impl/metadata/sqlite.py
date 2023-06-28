@@ -213,6 +213,9 @@ class SqliteMetadataSegment(MetadataReader):
                 return self._update_record(cur, record)
             else:
                 logger.warning(f"Insert of existing embedding ID: {record['id']}")
+                # We are trying to add for a record that already exists. Fail the call.
+                # We don't throw an exception since this is in principal an async path
+                return
 
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])

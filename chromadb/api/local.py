@@ -3,7 +3,6 @@ import time
 from uuid import UUID
 from typing import List, Optional, Sequence, cast
 from chromadb import __version__
-import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -19,6 +18,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     CollectionMetadata,
+    validate_metadata,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -29,6 +29,9 @@ from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 from overrides import override
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # mimics s3 bucket requirements for naming
@@ -107,6 +110,9 @@ class LocalAPI(API):
         """
         check_index_name(name)
 
+        if metadata is not None:
+            validate_metadata(metadata)
+
         res = self._db.create_collection(name, metadata, get_or_create)
         return Collection(
             client=self,
@@ -138,6 +144,10 @@ class LocalAPI(API):
             # collection(name="my_collection", metadata={})
             ```
         """
+
+        if metadata is not None:
+            validate_metadata(metadata)
+
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
         )
@@ -242,11 +252,32 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
         if len(existing_ids) > 0:
-            raise errors.IDAlreadyExistsError(
-                f"IDs {existing_ids} already exist in collection {collection_id}"
-            )
+            logger.info(f"Adding {len(existing_ids)} items with ids that already exist")
+            # Partially add the items that don't already exist
+            valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
+            if len(valid_indices) == 0:
+                return False
+            filtered_ids: IDs = []
+            filtered_embeddings: Embeddings = []
+            if metadatas is not None:
+                filtered_metadatas: Metadatas = []
+            if documents is not None:
+                filtered_documents: Documents = []
+            for index in valid_indices:
+                filtered_ids.append(ids[index])
+                filtered_embeddings.append(embeddings[index])
+                if metadatas is not None:
+                    filtered_metadatas.append(metadatas[index])
+                if documents is not None:
+                    filtered_documents.append(documents[index])
+            ids = filtered_ids
+            embeddings = filtered_embeddings
+            if metadatas is not None:
+                metadatas = filtered_metadatas
+            if documents is not None:
+                documents = filtered_documents
 
         added_uuids = self._db.add(
             collection_id,
