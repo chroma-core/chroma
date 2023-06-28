@@ -177,18 +177,24 @@ class Postgres(DB):
         return [[collection_uuid, name, metadata]]
 
     @override  # TODO: Add optional column parameters to include/rm
-    def get_collection(self, name: str) -> Sequence[Any]:
+    def get_collection(
+        self, name: str, error_if_not_found: bool = False
+    ) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE name = '{name}'"
         res = self._execute_query_with_response(query)
-        self._screen_get_collection_response(res, name)
+        if error_if_not_found:
+            self._screen_get_collection_response(res, str(name))
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2], x[3]] for x in res]
 
     # TODO: Add optional column parameters to include/rm
-    def get_collection_by_id(self, collection_uuid: UUID) -> Sequence[Any]:
+    def get_collection_by_id(
+        self, collection_uuid: UUID, error_if_not_found: bool = False
+    ) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE uuid = '{collection_uuid}'"
         res = self._execute_query_with_response(query)
-        self._screen_get_collection_response(res, str(collection_uuid))
+        if error_if_not_found:
+            self._screen_get_collection_response(res, str(collection_uuid))
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2], x[3]] for x in res]
 
@@ -284,11 +290,8 @@ class Postgres(DB):
 
         if size is None:
             self.update_collection_embedding_size(collection_uuid, len(embeddings[0]))
-        else:
-            if size != len(embeddings[0]):
-                raise ValueError(
-                    "Embedding size does not match collection embedding size"
-                )
+        elif size != len(embeddings[0]):
+            raise ValueError("Embedding size does not match collection embedding size")
 
         embeddings_table = f"embeddings{len(embeddings[0])}"
         data_to_insert = [
@@ -354,7 +357,7 @@ class Postgres(DB):
 
         embeddings_table = Table(f"embeddings{embeddings_size}")
 
-        get_query = Query.from_(embeddings_table).select("*")
+        get_query = Query.from_(embeddings_table).select(*columns or "*")
 
         # get_query: Query = self._add_where_clause(
         #     get_query,
@@ -376,7 +379,7 @@ class Postgres(DB):
             get_query.offset(offset)
 
         res = self._execute_query_with_response(str(get_query))
-        return [[x[0], x[1], x[2]] for x in res]
+        return [[*x] for x in res]
 
     @override
     def update(
@@ -387,7 +390,60 @@ class Postgres(DB):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        raise NotImplementedError
+        existing_items = self.get(collection_uuid=collection_uuid, ids=ids)
+        if len(existing_items) != len(ids):
+            raise ValueError(
+                f"Could not find {len(ids) - len(existing_items)} items for update"
+            )
+
+        embedding_size: int = 5
+
+        embeddings_table = f"embeddings{embedding_size}"
+        data_to_update = [
+            [
+                collection_uuid,
+                ids[i],
+            ]
+            for i, id in enumerate(ids)
+        ]
+
+        columns_to_update = ["collection_uuid", "id"]
+
+        # TODO: The triple loop here not great, do it better later
+        if embeddings is not None:
+            columns_to_update.append("embedding")
+            for i, embedding in enumerate(ids):
+                data_to_update[i].append(embedding)
+
+        if metadatas is not None:
+            columns_to_update.append("metadata")
+            for i, metadata in enumerate(metadatas):
+                data_to_update[i].append(metadata)
+
+        if documents is not None:
+            columns_to_update.append("document")
+            for i, document in enumerate(documents):
+                data_to_update[i].append(document)
+
+        # END TODO above
+
+        # TODO: use bulk insert down the line rather than looping
+        queries = [
+            Query.into(Table(embeddings_table))
+            .columns(
+                "collection_uuid",
+                "id",
+            )
+            .insert(data[0], data[1], data[2], data[3], data[4], data[5])
+            for data in data_to_update
+        ]
+        update_query = ""
+        for query in queries:
+            update_query += str(query) + ";"
+
+        self._execute_query(update_query)
+
+        return [x[1] for x in update_query]  # type: ignore
 
     @override
     def count(self, collection_id: UUID) -> int:
