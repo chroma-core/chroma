@@ -234,7 +234,7 @@ class Postgres(DB):
             [
                 collection_uuid,
                 uuid.uuid4(),
-                embedding,
+                str(embedding),  # Pypika arrays don't work - need to convert to string
                 json.dumps(metadatas[i]) if metadatas else None,
                 documents[i] if documents else None,
                 ids[i],
@@ -265,7 +265,7 @@ class Postgres(DB):
     def add_incremental(
         self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
     ) -> None:
-        raise NotImplementedError
+        pass  # TODO: Figure out any reindexing needs. This is a no-op for now.
 
     def _add_where_clause(
         self,
