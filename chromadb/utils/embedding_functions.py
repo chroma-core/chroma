@@ -25,7 +25,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
         self,
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
-        normalized_embeddings: bool = False,
+        normalize_embeddings: bool = False,
     ):
         if model_name not in self.models:
             try:
@@ -36,13 +36,13 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
                 )
             self.models[model_name] = SentenceTransformer(model_name, device=device)
         self._model = self.models[model_name]
-        self._normalized_embeddings = normalized_embeddings
+        self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, texts: Documents) -> Embeddings:
         return self._model.encode(
             list(texts),
             convert_to_numpy=True,
-            normalized_embeddings=self._normalized_embeddings,
+            normalize_embeddings=self._normalize_embeddings,
         ).tolist()
 
 
