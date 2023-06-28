@@ -73,6 +73,8 @@ export type AddResponse = {
 
 export type CollectionMetadata = Record<string, unknown>;
 
+// RequestInit can be used to set Authorization headers and more
+// see all options here: https://www.jsdocs.io/package/@types/node-fetch#RequestInit
 export type ConfigOptions = {
   options?: RequestInit;
 };
