@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "chromadb": "^1.5.2",
+    "cohere-ai": "^6.2.2"
+  }
+}
