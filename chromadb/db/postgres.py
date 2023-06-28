@@ -430,11 +430,8 @@ class Postgres(DB):
         # TODO: use bulk insert down the line rather than looping
         queries = [
             Query.into(Table(embeddings_table))
-            .columns(
-                "collection_uuid",
-                "id",
-            )
-            .insert(data[0], data[1], data[2], data[3], data[4], data[5])
+            .columns(*columns_to_update)
+            .insert(*data)
             for data in data_to_update
         ]
         update_query = ""
