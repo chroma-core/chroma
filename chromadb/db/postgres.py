@@ -188,7 +188,22 @@ class Postgres(DB):
         new_name: Optional[str] = None,
         new_metadata: Optional[Metadata] = None,
     ) -> None:
-        raise NotImplementedError
+        collections_table = Table("collections")
+        update_query = Query.update(collections_table)
+
+        if new_name is not None:
+            dupe_check = self.get_collection(new_name)
+            if len(dupe_check) > 0 and dupe_check[0][0] != id:
+                raise ValueError(f"Collection with name {new_name} already exists")
+
+            update_query.set(collections_table.name, new_name)
+
+        if new_metadata is not None:
+            update_query.set(collections_table.metadata, new_metadata)
+
+        if new_name is not None or new_metadata is not None:
+            update_query = update_query.where(collections_table.uuid == id)
+            self._execute_query(str(update_query))
 
     @override
     def delete_collection(self, name: str) -> None:
