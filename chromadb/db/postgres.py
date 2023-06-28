@@ -54,7 +54,8 @@ class Postgres(DB):
         with self._conn.cursor() as curs:
             self._create_extensions(curs)
             self._create_table_collections(curs)
-            self._create_table_embeddings_with_vector_size(curs, 5)
+            # TODO: Eventually add a pg safe mode to pre-create the
+            # embeddings tables
         self._conn.commit()
 
     def _get_conn(self) -> connection:
@@ -65,6 +66,7 @@ class Postgres(DB):
     def _create_extensions(self, cursor: cursor) -> None:
         cursor.execute("""CREATE EXTENSION IF NOT EXISTS vector;""")
 
+    # TODO: Add name uniqueness Postgres constraint
     def _create_table_collections(self, cursor: cursor) -> None:
         cursor.execute(
             """CREATE TABLE IF NOT EXISTS collections (
@@ -135,22 +137,22 @@ class Postgres(DB):
         get_or_create: bool = False,
     ) -> Sequence:  # type: ignore
         # poor man's unique constraint
-        # dupe_check = self.get_collection(name)
+        dupe_check = self.get_collection(name)
 
-        # if len(dupe_check) > 0:
-        #     if get_or_create:
-        #         if dupe_check[0][2] != metadata:
-        #             self.update_collection(
-        #                 dupe_check[0][0], new_name=name, new_metadata=metadata
-        #             )
-        #             dupe_check = self.get_collection(name)
-        #         logger.info(
-        #             f"collection with name {name} already exists, returning existing \
-        #                 collection"
-        #         )
-        #         return dupe_check
-        #     else:
-        #         raise ValueError(f"Collection with name {name} already exists")
+        if len(dupe_check) > 0:
+            if get_or_create:
+                if dupe_check[0][2] != metadata:
+                    self.update_collection(
+                        dupe_check[0][0], new_name=name, new_metadata=metadata
+                    )
+                    dupe_check = self.get_collection(name)
+                logger.info(
+                    f"collection with name {name} already exists, returning existing"
+                    " collection"
+                )
+                return dupe_check
+            else:
+                raise ValueError(f"Collection with name {name} already exists")
 
         collection_uuid = uuid.uuid4()
         data_to_insert = [[collection_uuid, name, json.dumps(metadata)]]
@@ -162,24 +164,25 @@ class Postgres(DB):
         self._execute_query(str(insert_query))
         return [[collection_uuid, name, metadata]]
 
-    @override
+    @override  # TODO: Add optional column parameters to include/rm
     def get_collection(self, name: str) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE name = '{name}'"
         res = self._execute_query_with_response(query)
         # json.loads for metadata not needed, psycopg2 does it automatically
-        return [[x[0], x[1], x[2]] for x in res]
+        return [[x[0], x[1], x[2], x[3]] for x in res]
 
+    # TODO: Add optional column parameters to include/rm
     def get_collection_by_id(self, collection_uuid: UUID) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE uuid = '{collection_uuid}'"
         res = self._execute_query_with_response(query)
         # json.loads for metadata not needed, psycopg2 does it automatically
-        return [[x[0], x[1], x[2]] for x in res]
+        return [[x[0], x[1], x[2], x[3]] for x in res]
 
     @override
     def list_collections(self) -> Sequence:  # type: ignore
         query = "SELECT * FROM collections"
         res = self._execute_query_with_response(query)
-        return [[x[0], x[1], x[2]] for x in res]
+        return [[x[0], x[1], x[2], x[3]] for x in res]
 
     @override
     def update_collection(
@@ -196,22 +199,38 @@ class Postgres(DB):
             if len(dupe_check) > 0 and dupe_check[0][0] != id:
                 raise ValueError(f"Collection with name {new_name} already exists")
 
-            update_query.set(collections_table.name, new_name)
+            update_query = update_query.set(collections_table.name, new_name)
 
         if new_metadata is not None:
-            update_query.set(collections_table.metadata, new_metadata)
+            update_query = update_query.set(collections_table.metadata, new_metadata)
 
         if new_name is not None or new_metadata is not None:
             update_query = update_query.where(collections_table.uuid == id)
             self._execute_query(str(update_query))
 
+    def update_collection_embedding_size(
+        self,
+        id: UUID,
+        embedding_size: int,
+    ) -> None:
+        # Create table if it doesn't exist
+        with self._conn.cursor() as curs:
+            self._create_table_embeddings_with_vector_size(curs, embedding_size)
+        self._conn.commit()
+
+        collections_table = Table("collections")
+        # Only update if embedding size is null
+        update_query = (
+            Query.update(collections_table)
+            .set(collections_table.embedding_size, embedding_size)
+            .where(collections_table.uuid == id)
+            .where(collections_table.embedding_size.isnull())
+        )
+        self._execute_query(str(update_query))
+
     @override
     def delete_collection(self, name: str) -> None:
         collection_uuid = self.get_collection_uuid_from_name(name)
-        query = (
-            f"SELECT uuid FROM embeddings WHERE collection_uuid = '{collection_uuid}'"
-        )
-        self._execute_query(query)
 
         if self.index_cache.get(collection_uuid) is not None:
             self._delete_index(collection_uuid)
@@ -244,6 +263,17 @@ class Postgres(DB):
         documents: Optional[Documents],
         ids: List[str],
     ) -> List[UUID]:
+        coll = self.get_collection_by_id(collection_uuid)
+        size: Optional[int] = coll[0][3]
+
+        if size is None:
+            self.update_collection_embedding_size(collection_uuid, len(embeddings[0]))
+        else:
+            if size != len(embeddings[0]):
+                raise ValueError(
+                    "Embedding size does not match collection embedding size"
+                )
+
         embeddings_table = f"embeddings{len(embeddings[0])}"
         data_to_insert = [
             [
@@ -269,9 +299,6 @@ class Postgres(DB):
         for query in queries:
             insert_query += str(query) + ";"
 
-        print(insert_query)
-        logging.info(insert_query)
-
         self._execute_query(insert_query)
 
         return [x[1] for x in data_to_insert]  # type: ignore
@@ -281,16 +308,6 @@ class Postgres(DB):
         self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
     ) -> None:
         pass  # TODO: Figure out any reindexing needs. This is a no-op for now.
-
-    def _add_where_clause(
-        self,
-        query: Query,
-        collection_uuid: Optional[UUID],
-        ids: Optional[List[str]] = None,
-        where: Where = {},
-        where_document: WhereDocument = {},
-    ) -> Query:
-        return query
 
     @override
     def get(
@@ -305,16 +322,23 @@ class Postgres(DB):
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
     ) -> Sequence[Any]:
-        if collection_name is None and collection_uuid is None:
+        if collection_name is not None:
+            coll = self.get_collection(collection_name)
+        elif collection_uuid is not None:  # collection_uuid is not None
+            coll = self.get_collection_by_id(collection_uuid)
+        else:
             raise TypeError(
                 "Arguments collection_name and collection_uuid cannot both be None"
             )
-
-        if collection_name is not None:
-            collection_uuid = self.get_collection_uuid_from_name(collection_name)
-
         # TODO: change to embeddings{len(embeddings[0])}
-        get_query = Query.from_(Table("embeddings5")).select("*")
+
+        embeddings_size = coll[0][3]
+        if embeddings_size is None:  # if embeddings_size is None, collection is empty
+            return []
+
+        embeddings_table = Table(f"embeddings{embeddings_size}")
+
+        get_query = Query.from_(embeddings_table).select("*")
 
         # get_query: Query = self._add_where_clause(
         #     get_query,
@@ -351,7 +375,18 @@ class Postgres(DB):
 
     @override
     def count(self, collection_id: UUID) -> int:
-        raise NotImplementedError
+        coll = self.get_collection_by_id(collection_id)
+        size: Optional[int] = coll[0][3]
+        if size is None:  # If embedding size is None, then the collection is empty
+            return 0
+        else:
+            embeddings_table = Table("embeddings{size}")
+            count_query = (
+                Query.from_(embeddings_table)
+                .select("COUNT(*)")
+                .where(embeddings_table.collection_uuid == collection_id)
+            )
+            return cast(int, self._execute_query_with_response(str(count_query))[0][0])
 
     @override
     def delete(
@@ -382,11 +417,21 @@ class Postgres(DB):
     def get_by_ids(
         self, uuids: List[UUID], columns: Optional[List[str]] = None
     ) -> Sequence:  # type: ignore
+        select_columns = columns + ["uuid"] if columns else ["uuid"]
+        embeddings_table = Table("embeddings5")
+        get_query = (
+            Query.from_(Table("embeddings5"))
+            .select(select_columns)
+            .where(embeddings_table.uuid.isin(uuids))
+            .orderby(embeddings_table.uuid)
+        )
+        res = self._execute_query_with_response(str(get_query))
+        return [[x[0], x[1], x[2]] for x in res]
         raise NotImplementedError
 
     @override
     def raw_sql(self, raw_sql):  # type: ignore
-        raise NotImplementedError
+        return self._execute_query_with_response(str(raw_sql))
 
     @override
     def create_index(self, collection_uuid: UUID) -> None:
