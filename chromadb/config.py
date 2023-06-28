@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     persist_directory: str = ".chroma"
 
     chroma_server_host: Optional[str] = None
-    chroma_server_header: Optional[Dict[str,str]] = None
+    chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_grpc_port: Optional[str] = None

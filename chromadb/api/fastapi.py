@@ -31,17 +31,22 @@ class FastAPI(API):
         super().__init__(system)
         url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
-        if system.settings.chroma_server_http_port is not None:
-            self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}:{system.settings.chroma_server_http_port}/api/v1"
-        else:  
-            self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}/api/v1"
-        print(self._api_url)
+
+        port_suffix = (
+            f":{system.settings.chroma_server_http_port}"
+            if system.settings.chroma_server_http_port
+            else ""
+        )
+        self._api_url = (
+            f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
+        )
+
         self._telemetry_client = self.require(Telemetry)
-        self._header=system.settings.chroma_server_header
-        self._session=requests.Session()
+        self._header = system.settings.chroma_server_headers
+        self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
-        
+
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
