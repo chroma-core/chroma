@@ -14,6 +14,8 @@ from chromadb.api.types import (
     Metadata,
 )
 
+import re
+
 
 def delete_all_indexes(settings: Settings) -> None:
     raise NotImplementedError
@@ -104,28 +106,23 @@ class Pgvector(Index):
         n_results: int,
         ids: Optional[List[UUID]] = None,
     ) -> Tuple[List[List[UUID]], npt.NDArray[Any]]:
-        # query = (
-        #     f"SELECT * FROM {self._embeddings_table_name} ORDER BY embedding"
-        #     f" {PGVECTOR_OPERATIONS[self._space]} '{embeddings}' LIMIT"
-        #     f" {str(n_results)};"
-        # )
         pg_embeddings_table = Table(self._embeddings_table_name)
         query = (
             Query.from_(pg_embeddings_table)
             .select("*")
             .limit(n_results)
-            .orderby("INJECT_ORDERBY_HERE")
             .where(pg_embeddings_table.uuid.isin(ids))
         )
-        # orderby = ""
-        # if embeddings is not None:
-        #     orderby = "ORDER BY"
-        #     for embedding in embeddings:
-        #         orderbyorderby.join()
-        #             f"embedding {PGVECTOR_OPERATIONS[self._space]} '{embedding}'"
-        #         )
+        if embeddings is not None:
+            for embedding in embeddings:
+                query = query.orderby(
+                    f"embedding {PGVECTOR_OPERATIONS[self._space]} '{embedding}'"
+                )
+            corrected_query = self._correct_order_by_pgvector_query(str(query))
+        else:
+            corrected_query = str(query)
 
-        _ = self._execute_query_with_response(str(query))
+        _ = self._execute_query_with_response(corrected_query)
         # return [[x[0], x[1], x[2]] for x in resp]
         raise NotImplementedError
 
@@ -144,3 +141,18 @@ class Pgvector(Index):
             res = curs.fetchall()
         self._conn.commit()
         return res
+
+    def _correct_order_by_pgvector_query(self, query: str) -> str:
+        """
+        TODO: This is a hack to get the query to work. Embedding orderbys
+        don't work with pgvector syntax because of extra quotes, so we remove them
+        and reinsert them around embedding column names with this function.
+        """
+        split_query = re.split("ORDER BY|LIMIT", query)
+        split_query[1] = (
+            split_query[1].replace('"', "").replace("embedding", '"embedding"')
+        )
+        corrected_query = (
+            split_query[0] + "ORDER BY" + split_query[1] + "LIMIT" + split_query[2]
+        )
+        return corrected_query

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Sequence, Optional, Tuple, cast
 import uuid
 from uuid import UUID
+import numpy as np
 import numpy.typing as npt
 import psycopg2 as pg
 
@@ -250,18 +251,20 @@ class Postgres(DB):
 
     @override
     def delete_collection(self, name: str) -> None:
-        collection_uuid = self.get_collection_uuid_from_name(name)
+        coll = self.get_collection(name, error_if_not_found=True)[0][0]
+        collection_uuid = coll[0][0]
+        embedding_size = coll[0][3]
 
         if self.index_cache.get(collection_uuid) is not None:
-            self._delete_index(collection_uuid)
+            self._delete_index(collection_uuid, embedding_size)
 
         query = f"DELETE FROM collections WHERE name = '{name}'"
         self._execute_query(query)
         raise NotImplementedError
 
-    def _delete_index(self, collection_id: UUID) -> None:
+    def _delete_index(self, collection_id: UUID, embedding_size: int) -> None:
         """Delete an index from the cache"""
-        index = self._index(collection_id)
+        index = self._index(collection_id, embedding_size)
         index.delete()
         del self.index_cache[collection_id]
 
@@ -439,8 +442,8 @@ class Postgres(DB):
             update_query += str(query) + ";"
 
         self._execute_query(update_query)
-
-        return [x[1] for x in update_query]  # type: ignore
+        raise NotImplementedError  # STILL NEEDS WORK
+        # return [x[1] for x in update_query]  # type: ignore
 
     @override
     def count(self, collection_id: UUID) -> int:
@@ -480,7 +483,33 @@ class Postgres(DB):
         n_results: int = 10,
         where_document: WhereDocument = {},
     ) -> Tuple[List[List[UUID]], npt.NDArray[Any]]:
-        raise NotImplementedError
+        if collection_uuid is None:
+            raise TypeError("Argument collection_uuid cannot be None")
+
+        # if len(where) != 0 or len(where_document) != 0:
+        #     results = self.get(
+        #         collection_uuid=collection_uuid,
+        #         where=where,
+        #         where_document=where_document,
+        #     )
+
+        #     if len(results) > 0:
+        #         ids = [x[1] for x in results]
+        #     else:
+        #         # No results found, return empty lists
+        #         return [[] for _ in range(len(embeddings))], [
+        #             [] for _ in range(len(embeddings))
+        #         ]
+        # else:
+        #     ids = None
+
+        ids = None
+        if embeddings is not None:
+            index = self._index(collection_uuid, len(embeddings[0]))
+            uuids, distances = index.get_nearest_neighbors(embeddings, n_results, ids)
+            return uuids, distances
+
+        return [], np.array([])
 
     @override
     def get_by_ids(
@@ -510,7 +539,7 @@ class Postgres(DB):
     # to offload state from the server
     index_cache: Dict[UUID, Pgvector] = {}
 
-    def _index(self, collection_id: UUID) -> Pgvector:
+    def _index(self, collection_id: UUID, embedding_size: int) -> Pgvector:
         """Retrieve an Pgvector index instance for the given collection"""
 
         if collection_id not in self.index_cache:
@@ -521,7 +550,7 @@ class Postgres(DB):
                 self._settings,
                 collection_metadata,
                 self._conn,
-                5
+                embedding_size
                 # self.count(collection_id),
             )
             self.index_cache[collection_id] = index
