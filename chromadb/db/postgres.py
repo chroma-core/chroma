@@ -293,7 +293,7 @@ class Postgres(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        get_query = Query.from_(Table("collections")).select("*")
+        get_query = Query.from_(Table("embeddings")).select("*")
 
         # get_query: Query = self._add_where_clause(
         #     get_query,
