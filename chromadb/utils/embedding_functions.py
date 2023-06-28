@@ -374,4 +374,4 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
         if "predictions" in response:
             return response["predictions"]
-        return {}
+        return []
