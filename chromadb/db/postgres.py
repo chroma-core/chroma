@@ -70,7 +70,8 @@ class Postgres(DB):
             """CREATE TABLE IF NOT EXISTS collections (
    uuid UUID PRIMARY KEY,
    name TEXT NOT NULL,
-   metadata JSONB);"""
+   metadata JSONB,
+   embedding_size INT);"""
         )
 
     def _create_table_embeddings_with_vector_size(
@@ -252,6 +253,10 @@ class Postgres(DB):
         insert_query = ""
         for query in queries:
             insert_query += str(query) + ";"
+
+        print(insert_query)
+        logging.info(insert_query)
+
         self._execute_query(insert_query)
 
         return [x[1] for x in data_to_insert]  # type: ignore
@@ -293,7 +298,8 @@ class Postgres(DB):
         if collection_name is not None:
             collection_uuid = self.get_collection_uuid_from_name(collection_name)
 
-        get_query = Query.from_(Table("embeddings")).select("*")
+        # TODO: change to embeddings{len(embeddings[0])}
+        get_query = Query.from_(Table("embeddings5")).select("*")
 
         # get_query: Query = self._add_where_clause(
         #     get_query,
