@@ -9,7 +9,7 @@ from chromadb.db.index.pgvector import Pgvector, delete_all_indexes
 from psycopg2.extensions import cursor, connection
 import json
 
-from pypika import Query, Table
+from pypika import Query, Table, functions as fn
 
 from chromadb.api.types import (
     Embeddings,
@@ -93,6 +93,18 @@ class Postgres(DB):
     #
     # UTILITY FUNCTIONS
     #
+
+    def _screen_get_collection_query(
+        self, res: list[tuple[Any, ...]], collection_identifier: str
+    ) -> None:
+        if len(res) == 0:
+            raise ValueError(f"Collection {collection_identifier} does not exist")
+        if len(res) > 1:
+            raise ValueError(
+                "More than one collection with identifier"
+                f" {collection_identifier} found"
+            )
+        return None
 
     def _execute_query(self, query: str) -> None:
         with self._get_conn().cursor() as curs:
@@ -252,7 +264,9 @@ class Postgres(DB):
     @override
     def get_collection_uuid_from_name(self, collection_name: str) -> UUID:
         query = f"SELECT uuid FROM collections WHERE name = '{collection_name}'"
-        return cast(UUID, self._execute_query_with_response(query)[0][0])
+        res = self._execute_query_with_response(query)
+        self._screen_get_collection_query(res, collection_name)
+        return cast(UUID, res[0][0])
 
     @override
     def add(
@@ -380,10 +394,10 @@ class Postgres(DB):
         if size is None:  # If embedding size is None, then the collection is empty
             return 0
         else:
-            embeddings_table = Table("embeddings{size}")
+            embeddings_table = Table(f"embeddings{size}")
             count_query = (
                 Query.from_(embeddings_table)
-                .select("COUNT(*)")
+                .select(fn.Count("*"))
                 .where(embeddings_table.collection_uuid == collection_id)
             )
             return cast(int, self._execute_query_with_response(str(count_query))[0][0])
