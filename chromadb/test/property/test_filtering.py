@@ -190,7 +190,7 @@ def test_filterable_metadata_query(
     api.reset()
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     coll.add(**record_set)
@@ -259,3 +259,20 @@ def test_empty_filter(api: API) -> None:
     assert res["embeddings"] is None
     assert res["distances"] == [[], []]
     assert res["metadatas"] == [[], []]
+
+
+@pytest.mark.xfail(reason="Boolean metadata is not supported yet")
+def test_boolean_metadata(api: API) -> None:
+    """Test that metadata with boolean values is correctly filtered"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_metadatas: Metadatas = [{"test": True}, {"test": False}, {"test": True}]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
+
+    res = coll.get(where={"test": True})
+
+    assert res["ids"] == ["1", "3"]
