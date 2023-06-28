@@ -94,7 +94,7 @@ class Postgres(DB):
     # UTILITY FUNCTIONS
     #
 
-    def _screen_get_collection_query(
+    def _screen_get_collection_response(
         self, res: list[tuple[Any, ...]], collection_identifier: str
     ) -> None:
         if len(res) == 0:
@@ -180,6 +180,7 @@ class Postgres(DB):
     def get_collection(self, name: str) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE name = '{name}'"
         res = self._execute_query_with_response(query)
+        self._screen_get_collection_response(res, name)
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2], x[3]] for x in res]
 
@@ -187,6 +188,7 @@ class Postgres(DB):
     def get_collection_by_id(self, collection_uuid: UUID) -> Sequence[Any]:
         query = f"SELECT * FROM collections WHERE uuid = '{collection_uuid}'"
         res = self._execute_query_with_response(query)
+        self._screen_get_collection_response(res, str(collection_uuid))
         # json.loads for metadata not needed, psycopg2 does it automatically
         return [[x[0], x[1], x[2], x[3]] for x in res]
 
@@ -265,7 +267,7 @@ class Postgres(DB):
     def get_collection_uuid_from_name(self, collection_name: str) -> UUID:
         query = f"SELECT uuid FROM collections WHERE name = '{collection_name}'"
         res = self._execute_query_with_response(query)
-        self._screen_get_collection_query(res, collection_name)
+        self._screen_get_collection_response(res, collection_name)
         return cast(UUID, res[0][0])
 
     @override
