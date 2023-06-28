@@ -2,14 +2,14 @@ import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
-import { CollectionMetadata, CollectionType } from './types';
+import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
 
 
 export class ChromaClient {
     /**
      * @ignore
      */
-    private api: DefaultApi;
+    private api: DefaultApi & ConfigOptions;
 
     /**
      * Creates a new ChromaClient instance.
@@ -24,12 +24,19 @@ export class ChromaClient {
      * });
      * ```
      */
-    constructor({ path }: { path?: string } = {}) {
+    constructor({
+        path,
+        fetchOptions
+    }: {
+        path?: string,
+        fetchOptions?: RequestInit
+    } = {}) {
         if (path === undefined) path = "http://localhost:8000";
         const apiConfig: Configuration = new Configuration({
             basePath: path,
         });
         this.api = new DefaultApi(apiConfig);
+        this.api.options = fetchOptions ?? {};
     }
 
     /**
@@ -44,7 +51,7 @@ export class ChromaClient {
      * ```
      */
     public async reset(): Promise<Api.Reset200Response> {
-        return await this.api.reset();
+        return await this.api.reset(this.api.options);
     }
 
     /**
@@ -57,7 +64,7 @@ export class ChromaClient {
      * ```
      */
     public async version(): Promise<string> {
-        const response = await this.api.version();
+        const response = await this.api.version(this.api.options);
         return await handleSuccess(response);
     }
 
@@ -71,7 +78,7 @@ export class ChromaClient {
      * ```
      */
     public async heartbeat(): Promise<number> {
-        const response = await this.api.heartbeat();
+        const response = await this.api.heartbeat(this.api.options);
         let ret = await handleSuccess(response);
         return ret["nanosecond heartbeat"]
     }
@@ -117,7 +124,7 @@ export class ChromaClient {
             .createCollection({
                 name,
                 metadata,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -163,7 +170,7 @@ export class ChromaClient {
                 name,
                 metadata,
                 'get_or_create': true
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -192,7 +199,7 @@ export class ChromaClient {
      * ```
      */
     public async listCollections(): Promise<CollectionType[]> {
-        const response = await this.api.listCollections();
+        const response = await this.api.listCollections(this.api.options);
         return handleSuccess(response);
     }
 
@@ -219,7 +226,7 @@ export class ChromaClient {
         embeddingFunction?: IEmbeddingFunction
     }): Promise<Collection> {
         const response = await this.api
-            .getCollection(name)
+            .getCollection(name, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -256,7 +263,7 @@ export class ChromaClient {
         name: string
     }): Promise<void> {
         return await this.api
-            .deleteCollection(name)
+            .deleteCollection(name, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
