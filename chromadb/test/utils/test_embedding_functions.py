@@ -78,7 +78,7 @@ class TestSentenceTransformerEmbeddingFunction(_TestEmbeddingFunction):
     embedding_dim = 42
     embedding_function = SentenceTransformerEmbeddingFunction
     patched_method = f"{required_package}.SentenceTransformer.encode"
-    patched_response = 0.05082 * np.ones((len(documents), embedding_dim))
+    patched_response = -0.02544 * np.ones((len(documents), embedding_dim))
 
     # this is to add sentence_transformers to sys.modules
     try:
@@ -98,6 +98,22 @@ class TestSentenceTransformerEmbeddingFunction(_TestEmbeddingFunction):
 
     def test_embeddings(self) -> None:
         self._test_callable_instances()
+
+    def test_embeddings_are_normalized(self) -> None:
+        if self.required_package in sys.modules:
+            with mock.patch(self.patched_method) as patched_call:
+                norm = np.linalg.norm(self.patched_response, axis=1).reshape(
+                    (len(self.documents), 1)
+                )
+                norm[norm == 0] = 1e-12
+                patched_call.return_value = self.patched_response / norm
+                embed_func = self.embedding_function(
+                    model_name=self.good_model_name, normalize_embeddings=True
+                )
+                assert embed_func._normalize_embeddings
+                embeddings = embed_func(self.documents)
+                for embedding in embeddings:
+                    assert abs(np.linalg.norm(embedding) - 1) < 0.0001
 
 
 @pytest.mark.requires("text2vec")
