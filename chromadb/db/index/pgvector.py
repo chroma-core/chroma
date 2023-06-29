@@ -1,6 +1,5 @@
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from chromadb.db.index import Index
-import numpy.typing as npt
 
 from overrides import override
 from chromadb.config import Settings
@@ -108,7 +107,11 @@ class Pgvector(Index):
         embeddings: Optional[Embeddings],
         n_results: int,
         ids: Optional[List[UUID]] = None,
-    ) -> Tuple[List[List[UUID]], npt.NDArray[Any]]:
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
+        """
+        collections.query outputs a distances matrix
+        of size (len(embeddings), max(n_results, TOTAL_COLLECTION_SIZE))
+        """
         pg_embeddings_table = Table(self._embeddings_table_name)
         query = Query.from_(pg_embeddings_table).select("*").limit(n_results)
         if ids is not None:
