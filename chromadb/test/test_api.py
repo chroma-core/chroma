@@ -291,6 +291,15 @@ def test_modify_error_on_existing_name(api):
         c2.modify(name="testspace")
 
 
+def test_modify_error_on_invalid_metadata(api):
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    with pytest.raises(Exception):
+        collection.modify(metadata="invalid metadata")
+
+
 def test_metadata_cru(api):
     api.reset()
     metadata_a = {"a": 1, "b": 2}
