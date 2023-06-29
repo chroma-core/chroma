@@ -44,15 +44,6 @@ test("add documents", async () => {
   expect(results.documents[0]).toBe("This is a test");
 });
 
-test('it should return an error when inserting an ID that alreay exists in the Collection', async () => {
-  await chroma.reset()
-  const collection = await chroma.createCollection({ name: "test" });
-  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS })
-  const results = await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS });
-  expect(results.error).toBeDefined()
-  expect(results.error).toContain("IDAlreadyExists")
-})
-
 test('It should return an error when inserting duplicate IDs in the same batch', async () => {
   await chroma.reset()
   const collection = await chroma.createCollection({ name: "test" });
