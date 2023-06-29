@@ -544,7 +544,7 @@ class Postgres(DB):
 
         if collection_id not in self.index_cache:
             coll = self.get_collection_by_id(collection_id)
-            collection_metadata = coll[2]
+            collection_metadata = coll[0][2]
             index = Pgvector(
                 collection_id,
                 self._settings,

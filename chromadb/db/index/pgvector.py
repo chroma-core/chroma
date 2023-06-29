@@ -64,7 +64,9 @@ class Pgvector(Index):
         self._settings = settings
         self._conn = conn
         self._size = size
-        self._index_name = f"{self._id}index"
+        # TODO: Include self._space in indexname to have multiple indexes on
+        # collection w/ different distance funcs
+        self._index_name = f"index{self._id}"
         self._embeddings_table_name = f"embeddings{str(self._size)}"
 
         self._create_index()
@@ -75,10 +77,11 @@ class Pgvector(Index):
     ) -> None:
         # Pypika has no index creation support - we need to use raw SQL
         query = (
-            f"CREATE INDEX {self._index_name} ON {self._embeddings_table_name} USING"
-            f" ivfflat (embedding {self._space}) WITH (lists = {lists}) WHERE"
-            f" (category_id = {self._id});"
+            f'CREATE INDEX IF NOT EXISTS "{self._index_name}" ON'
+            f" {self._embeddings_table_name} USING ivfflat (embedding {self._space})"
+            f" WITH (lists = {lists}) WHERE (collection_uuid = '{self._id}');"
         )
+        # TODO: Use {self._index_name} to create name of index in future
         self._execute_query(query)
 
     @override(check_signature=False)
@@ -107,12 +110,9 @@ class Pgvector(Index):
         ids: Optional[List[UUID]] = None,
     ) -> Tuple[List[List[UUID]], npt.NDArray[Any]]:
         pg_embeddings_table = Table(self._embeddings_table_name)
-        query = (
-            Query.from_(pg_embeddings_table)
-            .select("*")
-            .limit(n_results)
-            .where(pg_embeddings_table.uuid.isin(ids))
-        )
+        query = Query.from_(pg_embeddings_table).select("*").limit(n_results)
+        if ids is not None:
+            query = query.where(pg_embeddings_table.uuid.isin(ids))
         if embeddings is not None:
             for embedding in embeddings:
                 query = query.orderby(
@@ -122,8 +122,9 @@ class Pgvector(Index):
         else:
             corrected_query = str(query)
 
-        _ = self._execute_query_with_response(corrected_query)
-        # return [[x[0], x[1], x[2]] for x in resp]
+        res = self._execute_query_with_response(corrected_query)
+        print(res)
+        # return [[*x] for x in res]  # type: ignore
         raise NotImplementedError
 
     # UTILITY FUNCTIONS
