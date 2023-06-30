@@ -34,18 +34,21 @@ class FastAPI(API):
         system.settings.require("chroma_server_http_port")
         self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}:{system.settings.chroma_server_http_port}/api/v1"
         self._telemetry_client = self.require(Telemetry)
+        self.auth_headers = {
+            system.settings.auth_header_name: system.settings.auth_token
+        }
 
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
-        resp = requests.get(self._api_url)
+        resp = requests.get(self._api_url, headers=self.auth_headers)
         raise_chroma_error(resp)
         return int(resp.json()["nanosecond heartbeat"])
 
     @override
     def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
-        resp = requests.get(self._api_url + "/collections")
+        resp = requests.get(self._api_url + "/collections", headers=self.auth_headers)
         raise_chroma_error(resp)
         json_collections = resp.json()
         collections = []
@@ -68,6 +71,7 @@ class FastAPI(API):
             data=json.dumps(
                 {"name": name, "metadata": metadata, "get_or_create": get_or_create}
             ),
+            headers=self.auth_headers,
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
@@ -86,7 +90,9 @@ class FastAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Returns a collection"""
-        resp = requests.get(self._api_url + "/collections/" + name)
+        resp = requests.get(
+            self._api_url + "/collections/" + name, headers=self.auth_headers
+        )
         raise_chroma_error(resp)
         resp_json = resp.json()
         return Collection(
@@ -121,20 +127,22 @@ class FastAPI(API):
         resp = requests.put(
             self._api_url + "/collections/" + str(id),
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+            headers=self.auth_headers,
         )
         raise_chroma_error(resp)
 
     @override
     def delete_collection(self, name: str) -> None:
         """Deletes a collection"""
-        resp = requests.delete(self._api_url + "/collections/" + name)
+        resp = requests.delete(self._api_url + "/collections/" + name, headers=self.auth_headers)
         raise_chroma_error(resp)
 
     @override
     def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database"""
         resp = requests.get(
-            self._api_url + "/collections/" + str(collection_id) + "/count"
+            self._api_url + "/collections/" + str(collection_id) + "/count",
+            headers=self.auth_headers,
         )
         raise_chroma_error(resp)
         return cast(int, resp.json())
@@ -179,6 +187,7 @@ class FastAPI(API):
                     "include": include,
                 }
             ),
+            headers=self.auth_headers,
         )
 
         raise_chroma_error(resp)
@@ -205,6 +214,7 @@ class FastAPI(API):
             data=json.dumps(
                 {"where": where, "ids": ids, "where_document": where_document}
             ),
+            headers=self.auth_headers,
         )
 
         raise_chroma_error(resp)
@@ -237,6 +247,7 @@ class FastAPI(API):
                     "increment_index": increment_index,
                 }
             ),
+            headers=self.auth_headers,
         )
 
         raise_chroma_error(resp)
@@ -266,6 +277,7 @@ class FastAPI(API):
                     "documents": documents,
                 }
             ),
+            headers=self.auth_headers,
         )
 
         resp.raise_for_status()
@@ -297,6 +309,7 @@ class FastAPI(API):
                     "increment_index": increment_index,
                 }
             ),
+            headers=self.auth_headers,
         )
 
         resp.raise_for_status()
@@ -325,6 +338,7 @@ class FastAPI(API):
                     "include": include,
                 }
             ),
+            headers=self.auth_headers,
         )
 
         raise_chroma_error(resp)
@@ -341,13 +355,13 @@ class FastAPI(API):
     @override
     def reset(self) -> None:
         """Resets the database"""
-        resp = requests.post(self._api_url + "/reset")
+        resp = requests.post(self._api_url + "/reset", headers=self.auth_headers)
         raise_chroma_error(resp)
 
     @override
     def persist(self) -> bool:
         """Persists the database"""
-        resp = requests.post(self._api_url + "/persist")
+        resp = requests.post(self._api_url + "/persist", headers=self.auth_headers)
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
@@ -355,7 +369,9 @@ class FastAPI(API):
     def raw_sql(self, sql: str) -> pd.DataFrame:
         """Runs a raw SQL query against the database"""
         resp = requests.post(
-            self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql})
+            self._api_url + "/raw_sql",
+            data=json.dumps({"raw_sql": sql}),
+            headers=self.auth_headers,
         )
         raise_chroma_error(resp)
         return pd.DataFrame.from_dict(resp.json())
@@ -364,7 +380,8 @@ class FastAPI(API):
     def create_index(self, collection_name: str) -> bool:
         """Creates an index for the given space key"""
         resp = requests.post(
-            self._api_url + "/collections/" + collection_name + "/create_index"
+            self._api_url + "/collections/" + collection_name + "/create_index",
+            headers=self.auth_headers,
         )
         raise_chroma_error(resp)
         return cast(bool, resp.json())
@@ -372,7 +389,7 @@ class FastAPI(API):
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
-        resp = requests.get(self._api_url + "/version")
+        resp = requests.get(self._api_url + "/version", headers=self.auth_headers)
         raise_chroma_error(resp)
         return cast(str, resp.json())
 

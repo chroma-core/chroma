@@ -37,6 +37,9 @@ _abstract_type_keys: Dict[str, str] = {
 
 
 class Settings(BaseSettings):
+    auth_token: Optional[str] = None
+    auth_header_name: str = "X-Auth-Token"
+
     environment: str = ""
 
     chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
