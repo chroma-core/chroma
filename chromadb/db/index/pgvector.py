@@ -6,7 +6,6 @@ from chromadb.config import Settings
 from uuid import UUID
 
 from psycopg2.extensions import connection
-from pypika import Query, Table
 
 from chromadb.api.types import (
     Embeddings,
@@ -110,29 +109,35 @@ class Pgvector(Index):
     ) -> Tuple[List[List[UUID]], List[List[float]]]:
         """
         collections.query outputs a distances matrix
-        of size (len(embeddings), max(n_results, TOTAL_COLLECTION_SIZE))
-        """
-        pg_embeddings_table = Table(self._embeddings_table_name)
-        query = Query.from_(pg_embeddings_table).select("*").limit(n_results)
-        if ids is not None:
-            query = query.where(pg_embeddings_table.uuid.isin(ids))
-        if embeddings is not None:
-            for embedding in embeddings:
-                query = query.orderby(
-                    f"embedding {PGVECTOR_OPERATIONS[self._space]} '{embedding}'"
-                )
-            corrected_query = self._correct_order_by_pgvector_query(str(query))
-        else:
-            corrected_query = str(query)
+        of size (len(embeddings), max(n_results, TOTAL_COLLECTION_SIZE)).
 
-        res = self._execute_query_with_response(corrected_query)
-        print(res)
-        # return [[*x] for x in res]  # type: ignore
-        raise NotImplementedError
+        Example PG query with embeddings magnitude 10:
+        """
+        if embeddings is None:
+            return ([], [])
+        query = self._generate_knn_query(embeddings, n_results)
+        res = self._execute_query_with_response(query)
+        return [[*x] for x in res]  # type: ignore
 
     # UTILITY FUNCTIONS
     # TODO: Separate these out to a postgres-specific utility class
     # that we can share with the postgres backend.
+    def _generate_knn_query(self, embeddings: Embeddings, k: int) -> str:
+        embeddings_sql_str = ",".join(
+            [f"(VECTOR('{str(e)}'), {i})" for i, e in enumerate(embeddings)]
+        )
+
+        # For each embedding, return the k nearest neighbors (and their distances)
+        query = (
+            "SELECT ARRAY_AGG(knn.uuid), ARRAY_AGG(knn.distance) FROM ( VALUES"
+            f" {embeddings_sql_str} ) AS tq (query, query_id), LATERAL( SELECT e.uuid,"
+            f" e.embedding {PGVECTOR_OPERATIONS[self._space]}tq.query AS distance"
+            f' FROM {self._embeddings_table_name} e ORDER BY "distance" LIMIT {k} ) knn'
+            " GROUP BY query_id ORDER BY query_id"
+        )
+
+        return query
+
     def _execute_query(self, query: str) -> None:
         with self._conn.cursor() as curs:
             curs.execute(query)
