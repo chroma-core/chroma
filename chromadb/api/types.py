@@ -121,16 +121,22 @@ def validate_ids(ids: IDs) -> IDs:
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, or lists of each"""
     if not isinstance(metadata, dict):
         raise ValueError(f"Expected metadata to be a dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float)):
+        if not isinstance(value, (str, int, float, list)):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata value to be a str, int, float, or list, got {value}"
             )
+        if isinstance(value, list):
+            for item in value:
+                if not isinstance(item, (str, int, float)):
+                    raise ValueError(
+                        f"Expected metadata value to be a str, int, or float, got {item}"
+                    )
     return metadata
 
 
