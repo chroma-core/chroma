@@ -61,7 +61,7 @@ class SegmentAPI(API):
 
     @override
     def heartbeat(self) -> int:
-        return int(1000 * time.time_ns())
+        return int(time.time_ns())
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
