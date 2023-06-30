@@ -2,7 +2,7 @@ import chromadb.config
 import logging
 from chromadb.telemetry.events import ClientStartEvent
 from chromadb.telemetry import Telemetry
-from chromadb.config import Settings, System
+from chromadb.config import Settings, System, merge_settings
 from chromadb.api import API
 
 logger = logging.getLogger(__name__)
@@ -22,15 +22,22 @@ def get_settings() -> Settings:
     return __settings
 
 
-def EphemeralClient() -> API:
+def EphemeralClient(settings: Settings = Settings()) -> API:
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
     development, but not recommended for production use.
     """
-    return Client()
+    clientSettings = Settings(
+        chroma_db_impl="chromadb.db.duckdb.DuckDB",
+    )
+
+    # merge settings, clientSettings takes precedence
+    settings = merge_settings(settings, clientSettings)
+
+    return Client(settings)
 
 
-def PersistentClient(path: str = "./chroma") -> API:
+def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) -> API:
     """
     Creates a persistent instance of Chroma that saves to disk. This is useful for
     testing and development, but not recommended for production use.
@@ -38,15 +45,23 @@ def PersistentClient(path: str = "./chroma") -> API:
     Args:
         path: The directory to save Chroma's data to. Defaults to "./chroma".
     """
-    return Client(
-        Settings(
-            persist_directory=path,
-            chroma_db_impl="chromadb.db.duckdb.PersistentDuckDB",
-        )
+    clientSettings = Settings(
+        persist_directory=path,
+        chroma_db_impl="chromadb.db.duckdb.PersistentDuckDB",
     )
 
+    # merge settings, clientSettings takes precedence
+    settings = merge_settings(settings, clientSettings)
 
-def HttpClient(host: str = "localhost", port: str = "8000", ssl: bool = False) -> API:
+    return Client(settings)
+
+
+def HttpClient(
+    host: str = "localhost",
+    port: str = "8000",
+    ssl: bool = False,
+    settings: Settings = Settings(),
+) -> API:
     """
     Creates a client that connects to a remote Chroma server. This supports
     many clients connecting to the same server, and is the recommended way to
@@ -57,15 +72,18 @@ def HttpClient(host: str = "localhost", port: str = "8000", ssl: bool = False) -
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
     """
-    return Client(
-        Settings(
-            chroma_api_impl="rest",
-            chroma_server_host=host,
-            chroma_server_http_port=port,
-            chroma_server_ssl_enabled=ssl,
-            # TODO: auth headers
-        )
+    clientSettings = Settings(
+        chroma_api_impl="rest",
+        chroma_server_host=host,
+        chroma_server_http_port=port,
+        chroma_server_ssl_enabled=ssl,
+        # TODO: auth headers
     )
+
+    # merge settings, clientSettings takes precedence
+    settings = merge_settings(settings, clientSettings)
+
+    return Client(settings)
 
 
 def Client(settings: Settings = __settings) -> API:
