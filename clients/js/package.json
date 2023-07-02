@@ -39,5 +39,8 @@
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish"
+  },
+  "dependencies": {
+    "isomorphic-fetch": "^3.0.0"
   }
 }
