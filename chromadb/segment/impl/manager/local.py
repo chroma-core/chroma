@@ -18,11 +18,13 @@ from collections import defaultdict
 class SegmentType(Enum):
     SQLITE = "urn:chroma:segment/metadata/sqlite"
     HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
+    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
 
 
 SEGMENT_TYPE_IMPLS = {
     SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
+    SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_hnsw.PersistentLocalHnswSegment",
 }
 
 
@@ -31,6 +33,7 @@ class LocalSegmentManager(SegmentManager):
     _system: System
     _instances: Dict[UUID, SegmentImplementation]
     _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
+    _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -38,6 +41,9 @@ class LocalSegmentManager(SegmentManager):
         self._system = system
         self._instances = {}
         self._segment_cache = defaultdict(dict)
+
+        if self._system.settings.require("is_persistent"):
+            self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
 
     @override
     def start(self) -> None:
@@ -62,7 +68,7 @@ class LocalSegmentManager(SegmentManager):
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
-            SegmentType.HNSW_LOCAL_MEMORY, SegmentScope.VECTOR, collection
+            self._vector_segment_type, SegmentScope.VECTOR, collection
         )
         metadata_segment = _segment(
             SegmentType.SQLITE, SegmentScope.METADATA, collection

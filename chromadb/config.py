@@ -59,7 +59,8 @@ class Settings(BaseSettings):
     tenant_id: str = "default"
     topic_namespace: str = "default"
 
-    persist_directory: str = ".chroma"
+    is_persistent: bool = False
+    persist_directory: str = "./chroma"
 
     chroma_server_host: Optional[str] = None
     chroma_server_http_port: Optional[str] = None
@@ -71,7 +72,9 @@ class Settings(BaseSettings):
 
     allow_reset: bool = False
 
+    # TODO: this should be influenced by the persist_directory and is_persistent setting?
     sqlite_database: Optional[str] = ":memory:"
+
     migrations: Literal["none", "validate", "apply"] = "apply"
 
     def require(self, key: str) -> Any:

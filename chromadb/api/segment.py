@@ -44,6 +44,7 @@ class SegmentAPI(API):
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
+    # TODO: fire telemetry events
     _telemetry_client: Telemetry
     _tenant_id: str
     _topic_ns: str

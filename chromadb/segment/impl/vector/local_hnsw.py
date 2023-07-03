@@ -21,6 +21,8 @@ import multiprocessing
 import hnswlib
 from threading import Lock
 import logging
+import os
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ class LocalHnswSegment(VectorReader):
 
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
-    _elements: int
+    _total_elements_added: int
     _max_seq_id: SeqId
 
     _lock: Lock
@@ -371,7 +373,135 @@ class LocalHnswSegment(VectorReader):
             self._apply_batch(batch)
 
 
-# TODO: Implement this as a performance improvement, if rebuilding the
-# index on startup is too slow. But test this first.
+class PersistentData:
+    """Stores the data and metadata needed for a PersistentLocalHnswSegment"""
+
+    dimensionality: Optional[int]
+    total_elements_added: int
+    max_seq_id: SeqId
+
+    id_to_label: Dict[str, int]
+    label_to_id: Dict[int, str]
+    id_to_seq_id: Dict[str, SeqId]
+
+    def __init__(
+        self,
+        dimensionality: Optional[int],
+        total_elements_added: int,
+        max_seq_id: int,
+        id_to_label: Dict[str, int],
+        label_to_id: Dict[int, str],
+        id_to_seq_id: Dict[str, SeqId],
+    ):
+        self.dimensionality = dimensionality
+        self.total_elements_added = total_elements_added
+        self.max_seq_id = max_seq_id
+        self.id_to_label = id_to_label
+        self.label_to_id = label_to_id
+        self.id_to_seq_id = id_to_seq_id
+
+    @staticmethod
+    def load_from_file(filename: str) -> "PersistentData":
+        """Load persistent data from a file"""
+        with open(filename, "rb") as f:
+            ret = cast(PersistentData, pickle.load(f))
+            return ret
+
+
 class PersistentLocalHnswSegment(LocalHnswSegment):
-    pass
+    METADATA_FILE: str = "index_metadata.pickle"
+    PERSIST_PATH_PREFIX: str
+    _persist_directory: str
+    _sync_threshold: int = 1000
+    _persist_data: PersistentData
+
+    def __init__(self, system: System, segment: Segment):
+        self._persist_directory = system.settings.require("persist_directory")
+        super().__init__(system, segment)
+        # Load persist data if it exists already, otherwise create it
+        if self._index_exists():
+            self._persist_data = PersistentData.load_from_file(
+                self._get_metadata_file()
+            )
+            self._dimensionality = self._persist_data.dimensionality
+            self._total_elements_added = self._persist_data.total_elements_added
+            self._max_seq_id = self._persist_data.max_seq_id
+            print("loaded max seq id: ", self._max_seq_id)
+            self._id_to_label = self._persist_data.id_to_label
+            self._label_to_id = self._persist_data.label_to_id
+            self._id_to_seq_id = self._persist_data.id_to_seq_id
+        else:
+            self._persist_data = PersistentData(
+                self._dimensionality,
+                self._total_elements_added,
+                self._max_seq_id,
+                self._id_to_label,
+                self._label_to_id,
+                self._id_to_seq_id,
+            )
+
+    def _index_exists(self) -> bool:
+        """Check if the index exists"""
+        return os.path.exists(self._get_metadata_file())
+
+    def _get_metadata_file(self) -> str:
+        """Get the metadata file path"""
+        return os.path.join(self._persist_directory, self.METADATA_FILE)
+
+    @override
+    def _init_index(self, dimensionality: int) -> None:
+        index = hnswlib.Index(space=self._params.space, dim=dimensionality)
+
+        # Check if index exists and load it if it does
+        if self._index_exists():
+            index.load_index(
+                self._persist_directory,
+                is_persistent_index=True,
+                max_elements=int(
+                    max(self.count() * self._params.resize_factor, DEFAULT_CAPACITY)
+                ),
+            )
+        else:
+            index.init_index(
+                max_elements=DEFAULT_CAPACITY,
+                ef_construction=self._params.construction_ef,
+                M=self._params.M,
+                is_persistent_index=True,
+                persistence_location=self._persist_directory,
+            )
+
+        index.set_ef(self._params.search_ef)
+        index.set_num_threads(self._params.num_threads)
+
+        self._index = index
+        self._dimensionality = dimensionality
+
+    def _persist(self) -> None:
+        """Persist the index and data to disk"""
+        index = cast(hnswlib.Index, self._index)
+
+        # Persist the index
+        index.persist_dirty()
+
+        # Persist the metadata
+        self._persist_data.dimensionality = self._dimensionality
+        self._persist_data.total_elements_added = self._total_elements_added
+        self._persist_data.max_seq_id = self._max_seq_id
+
+        # TODO: This should really be stored in sqlite or the index itself
+        self._persist_data.id_to_label = self._id_to_label
+        self._persist_data.label_to_id = self._label_to_id
+        self._persist_data.id_to_seq_id = self._id_to_seq_id
+
+        with open(self._get_metadata_file(), "wb") as metadata_file:
+            pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+
+    @override
+    def _apply_batch(self, batch: Batch) -> None:
+        super()._apply_batch(batch)
+        if (
+            self._total_elements_added - self._persist_data.total_elements_added
+            >= self._sync_threshold
+        ):
+            print("persisting")
+            self._persist()

@@ -1,5 +1,5 @@
 import pytest
-from typing import Generator, List, Callable, Iterator, cast
+from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
 from chromadb.types import (
     SubmitEmbeddingRecord,
@@ -16,7 +16,10 @@ from chromadb.segment import VectorReader
 import uuid
 import time
 
-from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
+from chromadb.segment.impl.vector.local_hnsw import (
+    LocalHnswSegment,
+    PersistentLocalHnswSegment,
+)
 
 from pytest import FixtureRequest
 from itertools import count
@@ -24,7 +27,9 @@ from itertools import count
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
-    settings = Settings(sqlite_database=":memory:", allow_reset=True)
+    settings = Settings(
+        sqlite_database=":memory:", allow_reset=True, persist_directory="./garbage_can"
+    )
     system = System(settings)
     system.start()
     yield system
@@ -60,6 +65,15 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     return (create_record(i) for i in count())
 
 
+def vector_readers() -> List[Type[VectorReader]]:
+    return [LocalHnswSegment, PersistentLocalHnswSegment]
+
+
+@pytest.fixture(scope="module", params=vector_readers())
+def vector_reader(request: FixtureRequest) -> Generator[Type[VectorReader], None, None]:
+    yield request.param
+
+
 segment_definition = Segment(
     id=uuid.uuid4(),
     type="test_type",
@@ -81,7 +95,9 @@ def sync(segment: VectorReader, seq_id: SeqId) -> None:
 
 
 def test_insert_and_count(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
@@ -92,7 +108,7 @@ def test_insert_and_count(
     for i in range(3):
         max_id = producer.submit_embedding(topic, next(sample_embeddings))
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     sync(segment, max_id)
