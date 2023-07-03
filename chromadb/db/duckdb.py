@@ -211,15 +211,39 @@ class DuckDB(Clickhouse):
         for key, value in where.items():
             # Shortcut for $eq
             if type(value) == str:
-                result.append(f" json_extract_string(metadata,'$.{key}') = '{value}'")
+                result.append(
+                    f""" (
+                        json_extract_string(metadata, '$.{key}') = '{value}'
+                        OR
+                        json_contains(json_extract(metadata, '$.{key}'), '\"{value}\"')
+                    )
+                    """
+                )
             if type(value) == int:
                 result.append(
-                    f" CAST(json_extract(metadata,'$.{key}') AS INT) = {value}"
+                    f""" (
+                        CASE WHEN json_type(json_extract(metadata, '$.{key}')) = 'ARRAY'
+                        THEN
+                        list_has(CAST(json_extract(metadata, '$.{key}') AS INT[]), {value})
+                        ELSE
+                        CAST(json_extract(metadata, '$.{key}') AS INT) = {value}
+                        END
+                    )
+                    """
                 )
             if type(value) == float:
                 result.append(
-                    f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {value}"
+                    f""" (
+                        CASE WHEN json_type(json_extract(metadata, '$.{key}')) = 'ARRAY'
+                        THEN
+                        list_has(CAST(json_extract(metadata, '$.{key}') AS DOUBLE[]), {value})
+                        ELSE
+                        CAST(json_extract(metadata, '$.{key}') AS DOUBLE) = {value}
+                        END
+                    )
+                    """
                 )
+
             # Operator expression
             elif type(value) == dict:
                 operator, operand = list(value.items())[0]
@@ -242,19 +266,49 @@ class DuckDB(Clickhouse):
                 elif operator == "$ne":
                     if type(operand) == str:
                         return result.append(
-                            f" json_extract_string(metadata,'$.{key}') != '{operand}'"
+                            f"""(
+                            CASE WHEN json_type(json_extract(metadata, '$.{key}')) = 'ARRAY'
+                            THEN
+                            NOT json_contains(json_extract(metadata, '$.{key}'), '\"{operand}\"')
+                            ELSE
+                            json_extract_string(metadata, '$.{key}') != '{operand}'
+                            END
+                            )
+                        """
                         )
                     return result.append(
-                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) != {operand}"
+                        f""" (
+                            CASE WHEN json_type(json_extract(metadata, '$.{key}')) = 'ARRAY'
+                            THEN
+                            NOT list_has(CAST(json_extract(metadata, '$.{key}') AS DOUBLE[]), {operand})
+                            ELSE
+                            CAST(json_extract(metadata, '$.{key}') AS DOUBLE) != {operand}
+                            END
+                        )
+                        """
                     )
                 elif operator == "$eq":
                     if type(operand) == str:
                         return result.append(
-                            f" json_extract_string(metadata,'$.{key}') = '{operand}'"
+                            f""" (
+                                json_extract_string(metadata, '$.{key}') = '{operand}'
+                                OR
+                                json_contains(json_extract(metadata, '$.{key}'), '\"{operand}\"')
+                            )
+                            """
                         )
-                    return result.append(
-                        f" CAST(json_extract(metadata,'$.{key}') AS DOUBLE) = {operand}"
-                    )
+                    else:
+                        return result.append(
+                            f""" (
+                                CASE WHEN json_type(json_extract(metadata, '$.{key}')) = 'ARRAY'
+                                THEN
+                                list_has(CAST(json_extract(metadata, '$.{key}') AS DOUBLE[]), {operand})
+                                ELSE
+                                CAST(json_extract(metadata, '$.{key}') AS DOUBLE) = {operand}
+                                END
+                            )
+                            """
+                        )
                 else:
                     raise ValueError(f"Operator {operator} not supported")
             elif type(value) == list:
