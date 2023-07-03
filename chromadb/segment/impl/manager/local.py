@@ -9,7 +9,7 @@ from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
-from chromadb.types import Collection, Segment, SegmentScope, Metadata
+from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
@@ -105,6 +105,14 @@ class LocalSegmentManager(SegmentManager):
 
         instance = self._instance(self._segment_cache[collection_id][scope])
         return cast(S, instance)
+
+    @override
+    def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
+        # The local segment manager responds to hints by pre-loading both the metadata and vector
+        # segments for the given collection.
+        for type in [MetadataReader, VectorReader]:
+            # Just use get_segment to load the segment into the cache
+            self.get_segment(collection_id, type)
 
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
         classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]

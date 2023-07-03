@@ -215,6 +215,7 @@ class SegmentAPI(API):
         increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
@@ -232,6 +233,7 @@ class SegmentAPI(API):
         documents: Optional[Documents] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
         for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
@@ -250,6 +252,8 @@ class SegmentAPI(API):
         increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
+
         for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
@@ -318,6 +322,7 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
         # time a bad idea?
