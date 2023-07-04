@@ -20,7 +20,7 @@ from chromadb.config import Settings
 # Example setup of the client to connect to your chroma server
 client = chromadb.Client(Settings(chroma_api_impl="rest",
                                   chroma_server_host="localhost",
-                                  chroma_server_port=8000))
+                                  chroma_server_http_port=8000))
 
 collection = client.create_collection("all-my-documents")
 
