@@ -23,17 +23,24 @@ from chromadb.segment.impl.vector.local_hnsw import (
 
 from pytest import FixtureRequest
 from itertools import count
+import tempfile
+import os
+import shutil
 
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
+    # TODO: create memory db and also a persisted db
+    save_path = tempfile.mkdtemp()
     settings = Settings(
-        sqlite_database=":memory:", allow_reset=True, persist_directory="./garbage_can"
+        sqlite_database=":memory:", allow_reset=True, persist_directory=save_path
     )
     system = System(settings)
     system.start()
     yield system
     system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
@@ -74,14 +81,15 @@ def vector_reader(request: FixtureRequest) -> Generator[Type[VectorReader], None
     yield request.param
 
 
-segment_definition = Segment(
-    id=uuid.uuid4(),
-    type="test_type",
-    scope=SegmentScope.VECTOR,
-    topic="persistent://test/test/test_topic_1",
-    collection=None,
-    metadata=None,
-)
+def create_random_segment_definition() -> Segment:
+    return Segment(
+        id=uuid.uuid4(),
+        type="test_type",
+        scope=SegmentScope.VECTOR,
+        topic="persistent://test/test/test_topic_1",
+        collection=None,
+        metadata=None,
+    )
 
 
 def sync(segment: VectorReader, seq_id: SeqId) -> None:
@@ -101,7 +109,7 @@ def test_insert_and_count(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     max_id = 0
@@ -136,7 +144,7 @@ def test_get_vectors(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     segment = vector_reader(system, segment_definition)
@@ -181,7 +189,7 @@ def test_ann_query(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     segment = vector_reader(system, segment_definition)
@@ -246,7 +254,7 @@ def test_delete(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     segment = vector_reader(system, segment_definition)
@@ -387,7 +395,7 @@ def test_update(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     segment = vector_reader(system, segment_definition)
@@ -420,7 +428,7 @@ def test_upsert(
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
-
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     segment = vector_reader(system, segment_definition)

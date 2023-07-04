@@ -640,11 +640,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # How many records to add to index before syncing to disk
     _sync_threshold: int = 1000
     _persist_data: PersistentData
+    _persist_directory: str
 
     def __init__(self, system: System, segment: Segment):
+        super().__init__(system, segment)
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
-        super().__init__(system, segment)
+        if not os.path.exists(self._get_storage_folder()):
+            os.makedirs(self._get_storage_folder())
         # Load persist data if it exists already, otherwise create it
         if self._index_exists():
             self._persist_data = PersistentData.load_from_file(
@@ -653,7 +656,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
             self._max_seq_id = self._persist_data.max_seq_id
-            print("loaded max seq id: ", self._max_seq_id)
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
             self._id_to_seq_id = self._persist_data.id_to_seq_id
@@ -668,12 +670,17 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
 
     def _index_exists(self) -> bool:
-        """Check if the index exists"""
+        """Check if the index exists via the metadata file"""
         return os.path.exists(self._get_metadata_file())
 
     def _get_metadata_file(self) -> str:
         """Get the metadata file path"""
-        return os.path.join(self._persist_directory, self.METADATA_FILE)
+        return os.path.join(self._get_storage_folder(), self.METADATA_FILE)
+
+    def _get_storage_folder(self) -> str:
+        """Get the storage folder path"""
+        folder = os.path.join(self._persist_directory, str(self._id))
+        return folder
 
     @override
     def _init_index(self, dimensionality: int) -> None:
@@ -687,7 +694,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Check if index exists and load it if it does
         if self._index_exists():
             index.load_index(
-                self._persist_directory,
+                self._get_storage_folder(),
                 is_persistent_index=True,
                 max_elements=int(
                     max(self.count() * self._params.resize_factor, DEFAULT_CAPACITY)
@@ -699,7 +706,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 ef_construction=self._params.construction_ef,
                 M=self._params.M,
                 is_persistent_index=True,
-                persistence_location=self._persist_directory,
+                persistence_location=self._get_storage_folder(),
             )
 
         index.set_ef(self._params.search_ef)
@@ -730,13 +737,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     @override
     def _apply_batch(self, batch: Batch) -> None:
-        print("applying batch")
         super()._apply_batch(batch)
         if (
             self._total_elements_added - self._persist_data.total_elements_added
             >= self._sync_threshold
         ):
-            print("persisting")
             self._persist()
 
     @override
@@ -789,8 +794,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._apply_batch(self._curr_batch)
                 self._curr_batch = Batch()
                 self._brute_force_index.flush()
-                print("flushed brute force index")
-                print("hnsw index count", self.count())
 
     @override
     def count(self) -> int:
