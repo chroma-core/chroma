@@ -73,7 +73,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             self.api.delete_collection(name=coll.name)
             del self.model[coll.name]
         else:
-            with pytest.raises(Exception):
+            with pytest.raises(ValueError, match=".*does not exist.*"):
                 self.api.delete_collection(name=coll.name)
 
         with pytest.raises(Exception):
