@@ -1,4 +1,5 @@
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 import chromadb
 import chromadb.config
@@ -11,7 +12,7 @@ app = server.app()
 
 
 @app.middleware("http")
-async def check_authentication_header(request: Request, call_next: RequestResponseEndpoint):
+async def check_authentication_header(request: Request, call_next: RequestResponseEndpoint) -> Response:
     if request.headers.get(settings.auth_header_name) != settings.auth_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
     response = await call_next(request)
