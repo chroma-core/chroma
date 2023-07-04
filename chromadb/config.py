@@ -95,16 +95,6 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
 
-def merge_settings(default: Settings, incoming: Settings) -> Settings:
-    result = Settings()
-    for key in default.__dict__:
-        if getattr(incoming, key, None) is not None:
-            setattr(result, key, getattr(incoming, key))
-        else:
-            setattr(result, key, getattr(default, key))
-    return result
-
-
 T = TypeVar("T", bound="Component")
 
 

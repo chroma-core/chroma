@@ -2,7 +2,7 @@ import chromadb.config
 import logging
 from chromadb.telemetry.events import ClientStartEvent
 from chromadb.telemetry import Telemetry
-from chromadb.config import Settings, System, merge_settings
+from chromadb.config import Settings, System
 from chromadb.api import API
 
 logger = logging.getLogger(__name__)
@@ -27,12 +27,7 @@ def EphemeralClient(settings: Settings = Settings()) -> API:
     Creates an in-memory instance of Chroma. This is useful for testing and
     development, but not recommended for production use.
     """
-    clientSettings = Settings(
-        chroma_db_impl="chromadb.db.duckdb.DuckDB",
-    )
-
-    # merge settings, clientSettings takes precedence
-    settings = merge_settings(settings, clientSettings)
+    settings.chroma_db_impl = "chromadb.db.duckdb.DuckDB"
 
     return Client(settings)
 
@@ -45,13 +40,8 @@ def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) ->
     Args:
         path: The directory to save Chroma's data to. Defaults to "./chroma".
     """
-    clientSettings = Settings(
-        persist_directory=path,
-        chroma_db_impl="chromadb.db.duckdb.PersistentDuckDB",
-    )
-
-    # merge settings, clientSettings takes precedence
-    settings = merge_settings(settings, clientSettings)
+    settings.persist_directory = path
+    settings.chroma_db_impl = "chromadb.db.duckdb.PersistentDuckDB"
 
     return Client(settings)
 
@@ -72,16 +62,11 @@ def HttpClient(
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
     """
-    clientSettings = Settings(
-        chroma_api_impl="rest",
-        chroma_server_host=host,
-        chroma_server_http_port=port,
-        chroma_server_ssl_enabled=ssl,
-        # TODO: auth headers
-    )
-
-    # merge settings, clientSettings takes precedence
-    settings = merge_settings(settings, clientSettings)
+    settings.chroma_api_impl = "rest"
+    settings.chroma_server_host = host
+    settings.chroma_server_http_port = port
+    settings.chroma_server_ssl_enabled = ssl
+    # TODO: auth headers
 
     return Client(settings)
 
