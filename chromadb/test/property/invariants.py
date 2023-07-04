@@ -124,6 +124,7 @@ def no_duplicates(collection: Collection) -> None:
     assert len(ids) == len(set(ids))
 
 
+# TODO: point this at utils/distance_functions.py
 # These match what the spec of hnswlib is
 # This epsilon is used to prevent division by zero and the value is the same
 # https://github.com/nmslib/hnswlib/blob/359b2ba87358224963986f709e593d799064ace6/python_bindings/bindings.cpp#L238

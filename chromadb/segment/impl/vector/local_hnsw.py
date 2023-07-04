@@ -1,5 +1,5 @@
 from overrides import override
-from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
+from typing import Any, Optional, Sequence, Dict, Set, List, Callable, Union, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
@@ -23,6 +23,10 @@ from threading import Lock
 import logging
 import os
 import pickle
+import numpy as np
+import numpy.typing as npt
+
+from chromadb.utils import distance_functions
 
 logger = logging.getLogger(__name__)
 
@@ -63,37 +67,250 @@ class HnswParams:
 class Batch:
     """Used to model the set of changes as an atomic operation"""
 
-    labels: List[Optional[int]]
-    vectors: List[Vector]
-    seq_ids: List[SeqId]
-    ids: List[str]
-    delete_labels: List[int]
-    delete_ids: List[str]
+    _ids_to_records: Dict[str, EmbeddingRecord]
+    _deleted_ids: Set[str]
+    _written_ids: Set[str]
+    _upsert_add_ids: Set[str]  # IDs that are being added in an upsert
     add_count: int
+    update_count: int
     delete_count: int
+    max_seq_id: SeqId
 
     def __init__(self) -> None:
-        self.labels = []
-        self.vectors = []
-        self.seq_ids = []
-        self.ids = []
-        self.delete_labels = []
-        self.delete_ids = []
+        self._ids_to_records = {}
+        self._deleted_ids = set()
+        self._written_ids = set()
+        self._upsert_add_ids = set()
         self.add_count = 0
+        self.update_count = 0
         self.delete_count = 0
+        self.max_seq_id = 0
 
-    def add(self, label: Optional[int], record: EmbeddingRecord) -> None:
-        self.labels.append(label)
-        self.vectors.append(cast(Vector, record["embedding"]))
-        self.seq_ids.append(record["seq_id"])
-        self.ids.append(record["id"])
-        if not label:
-            self.add_count += 1
+    def __len__(self) -> int:
+        """Get the number of changes in this batch"""
+        return len(self._written_ids) + len(self._deleted_ids)
 
-    def delete(self, label: int, id: str) -> None:
-        self.delete_labels.append(label)
-        self.delete_ids.append(id)
-        self.delete_count += 1
+    def count(self) -> int:
+        """Get the net number of embeddings in this batch"""
+        return len(self._written_ids)
+
+    def get_deleted_ids(self) -> List[str]:
+        """Get the list of deleted embeddings in this batch"""
+        return list(self._deleted_ids)
+
+    def get_written_ids(self) -> List[str]:
+        """Get the list of written embeddings in this batch"""
+        return list(self._written_ids)
+
+    def get_written_vectors(self) -> List[Vector]:
+        """Get the list of vectors to write in this batch"""
+        return [
+            cast(Vector, self._ids_to_records[id]["embedding"])
+            for id in self.get_written_ids()
+        ]
+
+    def get_record(self, id: str) -> EmbeddingRecord:
+        """Get the record for a given ID"""
+        return self._ids_to_records[id]
+
+    def is_new(self, id: str) -> bool:
+        """Returns true if the id is a new addition to the index"""
+        record = self._ids_to_records[id]
+        return record["operation"] == Operation.ADD or (
+            record["operation"] == Operation.UPSERT and id in self._upsert_add_ids
+        )
+
+    def apply(self, record: EmbeddingRecord, is_add: bool = False) -> None:
+        """
+        Apply an embedding record to this batch. Records passed to this method are assumed to be validated for correctness.
+        For example, a delete or update presumes the ID exists in the index. An add presumes the ID does not exist in the index.
+        In the case of upsert, the is_add flag should be set to True if the ID does not exist in the index, and False otherwise.
+        """
+
+        id = record["id"]
+        if record["operation"] == Operation.DELETE:
+            self._deleted_ids.add(id)
+
+            # If the ID was previously written, remove it from the written set
+            # And update the add/update/delete counts
+            if id in self._written_ids:
+                self._written_ids.remove(id)
+                if self._ids_to_records[id]["operation"] == Operation.ADD:
+                    self.add_count -= 1
+                elif self._ids_to_records[id]["operation"] == Operation.UPDATE:
+                    self.update_count -= 1
+                elif self._ids_to_records[id]["operation"] == Operation.UPSERT:
+                    if id in self._upsert_add_ids:
+                        self.add_count -= 1
+                        self._upsert_add_ids.remove(id)
+                    else:
+                        self.update_count -= 1
+
+            # Remove the record from the batch
+            if id in self._ids_to_records:
+                del self._ids_to_records[id]
+
+            self.delete_count += 1
+        else:
+            self._ids_to_records[id] = record
+            self._written_ids.add(id)
+
+            # If the ID was previously deleted, remove it from the deleted set
+            # And update the delete count
+            if id in self._deleted_ids:
+                self._deleted_ids.remove(id)
+                self.delete_count -= 1
+
+            # Update the add/update counts
+            if record["operation"] == Operation.UPSERT:
+                if is_add:
+                    self.add_count += 1
+                    self._upsert_add_ids.add(id)
+                else:
+                    self.update_count += 1
+            elif record["operation"] == Operation.ADD:
+                self.add_count += 1
+            elif record["operation"] == Operation.UPDATE:
+                self.update_count += 1
+
+        self.max_seq_id = max(self.max_seq_id, record["seq_id"])
+
+
+class BruteForceIndex:
+    """A lightweight, numpy based brute force index that is used for batches that have not been indexed into hnsw yet"""
+
+    # TODO: mark internal
+    id_to_index: Dict[str, int]
+    index_to_id: Dict[int, str]
+    id_to_seq_id: Dict[str, int]
+    deleted_ids: Set[str]
+    curr_index: int
+    size: int
+    dimensionality: int
+    distance_fn: Callable[[npt.NDArray[Any], npt.NDArray[Any]], float]
+    vectors: npt.NDArray[Any]
+
+    def __init__(self, size: int, dimensionality: int, space: str = "l2"):
+        if space == "l2":
+            self.distance_fn = distance_functions.l2
+        elif space == "ip":
+            self.distance_fn = distance_functions.ip
+        elif space == "cosine":
+            self.distance_fn = distance_functions.cosine
+        else:
+            raise Exception(f"Unknown distance function: {space}")
+
+        self.id_to_index = {}
+        self.index_to_id = {}
+        self.id_to_seq_id = {}
+        self.deleted_ids = set()
+        self.curr_index = 0
+        self.size = size
+        self.dimensionality = dimensionality
+        self.vectors = np.zeros((size, dimensionality))
+
+    def __len__(self) -> int:
+        return len(self.id_to_index)
+
+    def flush(self) -> None:
+        self.id_to_index = {}
+        self.index_to_id = {}
+        self.id_to_seq_id = {}
+        self.deleted_ids.clear()
+        self.curr_index = 0
+        self.vectors.fill(0)
+
+    # TODO: thread safety
+    def upsert(self, records: List[EmbeddingRecord]) -> None:
+        if len(records) + len(self) > self.size:
+            raise Exception(
+                "Index with capacity {} and {} current entries cannot add {} records".format(
+                    self.size, len(self), len(records)
+                )
+            )
+
+        for i, record in enumerate(records):
+            id = record["id"]
+            vector = record["embedding"]
+            self.id_to_seq_id[id] = record["seq_id"]
+            if id in self.deleted_ids:
+                self.deleted_ids.remove(id)
+
+            if id in self.id_to_index:
+                # Update
+                index = self.id_to_index[id]
+                self.vectors[index] = vector
+            else:
+                # Add
+                self.id_to_index[id] = self.curr_index
+                self.index_to_id[self.curr_index] = id
+                self.vectors[self.curr_index] = vector
+                self.curr_index += 1
+
+    # TODO: use id type?
+    def delete(self, records: List[EmbeddingRecord]) -> None:
+        for record in records:
+            id = record["id"]
+            if id in self.id_to_index:
+                index = self.id_to_index[id]
+                self.deleted_ids.add(id)
+                del self.id_to_index[id]
+                del self.index_to_id[index]
+                del self.id_to_seq_id[id]
+                self.vectors[index].fill(0)
+            else:
+                logger.warning(f"Delete of nonexisting embedding ID: {id}")
+
+    def has_id(self, id: str) -> bool:
+        """Returns whether the index contains the given ID"""
+        return id in self.id_to_index and id not in self.deleted_ids
+
+    def get_vectors(
+        self, ids: Sequence[str] | None = None
+    ) -> Sequence[VectorEmbeddingRecord]:
+        target_ids = ids or self.id_to_index.keys()
+
+        return [
+            VectorEmbeddingRecord(
+                id=id,
+                embedding=self.vectors[self.id_to_index[id]].tolist(),
+                seq_id=self.id_to_seq_id[id],
+            )
+            for id in target_ids
+        ]
+
+    # TODO: allowed_ids
+    def query(
+        self, query_vectors: List[Vector]
+    ) -> Sequence[Sequence[VectorQueryResult]]:
+        np_query = np.array(query_vectors)
+
+        distances = np.apply_along_axis(
+            lambda query: np.apply_along_axis(self.distance_fn, 1, self.vectors, query),
+            1,
+            np_query,
+        )
+
+        indices = np.argsort(distances).tolist()
+        # Filter out deleted labels
+        filtered_results = []
+        for i, index_list in enumerate(indices):
+            curr_results = []
+            for j in index_list:
+                # If the index is in the index_to_id map, then it has been added
+                if j in self.index_to_id:
+                    id = self.index_to_id[j]
+                    if id not in self.deleted_ids:
+                        curr_results.append(
+                            VectorQueryResult(
+                                id=id,
+                                distance=distances[i][j],
+                                seq_id=self.id_to_seq_id[id],
+                                embedding=self.vectors[j].tolist(),
+                            )
+                        )
+            filtered_results.append(curr_results)
+        return filtered_results
 
 
 class LocalHnswSegment(VectorReader):
@@ -293,45 +510,49 @@ class LocalHnswSegment(VectorReader):
 
     def _apply_batch(self, batch: Batch) -> None:
         """Apply a batch of changes, as atomically as possible."""
+        deleted_ids = batch.get_deleted_ids()
+        written_ids = batch.get_written_ids()
+        vectors_to_write = batch.get_written_vectors()
+        labels_to_write = [0] * len(vectors_to_write)
 
-        if batch.delete_ids:
+        if len(deleted_ids) > 0:
             index = cast(hnswlib.Index, self._index)
-            for i in range(len(batch.delete_ids)):
-                label = batch.delete_labels[i]
-                id = batch.delete_ids[i]
+            for i in range(len(deleted_ids)):
+                id = deleted_ids[i]
+                label = self._id_to_label[id]
 
                 index.mark_deleted(label)
                 del self._id_to_label[id]
                 del self._label_to_id[label]
                 del self._id_to_seq_id[id]
 
-        if batch.ids:
-            self._ensure_index(batch.add_count, len(batch.vectors[0]))
+        if len(written_ids) > 0:
+            self._ensure_index(batch.add_count, len(vectors_to_write[0]))
 
             next_label = self._total_elements_added + 1
-            for i in range(len(batch.labels)):
-                if batch.labels[i] is None:
-                    batch.labels[i] = next_label
+            for i in range(len(written_ids)):
+                if batch.is_new(written_ids[i]):
+                    labels_to_write[i] = next_label
                     next_label += 1
-
-            labels = cast(List[int], batch.labels)
+                else:
+                    labels_to_write[i] = self._id_to_label[written_ids[i]]
 
             index = cast(hnswlib.Index, self._index)
 
             # First, update the index
-            index.add_items(batch.vectors, labels)
+            index.add_items(vectors_to_write, labels_to_write)
 
             # If that succeeds, update the mappings
-            for id, label, seq_id in zip(batch.ids, labels, batch.seq_ids):
-                self._id_to_seq_id[id] = seq_id
-                self._id_to_label[id] = label
-                self._label_to_id[label] = id
+            for i, id in enumerate(written_ids):
+                self._id_to_seq_id[id] = batch.get_record(id)["seq_id"]
+                self._id_to_label[id] = labels_to_write[i]
+                self._label_to_id[labels_to_write[i]] = id
 
             # If that succeeds, update the total count
             self._total_elements_added += batch.add_count
 
             # If that succeeds, finally the seq ID
-            self._max_seq_id = max(self._max_seq_id, max(batch.seq_ids))
+            self._max_seq_id = batch.max_seq_id
 
     def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
         """Add a batch of embeddings to the index"""
@@ -350,25 +571,25 @@ class LocalHnswSegment(VectorReader):
 
                 if op == Operation.DELETE:
                     if label:
-                        batch.delete(label, id)
+                        batch.apply(record)
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
                     if record["embedding"] is not None:
                         if label is not None:
-                            batch.add(label, record)
+                            batch.apply(record)
                         else:
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['id']}"
                             )
                 elif op == Operation.ADD:
                     if not label:
-                        batch.add(label, record)
+                        batch.apply(record, True)
                     else:
                         logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
-                    batch.add(label, record)
+                    batch.apply(record, is_add=label is None)
 
             self._apply_batch(batch)
 
@@ -410,13 +631,19 @@ class PersistentData:
 
 class PersistentLocalHnswSegment(LocalHnswSegment):
     METADATA_FILE: str = "index_metadata.pickle"
-    PERSIST_PATH_PREFIX: str
-    _persist_directory: str
+    # How many records to add to index at once, we do this because crossing the python/c++ boundary is expensive (for add())
+    # When records are not added to the c++ index, they are buffered in memory and served
+    # via brute force search.
+    _batch_size: int = 1000
+    _brute_force_index: BruteForceIndex
+    _curr_batch: Batch
+    # How many records to add to index before syncing to disk
     _sync_threshold: int = 1000
     _persist_data: PersistentData
 
     def __init__(self, system: System, segment: Segment):
         self._persist_directory = system.settings.require("persist_directory")
+        self._curr_batch = Batch()
         super().__init__(system, segment)
         # Load persist data if it exists already, otherwise create it
         if self._index_exists():
@@ -451,6 +678,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def _init_index(self, dimensionality: int) -> None:
         index = hnswlib.Index(space=self._params.space, dim=dimensionality)
+        self._brute_force_index = BruteForceIndex(
+            size=self._batch_size,
+            dimensionality=dimensionality,
+            space=self._params.space,
+        )
 
         # Check if index exists and load it if it does
         if self._index_exists():
@@ -498,6 +730,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     @override
     def _apply_batch(self, batch: Batch) -> None:
+        print("applying batch")
         super()._apply_batch(batch)
         if (
             self._total_elements_added - self._persist_data.total_elements_added
@@ -505,3 +738,140 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         ):
             print("persisting")
             self._persist()
+
+    @override
+    def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
+        """Add a batch of embeddings to the index"""
+        if not self._running:
+            raise RuntimeError("Cannot add embeddings to stopped component")
+
+        # TODO: THREAD SAFETY
+        for record in records:
+            if record["embedding"] is not None:
+                self._ensure_index(len(records), len(record["embedding"]))
+
+            self._max_seq_id = max(self._max_seq_id, record["seq_id"])
+            id = record["id"]
+            op = record["operation"]
+            exists_in_index = self._id_to_label.get(
+                id, None
+            ) or self._brute_force_index.has_id(id)
+
+            if op == Operation.DELETE:
+                if exists_in_index:
+                    self._curr_batch.apply(record)
+                    self._brute_force_index.delete([record])
+                else:
+                    logger.warning(f"Delete of nonexisting embedding ID: {id}")
+
+            elif op == Operation.UPDATE:
+                if record["embedding"] is not None:
+                    if exists_in_index:
+                        self._curr_batch.apply(record)
+                        self._brute_force_index.upsert([record])
+                    else:
+                        logger.warning(
+                            f"Update of nonexisting embedding ID: {record['id']}"
+                        )
+            elif op == Operation.ADD:
+                if record["embedding"] is not None:
+                    if not exists_in_index:
+                        self._curr_batch.apply(record, is_add=True)
+                        self._brute_force_index.upsert([record])
+                    else:
+                        logger.warning(f"Add of existing embedding ID: {id}")
+            elif op == Operation.UPSERT:
+                if record["embedding"] is not None:
+                    self._curr_batch.apply(record, is_add=exists_in_index is False)
+                    self._brute_force_index.upsert([record])
+
+            if len(self._curr_batch) >= self._batch_size:
+                self._apply_batch(self._curr_batch)
+                self._curr_batch = Batch()
+                self._brute_force_index.flush()
+                print("flushed brute force index")
+                print("hnsw index count", self.count())
+
+    @override
+    def count(self) -> int:
+        return len(self._id_to_label) + self._curr_batch.count()
+
+    @override
+    def get_vectors(
+        self, ids: Sequence[str] | None = None
+    ) -> Sequence[VectorEmbeddingRecord]:
+        """Get the embeddings from the HNSW index and layered brute force batch index"""
+        results = []
+        ids_hnsw = set(self._id_to_label.keys())
+        ids_bf = set(self._curr_batch.get_written_ids())
+        target_ids = ids or list(ids_hnsw.union(ids_bf))
+        hnsw_labels = []
+
+        for id in target_ids:
+            if id in ids_bf:
+                results.append(self._brute_force_index.get_vectors([id])[0])
+            elif id in ids_hnsw:
+                hnsw_labels.append(self._id_to_label[id])
+
+        if len(hnsw_labels) > 0 and self._index is not None:
+            vectors = cast(Sequence[Vector], self._index.get_items(hnsw_labels))
+
+            for label, vector in zip(hnsw_labels, vectors):
+                id = self._label_to_id[label]
+                seq_id = self._id_to_seq_id[id]
+                results.append(
+                    VectorEmbeddingRecord(id=id, seq_id=seq_id, embedding=vector)
+                )
+
+        return results
+
+    @override
+    def query_vectors(
+        self, query: VectorQuery
+    ) -> Sequence[Sequence[VectorQueryResult]]:
+        # TODO: handle k > index size
+        # Overquery by updated elements amount because they may
+        # hide the real nearest neighbors in the hnsw index
+        query = VectorQuery(
+            vectors=query["vectors"],
+            k=query["k"] + self._curr_batch.update_count,
+            allowed_ids=query["allowed_ids"],
+            include_embeddings=query["include_embeddings"],
+            options=query["options"],
+        )
+        results = []
+        bf_results = self._brute_force_index.query(cast(List[Vector], query["vectors"]))
+        hnsw_results = super().query_vectors(query)
+        # For each query vector, we want to take the top k results from the
+        # combined results of the brute force and hnsw index
+        for i in range(len(query["vectors"])):
+            # Merge results into a single list of size k
+            bf_pointer: int = 0
+            hnsw_pointer: int = 0
+            curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
+            curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
+            curr_results: List[VectorQueryResult] = []
+            while len(curr_results) < query["k"]:
+                if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
+                    curr_hnsw_result
+                ):
+                    bf_dist = curr_bf_result[bf_pointer]["distance"]
+                    hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
+                    if bf_dist <= hnsw_dist:
+                        curr_results.append(curr_bf_result[bf_pointer])
+                        bf_pointer += 1
+                    else:
+                        curr_results.append(curr_hnsw_result[hnsw_pointer])
+                        hnsw_pointer += 1
+                if bf_pointer >= len(curr_bf_result):
+                    remaining = query["k"] - len(curr_results)
+                    curr_results.extend(
+                        curr_hnsw_result[hnsw_pointer : hnsw_pointer + remaining]
+                    )
+                if hnsw_pointer >= len(curr_hnsw_result):
+                    remaining = query["k"] - len(curr_results)
+                    curr_results.extend(
+                        curr_bf_result[bf_pointer : bf_pointer + remaining]
+                    )
+            results.append(curr_results)
+        return results

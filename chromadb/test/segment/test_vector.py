@@ -130,14 +130,16 @@ def approx_equal_vector(a: Vector, b: Vector, epsilon: float = 0.0001) -> bool:
 
 
 def test_get_vectors(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(10)]
@@ -173,14 +175,16 @@ def test_get_vectors(
 
 
 def test_ann_query(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(100)]
@@ -236,14 +240,16 @@ def test_ann_query(
 
 
 def test_delete(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(5)]
@@ -277,6 +283,8 @@ def test_delete(
     assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
     results = segment.get_vectors()
     assert len(results) == 4
+    # get_vectors returns results in arbitrary order
+    results = sorted(results, key=lambda v: v["id"])
     for actual, expected in zip(results, embeddings[1:]):
         assert actual["id"] == expected["id"]
         assert approx_equal_vector(
@@ -373,14 +381,16 @@ def _test_update(
 
 
 def test_update(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPDATE)
@@ -404,14 +414,16 @@ def test_update(
 
 
 def test_upsert(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
     system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPSERT)
