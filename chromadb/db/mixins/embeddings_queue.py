@@ -74,8 +74,8 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         super().__init__(system)
 
     @override
-    def reset(self) -> None:
-        super().reset()
+    def reset_state(self) -> None:
+        super().reset_state()
         self._subscriptions = defaultdict(set)
 
     @override

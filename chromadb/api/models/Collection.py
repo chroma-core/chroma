@@ -20,6 +20,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many,
     validate_ids,
     validate_include,
+    validate_metadata,
     validate_metadatas,
     validate_where,
     validate_where_document,
@@ -240,6 +241,9 @@ class Collection(BaseModel):
         Returns:
             None
         """
+        if metadata is not None:
+            validate_metadata(metadata)
+
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self.name = name

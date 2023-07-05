@@ -8,7 +8,7 @@ on:
   pull_request:
     branches:
       - main
-      - team/hypothesis-tests
+      - '*'
 
 jobs:
   test:

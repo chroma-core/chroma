@@ -642,7 +642,7 @@ class Clickhouse(DB):
         self.index_cache = {}
 
     @override
-    def reset(self):
+    def reset_state(self):
         conn = self._get_conn()
         conn.command("DROP TABLE collections")
         conn.command("DROP TABLE embeddings")
