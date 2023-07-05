@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import List, Sequence, Optional, Tuple
 from uuid import UUID
-import numpy.typing as npt
 from chromadb.api.types import (
     Embeddings,
     Documents,
@@ -114,7 +113,7 @@ class DB(Component):
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
         where_document: WhereDocument = {},
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod

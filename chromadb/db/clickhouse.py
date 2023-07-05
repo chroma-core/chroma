@@ -19,7 +19,6 @@ import logging
 from uuid import UUID
 from chromadb.config import System
 from overrides import override
-import numpy.typing as npt
 from chromadb.api.types import Metadata
 
 logger = logging.getLogger(__name__)
@@ -587,7 +586,7 @@ class Clickhouse(DB):
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
         where_document: WhereDocument = {},
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         # Either the collection name or the collection uuid must be provided
         if collection_uuid is None:
             raise TypeError("Argument collection_uuid cannot be None")
