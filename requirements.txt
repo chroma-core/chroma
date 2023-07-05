@@ -1,4 +1,4 @@
-chroma-hnswlib @ git+https://github.com/chroma-core/hnswlib@826ede4f94989ecff31657d0f4636a2e89c8ab5d
+chroma-hnswlib @ git+https://github.com/chroma-core/hnswlib@46affb4f8b53a5756402936ea16c55b799b59f49
 clickhouse-connect==0.5.7
 duckdb==0.7.1
 fastapi==0.85.1
