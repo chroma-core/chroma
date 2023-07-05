@@ -266,7 +266,7 @@ class BruteForceIndex:
         return id in self.id_to_index and id not in self.deleted_ids
 
     def get_vectors(
-        self, ids: Sequence[str] | None = None
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         target_ids = ids or self.id_to_index.keys()
 
@@ -805,7 +805,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     @override
     def get_vectors(
-        self, ids: Sequence[str] | None = None
+        self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get the embeddings from the HNSW index and layered brute force batch index"""
         results = []
