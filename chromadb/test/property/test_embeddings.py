@@ -294,9 +294,45 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
 
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: API) -> None:
-    caplog.set_level(logging.ERROR)
+    caplog.set_level(logging.INFO)
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
     print_traces()
+
+
+def test_failing(api: API):
+    state = EmbeddingStateMachine(api)
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "0": 0.0,
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+                "hnsw:space": "ip",
+            },
+            dimension=2000,
+            dtype=np.float32,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=True,
+            has_embeddings=False,
+            embedding_function=strategies.hashing_embedding_function(2000, np.float32),
+        )
+    )
+    state.ann_accuracy()
+    state.count()
+    state.no_duplicates()
+    (v1,) = state.add_embeddings(
+        record_set={
+            "ids": ["1"],
+            "embeddings": None,
+            "metadatas": [{"0": "0"}],
+            "documents": ["ÙĔ\U00058eed āķĢ \U00099d8d\U00078f69\U00055717ĉZ"],
+        }
+    )
+    state.ann_accuracy()
+    state.teardown()
 
 
 def test_multi_add(api: API) -> None:
