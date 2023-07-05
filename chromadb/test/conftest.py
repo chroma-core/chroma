@@ -146,8 +146,30 @@ def sqlite() -> Generator[System, None, None]:
     system.stop()
 
 
+def sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for segment-based API using persistent Sqlite"""
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        sqlite_database="chroma.sqlite",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite]
+    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:

@@ -279,12 +279,9 @@ class BruteForceIndex:
             for id in target_ids
         ]
 
-    # TODO: allowed_ids
-    def query(
-        self, query_vectors: List[Vector]
-    ) -> Sequence[Sequence[VectorQueryResult]]:
-        np_query = np.array(query_vectors)
-
+    def query(self, query: VectorQuery) -> Sequence[Sequence[VectorQueryResult]]:
+        np_query = np.array(query["vectors"])
+        allowed_ids = None if not query["allowed_ids"] else set(query["allowed_ids"])
         distances = np.apply_along_axis(
             lambda query: np.apply_along_axis(self.distance_fn, 1, self.vectors, query),
             1,
@@ -300,7 +297,9 @@ class BruteForceIndex:
                 # If the index is in the index_to_id map, then it has been added
                 if j in self.index_to_id:
                     id = self.index_to_id[j]
-                    if id not in self.deleted_ids:
+                    if id not in self.deleted_ids and (
+                        allowed_ids is None or id in allowed_ids
+                    ):
                         curr_results.append(
                             VectorQueryResult(
                                 id=id,
@@ -428,7 +427,7 @@ class LocalHnswSegment(VectorReader):
         labels: Set[int] = set()
         ids = query["allowed_ids"]
         if ids is not None:
-            labels = {self._id_to_label[id] for id in ids}
+            labels = {self._id_to_label[id] for id in ids if id in self._id_to_label}
             if len(labels) < k:
                 k = len(labels)
 
@@ -832,19 +831,25 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def query_vectors(
         self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
-        # TODO: handle k > index size
+        k = query["k"]
+        if k > self.count():
+            logger.warning(
+                f"Number of requested results {k} is greater than number of elements in index {self.count()}, updating n_results = {self.count()}"
+            )
+            k = self.count()
+
         # Overquery by updated elements amount because they may
         # hide the real nearest neighbors in the hnsw index
-        query = VectorQuery(
+        hnsw_query = VectorQuery(
             vectors=query["vectors"],
-            k=query["k"] + self._curr_batch.update_count,
+            k=k + self._curr_batch.update_count,
             allowed_ids=query["allowed_ids"],
             include_embeddings=query["include_embeddings"],
             options=query["options"],
         )
         results = []
-        bf_results = self._brute_force_index.query(cast(List[Vector], query["vectors"]))
-        hnsw_results = super().query_vectors(query)
+        bf_results = self._brute_force_index.query(query)
+        hnsw_results = super().query_vectors(hnsw_query)
         # For each query vector, we want to take the top k results from the
         # combined results of the brute force and hnsw index
         for i in range(len(query["vectors"])):
@@ -854,7 +859,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
             curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
             curr_results: List[VectorQueryResult] = []
-            while len(curr_results) < query["k"]:
+            while len(curr_results) < k:
                 if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
                     curr_hnsw_result
                 ):
@@ -867,12 +872,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         curr_results.append(curr_hnsw_result[hnsw_pointer])
                         hnsw_pointer += 1
                 if bf_pointer >= len(curr_bf_result):
-                    remaining = query["k"] - len(curr_results)
+                    remaining = k - len(curr_results)
                     curr_results.extend(
                         curr_hnsw_result[hnsw_pointer : hnsw_pointer + remaining]
                     )
                 if hnsw_pointer >= len(curr_hnsw_result):
-                    remaining = query["k"] - len(curr_results)
+                    remaining = k - len(curr_results)
                     curr_results.extend(
                         curr_bf_result[bf_pointer : bf_pointer + remaining]
                     )
