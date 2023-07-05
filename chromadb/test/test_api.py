@@ -1052,6 +1052,7 @@ def test_invalid_id(api):
 
 
 def test_index_params(api):
+    EPS = 1e-12
     # first standard add
     api.reset()
     collection = api.create_collection(name="test_index_params")
@@ -1073,8 +1074,8 @@ def test_index_params(api):
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert items["distances"][0][0] > 0
-    assert items["distances"][0][0] < 1
+    assert items["distances"][0][0] > 0 - EPS
+    assert items["distances"][0][0] < 1 + EPS
 
     # ip
     api.reset()

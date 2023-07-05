@@ -281,7 +281,9 @@ class BruteForceIndex:
 
     def query(self, query: VectorQuery) -> Sequence[Sequence[VectorQueryResult]]:
         np_query = np.array(query["vectors"])
-        allowed_ids = None if not query["allowed_ids"] else set(query["allowed_ids"])
+        allowed_ids = (
+            None if query["allowed_ids"] is None else set(query["allowed_ids"])
+        )
         distances = np.apply_along_axis(
             lambda query: np.apply_along_axis(self.distance_fn, 1, self.vectors, query),
             1,
@@ -634,7 +636,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # When records are not added to the c++ index, they are buffered in memory and served
     # via brute force search.
     _batch_size: int = 1000
-    _brute_force_index: BruteForceIndex
+    _brute_force_index: Optional[BruteForceIndex]
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
     _sync_threshold: int = 1000
@@ -645,6 +647,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         super().__init__(system, segment)
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
+        self._brute_force_index = None
         if not os.path.exists(self._get_storage_folder()):
             os.makedirs(self._get_storage_folder())
         # Load persist data if it exists already, otherwise create it
@@ -754,6 +757,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             if record["embedding"] is not None:
                 self._ensure_index(len(records), len(record["embedding"]))
 
+            self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
+
             self._max_seq_id = max(self._max_seq_id, record["seq_id"])
             id = record["id"]
             op = record["operation"]
@@ -804,13 +809,19 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get the embeddings from the HNSW index and layered brute force batch index"""
         results = []
-        ids_hnsw = set(self._id_to_label.keys())
-        ids_bf = set(self._curr_batch.get_written_ids())
+        ids_hnsw: Set[str] = set()
+        ids_bf: Set[str] = set()
+
+        if self._index is not None:
+            ids_hnsw = set(self._id_to_label.keys())
+        if self._brute_force_index is not None:
+            ids_bf = set(self._curr_batch.get_written_ids())
         target_ids = ids or list(ids_hnsw.union(ids_bf))
         hnsw_labels = []
 
         for id in target_ids:
             if id in ids_bf:
+                self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
                 results.append(self._brute_force_index.get_vectors([id])[0])
             elif id in ids_hnsw:
                 hnsw_labels.append(self._id_to_label[id])
@@ -831,6 +842,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def query_vectors(
         self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
+        if self._index is None and self._brute_force_index is None:
+            return [[] for _ in range(len(query["vectors"]))]
+
         k = query["k"]
         if k > self.count():
             logger.warning(
@@ -847,11 +861,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             include_embeddings=query["include_embeddings"],
             options=query["options"],
         )
-        results = []
-        bf_results = self._brute_force_index.query(query)
-        hnsw_results = super().query_vectors(hnsw_query)
+
         # For each query vector, we want to take the top k results from the
         # combined results of the brute force and hnsw index
+        results: List[List[VectorQueryResult]] = []
+        self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
+        bf_results = self._brute_force_index.query(query)
+        hnsw_results = super().query_vectors(hnsw_query)
         for i in range(len(query["vectors"])):
             # Merge results into a single list of size k
             bf_pointer: int = 0
@@ -859,27 +875,33 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
             curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
             curr_results: List[VectorQueryResult] = []
-            while len(curr_results) < k:
-                if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
-                    curr_hnsw_result
-                ):
-                    bf_dist = curr_bf_result[bf_pointer]["distance"]
-                    hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
-                    if bf_dist <= hnsw_dist:
-                        curr_results.append(curr_bf_result[bf_pointer])
-                        bf_pointer += 1
-                    else:
-                        curr_results.append(curr_hnsw_result[hnsw_pointer])
-                        hnsw_pointer += 1
-                if bf_pointer >= len(curr_bf_result):
-                    remaining = k - len(curr_results)
-                    curr_results.extend(
-                        curr_hnsw_result[hnsw_pointer : hnsw_pointer + remaining]
-                    )
-                if hnsw_pointer >= len(curr_hnsw_result):
-                    remaining = k - len(curr_results)
-                    curr_results.extend(
-                        curr_bf_result[bf_pointer : bf_pointer + remaining]
-                    )
-            results.append(curr_results)
+            # In the case where filters cause the number of results to be less than k,
+            # we set k to be the number of results
+            total_results = len(curr_bf_result) + len(curr_hnsw_result)
+            if total_results == 0:
+                results.append([])
+            else:
+                while len(curr_results) < min(k, total_results):
+                    if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
+                        curr_hnsw_result
+                    ):
+                        bf_dist = curr_bf_result[bf_pointer]["distance"]
+                        hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
+                        if bf_dist <= hnsw_dist:
+                            curr_results.append(curr_bf_result[bf_pointer])
+                            bf_pointer += 1
+                        else:
+                            curr_results.append(curr_hnsw_result[hnsw_pointer])
+                            hnsw_pointer += 1
+                    if bf_pointer >= len(curr_bf_result):
+                        remaining = k - len(curr_results)
+                        curr_results.extend(
+                            curr_hnsw_result[hnsw_pointer : hnsw_pointer + remaining]
+                        )
+                    if hnsw_pointer >= len(curr_hnsw_result):
+                        remaining = k - len(curr_results)
+                        curr_results.extend(
+                            curr_bf_result[bf_pointer : bf_pointer + remaining]
+                        )
+                results.append(curr_results)
         return results

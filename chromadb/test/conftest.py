@@ -155,7 +155,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database="chroma.sqlite",
+        sqlite_database=save_path + "/chroma.sqlite",
         allow_reset=True,
         is_persistent=True,
         persist_directory=save_path,
