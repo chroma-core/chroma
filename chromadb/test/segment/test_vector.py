@@ -18,6 +18,9 @@ import time
 
 from chromadb.segment.impl.vector.local_hnsw import (
     LocalHnswSegment,
+)
+
+from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
 

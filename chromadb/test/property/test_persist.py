@@ -26,15 +26,29 @@ configurations = [
         chroma_api_impl="local",
         chroma_db_impl="duckdb+parquet",
         persist_directory=tempfile.gettempdir() + "/tests",
-    )
+    ),
+    Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        sqlite_database=tempfile.gettempdir() + "/tests/chroma.sqlite",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=tempfile.gettempdir() + "/tests",
+    ),
 ]
 
 
 @pytest.fixture(scope="module", params=configurations)
 def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     configuration = request.param
-    yield configuration
     save_path = configuration.persist_directory
+    # Create if it doesn't exist
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    yield configuration
     # Remove if it exists
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
