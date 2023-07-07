@@ -37,7 +37,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def create_coll(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
-        if coll.name in self.model:
+        # Metadata can either be None or a non-empty dict
+        if coll.name in self.model or (
+            coll.metadata is not None and len(coll.metadata) == 0
+        ):
             with pytest.raises(Exception):
                 c = self.api.create_collection(
                     name=coll.name,
@@ -119,6 +122,15 @@ class CollectionStateMachine(RuleBasedStateMachine):
         # The fact that we ignore the metadata of the generated collections is a
         # bit weird, but it is the easiest way to excercise all cases
 
+        if new_metadata is not None and len(new_metadata) == 0:
+            with pytest.raises(Exception):
+                c = self.api.get_or_create_collection(
+                    name=coll.name,
+                    metadata=new_metadata,
+                    embedding_function=coll.embedding_function,
+                )
+            return multiple()
+
         # Update model
         if coll.name not in self.model:
             # Handles case 1 and 3
@@ -162,6 +174,14 @@ class CollectionStateMachine(RuleBasedStateMachine):
         c = self.api.get_collection(name=coll.name)
 
         if new_metadata is not None:
+            if len(new_metadata) == 0:
+                with pytest.raises(Exception):
+                    c = self.api.get_or_create_collection(
+                        name=coll.name,
+                        metadata=new_metadata,
+                        embedding_function=coll.embedding_function,
+                    )
+                return multiple()
             coll.metadata = new_metadata
             self.model[coll.name] = coll.metadata
 

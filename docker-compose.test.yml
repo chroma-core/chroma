@@ -12,12 +12,13 @@ services:
     volumes:
       - ./:/chroma
       - test_index_data:/index_data
-    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
+    command: uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
     environment:
       - CHROMA_DB_IMPL=clickhouse
       - CLICKHOUSE_HOST=test_clickhouse
       - CLICKHOUSE_PORT=8123
       - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
     ports:
       - ${CHROMA_PORT}:8000
     depends_on:

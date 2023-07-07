@@ -14,7 +14,8 @@ import {
     GetResponse,
     QueryResponse,
     AddResponse,
-    CollectionMetadata
+    CollectionMetadata,
+    ConfigOptions
 } from "./types";
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { ApiApi as DefaultApi } from "./generated";
@@ -29,7 +30,7 @@ export class Collection {
     /**
      * @ignore
      */
-    private api: DefaultApi;
+    private api: DefaultApi & ConfigOptions;
     /**
      * @ignore
      */
@@ -195,7 +196,7 @@ export class Collection {
                 // @ts-ignore
                 documents: documentsArray,
                 metadatas: metadatasArray,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -249,6 +250,7 @@ export class Collection {
                 documents: documentsArray,
                 metadatas: metadatasArray,
             },
+            this.api.options
         )
             .then(handleSuccess)
             .catch(handleError);
@@ -267,7 +269,7 @@ export class Collection {
      * ```
      */
     public async count(): Promise<number> {
-        const response = await this.api.count(this.id);
+        const response = await this.api.count(this.id, this.api.options);
         return handleSuccess(response);
     }
 
@@ -300,6 +302,7 @@ export class Collection {
                     new_name: name,
                     new_metadata: metadata,
                 },
+                this.api.options
             )
             .then(handleSuccess)
             .catch(handleError);
@@ -360,7 +363,7 @@ export class Collection {
                 offset,
                 include,
                 where_document: whereDocument,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
@@ -427,6 +430,7 @@ export class Collection {
                     documents: documents,
                     metadatas: metadatas
                 },
+                this.api.options
             )
             .then(handleSuccess)
             .catch(handleError);
@@ -509,7 +513,7 @@ export class Collection {
                 n_results: nResults,
                 where_document: whereDocument,
                 include: include,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
@@ -532,7 +536,7 @@ export class Collection {
         if (limit === undefined) limit = 10;
         const response = await this.api.aGet(this.id, {
             limit: limit,
-        });
+        }, this.api.options);
         return handleSuccess(response);
     }
 
@@ -566,7 +570,7 @@ export class Collection {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
         return await this.api
-            .aDelete(this.id, { ids: idsArray, where: where, where_document: whereDocument })
+            .aDelete(this.id, { ids: idsArray, where: where, where_document: whereDocument }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }

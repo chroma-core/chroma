@@ -1,5 +1,7 @@
 #! /bin/bash
 
+cd ~
+
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg lsb-release
 mkdir -m 0755 -p /etc/apt/keyrings
@@ -74,4 +76,4 @@ cat << EOF > config/chroma_users.xml
 </clickhouse>
 EOF
 
-docker compose up -d
+COMPOSE_PROJECT_NAME=chroma docker compose up -d

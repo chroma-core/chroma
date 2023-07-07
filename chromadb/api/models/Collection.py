@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Tuple, cast, List
 from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
+import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     CollectionMetadata,
@@ -19,6 +20,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many,
     validate_ids,
     validate_include,
+    validate_metadata,
     validate_metadatas,
     validate_where,
     validate_where_document,
@@ -45,19 +47,11 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         metadata: Optional[CollectionMetadata] = None,
     ):
         self._client = client
-        if embedding_function is not None:
-            self._embedding_function = embedding_function
-        else:
-            import chromadb.utils.embedding_functions as ef
-
-            logger.warning(
-                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
-            )
-            self._embedding_function = ef.DefaultEmbeddingFunction()
+        self._embedding_function = embedding_function
         super().__init__(name=name, metadata=metadata, id=id)
 
     def __repr__(self) -> str:
@@ -83,10 +77,9 @@ class Collection(BaseModel):
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
-            embedding: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
-            metadata: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
-            ids: The ids to associate with the embeddings. Optional.
 
         Returns:
             None
@@ -248,6 +241,9 @@ class Collection(BaseModel):
         Returns:
             None
         """
+        if metadata is not None:
+            validate_metadata(metadata)
+
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:
             self.name = name

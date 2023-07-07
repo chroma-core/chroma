@@ -9,11 +9,13 @@ import copy
 
 def sqlite() -> Generator[migrations.MigratableDB, None, None]:
     """Fixture generator for sqlite DB"""
-    yield SqliteDB(
+    db = SqliteDB(
         System(
             Settings(sqlite_database=":memory:", migrations="none", allow_reset=True)
         )
     )
+    db.start()
+    yield db
 
 
 def db_fixtures() -> List[Callable[[], Generator[migrations.MigratableDB, None, None]]]:
@@ -33,7 +35,7 @@ def test_exception_propagation(db: migrations.MigratableDB) -> None:
 
 
 def test_setup_migrations(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
     db.setup_migrations()
     db.setup_migrations()  # idempotent
 
@@ -96,7 +98,7 @@ def test_migrations(db: migrations.MigratableDB) -> None:
 
 
 def test_tampered_migration(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
 
     db.setup_migrations()
 
@@ -140,7 +142,7 @@ def test_tampered_migration(db: migrations.MigratableDB) -> None:
 def test_initialization(
     monkeypatch: pytest.MonkeyPatch, db: migrations.MigratableDB
 ) -> None:
-    db.reset()
+    db.reset_state()
     monkeypatch.setattr(db, "migration_dirs", lambda: ["chromadb/test/db/migrations"])
 
     assert not db.migrations_initialized()
