@@ -2,12 +2,10 @@ import { ChromaClient } from '../../src/ChromaClient';
 // import env.ts
 
 window.onload = async () => {
-  const chroma = new ChromaClient("http://localhost:8000");
+  const chroma = new ChromaClient({ path: "http://localhost:8000" });
   await chroma.reset();
 
-  const collection = await chroma.createCollection({
-    name: "test-collection",
-  });
+  const collection = await chroma.createCollection({ name: "test-from-js" });
   console.log("collection", collection);
 
   // first generate some data
@@ -29,9 +27,7 @@ window.onload = async () => {
   const queryData = await collection.query({
     queryEmbeddings: [1, 2, 3, 4, 5],
     nResults: 5,
-    whereDocument: {
-      $contains: "test",
-    },
+    where: { test: "test" }
   });
 
   console.log("queryData", queryData);

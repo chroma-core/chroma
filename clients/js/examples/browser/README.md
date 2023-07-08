@@ -2,13 +2,14 @@
 
 Update your settings to add `localhost:3000` to `chroma_server_cors_allow_origins`.
 
-For example:
+For example in `docker-compose.yml`
 
 ```
-client = chromadb.Client(
-    Settings(chroma_api_impl="rest", chroma_server_host="localhost", chroma_server_http_port="8000", chroma_server_cors_allow_origins=["http://localhost:3000"])
-)
-
+environment:
+      - CHROMA_DB_IMPL=clickhouse
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["http://localhost:3000"]
 ```
 
 1. `yarn dev`
