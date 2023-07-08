@@ -50,7 +50,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
             if i % 3 == 0:
                 metadata["div_by_three"] = "true"
-            metadata["document"] = _build_document(i)
+            metadata["chroma:document"] = _build_document(i)
 
         record = SubmitEmbeddingRecord(
             id=f"embedding_{i}",
@@ -106,7 +106,7 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
     producer = system.instance(Producer)
 
     topic = str(segment_definition["topic"])
@@ -144,7 +144,7 @@ def assert_equiv_records(
 def test_get(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -242,7 +242,7 @@ def test_get(
 def test_fulltext(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -256,7 +256,7 @@ def test_fulltext(
 
     sync(segment, max_id)
 
-    result = segment.get_metadata(where={"document": "four two"})
+    result = segment.get_metadata(where={"chroma:document": "four two"})
     result2 = segment.get_metadata(ids=["embedding_42"])
     assert result == result2
 
@@ -304,7 +304,7 @@ def test_fulltext(
 def test_delete(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -367,7 +367,7 @@ def test_delete(
 def test_update(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -395,7 +395,7 @@ def test_update(
 def test_upsert(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset()
+    system.reset_state()
 
     producer = system.instance(Producer)
     topic = str(segment_definition["topic"])
@@ -442,7 +442,7 @@ def _test_update(
     # Update embedding with no metadata
     update_record = SubmitEmbeddingRecord(
         id="embedding_0",
-        metadata={"document": "foo bar"},
+        metadata={"chroma:document": "foo bar"},
         embedding=None,
         encoding=None,
         operation=op,
@@ -450,14 +450,14 @@ def _test_update(
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
-    assert results[0]["metadata"] == {"document": "foo bar"}
+    assert results[0]["metadata"] == {"chroma:document": "foo bar"}
     results = segment.get_metadata(where_document={"$contains": "foo"})
-    assert results[0]["metadata"] == {"document": "foo bar"}
+    assert results[0]["metadata"] == {"chroma:document": "foo bar"}
 
     # Update and overrwrite key
     update_record = SubmitEmbeddingRecord(
         id="embedding_0",
-        metadata={"document": "biz buz"},
+        metadata={"chroma:document": "biz buz"},
         embedding=None,
         encoding=None,
         operation=op,
@@ -465,9 +465,9 @@ def _test_update(
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
-    assert results[0]["metadata"] == {"document": "biz buz"}
+    assert results[0]["metadata"] == {"chroma:document": "biz buz"}
     results = segment.get_metadata(where_document={"$contains": "biz"})
-    assert results[0]["metadata"] == {"document": "biz buz"}
+    assert results[0]["metadata"] == {"chroma:document": "biz buz"}
     results = segment.get_metadata(where_document={"$contains": "foo"})
     assert len(results) == 0
 
@@ -482,12 +482,12 @@ def _test_update(
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
     results = segment.get_metadata(ids=["embedding_0"])
-    assert results[0]["metadata"] == {"document": "biz buz", "baz": 42}
+    assert results[0]["metadata"] == {"chroma:document": "biz buz", "baz": 42}
 
     # Update and delete key
     update_record = SubmitEmbeddingRecord(
         id="embedding_0",
-        metadata={"document": None},
+        metadata={"chroma:document": None},
         embedding=None,
         encoding=None,
         operation=op,

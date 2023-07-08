@@ -10,7 +10,7 @@
     "process": "^0.11.10"
   },
   "dependencies": {
-    "chromadb": "1.2.1"
+    "chromadb": "file:../.."
   },
   "scripts": {
     "dev": "parcel ./index.html --port 3000 --no-cache",

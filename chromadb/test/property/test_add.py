@@ -25,9 +25,15 @@ def test_add(
         metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
+    normalized_record_set = invariants.wrap_all(record_set)
+
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            collection.add(**normalized_record_set)
+        return
+
     coll.add(**record_set)
 
-    normalized_record_set = invariants.wrap_all(record_set)
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
     invariants.ann_accuracy(

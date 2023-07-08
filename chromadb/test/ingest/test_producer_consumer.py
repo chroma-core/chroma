@@ -120,7 +120,7 @@ async def test_backfill(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
 
     embeddings = [next(sample_embeddings) for _ in range(3)]
 
@@ -141,7 +141,7 @@ async def test_notifications(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     embeddings: List[SubmitEmbeddingRecord] = []
@@ -164,7 +164,7 @@ async def test_multiple_topics(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic_1")
     producer.create_topic("test_topic_2")
 
@@ -197,7 +197,7 @@ async def test_start_seq_id(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     consume_fn_1 = CapturingConsumeFn()
@@ -231,7 +231,7 @@ async def test_end_seq_id(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     consume_fn_1 = CapturingConsumeFn()

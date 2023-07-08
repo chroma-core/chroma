@@ -18,6 +18,7 @@ services:
       - CLICKHOUSE_HOST=test_clickhouse
       - CLICKHOUSE_PORT=8123
       - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
     ports:
       - ${CHROMA_PORT}:8000
     depends_on:

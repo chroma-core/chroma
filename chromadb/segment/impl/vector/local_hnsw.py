@@ -3,7 +3,7 @@ from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
-from chromadb.config import Component, System, Settings
+from chromadb.config import System, Settings
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -48,16 +48,6 @@ class HnswParams:
 
     def __init__(self, metadata: Metadata):
         metadata = metadata or {}
-
-        for param, value in metadata.items():
-            if param.startswith("hnsw:"):
-                if param not in param_validators:
-                    raise ValueError(f"Unknown HNSW parameter: {param}")
-                if not param_validators[param](value):
-                    raise ValueError(
-                        f"Invalid value for HNSW parameter: {param} = {value}"
-                    )
-
         self.space = str(metadata.get("hnsw:space", "l2"))
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
         self.search_ef = int(metadata.get("hnsw:search_ef", 10))
@@ -104,7 +94,7 @@ class Batch:
         self.delete_count += 1
 
 
-class LocalHnswSegment(Component, VectorReader):
+class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _topic: Optional[str]
@@ -140,7 +130,25 @@ class LocalHnswSegment(Component, VectorReader):
         self._label_to_id = {}
 
         self._lock = Lock()
-        super().__init__(system)
+        super().__init__(system, segment)
+
+    @staticmethod
+    @override
+    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
+        # Extract relevant metadata
+        segment_metadata = {}
+        for param, value in metadata.items():
+            if param.startswith("hnsw:"):
+                segment_metadata[param] = value
+
+        # Validate it
+        for param, value in segment_metadata.items():
+            if param not in param_validators:
+                raise ValueError(f"Unknown HNSW parameter: {param}")
+            if not param_validators[param](value):
+                raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+
+        return segment_metadata
 
     @override
     def start(self) -> None:
@@ -223,8 +231,14 @@ class LocalHnswSegment(Component, VectorReader):
             for label, distance in zip(result_labels[result_i], distances[result_i]):
                 id = self._label_to_id[label]
                 seq_id = self._id_to_seq_id[id]
+                if query["include_embeddings"]:
+                    embedding = self._index.get_items([label])[0]
+                else:
+                    embedding = None
                 results.append(
-                    VectorQueryResult(id=id, seq_id=seq_id, distance=distance)
+                    VectorQueryResult(
+                        id=id, seq_id=seq_id, distance=distance, embedding=embedding
+                    )
                 )
             all_results.append(results)
 

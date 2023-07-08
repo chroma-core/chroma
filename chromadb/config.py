@@ -33,6 +33,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
+    "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
 }
 
 
@@ -47,9 +49,15 @@ class Settings(BaseSettings):
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_segment_manager_impl: str = (
+        "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
 
     clickhouse_host: Optional[str] = None
     clickhouse_port: Optional[str] = None
+
+    tenant_id: str = "default"
+    topic_namespace: str = "default"
 
     persist_directory: str = ".chroma"
 
@@ -114,16 +122,18 @@ class Component(ABC, EnforceOverrides):
     def stop(self) -> None:
         """Idempotently stop this component's execution and free all associated
         resources."""
+        logger.debug(f"Stopping component {self.__class__.__name__}")
         self._running = False
 
     def start(self) -> None:
         """Idempotently start this component's execution"""
+        logger.debug(f"Starting component {self.__class__.__name__}")
         self._running = True
 
-    def reset(self) -> None:
+    def reset_state(self) -> None:
         """Reset this component's state to its initial blank state. Only intended to be
         called from tests."""
-        pass
+        logger.debug(f"Resetting component {self.__class__.__name__}")
 
 
 class System(Component):
@@ -135,14 +145,6 @@ class System(Component):
         self.settings = settings
         self._instances = {}
         super().__init__(self)
-
-        if is_thin_client:
-            # The thin client is a system with only the API component
-            if self.settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
-                raise RuntimeError(
-                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' or 'rest' as the chroma_api_impl. \
-            see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
-                )
 
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
@@ -187,11 +189,12 @@ class System(Component):
             component.stop()
 
     @override
-    def reset(self) -> None:
+    def reset_state(self) -> None:
+        """Reset the state of this system and all constituents in reverse dependency order"""
         if not self.settings.allow_reset:
             raise ValueError("Resetting is not allowed by this configuration")
-        for component in self.components():
-            component.reset()
+        for component in reversed(list(self.components())):
+            component.reset_state()
 
 
 C = TypeVar("C")
