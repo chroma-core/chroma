@@ -1,4 +1,5 @@
-from pydantic import BaseSettings
+# from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from typing import Optional, List, Any, Dict, TypeVar, Set, cast, Iterable, Type
 from typing_extensions import Literal
 from abc import ABC
