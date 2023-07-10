@@ -5,7 +5,6 @@ from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
-import chromadb.api.local as old_api
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
 
@@ -34,8 +33,30 @@ from uuid import UUID, uuid4
 import pandas as pd
 import time
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+# mimics s3 bucket requirements for naming
+def check_index_name(index_name: str) -> None:
+    msg = (
+        "Expected collection name that "
+        "(1) contains 3-63 characters, "
+        "(2) starts and ends with an alphanumeric character, "
+        "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+        "(4) contains no two consecutive periods (..) and "
+        "(5) is not a valid IPv4 address, "
+        f"got {index_name}"
+    )
+    if len(index_name) < 3 or len(index_name) > 63:
+        raise ValueError(msg)
+    if not re.match("^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$", index_name):
+        raise ValueError(msg)
+    if ".." in index_name:
+        raise ValueError(msg)
+    if re.match("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", index_name):
+        raise ValueError(msg)
 
 
 class SegmentAPI(API):
@@ -95,8 +116,8 @@ class SegmentAPI(API):
             else:
                 raise ValueError(f"Collection {name} already exists.")
 
-        # backwards compatibility in naming requirements (for now)
-        old_api.check_index_name(name)
+        # TODO: remove backwards compatibility in naming requirements
+        check_index_name(name)
 
         id = uuid4()
         coll = t.Collection(
@@ -176,7 +197,7 @@ class SegmentAPI(API):
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
-            old_api.check_index_name(new_name)
+            check_index_name(new_name)
 
         if new_metadata:
             validate_update_metadata(new_metadata)

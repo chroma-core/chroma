@@ -1,3 +1,4 @@
+from chromadb.db.impl.sqlite_pool import PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -15,9 +16,12 @@ from threading import local
 
 
 class TxWrapper(base.TxWrapper):
-    def __init__(self, conn: sqlite3.Connection, stack: local) -> None:
+    _conn: sqlite3.Connection
+
+    def __init__(self, conn_pool: Pool, stack: local) -> None:
         self._tx_stack = stack
-        self._conn = conn
+        self._conn = conn_pool.connect()
+        self._conn.isolation_level = None  # Handle commits explicitly
 
     @override
     def __enter__(self) -> base.Cursor:
@@ -39,11 +43,12 @@ class TxWrapper(base.TxWrapper):
                 self._conn.commit()
             else:
                 self._conn.rollback()
+        self._conn.close()
         return False
 
 
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
-    _conn: sqlite3.Connection
+    _conn_pool: Pool
     _settings: Settings
     _migration_dirs: Sequence[str]
     _db_file: str
@@ -57,14 +62,16 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             "migrations/metadb",
         ]
         self._db_file = self._settings.require("sqlite_database")
+        if ":memory:" in self._db_file:
+            self._conn_pool = PerThreadPool(self._db_file)
+        else:
+            self._conn_pool = PerThreadPool(self._db_file)  # TODO: use empty pool?
         self._tx_stack = local()
         super().__init__(system)
 
     @override
     def start(self) -> None:
         super().start()
-        self._conn = sqlite3.connect(self._db_file)
-        self._conn.isolation_level = None  # Handle commits explicitly
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
@@ -73,7 +80,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def stop(self) -> None:
         super().stop()
-        self._conn.close()
+        self._conn_pool.close()
 
     @staticmethod
     @override
@@ -98,7 +105,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     def tx(self) -> TxWrapper:
         if not hasattr(self._tx_stack, "stack"):
             self._tx_stack.stack = []
-        return TxWrapper(self._conn, stack=self._tx_stack)
+        return TxWrapper(self._conn_pool, stack=self._tx_stack)
 
     @override
     def reset_state(self) -> None:
@@ -106,9 +113,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
-        self._conn.close()
+        self._conn_pool.close()
         db_file = self._settings.require("sqlite_database")
-        if db_file != ":memory:":
+        if ":memory:" not in db_file:
             os.remove(db_file)
         self.start()
         super().reset_state()

@@ -10,8 +10,8 @@ from chromadb.config import Component
 from pathlib import Path
 from enum import Enum
 
+# TODO: Telemetry whitelisting for new settings
 TELEMETRY_WHITELISTED_SETTINGS = [
-    "chroma_db_impl",
     "chroma_api_impl",
     "chroma_server_ssl_enabled",
 ]

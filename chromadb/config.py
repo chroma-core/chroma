@@ -19,16 +19,18 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _legacy_config_values = {
-    "duckdb": "chromadb.db.duckdb.DuckDB",
-    "duckdb+parquet": "chromadb.db.duckdb.PersistentDuckDB",
-    "clickhouse": "chromadb.db.clickhouse.Clickhouse",
-    "rest": "chromadb.api.fastapi.FastAPI",
-    "local": "chromadb.api.local.LocalAPI",
+    "duckdb",
+    "duckdb+parquet",
+    "clickhouse",
+    "local",
+    "chromadb.db.duckdb.DuckDB",
+    "chromadb.db.duckdb.PersistentDuckDB",
+    "chromadb.db.clickhouse.Clickhouse",
+    "chromadb.api.local.LocalAPI",
 }
 
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
-    "chromadb.db.DB": "chroma_db_impl",
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
@@ -41,8 +43,7 @@ _abstract_type_keys: Dict[str, str] = {
 class Settings(BaseSettings):
     environment: str = ""
 
-    chroma_db_impl: str = "chromadb.db.duckdb.DuckDB"
-    chroma_api_impl: str = "chromadb.api.local.LocalAPI"
+    chroma_api_impl: str = "chromadb.api.local.SegmentAPI"  # Can be "chromadb.api.local.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
     # New architecture components
@@ -52,9 +53,6 @@ class Settings(BaseSettings):
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
-
-    clickhouse_host: Optional[str] = None
-    clickhouse_port: Optional[str] = None
 
     tenant_id: str = "default"
     topic_namespace: str = "default"
@@ -73,7 +71,10 @@ class Settings(BaseSettings):
     allow_reset: bool = False
 
     # TODO: this should be influenced by the persist_directory and is_persistent setting?
-    sqlite_database: Optional[str] = ":memory:"
+    # In order to allow sqlite to be shared between multiple threads, we need to use a
+    # URI connection string with shared cache.
+    # See https://www.sqlite.org/sharedcache.html and https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
+    sqlite_database: Optional[str] = "file:chroma?mode=memory&cache=shared"
 
     migrations: Literal["none", "validate", "apply"] = "apply"
 
@@ -87,10 +88,11 @@ class Settings(BaseSettings):
 
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
-        # Backwards compatibility with short names instead of full class names
+        # Error on legacy config values
         if val in _legacy_config_values:
-            newval = _legacy_config_values[val]
-            val = newval
+            raise ValueError(
+                "You are using a deprecated configuration of Chroma. Please pip install chroma-migration and run `chroma-migration migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information."
+            )
         return val
 
     class Config:
