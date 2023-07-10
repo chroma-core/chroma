@@ -353,15 +353,6 @@ class FastAPI(API):
         return cast(bool, resp.json())
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database"""
-        resp = requests.post(
-            self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql})
-        )
-        raise_chroma_error(resp)
-        return pd.DataFrame.from_dict(resp.json())
-
-    @override
     def create_index(self, collection_name: str) -> bool:
         """Creates an index for the given space key"""
         resp = requests.post(

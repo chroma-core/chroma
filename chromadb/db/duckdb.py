@@ -9,7 +9,6 @@ from chromadb.db.clickhouse import (
     COLLECTION_TABLE_SCHEMA,
 )
 from typing import List, Optional, Sequence
-import pandas as pd
 import json
 import duckdb
 import uuid
@@ -402,10 +401,6 @@ class DuckDB(Clickhouse):
         )
 
         return response
-
-    @override
-    def raw_sql(self, raw_sql):
-        return self._conn.execute(raw_sql).df()
 
     # TODO: This method should share logic with clickhouse impl
     @override

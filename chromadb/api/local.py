@@ -548,10 +548,6 @@ class LocalAPI(API):
         return query_result
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        return self._db.raw_sql(sql)  # type: ignore
-
-    @override
     def create_index(self, collection_name: str) -> bool:
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)

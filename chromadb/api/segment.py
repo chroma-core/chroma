@@ -428,10 +428,6 @@ class SegmentAPI(API):
         return True
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        raise NotImplementedError()
-
-    @override
     def create_index(self, collection_name: str) -> bool:
         logger.warning(
             "Calling create_index is unnecessary, data is now automatically indexed"

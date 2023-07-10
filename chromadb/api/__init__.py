@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
-import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -293,19 +292,6 @@ class API(Component, ABC):
             None
         Returns:
             None
-        """
-        pass
-
-    @abstractmethod
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database
-        ⚠️ This method should not be used directly.
-
-        Args:
-            sql: The SQL query to run
-
-        Returns:
-            pd.DataFrame: A pandas dataframe containing the results of the query
         """
         pass
 
