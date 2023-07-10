@@ -10,7 +10,7 @@ This readme is helpful for local dev.
 ### Generating
 
 1. `yarn` to install deps
-2. `yarn genapi-zsh` if you have zsh
+2. `yarn genapi`
 3. Examples are in the `examples` folder. There is one for the browser and one for node. Run them with `yarn dev`, eg `cd examples/browser && yarn dev`
 
 ### Running test
