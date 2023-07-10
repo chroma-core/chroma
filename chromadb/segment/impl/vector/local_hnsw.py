@@ -187,8 +187,9 @@ class LocalHnswSegment(VectorReader):
             query_vectors, k=k, filter=filter_function if ids else None
         )
 
-        distances = cast(List[List[float]], distances)
-        result_labels = cast(List[List[int]], result_labels)
+        # TODO: these casts are not correct, hnswlib returns np
+        # distances = cast(List[List[float]], distances)
+        # result_labels = cast(List[List[int]], result_labels)
 
         all_results: List[List[VectorQueryResult]] = []
         for result_i in range(len(result_labels)):
@@ -202,7 +203,10 @@ class LocalHnswSegment(VectorReader):
                     embedding = None
                 results.append(
                     VectorQueryResult(
-                        id=id, seq_id=seq_id, distance=distance, embedding=embedding
+                        id=id,
+                        seq_id=seq_id,
+                        distance=distance.item(),
+                        embedding=embedding,
                     )
                 )
             all_results.append(results)

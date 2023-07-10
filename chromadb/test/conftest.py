@@ -42,9 +42,13 @@ def find_free_port() -> int:
 def _run_server(port: int) -> None:
     """Run a Chroma server locally"""
     settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb",
-        persist_directory=tempfile.gettempdir() + "/test_server",
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        sqlite_database="file::memory:?cache=shared",
+        allow_reset=True,
     )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -72,7 +76,7 @@ def fastapi() -> Generator[System, None, None]:
     proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     settings = Settings(
-        chroma_api_impl="rest",
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
@@ -84,38 +88,6 @@ def fastapi() -> Generator[System, None, None]:
     yield system
     system.stop()
     proc.kill()
-
-
-def duckdb() -> Generator[System, None, None]:
-    """Fixture generator for duckdb"""
-    settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb",
-        persist_directory=tempfile.gettempdir(),
-        allow_reset=True,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
-
-
-def duckdb_parquet() -> Generator[System, None, None]:
-    """Fixture generator for duckdb+parquet"""
-
-    save_path = tempfile.gettempdir() + "/tests"
-    settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb+parquet",
-        persist_directory=save_path,
-        allow_reset=True,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
 
 
 def integration() -> Generator[System, None, None]:
@@ -137,7 +109,7 @@ def sqlite() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database=":memory:",
+        sqlite_database="file::memory:?cache=shared",
         allow_reset=True,
     )
     system = System(settings)
@@ -169,7 +141,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite, sqlite_persistent]
+    fixtures = [fastapi, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:

@@ -144,7 +144,7 @@ class BruteForceIndex:
                         curr_results.append(
                             VectorQueryResult(
                                 id=id,
-                                distance=distances[i][j],
+                                distance=distances[i][j].item(),
                                 seq_id=self.id_to_seq_id[id],
                                 embedding=self.vectors[j].tolist(),
                             )
