@@ -1,4 +1,4 @@
-chroma-hnswlib
+chroma-hnswlib==0.7.0
 clickhouse-connect==0.5.7
 duckdb==0.7.1
 fastapi >=0.85.1, <=0.99.1
