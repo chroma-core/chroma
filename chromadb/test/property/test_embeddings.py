@@ -7,7 +7,6 @@ from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.db.impl.sqlite import SqliteDB
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
