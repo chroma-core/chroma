@@ -43,7 +43,7 @@ _abstract_type_keys: Dict[str, str] = {
 class Settings(BaseSettings):
     environment: str = ""
 
-    chroma_api_impl: str = "chromadb.api.local.SegmentAPI"  # Can be "chromadb.api.local.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
     # New architecture components

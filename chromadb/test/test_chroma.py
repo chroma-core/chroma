@@ -4,7 +4,8 @@ from unittest.mock import patch, Mock
 import pytest
 import chromadb
 import chromadb.config
-from chromadb.db import DB
+from chromadb.db.system import SysDB
+from chromadb.ingest import Consumer, Producer
 
 
 class GetDBTest(unittest.TestCase):
@@ -13,7 +14,7 @@ class GetDBTest(unittest.TestCase):
         system = chromadb.config.System(
             chromadb.config.Settings(persist_directory="./foo")
         )
-        system.instance(DB)
+        system.instance(SysDB)
         assert mock.called
 
     @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
@@ -24,7 +25,7 @@ class GetDBTest(unittest.TestCase):
                 persist_directory="./foo",
             )
         )
-        system.instance(DB)
+        system.instance(SysDB)
         assert mock.called
 
     @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
@@ -37,12 +38,13 @@ class GetDBTest(unittest.TestCase):
                 persist_directory="./foo",
             )
         )
-        system.instance(DB)
+        system.instance(Producer)
+        system.instance(Consumer)
         assert mock.called
 
 
 class GetAPITest(unittest.TestCase):
-    @patch("chromadb.api.local.SegmentAPI", autospec=True)
+    @patch("chromadb.api.segment.SegmentAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
     def test_local(self, mock_api: Mock) -> None:
         chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
