@@ -106,8 +106,8 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
 
     topic = str(segment_definition["topic"])
 
@@ -144,9 +144,8 @@ def assert_equiv_records(
 def test_get(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     embeddings = [next(sample_embeddings) for i in range(10)]
@@ -242,9 +241,8 @@ def test_get(
 def test_fulltext(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -304,9 +302,8 @@ def test_fulltext(
 def test_delete(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -367,9 +364,8 @@ def test_delete(
 def test_update(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -395,9 +391,8 @@ def test_update(
 def test_upsert(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)

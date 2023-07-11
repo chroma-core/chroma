@@ -111,8 +111,9 @@ def test_insert_and_count(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -146,8 +147,8 @@ def test_get_vectors(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -191,8 +192,8 @@ def test_ann_query(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -256,8 +257,8 @@ def test_delete(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -397,8 +398,8 @@ def test_update(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -430,8 +431,8 @@ def test_upsert(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 

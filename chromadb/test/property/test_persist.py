@@ -168,6 +168,9 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         else:
             self.last_persist_delay -= 1
 
+    def teardown(self):
+        self.api.reset()
+
 
 def test_persist_embeddings_state(
     caplog: pytest.LogCaptureFixture, settings: Settings

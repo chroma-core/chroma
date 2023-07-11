@@ -192,7 +192,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         for record in records:
             if record["embedding"] is not None:
                 self._ensure_index(len(records), len(record["embedding"]))
-            print(f"Operation: {record['operation']} for id: {record['id']}")
             self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
             self._max_seq_id = max(self._max_seq_id, record["seq_id"])
@@ -229,9 +228,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 if record["embedding"] is not None:
                     self._curr_batch.apply(record, exists_in_index)
                     self._brute_force_index.upsert([record])
-            print("curr_batch_len: " + str(len(self._curr_batch)))
             if len(self._curr_batch) >= self._batch_size:
-                print("flushing" + str(record["seq_id"]))
                 self._apply_batch(self._curr_batch)
                 self._curr_batch = Batch()
                 self._brute_force_index.flush()

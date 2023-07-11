@@ -23,7 +23,7 @@ def local_persist_api():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir() + "/test_server",
+            persist_directory=tempfile.gettempdir(),
         ),
     )
 
@@ -40,7 +40,7 @@ def local_persist_api_cache_bust():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir() + "/test_server",
+            persist_directory=tempfile.gettempdir(),
         ),
     )
 
