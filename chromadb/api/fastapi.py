@@ -339,10 +339,11 @@ class FastAPI(API):
         )
 
     @override
-    def reset(self) -> None:
+    def reset(self) -> bool:
         """Resets the database"""
         resp = requests.post(self._api_url + "/reset")
         raise_chroma_error(resp)
+        return cast(bool, resp.json())
 
     @override
     def persist(self) -> bool:

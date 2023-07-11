@@ -77,6 +77,7 @@ class SysDB(Component):
         id: UUID,
         topic: OptionalArgument[str] = Unspecified(),
         name: OptionalArgument[str] = Unspecified(),
+        dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a collection. Unspecified fields will be left unchanged. For metadata,

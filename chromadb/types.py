@@ -26,6 +26,7 @@ class Collection(TypedDict):
     name: str
     topic: str
     metadata: Optional[Metadata]
+    dimension: Optional[int]
 
 
 class Segment(TypedDict):
@@ -97,6 +98,7 @@ class VectorQuery(TypedDict):
     vectors: Sequence[Vector]
     k: int
     allowed_ids: Optional[Sequence[str]]
+    include_embeddings: bool
     options: Optional[Dict[str, Union[str, int, float]]]
 
 
@@ -106,6 +108,7 @@ class VectorQueryResult(TypedDict):
     id: str
     seq_id: SeqId
     distance: float
+    embedding: Optional[Vector]
 
 
 # Metadata Query Grammar

@@ -1,8 +1,9 @@
-from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
+from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
     Metadata,
+    UpdateMetadata,
     Vector,
     LiteralValue,
     LogicalOperator,
@@ -14,7 +15,7 @@ from chromadb.types import (
 )
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument"]
+__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
 ID = str
 IDs = List[ID]
@@ -24,7 +25,8 @@ Embeddings = List[Embedding]
 
 Metadatas = List[Metadata]
 
-CollectionMetadata = Dict[Any, Any]
+CollectionMetadata = Dict[str, Any]
+UpdateCollectionMetadata = UpdateMetadata
 
 Document = str
 Documents = List[Document]
@@ -135,10 +137,31 @@ def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
     if not isinstance(metadata, dict):
         raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if len(metadata) == 0:
+        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            raise ValueError(
+                f"Expected metadata key to be a str, got {key} which is a {type(key)}"
+            )
+        # isinstance(True, int) evaluates to True, so we need to check for bools separately
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value} which is a {type(value)}"
+            )
+    return metadata
+
+
+def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if len(metadata) == 0:
+        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float)):
+        if not isinstance(value, (str, int, float, type(None))):
             raise ValueError(
                 f"Expected metadata value to be a str, int, or float, got {value}"
             )

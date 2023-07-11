@@ -32,24 +32,27 @@ sample_collections = [
         name="test_collection_1",
         topic="test_topic_1",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+        dimension=128,
     ),
     Collection(
         id=uuid.uuid4(),
         name="test_collection_2",
         topic="test_topic_2",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
+        dimension=None,
     ),
     Collection(
         id=uuid.uuid4(),
         name="test_collection_3",
         topic="test_topic_3",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
+        dimension=None,
     ),
 ]
 
 
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
-    sysdb.reset()
+    sysdb.reset_state()
 
     for collection in sample_collections:
         sysdb.create_collection(collection)
@@ -116,9 +119,10 @@ def test_update_collections(sysdb: SysDB) -> None:
         name="test_collection_1",
         topic="test_topic_1",
         metadata=metadata,
+        dimension=None,
     )
 
-    sysdb.reset()
+    sysdb.reset_state()
 
     sysdb.create_collection(coll)
 
@@ -134,21 +138,15 @@ def test_update_collections(sysdb: SysDB) -> None:
     result = sysdb.get_collections(topic=coll["topic"])
     assert result == [coll]
 
-    # Add a new metadata key
-    metadata["test_str2"] = "str2"
-    sysdb.update_collection(coll["id"], metadata={"test_str2": "str2"})
+    # Update dimension
+    coll["dimension"] = 128
+    sysdb.update_collection(coll["id"], dimension=coll["dimension"])
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
-    # Update a metadata key
-    metadata["test_str"] = "str3"
-    sysdb.update_collection(coll["id"], metadata={"test_str": "str3"})
-    result = sysdb.get_collections(id=coll["id"])
-    assert result == [coll]
-
-    # Delete a metadata key
-    del metadata["test_str"]
-    sysdb.update_collection(coll["id"], metadata={"test_str": None})
+    # Reset the metadata
+    coll["metadata"] = {"test_str2": "str2"}
+    sysdb.update_collection(coll["id"], metadata=coll["metadata"])
     result = sysdb.get_collections(id=coll["id"])
     assert result == [coll]
 
@@ -188,7 +186,7 @@ sample_segments = [
 
 
 def test_create_get_delete_segments(sysdb: SysDB) -> None:
-    sysdb.reset()
+    sysdb.reset_state()
 
     for collection in sample_collections:
         sysdb.create_collection(collection)
@@ -262,7 +260,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         metadata=metadata,
     )
 
-    sysdb.reset()
+    sysdb.reset_state()
     for c in sample_collections:
         sysdb.create_collection(c)
 
