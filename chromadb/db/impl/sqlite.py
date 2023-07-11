@@ -1,4 +1,4 @@
-from chromadb.db.impl.sqlite_pool import PerThreadPool, Pool
+from chromadb.db.impl.sqlite_pool import Connection, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -16,7 +16,7 @@ from threading import local
 
 
 class TxWrapper(base.TxWrapper):
-    _conn: sqlite3.Connection
+    _conn: Connection
 
     def __init__(self, conn_pool: Pool, stack: local) -> None:
         self._tx_stack = stack

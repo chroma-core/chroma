@@ -19,9 +19,11 @@ class Connection(sqlite3.Connection):
         super().__init__(db_file, check_same_thread=False, uri=is_uri, *args, **kwargs)
 
     def close(self) -> None:
+        """Returns the connection to the pool"""
         self._pool.return_to_pool(self)
 
     def close_actual(self) -> None:
+        """Actually closes the connection to the db"""
         super().close()
 
 
@@ -62,6 +64,7 @@ class EmptyPool(Pool):
         self._connections = set()
         self._lock = threading.Lock()
         self._db_file = db_file
+        self._is_uri = is_uri
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
