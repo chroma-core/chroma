@@ -83,7 +83,6 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-                sqlite_database=tempfile.gettempdir() + "/tests/chroma.sqlite",
                 allow_reset=True,
                 is_persistent=True,
                 persist_directory=tempfile.gettempdir() + "/tests",

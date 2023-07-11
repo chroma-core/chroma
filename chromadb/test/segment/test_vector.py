@@ -36,7 +36,8 @@ def sqlite() -> Generator[System, None, None]:
     # TODO: create memory db and also a persisted db
     save_path = tempfile.mkdtemp()
     settings = Settings(
-        sqlite_database=":memory:", allow_reset=True, persist_directory=save_path
+        allow_reset=True,
+        persist_directory=save_path,
     )
     system = System(settings)
     system.start()

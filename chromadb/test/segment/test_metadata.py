@@ -23,7 +23,7 @@ from itertools import count
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
-    settings = Settings(sqlite_database=":memory:", allow_reset=True)
+    settings = Settings(allow_reset=True)
     system = System(settings)
     system.start()
     yield system

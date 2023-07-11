@@ -11,13 +11,12 @@ class Connection(sqlite3.Connection):
     pool: "Pool"
     db_file: str
 
-    def __init__(self, pool: "Pool", db_file: str, *args: Any, **kwargs: Any):
+    def __init__(
+        self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
+    ):
         self._pool = pool
         self._db_file = db_file
-        # TODO: abstract out the uri :memory: check
-        super().__init__(
-            db_file, check_same_thread=False, uri=":memory:" in db_file, *args, **kwargs
-        )
+        super().__init__(db_file, check_same_thread=False, uri=is_uri, *args, **kwargs)
 
     def close(self) -> None:
         self._pool.return_to_pool(self)
@@ -30,7 +29,7 @@ class Pool(ABC):
     """Abstract base class for a pool of connections to a sqlite database."""
 
     @abstractmethod
-    def __init__(self, db_file: str) -> None:
+    def __init__(self, db_file: str, is_uri: bool) -> None:
         pass
 
     @abstractmethod
@@ -57,15 +56,16 @@ class EmptyPool(Pool):
     _connections: Set[Connection]
     _lock: threading.Lock
     _db_file: str
+    _is_uri: bool
 
-    def __init__(self, db_file: str):
+    def __init__(self, db_file: str, is_uri: bool = False):
         self._connections = set()
         self._lock = threading.Lock()
         self._db_file = db_file
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
-        new_connection = Connection(self, self._db_file, *args, **kwargs)
+        new_connection = Connection(self, self._db_file, self._is_uri, *args, **kwargs)
         with self._lock:
             self._connections.add(new_connection)
         return new_connection
@@ -94,19 +94,23 @@ class PerThreadPool(Pool):
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
+    _is_uri_: bool
 
-    def __init__(self, db_file: str):
+    def __init__(self, db_file: str, is_uri: bool = False):
         self._connections = set()
         self._connection = threading.local()
         self._lock = threading.Lock()
         self._db_file = db_file
+        self._is_uri = is_uri
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
         if hasattr(self._connection, "conn") and self._connection.conn is not None:
             return self._connection.conn  # type: ignore # cast doesn't work here for some reason
         else:
-            new_connection = Connection(self, self._db_file, *args, **kwargs)
+            new_connection = Connection(
+                self, self._db_file, self._is_uri, *args, **kwargs
+            )
             self._connection.conn = new_connection
             with self._lock:
                 self._connections.add(new_connection)

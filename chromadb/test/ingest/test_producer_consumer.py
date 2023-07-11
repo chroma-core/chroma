@@ -26,7 +26,7 @@ from asyncio import Event, wait_for, TimeoutError
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
     """Fixture generator for sqlite Producer + Consumer"""
-    system = System(Settings(sqlite_database=":memory:", allow_reset=True))
+    system = System(Settings(allow_reset=True))
     db = system.require(SqliteDB)
     system.start()
     yield db, db

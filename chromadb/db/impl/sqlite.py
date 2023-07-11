@@ -53,6 +53,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _migration_dirs: Sequence[str]
     _db_file: str
     _tx_stack: local
+    _is_persistent: bool
 
     def __init__(self, system: System):
         self._settings = system.settings
@@ -61,10 +62,18 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             "migrations/sysdb",
             "migrations/metadb",
         ]
-        self._db_file = self._settings.require("sqlite_database")
-        if ":memory:" in self._db_file:
-            self._conn_pool = PerThreadPool(self._db_file)
+        self._is_persistent = self._settings.require("is_persistent")
+        if not self._is_persistent:
+            # In order to allow sqlite to be shared between multiple threads, we need to use a
+            # URI connection string with shared cache.
+            # See https://www.sqlite.org/sharedcache.html
+            # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
+            self._db_file = "file::memory:?cache=shared"
+            self._conn_pool = PerThreadPool(self._db_file, is_uri=True)
         else:
+            self._db_file = (
+                self._settings.require("persist_directory") + "/chroma.sqlite3"
+            )
             self._conn_pool = PerThreadPool(self._db_file)  # TODO: use empty pool?
         self._tx_stack = local()
         super().__init__(system)
@@ -113,10 +122,19 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
+        with self.tx() as cur:
+            # Drop all tables
+            cur.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type='table'
+                """
+            )
+            for row in cur.fetchall():
+                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
-        db_file = self._settings.require("sqlite_database")
-        if ":memory:" not in db_file:
-            os.remove(db_file)
+        if self._is_persistent:
+            os.remove(self._db_file)
         self.start()
         super().reset_state()
 

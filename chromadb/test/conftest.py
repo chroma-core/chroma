@@ -47,7 +47,7 @@ def _run_server(port: int) -> None:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database="file::memory:?cache=shared",
+        is_persistent=False,
         allow_reset=True,
     )
     server = chromadb.server.fastapi.FastAPI(settings)
@@ -109,7 +109,7 @@ def sqlite() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database="file::memory:?cache=shared",
+        is_persistent=False,
         allow_reset=True,
     )
     system = System(settings)
@@ -127,7 +127,6 @@ def sqlite_persistent() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database=save_path + "/chroma.sqlite",
         allow_reset=True,
         is_persistent=True,
         persist_directory=save_path,

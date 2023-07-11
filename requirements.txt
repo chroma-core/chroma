@@ -1,6 +1,4 @@
 chroma-hnswlib==0.7.1
-clickhouse-connect==0.5.7
-duckdb==0.7.1
 fastapi==0.85.1
 graphlib_backport==1.0.3; python_version < '3.9'
 numpy==1.21.6

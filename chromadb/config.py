@@ -23,6 +23,7 @@ _legacy_config_values = {
     "duckdb+parquet",
     "clickhouse",
     "local",
+    "rest",
     "chromadb.db.duckdb.DuckDB",
     "chromadb.db.duckdb.PersistentDuckDB",
     "chromadb.db.clickhouse.Clickhouse",
@@ -69,12 +70,6 @@ class Settings(BaseSettings):
     anonymized_telemetry: bool = True
 
     allow_reset: bool = False
-
-    # TODO: this should be influenced by the persist_directory and is_persistent setting?
-    # In order to allow sqlite to be shared between multiple threads, we need to use a
-    # URI connection string with shared cache.
-    # See https://www.sqlite.org/sharedcache.html and https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
-    sqlite_database: Optional[str] = "file:chroma?mode=memory&cache=shared"
 
     migrations: Literal["none", "validate", "apply"] = "apply"
 
