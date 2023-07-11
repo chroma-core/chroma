@@ -85,7 +85,6 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    api_1.persist()
     del api_1
 
     api_2 = chromadb.Client(settings)
@@ -145,7 +144,6 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     @rule()
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
-        self.api.persist()
         collection_name = self.collection.name
         # Create a new process and then inside the process run the invariants
         # TODO: Once we switch off of duckdb and onto sqlite we can remove this

@@ -488,13 +488,6 @@ class SegmentAPI(API):
         )
         return True
 
-    @override
-    def persist(self) -> bool:
-        logger.warning(
-            "Calling persist is unnecessary, data is now automatically indexed."
-        )
-        return True
-
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
 
