@@ -23,27 +23,32 @@ import chromadb.utils.embedding_functions as ef
 class API(Component, ABC):
     @abstractmethod
     def heartbeat(self) -> int:
-        """Returns the current server time in nanoseconds to check if the server is alive
+        """Get the current time in nanoseconds since epoch.
+        Used to check if the server is alive.
 
         Args:
             None
-
         Returns:
-            int: The current server time in nanoseconds
+            The current time in nanoseconds since epoch
 
         """
         pass
 
+    #
+    # COLLECTION METHODS
+    #
+
     @abstractmethod
     def list_collections(self) -> Sequence[Collection]:
-        """Returns all collections in the database
-
-        Args:
-            None
-
+        """List all collections.
         Returns:
-            dict: A dictionary of collections
+            A list of collections
 
+        Examples:
+            ```python
+            client.list_collections()
+            # [collection(name="my_collection", metadata={})]
+            ```
         """
         pass
 
@@ -55,49 +60,29 @@ class API(Component, ABC):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        """Creates a new collection in the database
-
+        """Create a new collection with the given name and metadata.
         Args:
-            name  The name of the collection to create. The name must be unique.
-            metadata: A dictionary of metadata to associate with the collection. Defaults to None.
-            embedding_function: A function that takes documents and returns an embedding. Defaults to None.
-            get_or_create: If True, will return the collection if it already exists,
-                and update the metadata (if applicable). Defaults to False.
+            name: The name of the collection to create.
+            metadata: Optional metadata to associate with the collection.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            get_or_create: If True, return the existing collection if it exists.
 
         Returns:
-            dict: the created collection
+            The newly created collection.
 
-        """
-        pass
+        Raises:
+            ValueError: If the collection already exists and get_or_create is False.
+            ValueError: If the collection name is invalid.
 
-    @abstractmethod
-    def delete_collection(
-        self,
-        name: str,
-    ) -> None:
-        """Deletes a collection from the database
+        Examples:
+            ```python
+            client.create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
 
-        Args:
-            name: The name of the collection to delete
-        """
-
-    @abstractmethod
-    def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-    ) -> Collection:
-        """Calls create_collection with get_or_create=True.
-           If the collection exists, but with different metadata, the metadata will be replaced.
-
-        Args:
-            name: The name of the collection to create. The name must be unique.
-            metadata: A dictionary of metadata to associate with the collection. Defaults to None.
-            embedding_function: A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
-        Returns:
-            the created collection
-
+            client.create_collection("my_collection", metadata={"foo": "bar"})
+            # collection(name="my_collection", metadata={"foo": "bar"})
+            ```
         """
         pass
 
@@ -107,15 +92,47 @@ class API(Component, ABC):
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Gets a collection from the database by either name or uuid
-
+        """Get a collection with the given name.
         Args:
-            name: The name of the collection to get. Defaults to None.
-            embedding_function: A function that takes documents and returns an embedding. Should be the same as the one used to create the collection. Defaults to None.
+            name: The name of the collection to get
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
 
         Returns:
-            dict: the requested collection
+            The collection
 
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        """Get or create a collection with the given name and metadata.
+        Args:
+            name: The name of the collection to get or create
+            metadata: Optional metadata to associate with the collection
+            embedding_function: Optional function to use to embed documents
+
+        Returns:
+            The collection
+
+        Examples:
+            ```python
+            client.get_or_create_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
         """
         pass
 
@@ -125,14 +142,32 @@ class API(Component, ABC):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
-        """Modify a collection in the database - can update the name and/or metadata
+        """Modify a collection by UUID. Can update the name and/or metadata.
 
         Args:
-            current_name: The name of the collection to modify
-            new_name: The new name of the collection. Defaults to None.
+            id: The internal UUID of the collection to modify
+            new_name: The new name of the collection. If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection. Defaults to None.
         """
         pass
+
+    @abstractmethod
+    def delete_collection(
+        self,
+        name: str,
+    ) -> None:
+        """Delete a collection with the given name.
+        Args:
+            name: The name of the collection to delete
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            client.delete_collection("my_collection")
+            ```
+        """
 
     @abstractmethod
     def _add(
