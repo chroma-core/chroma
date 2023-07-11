@@ -26,6 +26,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
 )
+from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
 import chromadb.types as t
 
@@ -244,6 +245,7 @@ class SegmentAPI(API):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
 
+        self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
 
     @override
@@ -376,6 +378,9 @@ class SegmentAPI(API):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
 
+        self._telemetry_client.capture(
+            CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
+        )
         return ids_to_delete
 
     @override
