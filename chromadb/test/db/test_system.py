@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 import pytest
 from typing import Generator, List, Callable, Dict, Union
 from chromadb.types import Collection, Segment, SegmentScope
@@ -17,8 +20,23 @@ def sqlite() -> Generator[SysDB, None, None]:
     db.stop()
 
 
+def sqlite_persistent() -> Generator[SysDB, None, None]:
+    """Fixture generator for sqlite DB"""
+    save_path = tempfile.mkdtemp()
+    db = SqliteDB(
+        System(
+            Settings(allow_reset=True, is_persistent=True, persist_directory=save_path)
+        )
+    )
+    db.start()
+    yield db
+    db.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
-    return [sqlite]
+    return [sqlite, sqlite_persistent]
 
 
 @pytest.fixture(scope="module", params=db_fixtures())
