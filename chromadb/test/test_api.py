@@ -59,18 +59,14 @@ def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
 def test_persist_index_loading(api_fixture, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection(
-        "test", embedding_function=lambda text: [[1, 2, 3]]
-    )
+    collection = api.create_collection("test")
     collection.add(ids="id1", documents="hello")
 
     api.persist()
     del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection(
-        "test", embedding_function=lambda text: [[1, 2, 3]]
-    )
+    collection = api2.get_collection("test")
 
     nn = collection.query(
         query_texts="hello",
@@ -143,9 +139,7 @@ def test_persist(api_fixture, request):
 
     api.reset()
 
-    collection = api.create_collection(
-        "testspace", embedding_function=lambda text: [[1, 2, 3]]
-    )
+    collection = api.create_collection("testspace")
 
     collection.add(**batch_records)
 
@@ -155,9 +149,7 @@ def test_persist(api_fixture, request):
     del api
 
     api = request.getfixturevalue(api_fixture.__name__)
-    collection = api.get_collection(
-        "testspace", embedding_function=lambda text: [[1, 2, 3]]
-    )
+    collection = api.get_collection("testspace")
     assert collection.count() == 2
 
     api.delete_collection("testspace")
@@ -1130,7 +1122,6 @@ def test_persist_index_loading_params(api, request):
     collection = api.create_collection(
         "test",
         metadata={"hnsw:space": "ip"},
-        embedding_function=lambda text: [[1, 2, 3]],
     )
     collection.add(ids="id1", documents="hello")
 
@@ -1140,7 +1131,6 @@ def test_persist_index_loading_params(api, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection(
         "test",
-        embedding_function=lambda text: [[1, 2, 3]],
     )
 
     assert collection.metadata["hnsw:space"] == "ip"

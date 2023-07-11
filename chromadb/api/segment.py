@@ -7,6 +7,7 @@ from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     CollectionMetadata,
@@ -95,7 +96,7 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
@@ -144,7 +145,7 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         return self.create_collection(
             name=name,
@@ -160,7 +161,7 @@ class SegmentAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
