@@ -23,6 +23,8 @@ from chromadb.api.types import (
     QueryResult,
     validate_metadata,
     validate_update_metadata,
+    validate_where,
+    validate_where_document,
 )
 
 import chromadb.types as t
@@ -295,6 +297,13 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
 
         if sort is not None:
@@ -342,6 +351,13 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
@@ -377,6 +393,13 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
+        where = validate_where(where) if where is not None and len(where) > 0 else where
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else where_document
+        )
+
         allowed_ids = None
 
         coll = self._get_collection(collection_id)
