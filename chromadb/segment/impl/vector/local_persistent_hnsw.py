@@ -4,6 +4,7 @@ import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
+from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
     DEFAULT_CAPACITY,
     LocalHnswSegment,
@@ -11,6 +12,7 @@ from chromadb.segment.impl.vector.local_hnsw import (
 from chromadb.segment.impl.vector.brute_force_index import BruteForceIndex
 from chromadb.types import (
     EmbeddingRecord,
+    Metadata,
     Operation,
     Segment,
     SeqId,
@@ -66,16 +68,21 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # How many records to add to index at once, we do this because crossing the python/c++ boundary is expensive (for add())
     # When records are not added to the c++ index, they are buffered in memory and served
     # via brute force search.
-    _batch_size: int = 5
+    _batch_size: int
     _brute_force_index: Optional[BruteForceIndex]
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
-    _sync_threshold: int = 5
+    _sync_threshold: int
     _persist_data: PersistentData
     _persist_directory: str
 
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
+
+        self._params = PersistentHnswParams(segment["metadata"] or {})
+        self._batch_size = self._params.batch_size
+        self._sync_threshold = self._params.sync_threshold
+
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
         self._brute_force_index = None
@@ -105,6 +112,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+    @staticmethod
+    @override
+    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
+        # Extract relevant metadata
+        segment_metadata = PersistentHnswParams.extract(metadata)
+        return segment_metadata
 
     def _index_exists(self) -> bool:
         """Check if the index exists via the metadata file"""
@@ -192,7 +206,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         for record in records:
             if record["embedding"] is not None:
                 self._ensure_index(len(records), len(record["embedding"]))
-            print(f"Operation: {record['operation']} for id: {record['id']}")
             self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
             self._max_seq_id = max(self._max_seq_id, record["seq_id"])
@@ -229,9 +242,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 if record["embedding"] is not None:
                     self._curr_batch.apply(record, exists_in_index)
                     self._brute_force_index.upsert([record])
-            print("curr_batch_len: " + str(len(self._curr_batch)))
             if len(self._curr_batch) >= self._batch_size:
-                print("flushing" + str(record["seq_id"]))
                 self._apply_batch(self._curr_batch)
                 self._curr_batch = Batch()
                 self._brute_force_index.flush()
@@ -342,23 +353,21 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                                 curr_results.append(curr_hnsw_result[hnsw_pointer])
                             hnsw_pointer += 1
                     else:
-                        # TODO: remove this from loop
-                        remaining = k - len(curr_results)
-                        if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
-                            for i in range(
-                                hnsw_pointer,
-                                min(
-                                    len(curr_hnsw_result), hnsw_pointer + remaining + 1
-                                ),
-                            ):
-                                id = curr_hnsw_result[i]["id"]
-                                if not self._brute_force_index.has_id(
-                                    id
-                                ) and not self._curr_batch.is_deleted(id):
-                                    curr_results.append(curr_hnsw_result[i])
-                        if remaining > 0 and bf_pointer < len(curr_bf_result):
-                            curr_results.extend(
-                                curr_bf_result[bf_pointer : bf_pointer + remaining]
-                            )
+                        break
+                remaining = min(k, total_results) - len(curr_results)
+                if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
+                    for i in range(
+                        hnsw_pointer,
+                        min(len(curr_hnsw_result), hnsw_pointer + remaining + 1),
+                    ):
+                        id = curr_hnsw_result[i]["id"]
+                        if not self._brute_force_index.has_id(
+                            id
+                        ) and not self._curr_batch.is_deleted(id):
+                            curr_results.append(curr_hnsw_result[i])
+                elif remaining > 0 and bf_pointer < len(curr_bf_result):
+                    curr_results.extend(
+                        curr_bf_result[bf_pointer : bf_pointer + remaining]
+                    )
                 results.append(curr_results)
         return results

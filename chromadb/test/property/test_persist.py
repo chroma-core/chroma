@@ -13,8 +13,15 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachine,
     EmbeddingStateMachineStates,
+    collection_st as embedding_collection_st,
+    trace,
 )
-from hypothesis.stateful import run_state_machine_as_test, rule, precondition
+from hypothesis.stateful import (
+    run_state_machine_as_test,
+    rule,
+    precondition,
+    initialize,
+)
 import os
 import shutil
 import tempfile
@@ -22,11 +29,6 @@ import tempfile
 CreatePersistAPI = Callable[[], API]
 
 configurations = [
-    Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb+parquet",
-        persist_directory=tempfile.gettempdir() + "/tests",
-    ),
     Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -54,7 +56,10 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
         shutil.rmtree(save_path)
 
 
-collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+collection_st = st.shared(
+    strategies.collections(with_hnsw_params=True, with_persistent_hnsw_params=True),
+    key="coll",
+)
 
 
 @given(
@@ -143,6 +148,24 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.last_persist_delay = 10
         self.api.reset()
         super().__init__(self.api)
+
+    @initialize(collection=embedding_collection_st, batch_size=st.integers(min_value=3, max_value=2000), sync_threshold=st.integers(min_value=3, max_value=2000))  # type: ignore
+    def initialize(
+        self, collection: strategies.Collection, batch_size: int, sync_threshold: int
+    ):
+        self.api.reset()
+        self.collection = self.api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,
+            embedding_function=collection.embedding_function,
+        )
+        self.embedding_function = collection.embedding_function
+        trace("init")
+        self.on_state_change(EmbeddingStateMachineStates.initialize)
+
+        self.record_set_state = strategies.StateMachineRecordSet(
+            ids=[], metadatas=[], documents=[], embeddings=[]
+        )
 
     @precondition(
         lambda self: len(self.record_set_state["ids"]) >= 1
