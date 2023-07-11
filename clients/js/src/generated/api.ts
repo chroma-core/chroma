@@ -414,32 +414,6 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			};
 		},
 		/**
-		 * @summary Persist
-		 * @param {RequestInit} [options] Override http request option.
-		 * @throws {RequiredError}
-		 */
-		persist(options: RequestInit = {}): FetchArgs {
-			let localVarPath = `/api/v1/persist`;
-			const localVarPathQueryStart = localVarPath.indexOf("?");
-			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-			if (localVarPathQueryStart !== -1) {
-				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-			}
-
-			localVarRequestOptions.headers = localVarHeaderParameter;
-
-			const localVarQueryParameterString = localVarQueryParameter.toString();
-			if (localVarQueryParameterString) {
-				localVarPath += "?" + localVarQueryParameterString;
-			}
-			return {
-				url: localVarPath,
-				options: localVarRequestOptions,
-			};
-		},
-		/**
 		 * @summary Raw Sql
 		 * @param {Api.RawSql} request
 		 * @param {RequestInit} [options] Override http request option.
@@ -1002,28 +976,6 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
-		 * @summary Persist
-		 * @param {RequestInit} [options] Override http request option.
-		 * @throws {RequiredError}
-		 */
-		persist(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Persist200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).persist(options);
-			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-					const contentType = response.headers.get('Content-Type');
-					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-					if (response.status === 200) {
-						if (mimeType === 'application/json') {
-							return response.json() as any;
-						}
-						throw response;
-					}
-					throw response;
-				});
-			};
-		},
-		/**
 		 * @summary Raw Sql
 		 * @param {Api.RawSql} request
 		 * @param {RequestInit} [options] Override http request option.
@@ -1336,15 +1288,6 @@ export class ApiApi extends BaseAPI {
 	 */
 	public listCollections(options?: RequestInit) {
 		return ApiApiFp(this.configuration).listCollections(options)(this.fetch, this.basePath);
-	}
-
-	/**
-	 * @summary Persist
-	 * @param {RequestInit} [options] Override http request option.
-	 * @throws {RequiredError}
-	 */
-	public persist(options?: RequestInit) {
-		return ApiApiFp(this.configuration).persist(options)(this.fetch, this.basePath);
 	}
 
 	/**
