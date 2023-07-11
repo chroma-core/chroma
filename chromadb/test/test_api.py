@@ -311,9 +311,13 @@ def test_modify_error_on_invalid_metadata(api):
     api.reset()
 
     collection = api.create_collection("testspace")
+    c2 = api.create_collection("testspace2")
 
     with pytest.raises(Exception):
         collection.modify(metadata="invalid metadata")
+
+    with pytest.raises(Exception):
+        c2.modify(metadata={1: 1, "b": 2})
 
 
 def test_metadata_cru(api):
