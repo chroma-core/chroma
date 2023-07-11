@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Tuple, cast, List
-from pydantic import BaseModel, PrivateAttr, validate_arguments
+from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
@@ -20,6 +20,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many,
     validate_ids,
     validate_include,
+    validate_collection_metadata,
     validate_metadatas,
     validate_where,
     validate_where_document,
@@ -229,7 +230,6 @@ class Collection(BaseModel):
             include=include,
         )
 
-    @validate_arguments
     def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
     ) -> None:
@@ -246,6 +246,7 @@ class Collection(BaseModel):
         if name:
             self.name = name
         if metadata:
+            metadata = validate_collection_metadata(metadata)
             self.metadata = metadata
 
     def update(
