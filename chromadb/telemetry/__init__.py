@@ -13,6 +13,7 @@ from enum import Enum
 # TODO: Telemetry whitelisting for new settings
 TELEMETRY_WHITELISTED_SETTINGS = [
     "chroma_api_impl",
+    "is_persistent",
     "chroma_server_ssl_enabled",
 ]
 

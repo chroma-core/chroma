@@ -346,13 +346,6 @@ class FastAPI(API):
         return cast(bool, resp.json())
 
     @override
-    def persist(self) -> bool:
-        """Persists the database"""
-        resp = requests.post(self._api_url + "/persist")
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
-
-    @override
     def raw_sql(self, sql: str) -> pd.DataFrame:
         """Runs a raw SQL query against the database"""
         resp = requests.post(
