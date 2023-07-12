@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.3.27"
+__version__ = "0.3.28"
 
 
 def configure(**kwargs) -> None:  # type: ignore
