@@ -80,7 +80,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._curr_batch = Batch()
         self._brute_force_index = None
         if not os.path.exists(self._get_storage_folder()):
-            os.makedirs(self._get_storage_folder())
+            os.makedirs(self._get_storage_folder(), exist_ok=True)
         # Load persist data if it exists already, otherwise create it
         if self._index_exists():
             self._persist_data = PersistentData.load_from_file(

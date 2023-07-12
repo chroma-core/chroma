@@ -60,6 +60,13 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
+    if count != len(normalized_record_set["ids"]):
+        print(
+            "Exepcted count: ",
+            len(normalized_record_set["ids"]),
+            " Actual count: ",
+            count,
+        )
     assert count == len(normalized_record_set["ids"])
 
 

@@ -1,4 +1,4 @@
-from chromadb.db.impl.sqlite_pool import Connection, PerThreadPool, Pool
+from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -17,11 +17,12 @@ from threading import local
 
 class TxWrapper(base.TxWrapper):
     _conn: Connection
+    _pool: Pool
 
-    def __init__(self, conn_pool: Pool, stack: local) -> None:
+    def __init__(self, conn_pool: Pool, stack: local):
         self._tx_stack = stack
         self._conn = conn_pool.connect()
-        self._conn.isolation_level = None  # Handle commits explicitly
+        self._pool = conn_pool
 
     @override
     def __enter__(self) -> base.Cursor:
@@ -43,7 +44,7 @@ class TxWrapper(base.TxWrapper):
                 self._conn.commit()
             else:
                 self._conn.rollback()
-        self._conn.close()
+        self._pool.return_to_pool(self._conn)
         return False
 
 
@@ -69,12 +70,12 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             # See https://www.sqlite.org/sharedcache.html
             # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
             self._db_file = "file::memory:?cache=shared"
-            self._conn_pool = PerThreadPool(self._db_file, is_uri=True)
+            self._conn_pool = LockPool(self._db_file, is_uri=True)
         else:
             self._db_file = (
                 self._settings.require("persist_directory") + "/chroma.sqlite3"
             )
-            self._conn_pool = PerThreadPool(self._db_file)  # TODO: use empty pool?
+            self._conn_pool = PerThreadPool(self._db_file)
         self._tx_stack = local()
         super().__init__(system)
 
