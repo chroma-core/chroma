@@ -20,7 +20,6 @@ from chromadb.api.types import (
     maybe_cast_one_to_many,
     validate_ids,
     validate_include,
-    validate_collection_metadata,
     validate_metadata,
     validate_metadatas,
     validate_where,
@@ -249,7 +248,6 @@ class Collection(BaseModel):
         if name:
             self.name = name
         if metadata:
-            metadata = validate_collection_metadata(metadata)
             self.metadata = metadata
 
     def update(

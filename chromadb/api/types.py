@@ -122,20 +122,6 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
-def validate_collection_metadata(
-    collection_metadata: CollectionMetadata,
-) -> CollectionMetadata:
-    """Validates collection_metadata to ensure it is a dictionary of strings to any"""
-    if not isinstance(collection_metadata, dict):
-        raise ValueError(
-            f"Expected collection_metadata to be a dict, got {collection_metadata}"
-        )
-    for key, _ in collection_metadata.items():
-        if not isinstance(key, str):
-            raise ValueError(f"Expected collection_metadata key to be a str, got {key}")
-    return collection_metadata
-
-
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
     if not isinstance(metadata, dict):
