@@ -12,6 +12,7 @@ __version__ = "A.B.C"
 ```
 git tag A.B.C <SHA>
 ```
+4. You need to then wait for the github action for main for `chroma release` and `chroma client release` to go green. Not doing this will result in a race condition.
 
 #### Perform the release
 1. Push your tag to origin to create the release
