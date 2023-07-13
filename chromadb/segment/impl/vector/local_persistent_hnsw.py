@@ -188,50 +188,50 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
 
-        # TODO: THREAD SAFETY
-        for record in records:
-            if record["embedding"] is not None:
-                self._ensure_index(len(records), len(record["embedding"]))
-            self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-
-            self._max_seq_id = max(self._max_seq_id, record["seq_id"])
-            id = record["id"]
-            op = record["operation"]
-            exists_in_index = self._id_to_label.get(
-                id, None
-            ) is not None or self._brute_force_index.has_id(id)
-
-            if op == Operation.DELETE:
-                if exists_in_index:
-                    self._curr_batch.apply(record)
-                    self._brute_force_index.delete([record])
-                else:
-                    logger.warning(f"Delete of nonexisting embedding ID: {id}")
-
-            elif op == Operation.UPDATE:
+        with self._lock:
+            for record in records:
                 if record["embedding"] is not None:
+                    self._ensure_index(len(records), len(record["embedding"]))
+                self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
+
+                self._max_seq_id = max(self._max_seq_id, record["seq_id"])
+                id = record["id"]
+                op = record["operation"]
+                exists_in_index = self._id_to_label.get(
+                    id, None
+                ) is not None or self._brute_force_index.has_id(id)
+
+                if op == Operation.DELETE:
                     if exists_in_index:
                         self._curr_batch.apply(record)
-                        self._brute_force_index.upsert([record])
+                        self._brute_force_index.delete([record])
                     else:
-                        logger.warning(
-                            f"Update of nonexisting embedding ID: {record['id']}"
-                        )
-            elif op == Operation.ADD:
-                if record["embedding"] is not None:
-                    if not exists_in_index:
-                        self._curr_batch.apply(record, not exists_in_index)
+                        logger.warning(f"Delete of nonexisting embedding ID: {id}")
+
+                elif op == Operation.UPDATE:
+                    if record["embedding"] is not None:
+                        if exists_in_index:
+                            self._curr_batch.apply(record)
+                            self._brute_force_index.upsert([record])
+                        else:
+                            logger.warning(
+                                f"Update of nonexisting embedding ID: {record['id']}"
+                            )
+                elif op == Operation.ADD:
+                    if record["embedding"] is not None:
+                        if not exists_in_index:
+                            self._curr_batch.apply(record, not exists_in_index)
+                            self._brute_force_index.upsert([record])
+                        else:
+                            logger.warning(f"Add of existing embedding ID: {id}")
+                elif op == Operation.UPSERT:
+                    if record["embedding"] is not None:
+                        self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
-                    else:
-                        logger.warning(f"Add of existing embedding ID: {id}")
-            elif op == Operation.UPSERT:
-                if record["embedding"] is not None:
-                    self._curr_batch.apply(record, exists_in_index)
-                    self._brute_force_index.upsert([record])
-            if len(self._curr_batch) >= self._batch_size:
-                self._apply_batch(self._curr_batch)
-                self._curr_batch = Batch()
-                self._brute_force_index.flush()
+                if len(self._curr_batch) >= self._batch_size:
+                    self._apply_batch(self._curr_batch)
+                    self._curr_batch = Batch()
+                    self._brute_force_index.flush()
 
     @override
     def count(self) -> int:
