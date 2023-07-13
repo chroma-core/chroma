@@ -1,5 +1,5 @@
 from chromadb.api import API
-from chromadb.config import System
+from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
@@ -66,6 +66,7 @@ def check_index_name(index_name: str) -> None:
 class SegmentAPI(API):
     """API implementation utilizing the new segment-based internal architecture"""
 
+    _settings: Settings
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
@@ -77,6 +78,7 @@ class SegmentAPI(API):
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
         self._telemetry_client = self.require(Telemetry)
@@ -493,6 +495,10 @@ class SegmentAPI(API):
             "Calling create_index is unnecessary, data is now automatically indexed"
         )
         return True
+
+    @override
+    def get_settings(self) -> Settings:
+        return self._settings
 
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
