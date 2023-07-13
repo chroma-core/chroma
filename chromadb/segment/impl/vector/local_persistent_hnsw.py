@@ -22,6 +22,8 @@ from chromadb.types import (
 import hnswlib
 import logging
 
+from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
+
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +190,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
 
-        with self._lock:
+        with WriteRWLock(self._lock):
             for record in records:
                 if record["embedding"] is not None:
                     self._ensure_index(len(records), len(record["embedding"]))
@@ -305,7 +307,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # combined results of the brute force and hnsw index
         results: List[List[VectorQueryResult]] = []
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-        with self._lock:
+        with ReadRWLock(self._lock):
             bf_results = self._brute_force_index.query(query)
             hnsw_results = super().query_vectors(hnsw_query)
             for i in range(len(query["vectors"])):

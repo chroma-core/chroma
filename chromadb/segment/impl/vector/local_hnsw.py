@@ -20,7 +20,7 @@ from chromadb.errors import InvalidDimensionException
 import re
 import multiprocessing
 import hnswlib
-from threading import RLock
+from chromadb.utils.read_write_lock import ReadWriteLock, ReadRWLock, WriteRWLock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class LocalHnswSegment(VectorReader):
     _total_elements_added: int
     _max_seq_id: SeqId
 
-    _lock: RLock
+    _lock: ReadWriteLock
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
@@ -94,7 +94,7 @@ class LocalHnswSegment(VectorReader):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._lock = RLock()
+        self._lock = ReadWriteLock()
         super().__init__(system, segment)
 
     @staticmethod
@@ -183,7 +183,7 @@ class LocalHnswSegment(VectorReader):
 
         query_vectors = query["vectors"]
 
-        with self._lock:
+        with ReadRWLock(self._lock):
             result_labels, distances = self._index.knn_query(
                 query_vectors, k=k, filter=filter_function if ids else None
             )
@@ -316,7 +316,7 @@ class LocalHnswSegment(VectorReader):
             raise RuntimeError("Cannot add embeddings to stopped component")
 
         # Avoid all sorts of potential problems by ensuring single-threaded access
-        with self._lock:
+        with WriteRWLock(self._lock):
             batch = Batch()
 
             for record in records:
