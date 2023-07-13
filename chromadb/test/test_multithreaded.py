@@ -115,6 +115,8 @@ def _test_interleaved_add_query(api: API, N: int, D: int, num_workers: int) -> N
             assert ids_to_modify is not None
             indices_to_modify = [ids.index(id) for id in ids_to_modify]
             # Add a subset of the dataset
+            if len(indices_to_modify) == 0:
+                return
             coll.add(
                 ids=ids_to_modify,
                 embeddings=[embeddings[i] for i in indices_to_modify]
