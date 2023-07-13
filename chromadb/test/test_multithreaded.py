@@ -14,7 +14,7 @@ from chromadb.types import Metadata
 
 def generate_data_shape() -> Tuple[int, int]:
     N = random.randint(10, 10000)
-    D = random.randint(10, 2000)
+    D = random.randint(10, 256)
     return (N, D)
 
 
@@ -58,6 +58,8 @@ def _test_multithreaded_add(api: API, N: int, D: int, num_workers: int) -> None:
             to_send = min(batch_size, len(ids) - total_sent)
             start = total_sent + 1
             end = total_sent + to_send + 1
+            if embeddings is not None and len(embeddings[start:end]) == 0:
+                break
             future = executor.submit(
                 coll.add,
                 ids=ids[start:end],

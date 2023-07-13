@@ -75,6 +75,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             self._db_file = (
                 self._settings.require("persist_directory") + "/chroma.sqlite3"
             )
+            if not os.path.exists(self._db_file):
+                os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
             self._conn_pool = PerThreadPool(self._db_file)
         self._tx_stack = local()
         super().__init__(system)
