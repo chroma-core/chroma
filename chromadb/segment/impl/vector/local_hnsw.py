@@ -20,7 +20,7 @@ from chromadb.errors import InvalidDimensionException
 import re
 import multiprocessing
 import hnswlib
-from threading import Lock
+from threading import RLock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class LocalHnswSegment(VectorReader):
     _total_elements_added: int
     _max_seq_id: SeqId
 
-    _lock: Lock
+    _lock: RLock
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
@@ -94,7 +94,7 @@ class LocalHnswSegment(VectorReader):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._lock = Lock()
+        self._lock = RLock()
         super().__init__(system, segment)
 
     @staticmethod
@@ -183,35 +183,38 @@ class LocalHnswSegment(VectorReader):
 
         query_vectors = query["vectors"]
 
-        result_labels, distances = self._index.knn_query(
-            query_vectors, k=k, filter=filter_function if ids else None
-        )
+        with self._lock:
+            result_labels, distances = self._index.knn_query(
+                query_vectors, k=k, filter=filter_function if ids else None
+            )
 
-        # TODO: these casts are not correct, hnswlib returns np
-        # distances = cast(List[List[float]], distances)
-        # result_labels = cast(List[List[int]], result_labels)
+            # TODO: these casts are not correct, hnswlib returns np
+            # distances = cast(List[List[float]], distances)
+            # result_labels = cast(List[List[int]], result_labels)
 
-        all_results: List[List[VectorQueryResult]] = []
-        for result_i in range(len(result_labels)):
-            results: List[VectorQueryResult] = []
-            for label, distance in zip(result_labels[result_i], distances[result_i]):
-                id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
-                if query["include_embeddings"]:
-                    embedding = self._index.get_items([label])[0]
-                else:
-                    embedding = None
-                results.append(
-                    VectorQueryResult(
-                        id=id,
-                        seq_id=seq_id,
-                        distance=distance.item(),
-                        embedding=embedding,
+            all_results: List[List[VectorQueryResult]] = []
+            for result_i in range(len(result_labels)):
+                results: List[VectorQueryResult] = []
+                for label, distance in zip(
+                    result_labels[result_i], distances[result_i]
+                ):
+                    id = self._label_to_id[label]
+                    seq_id = self._id_to_seq_id[id]
+                    if query["include_embeddings"]:
+                        embedding = self._index.get_items([label])[0]
+                    else:
+                        embedding = None
+                    results.append(
+                        VectorQueryResult(
+                            id=id,
+                            seq_id=seq_id,
+                            distance=distance.item(),
+                            embedding=embedding,
+                        )
                     )
-                )
-            all_results.append(results)
+                all_results.append(results)
 
-        return all_results
+            return all_results
 
     @override
     def max_seqid(self) -> SeqId:

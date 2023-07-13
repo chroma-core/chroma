@@ -305,57 +305,59 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # combined results of the brute force and hnsw index
         results: List[List[VectorQueryResult]] = []
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-        bf_results = self._brute_force_index.query(query)
-        hnsw_results = super().query_vectors(hnsw_query)
-        for i in range(len(query["vectors"])):
-            # Merge results into a single list of size k
-            bf_pointer: int = 0
-            hnsw_pointer: int = 0
-            curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
-            curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
-            curr_results: List[VectorQueryResult] = []
-            # In the case where filters cause the number of results to be less than k,
-            # we set k to be the number of results
-            total_results = len(curr_bf_result) + len(curr_hnsw_result)
-            if total_results == 0:
-                results.append([])
-            else:
-                while len(curr_results) < min(k, total_results):
-                    if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
-                        curr_hnsw_result
-                    ):
-                        bf_dist = curr_bf_result[bf_pointer]["distance"]
-                        hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
-                        if bf_dist <= hnsw_dist:
-                            curr_results.append(curr_bf_result[bf_pointer])
-                            bf_pointer += 1
-                        else:
-                            id = curr_hnsw_result[hnsw_pointer]["id"]
-                            # Only add the hnsw result if it is not in the brute force index
-                            # as updated or deleted
-                            if not self._brute_force_index.has_id(
-                                id
-                            ) and not self._curr_batch.is_deleted(id):
-                                curr_results.append(curr_hnsw_result[hnsw_pointer])
-                            hnsw_pointer += 1
-                    else:
-                        # TODO: remove this from loop
-                        remaining = k - len(curr_results)
-                        if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
-                            for i in range(
-                                hnsw_pointer,
-                                min(
-                                    len(curr_hnsw_result), hnsw_pointer + remaining + 1
-                                ),
-                            ):
-                                id = curr_hnsw_result[i]["id"]
+        with self._lock:
+            bf_results = self._brute_force_index.query(query)
+            hnsw_results = super().query_vectors(hnsw_query)
+            for i in range(len(query["vectors"])):
+                # Merge results into a single list of size k
+                bf_pointer: int = 0
+                hnsw_pointer: int = 0
+                curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
+                curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
+                curr_results: List[VectorQueryResult] = []
+                # In the case where filters cause the number of results to be less than k,
+                # we set k to be the number of results
+                total_results = len(curr_bf_result) + len(curr_hnsw_result)
+                if total_results == 0:
+                    results.append([])
+                else:
+                    while len(curr_results) < min(k, total_results):
+                        if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
+                            curr_hnsw_result
+                        ):
+                            bf_dist = curr_bf_result[bf_pointer]["distance"]
+                            hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
+                            if bf_dist <= hnsw_dist:
+                                curr_results.append(curr_bf_result[bf_pointer])
+                                bf_pointer += 1
+                            else:
+                                id = curr_hnsw_result[hnsw_pointer]["id"]
+                                # Only add the hnsw result if it is not in the brute force index
+                                # as updated or deleted
                                 if not self._brute_force_index.has_id(
                                     id
                                 ) and not self._curr_batch.is_deleted(id):
-                                    curr_results.append(curr_hnsw_result[i])
-                        if remaining > 0 and bf_pointer < len(curr_bf_result):
-                            curr_results.extend(
-                                curr_bf_result[bf_pointer : bf_pointer + remaining]
-                            )
-                results.append(curr_results)
-        return results
+                                    curr_results.append(curr_hnsw_result[hnsw_pointer])
+                                hnsw_pointer += 1
+                        else:
+                            # TODO: remove this from loop
+                            remaining = k - len(curr_results)
+                            if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
+                                for i in range(
+                                    hnsw_pointer,
+                                    min(
+                                        len(curr_hnsw_result),
+                                        hnsw_pointer + remaining + 1,
+                                    ),
+                                ):
+                                    id = curr_hnsw_result[i]["id"]
+                                    if not self._brute_force_index.has_id(
+                                        id
+                                    ) and not self._curr_batch.is_deleted(id):
+                                        curr_results.append(curr_hnsw_result[i])
+                            if remaining > 0 and bf_pointer < len(curr_bf_result):
+                                curr_results.extend(
+                                    curr_bf_result[bf_pointer : bf_pointer + remaining]
+                                )
+                    results.append(curr_results)
+            return results
