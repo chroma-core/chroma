@@ -451,7 +451,7 @@ class SegmentAPI(API):
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
-                metadata_list = [metadata_by_id[id] for id in id_list]
+                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
                 if "metadatas" in include:
                     metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
                 if "documents" in include:
