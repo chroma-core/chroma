@@ -247,7 +247,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 if len(self._curr_batch) >= self._batch_size:
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
-                    self._brute_force_index.flush()
+                    self._brute_force_index.clear()
 
     @override
     def count(self) -> int:

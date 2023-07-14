@@ -35,13 +35,9 @@ class Batch:
         """Get the list of written embeddings in this batch"""
         return list(self._written_ids)
 
-    def get_written_vectors(self) -> List[Vector]:
+    def get_written_vectors(self, ids: List[str]) -> List[Vector]:
         """Get the list of vectors to write in this batch"""
-        # TODO: change api to take in ids as set() ordering is not guaranteed
-        return [
-            cast(Vector, self._ids_to_records[id]["embedding"])
-            for id in self.get_written_ids()
-        ]
+        return [cast(Vector, self._ids_to_records[id]["embedding"]) for id in ids]
 
     def get_record(self, id: str) -> EmbeddingRecord:
         """Get the record for a given ID"""

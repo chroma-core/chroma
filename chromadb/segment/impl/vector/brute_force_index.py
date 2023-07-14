@@ -51,7 +51,7 @@ class BruteForceIndex:
     def __len__(self) -> int:
         return len(self.id_to_index)
 
-    def flush(self) -> None:
+    def clear(self) -> None:
         self.id_to_index = {}
         self.index_to_id = {}
         self.id_to_seq_id = {}
@@ -74,6 +74,7 @@ class BruteForceIndex:
             if id in self.deleted_ids:
                 self.deleted_ids.remove(id)
 
+            # TODO: It may be faster to use multi-index selection on the vectors array
             if id in self.id_to_index:
                 # Update
                 index = self.id_to_index[id]
@@ -94,7 +95,7 @@ class BruteForceIndex:
                 del self.id_to_index[id]
                 del self.index_to_id[index]
                 del self.id_to_seq_id[id]
-                self.vectors[index].fill(0)
+                self.vectors[index].fill(np.NaN)
                 self.free_indices.append(index)
             else:
                 logger.warning(f"Delete of nonexisting embedding ID: {id}")
