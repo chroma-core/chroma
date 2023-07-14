@@ -10,7 +10,6 @@ from chromadb.config import Component
 from pathlib import Path
 from enum import Enum
 
-# TODO: Telemetry whitelisting for new settings
 TELEMETRY_WHITELISTED_SETTINGS = [
     "chroma_api_impl",
     "is_persistent",
