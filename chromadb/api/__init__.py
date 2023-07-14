@@ -16,7 +16,7 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
-from chromadb.config import Component
+from chromadb.config import Component, Settings
 import chromadb.utils.embedding_functions as ef
 
 
@@ -329,6 +329,16 @@ class API(Component, ABC):
 
         Returns:
             str: The version of Chroma
+
+        """
+        pass
+
+    @abstractmethod
+    def get_settings(self) -> Settings:
+        """Get the settings used to initialize the client.
+
+        Returns:
+            Settings: The settings used to initialize the client.
 
         """
         pass
