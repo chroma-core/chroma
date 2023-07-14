@@ -1,10 +1,11 @@
 from overrides import override
-from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
+from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
+from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -17,8 +18,6 @@ from chromadb.types import (
     Vector,
 )
 from chromadb.errors import InvalidDimensionException
-import re
-import multiprocessing
 import hnswlib
 from chromadb.utils.read_write_lock import ReadWriteLock, ReadRWLock, WriteRWLock
 import logging
@@ -26,37 +25,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_CAPACITY = 1000
-
-Validator = Callable[[Union[str, int, float]], bool]
-
-param_validators: Dict[str, Validator] = {
-    "hnsw:space": lambda p: bool(re.match(r"^(l2|cosine|ip)$", str(p))),
-    "hnsw:construction_ef": lambda p: isinstance(p, int),
-    "hnsw:search_ef": lambda p: isinstance(p, int),
-    "hnsw:M": lambda p: isinstance(p, int),
-    "hnsw:num_threads": lambda p: isinstance(p, int),
-    "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
-}
-
-
-class HnswParams:
-    space: str
-    construction_ef: int
-    search_ef: int
-    M: int
-    num_threads: int
-    resize_factor: float
-
-    def __init__(self, metadata: Metadata):
-        metadata = metadata or {}
-        self.space = str(metadata.get("hnsw:space", "l2"))
-        self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
-        self.search_ef = int(metadata.get("hnsw:search_ef", 10))
-        self.M = int(metadata.get("hnsw:M", 16))
-        self.num_threads = int(
-            metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
-        )
-        self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
 
 
 class LocalHnswSegment(VectorReader):
@@ -101,18 +69,7 @@ class LocalHnswSegment(VectorReader):
     @override
     def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
         # Extract relevant metadata
-        segment_metadata = {}
-        for param, value in metadata.items():
-            if param.startswith("hnsw:"):
-                segment_metadata[param] = value
-
-        # Validate it
-        for param, value in segment_metadata.items():
-            if param not in param_validators:
-                raise ValueError(f"Unknown HNSW parameter: {param}")
-            if not param_validators[param](value):
-                raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
-
+        segment_metadata = HnswParams.extract(metadata)
         return segment_metadata
 
     @override

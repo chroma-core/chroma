@@ -19,7 +19,6 @@ class BruteForceIndex:
     thread safe and callers should ensure that only one thread is accessing it at a time.
     """
 
-    # TODO: mark internal
     id_to_index: Dict[str, int]
     index_to_id: Dict[int, str]
     id_to_seq_id: Dict[str, int]
@@ -86,7 +85,6 @@ class BruteForceIndex:
                 self.index_to_id[next_index] = id
                 self.vectors[next_index] = vector
 
-    # TODO: use id type?
     def delete(self, records: List[EmbeddingRecord]) -> None:
         for record in records:
             id = record["id"]
