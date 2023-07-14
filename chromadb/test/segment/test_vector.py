@@ -33,10 +33,11 @@ import shutil
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
-    # TODO: create memory db and also a persisted db
     save_path = tempfile.mkdtemp()
     settings = Settings(
-        sqlite_database=":memory:", allow_reset=True, persist_directory=save_path
+        allow_reset=True,
+        is_persistent=False,
+        persist_directory=save_path,
     )
     system = System(settings)
     system.start()
@@ -46,8 +47,27 @@ def sqlite() -> Generator[System, None, None]:
         shutil.rmtree(save_path)
 
 
+def sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for sqlite DB"""
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
+# We will excercise in memory, persistent sqlite with both ephemeral and persistent hnsw.
+# We technically never expose persitent sqlite with memory hnsw to users, but it's a valid
+# configuration, so we test it here.
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    return [sqlite]
+    return [sqlite, sqlite_persistent]
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
@@ -110,8 +130,9 @@ def test_insert_and_count(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -145,8 +166,8 @@ def test_get_vectors(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -190,8 +211,8 @@ def test_ann_query(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -255,8 +276,8 @@ def test_delete(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -396,8 +417,8 @@ def test_update(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
@@ -429,8 +450,8 @@ def test_upsert(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 

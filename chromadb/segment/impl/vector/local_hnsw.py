@@ -19,7 +19,7 @@ from chromadb.types import (
 )
 from chromadb.errors import InvalidDimensionException
 import hnswlib
-from threading import Lock
+from chromadb.utils.read_write_lock import ReadWriteLock, ReadRWLock, WriteRWLock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class LocalHnswSegment(VectorReader):
     _total_elements_added: int
     _max_seq_id: SeqId
 
-    _lock: Lock
+    _lock: ReadWriteLock
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
@@ -62,7 +62,7 @@ class LocalHnswSegment(VectorReader):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._lock = Lock()
+        self._lock = ReadWriteLock()
         super().__init__(system, segment)
 
     @staticmethod
@@ -140,31 +140,38 @@ class LocalHnswSegment(VectorReader):
 
         query_vectors = query["vectors"]
 
-        result_labels, distances = self._index.knn_query(
-            query_vectors, k=k, filter=filter_function if ids else None
-        )
+        with ReadRWLock(self._lock):
+            result_labels, distances = self._index.knn_query(
+                query_vectors, k=k, filter=filter_function if ids else None
+            )
 
-        distances = cast(List[List[float]], distances)
-        result_labels = cast(List[List[int]], result_labels)
+            # TODO: these casts are not correct, hnswlib returns np
+            # distances = cast(List[List[float]], distances)
+            # result_labels = cast(List[List[int]], result_labels)
 
-        all_results: List[List[VectorQueryResult]] = []
-        for result_i in range(len(result_labels)):
-            results: List[VectorQueryResult] = []
-            for label, distance in zip(result_labels[result_i], distances[result_i]):
-                id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
-                if query["include_embeddings"]:
-                    embedding = self._index.get_items([label])[0]
-                else:
-                    embedding = None
-                results.append(
-                    VectorQueryResult(
-                        id=id, seq_id=seq_id, distance=distance, embedding=embedding
+            all_results: List[List[VectorQueryResult]] = []
+            for result_i in range(len(result_labels)):
+                results: List[VectorQueryResult] = []
+                for label, distance in zip(
+                    result_labels[result_i], distances[result_i]
+                ):
+                    id = self._label_to_id[label]
+                    seq_id = self._id_to_seq_id[id]
+                    if query["include_embeddings"]:
+                        embedding = self._index.get_items([label])[0]
+                    else:
+                        embedding = None
+                    results.append(
+                        VectorQueryResult(
+                            id=id,
+                            seq_id=seq_id,
+                            distance=distance.item(),
+                            embedding=embedding,
+                        )
                     )
-                )
-            all_results.append(results)
+                all_results.append(results)
 
-        return all_results
+            return all_results
 
     @override
     def max_seqid(self) -> SeqId:
@@ -266,7 +273,7 @@ class LocalHnswSegment(VectorReader):
             raise RuntimeError("Cannot add embeddings to stopped component")
 
         # Avoid all sorts of potential problems by ensuring single-threaded access
-        with self._lock:
+        with WriteRWLock(self._lock):
             batch = Batch()
 
             for record in records:

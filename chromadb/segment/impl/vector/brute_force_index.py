@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class BruteForceIndex:
-    """A lightweight, numpy based brute force index that is used for batches that have not been indexed into hnsw yet"""
+    """A lightweight, numpy based brute force index that is used for batches that have not been indexed into hnsw yet. It is not
+    thread safe and callers should ensure that only one thread is accessing it at a time.
+    """
 
     id_to_index: Dict[str, int]
     index_to_id: Dict[int, str]
@@ -57,7 +59,6 @@ class BruteForceIndex:
         self.free_indices = list(range(self.size))
         self.vectors.fill(0)
 
-    # TODO: thread safety
     def upsert(self, records: List[EmbeddingRecord]) -> None:
         if len(records) + len(self) > self.size:
             raise Exception(
@@ -142,7 +143,7 @@ class BruteForceIndex:
                         curr_results.append(
                             VectorQueryResult(
                                 id=id,
-                                distance=distances[i][j],
+                                distance=distances[i][j].item(),
                                 seq_id=self.id_to_seq_id[id],
                                 embedding=self.vectors[j].tolist(),
                             )

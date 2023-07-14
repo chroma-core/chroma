@@ -1,3 +1,4 @@
+from threading import Lock
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
@@ -34,6 +35,7 @@ class LocalSegmentManager(SegmentManager):
     _instances: Dict[UUID, SegmentImplementation]
     _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
     _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
+    _lock: Lock
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -41,6 +43,7 @@ class LocalSegmentManager(SegmentManager):
         self._system = system
         self._instances = {}
         self._segment_cache = defaultdict(dict)
+        self._lock = Lock()
 
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
@@ -103,7 +106,10 @@ class LocalSegmentManager(SegmentManager):
             segment = next(filter(lambda s: s["type"] in known_types, segments))
             self._segment_cache[collection_id][scope] = segment
 
-        instance = self._instance(self._segment_cache[collection_id][scope])
+        # Instances must be atomically created, so we use a lock to ensure that only one thread
+        # creates the instance.
+        with self._lock:
+            instance = self._instance(self._segment_cache[collection_id][scope])
         return cast(S, instance)
 
     @override

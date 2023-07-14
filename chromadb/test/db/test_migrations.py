@@ -11,7 +11,10 @@ def sqlite() -> Generator[migrations.MigratableDB, None, None]:
     """Fixture generator for sqlite DB"""
     db = SqliteDB(
         System(
-            Settings(sqlite_database=":memory:", migrations="none", allow_reset=True)
+            Settings(
+                migrations="none",
+                allow_reset=True,
+            )
         )
     )
     db.start()

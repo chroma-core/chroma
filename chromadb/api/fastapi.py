@@ -1,6 +1,6 @@
 from typing import Optional, cast
 from chromadb.api import API
-from chromadb.config import System
+from chromadb.config import Settings, System
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -27,6 +27,8 @@ from overrides import override
 
 
 class FastAPI(API):
+    _settings: Settings
+
     def __init__(self, system: System):
         super().__init__(system)
         url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
@@ -34,6 +36,7 @@ class FastAPI(API):
         system.settings.require("chroma_server_http_port")
         self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}:{system.settings.chroma_server_http_port}/api/v1"
         self._telemetry_client = self.require(Telemetry)
+        self._settings = system.settings
 
     @override
     def heartbeat(self) -> int:
@@ -346,13 +349,6 @@ class FastAPI(API):
         return cast(bool, resp.json())
 
     @override
-    def persist(self) -> bool:
-        """Persists the database"""
-        resp = requests.post(self._api_url + "/persist")
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
-
-    @override
     def raw_sql(self, sql: str) -> pd.DataFrame:
         """Runs a raw SQL query against the database"""
         resp = requests.post(
@@ -376,6 +372,11 @@ class FastAPI(API):
         resp = requests.get(self._api_url + "/version")
         raise_chroma_error(resp)
         return cast(str, resp.json())
+
+    @override
+    def get_settings(self) -> Settings:
+        """Returns the settings of the client"""
+        return self._settings
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

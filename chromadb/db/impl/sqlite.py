@@ -1,3 +1,4 @@
+from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
@@ -15,9 +16,13 @@ from threading import local
 
 
 class TxWrapper(base.TxWrapper):
-    def __init__(self, conn: sqlite3.Connection, stack: local) -> None:
+    _conn: Connection
+    _pool: Pool
+
+    def __init__(self, conn_pool: Pool, stack: local):
         self._tx_stack = stack
-        self._conn = conn
+        self._conn = conn_pool.connect()
+        self._pool = conn_pool
 
     @override
     def __enter__(self) -> base.Cursor:
@@ -39,15 +44,17 @@ class TxWrapper(base.TxWrapper):
                 self._conn.commit()
             else:
                 self._conn.rollback()
+        self._pool.return_to_pool(self._conn)
         return False
 
 
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
-    _conn: sqlite3.Connection
+    _conn_pool: Pool
     _settings: Settings
     _migration_dirs: Sequence[str]
     _db_file: str
     _tx_stack: local
+    _is_persistent: bool
 
     def __init__(self, system: System):
         self._settings = system.settings
@@ -56,15 +63,27 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             "migrations/sysdb",
             "migrations/metadb",
         ]
-        self._db_file = self._settings.require("sqlite_database")
+        self._is_persistent = self._settings.require("is_persistent")
+        if not self._is_persistent:
+            # In order to allow sqlite to be shared between multiple threads, we need to use a
+            # URI connection string with shared cache.
+            # See https://www.sqlite.org/sharedcache.html
+            # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
+            self._db_file = "file::memory:?cache=shared"
+            self._conn_pool = LockPool(self._db_file, is_uri=True)
+        else:
+            self._db_file = (
+                self._settings.require("persist_directory") + "/chroma.sqlite3"
+            )
+            if not os.path.exists(self._db_file):
+                os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
+            self._conn_pool = PerThreadPool(self._db_file)
         self._tx_stack = local()
         super().__init__(system)
 
     @override
     def start(self) -> None:
         super().start()
-        self._conn = sqlite3.connect(self._db_file)
-        self._conn.isolation_level = None  # Handle commits explicitly
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
@@ -73,7 +92,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def stop(self) -> None:
         super().stop()
-        self._conn.close()
+        self._conn_pool.close()
 
     @staticmethod
     @override
@@ -98,7 +117,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     def tx(self) -> TxWrapper:
         if not hasattr(self._tx_stack, "stack"):
             self._tx_stack.stack = []
-        return TxWrapper(self._conn, stack=self._tx_stack)
+        return TxWrapper(self._conn_pool, stack=self._tx_stack)
 
     @override
     def reset_state(self) -> None:
@@ -106,10 +125,19 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
-        self._conn.close()
-        db_file = self._settings.require("sqlite_database")
-        if db_file != ":memory:":
-            os.remove(db_file)
+        with self.tx() as cur:
+            # Drop all tables
+            cur.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type='table'
+                """
+            )
+            for row in cur.fetchall():
+                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+        self._conn_pool.close()
+        if self._is_persistent:
+            os.remove(self._db_file)
         self.start()
         super().reset_state()
 

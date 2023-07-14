@@ -24,6 +24,8 @@ from chromadb.types import (
 import hnswlib
 import logging
 
+from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
+
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +89,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._curr_batch = Batch()
         self._brute_force_index = None
         if not os.path.exists(self._get_storage_folder()):
-            os.makedirs(self._get_storage_folder())
+            os.makedirs(self._get_storage_folder(), exist_ok=True)
         # Load persist data if it exists already, otherwise create it
         if self._index_exists():
             self._persist_data = PersistentData.load_from_file(
@@ -202,50 +204,50 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
 
-        # TODO: THREAD SAFETY
-        for record in records:
-            if record["embedding"] is not None:
-                self._ensure_index(len(records), len(record["embedding"]))
-            self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-
-            self._max_seq_id = max(self._max_seq_id, record["seq_id"])
-            id = record["id"]
-            op = record["operation"]
-            exists_in_index = self._id_to_label.get(
-                id, None
-            ) is not None or self._brute_force_index.has_id(id)
-
-            if op == Operation.DELETE:
-                if exists_in_index:
-                    self._curr_batch.apply(record)
-                    self._brute_force_index.delete([record])
-                else:
-                    logger.warning(f"Delete of nonexisting embedding ID: {id}")
-
-            elif op == Operation.UPDATE:
+        with WriteRWLock(self._lock):
+            for record in records:
                 if record["embedding"] is not None:
+                    self._ensure_index(len(records), len(record["embedding"]))
+                self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
+
+                self._max_seq_id = max(self._max_seq_id, record["seq_id"])
+                id = record["id"]
+                op = record["operation"]
+                exists_in_index = self._id_to_label.get(
+                    id, None
+                ) is not None or self._brute_force_index.has_id(id)
+
+                if op == Operation.DELETE:
                     if exists_in_index:
                         self._curr_batch.apply(record)
-                        self._brute_force_index.upsert([record])
+                        self._brute_force_index.delete([record])
                     else:
-                        logger.warning(
-                            f"Update of nonexisting embedding ID: {record['id']}"
-                        )
-            elif op == Operation.ADD:
-                if record["embedding"] is not None:
-                    if not exists_in_index:
-                        self._curr_batch.apply(record, not exists_in_index)
+                        logger.warning(f"Delete of nonexisting embedding ID: {id}")
+
+                elif op == Operation.UPDATE:
+                    if record["embedding"] is not None:
+                        if exists_in_index:
+                            self._curr_batch.apply(record)
+                            self._brute_force_index.upsert([record])
+                        else:
+                            logger.warning(
+                                f"Update of nonexisting embedding ID: {record['id']}"
+                            )
+                elif op == Operation.ADD:
+                    if record["embedding"] is not None:
+                        if not exists_in_index:
+                            self._curr_batch.apply(record, not exists_in_index)
+                            self._brute_force_index.upsert([record])
+                        else:
+                            logger.warning(f"Add of existing embedding ID: {id}")
+                elif op == Operation.UPSERT:
+                    if record["embedding"] is not None:
+                        self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
-                    else:
-                        logger.warning(f"Add of existing embedding ID: {id}")
-            elif op == Operation.UPSERT:
-                if record["embedding"] is not None:
-                    self._curr_batch.apply(record, exists_in_index)
-                    self._brute_force_index.upsert([record])
-            if len(self._curr_batch) >= self._batch_size:
-                self._apply_batch(self._curr_batch)
-                self._curr_batch = Batch()
-                self._brute_force_index.flush()
+                if len(self._curr_batch) >= self._batch_size:
+                    self._apply_batch(self._curr_batch)
+                    self._curr_batch = Batch()
+                    self._brute_force_index.flush()
 
     @override
     def count(self) -> int:
@@ -319,55 +321,56 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # combined results of the brute force and hnsw index
         results: List[List[VectorQueryResult]] = []
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
-        bf_results = self._brute_force_index.query(query)
-        hnsw_results = super().query_vectors(hnsw_query)
-        for i in range(len(query["vectors"])):
-            # Merge results into a single list of size k
-            bf_pointer: int = 0
-            hnsw_pointer: int = 0
-            curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
-            curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
-            curr_results: List[VectorQueryResult] = []
-            # In the case where filters cause the number of results to be less than k,
-            # we set k to be the number of results
-            total_results = len(curr_bf_result) + len(curr_hnsw_result)
-            if total_results == 0:
-                results.append([])
-            else:
-                while len(curr_results) < min(k, total_results):
-                    if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
-                        curr_hnsw_result
-                    ):
-                        bf_dist = curr_bf_result[bf_pointer]["distance"]
-                        hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
-                        if bf_dist <= hnsw_dist:
-                            curr_results.append(curr_bf_result[bf_pointer])
-                            bf_pointer += 1
+        with ReadRWLock(self._lock):
+            bf_results = self._brute_force_index.query(query)
+            hnsw_results = super().query_vectors(hnsw_query)
+            for i in range(len(query["vectors"])):
+                # Merge results into a single list of size k
+                bf_pointer: int = 0
+                hnsw_pointer: int = 0
+                curr_bf_result: Sequence[VectorQueryResult] = bf_results[i]
+                curr_hnsw_result: Sequence[VectorQueryResult] = hnsw_results[i]
+                curr_results: List[VectorQueryResult] = []
+                # In the case where filters cause the number of results to be less than k,
+                # we set k to be the number of results
+                total_results = len(curr_bf_result) + len(curr_hnsw_result)
+                if total_results == 0:
+                    results.append([])
+                else:
+                    while len(curr_results) < min(k, total_results):
+                        if bf_pointer < len(curr_bf_result) and hnsw_pointer < len(
+                            curr_hnsw_result
+                        ):
+                            bf_dist = curr_bf_result[bf_pointer]["distance"]
+                            hnsw_dist = curr_hnsw_result[hnsw_pointer]["distance"]
+                            if bf_dist <= hnsw_dist:
+                                curr_results.append(curr_bf_result[bf_pointer])
+                                bf_pointer += 1
+                            else:
+                                id = curr_hnsw_result[hnsw_pointer]["id"]
+                                # Only add the hnsw result if it is not in the brute force index
+                                # as updated or deleted
+                                if not self._brute_force_index.has_id(
+                                    id
+                                ) and not self._curr_batch.is_deleted(id):
+                                    curr_results.append(curr_hnsw_result[hnsw_pointer])
+                                hnsw_pointer += 1
                         else:
-                            id = curr_hnsw_result[hnsw_pointer]["id"]
-                            # Only add the hnsw result if it is not in the brute force index
-                            # as updated or deleted
+                            break
+                    remaining = min(k, total_results) - len(curr_results)
+                    if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
+                        for i in range(
+                            hnsw_pointer,
+                            min(len(curr_hnsw_result), hnsw_pointer + remaining + 1),
+                        ):
+                            id = curr_hnsw_result[i]["id"]
                             if not self._brute_force_index.has_id(
                                 id
                             ) and not self._curr_batch.is_deleted(id):
-                                curr_results.append(curr_hnsw_result[hnsw_pointer])
-                            hnsw_pointer += 1
-                    else:
-                        break
-                remaining = min(k, total_results) - len(curr_results)
-                if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
-                    for i in range(
-                        hnsw_pointer,
-                        min(len(curr_hnsw_result), hnsw_pointer + remaining + 1),
-                    ):
-                        id = curr_hnsw_result[i]["id"]
-                        if not self._brute_force_index.has_id(
-                            id
-                        ) and not self._curr_batch.is_deleted(id):
-                            curr_results.append(curr_hnsw_result[i])
-                elif remaining > 0 and bf_pointer < len(curr_bf_result):
-                    curr_results.extend(
-                        curr_bf_result[bf_pointer : bf_pointer + remaining]
-                    )
-                results.append(curr_results)
-        return results
+                                curr_results.append(curr_hnsw_result[i])
+                    elif remaining > 0 and bf_pointer < len(curr_bf_result):
+                        curr_results.extend(
+                            curr_bf_result[bf_pointer : bf_pointer + remaining]
+                        )
+                    results.append(curr_results)
+            return results

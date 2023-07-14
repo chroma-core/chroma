@@ -35,7 +35,6 @@ configurations = [
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database=tempfile.gettempdir() + "/tests/chroma.sqlite",
         allow_reset=True,
         is_persistent=True,
         persist_directory=tempfile.gettempdir() + "/tests",
@@ -49,7 +48,7 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     save_path = configuration.persist_directory
     # Create if it doesn't exist
     if not os.path.exists(save_path):
-        os.makedirs(save_path)
+        os.makedirs(save_path, exist_ok=True)
     yield configuration
     # Remove if it exists
     if os.path.exists(save_path):
@@ -96,7 +95,6 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    api_1.persist()
     del api_1
 
     api_2 = chromadb.Client(settings)
@@ -174,7 +172,6 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     @rule()
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
-        self.api.persist()
         collection_name = self.collection.name
         # Create a new process and then inside the process run the invariants
         # TODO: Once we switch off of duckdb and onto sqlite we can remove this
@@ -196,6 +193,9 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
             self.last_persist_delay = 10
         else:
             self.last_persist_delay -= 1
+
+    def teardown(self) -> None:
+        self.api.reset()
 
 
 def test_persist_embeddings_state(
