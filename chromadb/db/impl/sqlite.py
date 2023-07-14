@@ -175,7 +175,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
         with self.tx() as cur:
-            print(f"Getting migrations for {dir.name}")
             cur.execute(
                 """
                 SELECT dir, version, filename, sql, hash
@@ -189,7 +188,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             migrations = []
             for row in cur.fetchall():
                 found_dir = cast(str, row[0])
-                print(f"Found migration {found_dir}")
                 found_version = cast(int, row[1])
                 found_filename = cast(str, row[2])
                 found_sql = cast(str, row[3])
@@ -209,7 +207,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
         cur.executescript(migration["sql"])
-        print(f"Applied migration {migration['dir']}/{migration['filename']}")
         cur.execute(
             """
             INSERT INTO migrations (dir, version, filename, sql, hash)
