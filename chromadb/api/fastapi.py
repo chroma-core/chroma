@@ -31,6 +31,9 @@ class FastAPI(API):
         super().__init__(system)
         url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
+        system.settings.require("chroma_server_http_port")
+
+        self._telemetry_client = self.require(Telemetry)
 
         port_suffix = (
             f":{system.settings.chroma_server_http_port}"
@@ -41,7 +44,6 @@ class FastAPI(API):
             f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
         )
 
-        self._telemetry_client = self.require(Telemetry)
         self._header = system.settings.chroma_server_headers
         self._session = requests.Session()
         if self._header is not None:
@@ -208,7 +210,6 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
         """Deletes embeddings from the database"""
-
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/delete",
             data=json.dumps(
@@ -233,7 +234,7 @@ class FastAPI(API):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
-        -     and then manually create the index yourself with collection.create_index()
+        -   and then manually create the index yourself with collection.create_index()
         """
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/add",
@@ -264,7 +265,6 @@ class FastAPI(API):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/update",
             data=json.dumps(
@@ -291,10 +291,9 @@ class FastAPI(API):
         increment_index: bool = True,
     ) -> bool:
         """
-        Updates a batch of embeddings in the database
+        Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/upsert",
             data=json.dumps(
@@ -322,7 +321,6 @@ class FastAPI(API):
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
-
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
@@ -348,7 +346,7 @@ class FastAPI(API):
         )
 
     @override
-    def reset(self) -> None:
+    def reset(self) -> bool:
         """Resets the database"""
         resp = self._session.post(self._api_url + "/reset")
         raise_chroma_error(resp)
@@ -372,7 +370,7 @@ class FastAPI(API):
 
     @override
     def create_index(self, collection_name: str) -> bool:
-        """Creates an index for the given space key"""
+        """Soon deprecated"""
         resp = self._session.post(
             self._api_url + "/collections/" + collection_name + "/create_index"
         )
