@@ -453,6 +453,15 @@ class SegmentAPI(API):
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
+                # In the segment based architecture, it is possible for one segment
+                # to have a record that another segment does not have. This results in
+                # data inconsistency. For the case of the local segments and the
+                # local segment manager, there is a case where a thread writes
+                # a record to the vector segment but not the metadata segment.
+                # Then a query'ing thread reads from the vector segment and
+                # queries the metadata segment. The metadata segment does not have
+                # the record. In this case we choose to return potentially
+                # incorrect data in the form of None.
                 metadata_list = [metadata_by_id.get(id, None) for id in id_list]
                 if "metadatas" in include:
                     metadatas.append(_clean_metadatas(metadata_list))  # type: ignore

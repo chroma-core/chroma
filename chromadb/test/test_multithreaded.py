@@ -1,5 +1,5 @@
 import multiprocessing
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import random
 import threading
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
@@ -69,6 +69,9 @@ def _test_multithreaded_add(api: API, N: int, D: int, num_workers: int) -> None:
             )
             futures.append(future)
             total_sent += to_send
+
+    wait(futures)
+
     for future in futures:
         exception = future.exception()
         if exception is not None:
@@ -179,6 +182,8 @@ def _test_interleaved_add_query(api: API, N: int, D: int, num_workers: int) -> N
                     operation,
                 )
                 futures.append(future)
+
+    wait(futures)
 
     for future in futures:
         exception = future.exception()
