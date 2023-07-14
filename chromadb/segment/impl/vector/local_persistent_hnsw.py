@@ -4,7 +4,6 @@ import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
     DEFAULT_CAPACITY,
     LocalHnswSegment,
@@ -12,7 +11,6 @@ from chromadb.segment.impl.vector.local_hnsw import (
 from chromadb.segment.impl.vector.brute_force_index import BruteForceIndex
 from chromadb.types import (
     EmbeddingRecord,
-    Metadata,
     Operation,
     Segment,
     SeqId,
@@ -70,21 +68,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # How many records to add to index at once, we do this because crossing the python/c++ boundary is expensive (for add())
     # When records are not added to the c++ index, they are buffered in memory and served
     # via brute force search.
-    _batch_size: int
+    _batch_size: int = 5
     _brute_force_index: Optional[BruteForceIndex]
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
-    _sync_threshold: int
+    _sync_threshold: int = 5
     _persist_data: PersistentData
     _persist_directory: str
 
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
-
-        self._params = PersistentHnswParams(segment["metadata"] or {})
-        self._batch_size = self._params.batch_size
-        self._sync_threshold = self._params.sync_threshold
-
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
         self._brute_force_index = None
@@ -114,13 +107,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._label_to_id,
                 self._id_to_seq_id,
             )
-
-    @staticmethod
-    @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = PersistentHnswParams.extract(metadata)
-        return segment_metadata
 
     def _index_exists(self) -> bool:
         """Check if the index exists via the metadata file"""
@@ -226,41 +212,17 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
                 elif op == Operation.UPDATE:
                     if record["embedding"] is not None:
-                        self._ensure_index(len(records), len(record["embedding"]))
-
-                    self._max_seq_id = max(self._max_seq_id, record["seq_id"])
-                    id = record["id"]
-                    op = record["operation"]
-                    exists_in_index = self._id_to_label.get(
-                        id, None
-                    ) is not None or self._brute_force_index.has_id(id)
-
-                    if op == Operation.DELETE:
                         if exists_in_index:
                             self._curr_batch.apply(record)
-                            self._brute_force_index.delete([record])
+                            self._brute_force_index.upsert([record])
                         else:
-                            logger.warning(f"Delete of nonexisting embedding ID: {id}")
-
-                    elif op == Operation.UPDATE:
-                        if record["embedding"] is not None:
-                            if exists_in_index:
-                                self._curr_batch.apply(record)
-                                self._brute_force_index.upsert([record])
-                            else:
-                                logger.warning(
-                                    f"Update of nonexisting embedding ID: {record['id']}"
-                                )
-                    elif op == Operation.ADD:
-                        if record["embedding"] is not None:
-                            if not exists_in_index:
-                                self._curr_batch.apply(record, not exists_in_index)
-                                self._brute_force_index.upsert([record])
-                            else:
-                                logger.warning(f"Add of existing embedding ID: {id}")
-                    elif op == Operation.UPSERT:
-                        if record["embedding"] is not None:
-                            self._curr_batch.apply(record, exists_in_index)
+                            logger.warning(
+                                f"Update of nonexisting embedding ID: {record['id']}"
+                            )
+                elif op == Operation.ADD:
+                    if record["embedding"] is not None:
+                        if not exists_in_index:
+                            self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
                         else:
                             logger.warning(f"Add of existing embedding ID: {id}")
