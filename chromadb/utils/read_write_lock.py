@@ -56,7 +56,6 @@ class ReadRWLock:
         traceback: Optional[TracebackType],
     ) -> None:
         self.rwLock.release_read()
-        # TODO: handle exceptions
 
 
 class WriteRWLock:
@@ -73,4 +72,3 @@ class WriteRWLock:
         traceback: Optional[TracebackType],
     ) -> None:
         self.rwLock.release_write()
-        # TODO: handle exceptions
