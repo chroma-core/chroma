@@ -1,5 +1,5 @@
 from chromadb.api import API
-from chromadb.config import System
+from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
@@ -66,6 +66,7 @@ def check_index_name(index_name: str) -> None:
 class SegmentAPI(API):
     """API implementation utilizing the new segment-based internal architecture"""
 
+    _settings: Settings
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
@@ -77,6 +78,7 @@ class SegmentAPI(API):
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
         self._telemetry_client = self.require(Telemetry)
@@ -451,7 +453,16 @@ class SegmentAPI(API):
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
-                metadata_list = [metadata_by_id[id] for id in id_list]
+                # In the segment based architecture, it is possible for one segment
+                # to have a record that another segment does not have. This results in
+                # data inconsistency. For the case of the local segments and the
+                # local segment manager, there is a case where a thread writes
+                # a record to the vector segment but not the metadata segment.
+                # Then a query'ing thread reads from the vector segment and
+                # queries the metadata segment. The metadata segment does not have
+                # the record. In this case we choose to return potentially
+                # incorrect data in the form of None.
+                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
                 if "metadatas" in include:
                     metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
                 if "documents" in include:
@@ -493,6 +504,10 @@ class SegmentAPI(API):
             "Calling create_index is unnecessary, data is now automatically indexed"
         )
         return True
+
+    @override
+    def get_settings(self) -> Settings:
+        return self._settings
 
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"

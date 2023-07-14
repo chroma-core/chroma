@@ -169,6 +169,7 @@ def ann_accuracy(
     n_results: int = 1,
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,
+    query_indices: Optional[List[int]] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -207,13 +208,20 @@ def ann_accuracy(
             distance_function = distance_functions["ip"]
 
     # Perform exact distance computation
+    query_embeddings = (
+        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
+    )
+    query_documents = normalized_record_set["documents"]
+    if query_indices is not None and query_documents is not None:
+        query_documents = [query_documents[i] for i in query_indices]
+
     indices, distances = _exact_distances(
-        embeddings, embeddings, distance_fn=distance_function
+        query_embeddings, embeddings, distance_fn=distance_function
     )
 
     query_results = collection.query(
-        query_embeddings=normalized_record_set["embeddings"],
-        query_texts=normalized_record_set["documents"] if not have_embeddings else None,
+        query_embeddings=query_embeddings if have_embeddings else None,
+        query_texts=query_documents if not have_embeddings else None,
         n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )

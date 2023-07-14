@@ -5,26 +5,40 @@ import threading
 from overrides import override
 
 
-class Connection(sqlite3.Connection):
+class Connection:
     """A threadpool connection that returns itself to the pool on close()"""
 
-    pool: "Pool"
-    db_file: str
+    _pool: "Pool"
+    _db_file: str
+    _conn: sqlite3.Connection
 
     def __init__(
         self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
     ):
         self._pool = pool
         self._db_file = db_file
-        super().__init__(db_file, check_same_thread=False, uri=is_uri, *args, **kwargs)
+        self._conn = sqlite3.connect(
+            db_file, timeout=1000, check_same_thread=False, *args, **kwargs
+        )
+        self._conn.isolation_level = None  # Handle commits explicitly
 
-    def close(self) -> None:
-        """Returns the connection to the pool"""
-        self._pool.return_to_pool(self)
+    def execute(self, sql, parameters=...) -> sqlite3.Cursor:
+        if parameters is ...:
+            return self._conn.execute(sql)
+        return self._conn.execute(sql, parameters)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def cursor(self) -> sqlite3.Cursor:
+        return self._conn.cursor()
 
     def close_actual(self) -> None:
         """Actually closes the connection to the db"""
-        super().close()
+        self._conn.close()
 
 
 class Pool(ABC):
@@ -50,46 +64,59 @@ class Pool(ABC):
         pass
 
 
-class EmptyPool(Pool):
-    """A pool that creates a new connection each time connect() is called. It never holds
-    connections and is therefore empty.
+class LockPool(Pool):
+    """A pool that has a single connection per thread but uses a lock to ensure that only one thread can use it at a time.
+    This is used because sqlite does not support multithreaded access with connection timeouts when using the
+    shared cache mode. We use the shared cache mode to allow multiple threads to share a database.
     """
 
     _connections: Set[Connection]
-    _lock: threading.Lock
+    _lock: threading.RLock
+    _connection: threading.local
     _db_file: str
     _is_uri: bool
 
     def __init__(self, db_file: str, is_uri: bool = False):
         self._connections = set()
-        self._lock = threading.Lock()
+        self._connection = threading.local()
+        self._lock = threading.RLock()
         self._db_file = db_file
         self._is_uri = is_uri
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
-        new_connection = Connection(self, self._db_file, self._is_uri, *args, **kwargs)
-        with self._lock:
+        self._lock.acquire()
+        if hasattr(self._connection, "conn") and self._connection.conn is not None:
+            return self._connection.conn  # type: ignore # cast doesn't work here for some reason
+        else:
+            new_connection = Connection(
+                self, self._db_file, self._is_uri, *args, **kwargs
+            )
+            self._connection.conn = new_connection
             self._connections.add(new_connection)
-        return new_connection
+            return new_connection
 
     @override
     def return_to_pool(self, conn: Connection) -> None:
-        conn.close_actual()
-        with self._lock:
-            self._connections.remove(conn)
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
 
     @override
     def close(self) -> None:
-        with self._lock:
-            for conn in self._connections:
-                conn.close_actual()
-            self._connections.clear()
+        for conn in self._connections:
+            conn.close_actual()
+        self._connections.clear()
+        self._connection = threading.local()
+        try:
+            self._lock.release()
+        except RuntimeError:
+            pass
 
 
 class PerThreadPool(Pool):
-    """Maintains a connection per thread. This should be used with in-memory sqlite dbs.
-    For now this does not maintain a cap on the number of connections, but it could be
+    """Maintains a connection per thread. For now this does not maintain a cap on the number of connections, but it could be
     extended to do so and block on connect() if the cap is reached.
     """
 

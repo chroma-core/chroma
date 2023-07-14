@@ -29,7 +29,7 @@ def test_add(
 
     if not invariants.is_metadata_valid(normalized_record_set):
         with pytest.raises(Exception):
-            collection.add(**normalized_record_set)
+            coll.add(**normalized_record_set)
         return
 
     coll.add(**record_set)

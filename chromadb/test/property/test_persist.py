@@ -41,7 +41,7 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     save_path = configuration.persist_directory
     # Create if it doesn't exist
     if not os.path.exists(save_path):
-        os.makedirs(save_path)
+        os.makedirs(save_path, exist_ok=True)
     yield configuration
     # Remove if it exists
     if os.path.exists(save_path):
@@ -166,7 +166,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         else:
             self.last_persist_delay -= 1
 
-    def teardown(self):
+    def teardown(self) -> None:
         self.api.reset()
 
 
