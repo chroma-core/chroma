@@ -222,7 +222,7 @@ class LocalHnswSegment(VectorReader):
         """Apply a batch of changes, as atomically as possible."""
         deleted_ids = batch.get_deleted_ids()
         written_ids = batch.get_written_ids()
-        vectors_to_write = batch.get_written_vectors()
+        vectors_to_write = batch.get_written_vectors(written_ids)
         labels_to_write = [0] * len(vectors_to_write)
 
         if len(deleted_ids) > 0:
