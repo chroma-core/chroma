@@ -234,6 +234,7 @@ export class ChromaClient {
             response.metadata,
             embeddingFunction
         );
+
     }
 
     /**
