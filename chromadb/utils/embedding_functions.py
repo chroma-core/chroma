@@ -21,7 +21,12 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
 
     # If you have a beefier machine, try "gtr-t5-large".
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        device: str = "cpu",
+        normalize_embeddings: bool = False,
+    ):
         if model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -31,9 +36,14 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
                 )
             self.models[model_name] = SentenceTransformer(model_name, device=device)
         self._model = self.models[model_name]
+        self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, texts: Documents) -> Embeddings:
-        return self._model.encode(list(texts), convert_to_numpy=True).tolist()  # type: ignore # noqa E501
+        return self._model.encode(
+            list(texts),
+            convert_to_numpy=True,
+            normalize_embeddings=self._normalize_embeddings,
+        ).tolist()
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction):
@@ -350,6 +360,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction):
             for text in texts
         ]
 
+
 class GoogleVertexEmbeddingFunction(EmbeddingFunction):
     # Follow API Quickstart for Google Vertex AI
     # https://cloud.google.com/vertex-ai/docs/generative-ai/start/quickstarts/api-quickstart
@@ -373,4 +384,4 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
         if "predictions" in response:
             return response["predictions"]
-        return {}
+        return []

@@ -3,7 +3,6 @@ import time
 from uuid import UUID
 from typing import List, Optional, Sequence, cast
 from chromadb import __version__
-import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
@@ -19,6 +18,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     CollectionMetadata,
+    validate_metadata,
 )
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
@@ -29,6 +29,9 @@ from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 from overrides import override
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # mimics s3 bucket requirements for naming
@@ -63,17 +66,26 @@ class LocalAPI(API):
 
     @override
     def heartbeat(self) -> int:
-        """Ping the database to ensure it is alive
-
-        Returns:
-            The current time in milliseconds
-
-        """
-        return int(1000 * time.time_ns())
+        return int(time.time_ns())
 
     #
     # COLLECTION METHODS
     #
+    @override
+    def list_collections(self) -> Sequence[Collection]:
+        collections = []
+        db_collections = self._db.list_collections()
+        for db_collection in db_collections:
+            collections.append(
+                Collection(
+                    client=self,
+                    id=db_collection[0],
+                    name=db_collection[1],
+                    metadata=db_collection[2],
+                )
+            )
+        return collections
+
     @override
     def create_collection(
         self,
@@ -82,30 +94,10 @@ class LocalAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        """Create a new collection with the given name and metadata.
-        Args:
-            name: The name of the collection to create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
-            get_or_create: If True, return the existing collection if it exists
-
-        Returns:
-            The newly created collection
-
-        Raises:
-            ValueError: If the collection already exists and get_or_create is False
-            ValueError: If the collection name is invalid
-
-        Examples:
-            ```python
-            client.create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-
-            client.create_collection("my_collection", metadata={"foo": "bar"})
-            # collection(name="my_collection", metadata={"foo": "bar"})
-            ```
-        """
         check_index_name(name)
+
+        if metadata is not None:
+            validate_metadata(metadata)
 
         res = self._db.create_collection(name, metadata, get_or_create)
         return Collection(
@@ -123,21 +115,9 @@ class LocalAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Get or create a collection with the given name and metadata.
-        Args:
-            name: The name of the collection to get or create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
+        if metadata is not None:
+            validate_metadata(metadata)
 
-        Returns:
-            The collection
-
-        Examples:
-            ```python
-            client.get_or_create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-            ```
-        """
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
         )
@@ -148,23 +128,6 @@ class LocalAPI(API):
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Get a collection with the given name.
-        Args:
-            name: The name of the collection to get
-            embedding_function: Optional function to use to embed documents
-
-        Returns:
-            The collection
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            ```python
-            client.get_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-            ```
-        """
         res = self._db.get_collection(name)
         if len(res) == 0:
             raise ValueError(f"Collection {name} does not exist")
@@ -175,31 +138,6 @@ class LocalAPI(API):
             embedding_function=embedding_function,
             metadata=res[0][2],
         )
-
-    @override
-    def list_collections(self) -> Sequence[Collection]:
-        """List all collections.
-        Returns:
-            A list of collections
-
-        Examples:
-            ```python
-            client.list_collections()
-            # [collection(name="my_collection", metadata={})]
-            ```
-        """
-        collections = []
-        db_collections = self._db.list_collections()
-        for db_collection in db_collections:
-            collections.append(
-                Collection(
-                    client=self,
-                    id=db_collection[0],
-                    name=db_collection[1],
-                    metadata=db_collection[2],
-                )
-            )
-        return collections
 
     @override
     def _modify(
@@ -215,18 +153,6 @@ class LocalAPI(API):
 
     @override
     def delete_collection(self, name: str) -> None:
-        """Delete a collection with the given name.
-        Args:
-            name: The name of the collection to delete
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            ```python
-            client.delete_collection("my_collection")
-            ```
-        """
         self._db.delete_collection(name)
 
     #
@@ -242,11 +168,32 @@ class LocalAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
         if len(existing_ids) > 0:
-            raise errors.IDAlreadyExistsError(
-                f"IDs {existing_ids} already exist in collection {collection_id}"
-            )
+            logger.info(f"Adding {len(existing_ids)} items with ids that already exist")
+            # Partially add the items that don't already exist
+            valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
+            if len(valid_indices) == 0:
+                return False
+            filtered_ids: IDs = []
+            filtered_embeddings: Embeddings = []
+            if metadatas is not None:
+                filtered_metadatas: Metadatas = []
+            if documents is not None:
+                filtered_documents: Documents = []
+            for index in valid_indices:
+                filtered_ids.append(ids[index])
+                filtered_embeddings.append(embeddings[index])
+                if metadatas is not None:
+                    filtered_metadatas.append(metadatas[index])
+                if documents is not None:
+                    filtered_documents.append(documents[index])
+            ids = filtered_ids
+            embeddings = filtered_embeddings
+            if metadatas is not None:
+                metadatas = filtered_metadatas
+            if documents is not None:
+                documents = filtered_documents
 
         added_uuids = self._db.add(
             collection_id,
@@ -435,14 +382,9 @@ class LocalAPI(API):
         return self._db.count(collection_id)
 
     @override
-    def reset(self) -> None:
-        """Reset the database. This will delete all collections and items.
-
-        Returns:
-            True if the database was reset successfully
-
-        """
-        self._db.reset()
+    def reset(self) -> bool:
+        self._db.reset_state()
+        return True
 
     @override
     def _query(
@@ -510,7 +452,7 @@ class LocalAPI(API):
                     metadatas
                 )
             if include_distances:
-                cast(List[float], query_result["distances"]).append(distances[i])
+                cast(List[List[float]], query_result["distances"]).append(distances[i])
             query_result["ids"].append(ids)
 
         return query_result
@@ -535,21 +477,9 @@ class LocalAPI(API):
 
     @override
     def persist(self) -> bool:
-        """Persist the database to disk.
-
-        Returns:
-            True if the database was persisted successfully
-
-        """
         self._db.persist()
         return True
 
     @override
     def get_version(self) -> str:
-        """Get the version of Chroma.
-
-        Returns:
-            The version of Chroma
-
-        """
         return __version__

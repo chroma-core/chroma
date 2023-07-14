@@ -14,6 +14,10 @@ import logging
 import socket
 import multiprocessing
 
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)  # This will only run when testing
+
+
 logger = logging.getLogger(__name__)
 
 hypothesis.settings.register_profile(
@@ -22,6 +26,7 @@ hypothesis.settings.register_profile(
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
+        hypothesis.HealthCheck.function_scoped_fixture,
     ],
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
@@ -58,7 +63,7 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def fastapi() -> Generator[API, None, None]:
+def fastapi() -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
     port = find_free_port()
@@ -70,31 +75,32 @@ def fastapi() -> Generator[API, None, None]:
         chroma_api_impl="rest",
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
+        allow_reset=True,
     )
     system = System(settings)
     api = system.instance(API)
-    _await_server(api)
     system.start()
-    yield api
+    _await_server(api)
+    yield system
     system.stop()
     proc.kill()
 
 
-def duckdb() -> Generator[API, None, None]:
+def duckdb() -> Generator[System, None, None]:
     """Fixture generator for duckdb"""
     settings = Settings(
         chroma_api_impl="local",
         chroma_db_impl="duckdb",
         persist_directory=tempfile.gettempdir(),
+        allow_reset=True,
     )
     system = System(settings)
-    api = system.instance(API)
     system.start()
-    yield api
+    yield system
     system.stop()
 
 
-def duckdb_parquet() -> Generator[API, None, None]:
+def duckdb_parquet() -> Generator[System, None, None]:
     """Fixture generator for duckdb+parquet"""
 
     save_path = tempfile.gettempdir() + "/tests"
@@ -102,37 +108,60 @@ def duckdb_parquet() -> Generator[API, None, None]:
         chroma_api_impl="local",
         chroma_db_impl="duckdb+parquet",
         persist_directory=save_path,
+        allow_reset=True,
     )
     system = System(settings)
-    api = system.instance(API)
     system.start()
-    yield api
+    yield system
     system.stop()
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
 
-def integration_api() -> Generator[API, None, None]:
+def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
-    settings = Settings()
+    settings = Settings(allow_reset=True)
     system = System(settings)
-    api = system.instance(API)
     system.start()
-    yield api
+    yield system
     system.stop()
 
 
-def fixtures() -> List[Callable[[], Generator[API, None, None]]]:
-    api_fixtures = [duckdb, duckdb_parquet, fastapi]
+def sqlite() -> Generator[System, None, None]:
+    """Fixture generator for segment-based API using in-memory Sqlite"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        sqlite_database=":memory:",
+        allow_reset=True,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+
+def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
-        api_fixtures.append(integration_api)
+        fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
-        api_fixtures = [integration_api]
-    return api_fixtures
+        fixtures = [integration]
+    return fixtures
 
 
-@pytest.fixture(scope="module", params=fixtures())
-def api(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+@pytest.fixture(scope="module", params=system_fixtures())
+def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
     yield next(request.param())
+
+
+@pytest.fixture(scope="function")
+def api(system: System) -> Generator[API, None, None]:
+    system.reset_state()
+    api = system.instance(API)
+    yield api

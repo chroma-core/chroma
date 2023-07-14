@@ -116,8 +116,6 @@ class FastAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Get a collection, or return it if it exists"""
-
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
         )
@@ -173,7 +171,6 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
-        """Gets embeddings from the database"""
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
@@ -355,6 +352,7 @@ class FastAPI(API):
         """Resets the database"""
         resp = self._session.post(self._api_url + "/reset")
         raise_chroma_error(resp)
+        return cast(bool, resp.json())
 
     @override
     def persist(self) -> bool:
@@ -390,7 +388,6 @@ class FastAPI(API):
 
 
 def raise_chroma_error(resp: requests.Response) -> None:
-    """Raises an error if the response is not ok, using a ChromaError if possible"""
     if resp.ok:
         return
 

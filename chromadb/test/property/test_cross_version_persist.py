@@ -220,6 +220,9 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
     reason="The mininum supported versions of chroma do not work with python <= 3.7",
 )
+@pytest.mark.xfail(
+    reason="As we migrate to sqlite, we will not support old versions of chromadb and instead require manual migration. The minimum version will be increased to 0.4.0 and this test will be expected to pass."
+)
 @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],

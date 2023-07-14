@@ -35,7 +35,7 @@ def test_exception_propagation(db: migrations.MigratableDB) -> None:
 
 
 def test_setup_migrations(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
     db.setup_migrations()
     db.setup_migrations()  # idempotent
 
@@ -98,7 +98,7 @@ def test_migrations(db: migrations.MigratableDB) -> None:
 
 
 def test_tampered_migration(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
 
     db.setup_migrations()
 
@@ -142,7 +142,7 @@ def test_tampered_migration(db: migrations.MigratableDB) -> None:
 def test_initialization(
     monkeypatch: pytest.MonkeyPatch, db: migrations.MigratableDB
 ) -> None:
-    db.reset()
+    db.reset_state()
     monkeypatch.setattr(db, "migration_dirs", lambda: ["chromadb/test/db/migrations"])
 
     assert not db.migrations_initialized()
