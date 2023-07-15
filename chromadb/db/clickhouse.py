@@ -1,4 +1,3 @@
-# type: ignore
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -138,6 +137,7 @@ class Clickhouse(DB):
         ids: Optional[List[str]] = None,
         where: Where = {},
         where_document: WhereDocument = {},
+        metadata_filter: Optional[Metadata] = None,
     ):
         where_clauses: List[str] = []
         self._format_where(where, where_clauses)
@@ -148,6 +148,9 @@ class Clickhouse(DB):
 
         if ids is not None:
             where_clauses.append(f" id IN {tuple(ids)}")
+
+        if metadata_filter is not None:
+            where_clauses.append(f" metadata = '{json.dumps(metadata_filter)}'")
 
         where_clauses.append(f"collection_uuid = '{collection_uuid}'")
         where_str = " AND ".join(where_clauses)
@@ -478,6 +481,7 @@ class Clickhouse(DB):
         offset: Optional[int] = None,
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
+        metadata_filter: Optional[Metadata] = None,
     ) -> Sequence:
         if collection_name is None and collection_uuid is None:
             raise TypeError(
@@ -493,6 +497,7 @@ class Clickhouse(DB):
             ids=ids,
             where=where,
             where_document=where_document,
+            metadata_filter=metadata_filter,
         )
 
         if sort is not None:
