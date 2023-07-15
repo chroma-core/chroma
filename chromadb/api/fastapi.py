@@ -153,6 +153,122 @@ class FastAPI(API):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
+        metadata_filter: Optional[Metadata] = None,
+    ) -> GetResult:
+        if page and page_size:
+            offset = (page - 1) * page_size
+            limit = page_size
+
+        resp = requests.post(
+            self._api_url + "/collections/" + str(collection_id) + "/get",
+            data=json.dumps(
+                {
+                    "ids": ids,
+                    "where": where,
+                    "sort": sort,
+                    "limit": limit,
+                    "offset": offset,
+                    "where_document": where_document,
+                    "include": include,
+                    "metadata_filter": metadata_filter,
+                }
+            ),
+        )
+
+        raise_chroma_error(resp)
+        body = resp.json()
+        return GetResult(
+            ids=body["ids"],
+            embeddings=body.get("embeddings", None),
+            metadatas=body.get("metadatas", None),
+            documents=body.get("documents", None),
+        )
+
+    @override
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        metadata_filter: Optional[Metadata] = None,
+    ) -> Collection:
+        resp = requests.get(
+            self._api_url + "/collections/" + name,
+            data=json.dumps(
+                {
+                    "metadata_filter": metadata_filter,
+                }
+            ),
+        )
+        raise_chroma_error(resp)
+        resp_json = resp.json()
+        return Collection(
+            client=self,
+            name=resp_json["name"],
+            id=resp_json["id"],
+            embedding_function=embedding_function,
+            metadata=resp_json["metadata"],
+        )
+
+    @override
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True
+        )
+
+    @override
+    def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
+        """Updates a collection"""
+        resp = requests.put(
+            self._api_url + "/collections/" + str(id),
+            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+        )
+        raise_chroma_error(resp)
+
+    @override
+    def delete_collection(self, name: str) -> None:
+        resp = requests.delete(self._api_url + "/collections/" + name)
+        raise_chroma_error(resp)
+
+    @override
+    def _count(self, collection_id: UUID) -> int:
+        """Returns the number of embeddings in the database"""
+        resp = requests.get(
+            self._api_url + "/collections/" + str(collection_id) + "/count"
+        )
+        raise_chroma_error(resp)
+        return cast(int, resp.json())
+
+    @override
+    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+        return self._get(
+            collection_id,
+            limit=n,
+            include=["embeddings", "documents", "metadatas"],
+        )
+
+    @override
+    def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
