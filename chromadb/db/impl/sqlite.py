@@ -13,6 +13,8 @@ from types import TracebackType
 import os
 from uuid import UUID
 from threading import local
+from importlib_resources import files
+from importlib_resources.abc import Traversable
 
 
 class TxWrapper(base.TxWrapper):
@@ -51,17 +53,17 @@ class TxWrapper(base.TxWrapper):
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     _conn_pool: Pool
     _settings: Settings
-    _migration_dirs: Sequence[str]
+    _migration_imports: Sequence[Traversable]
     _db_file: str
     _tx_stack: local
     _is_persistent: bool
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = [
-            "migrations/embeddings_queue",
-            "migrations/sysdb",
-            "migrations/metadb",
+        self._migration_imports = [
+            files("chromadb.migrations.embeddings_queue"),
+            files("chromadb.migrations.sysdb"),
+            files("chromadb.migrations.metadb"),
         ]
         self._is_persistent = self._settings.require("is_persistent")
         if not self._is_persistent:
@@ -110,8 +112,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         return "sqlite"
 
     @override
-    def migration_dirs(self) -> Sequence[str]:
-        return self._migration_dirs
+    def migration_dirs(self) -> Sequence[Traversable]:
+        return self._migration_imports
 
     @override
     def tx(self) -> TxWrapper:
@@ -171,7 +173,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 return True
 
     @override
-    def db_migrations(self, dir: str) -> Sequence[Migration]:
+    def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
         with self.tx() as cur:
             cur.execute(
                 """
@@ -180,23 +182,23 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 WHERE dir = ?
                 ORDER BY version ASC
                 """,
-                (dir,),
+                (dir.name,),
             )
 
             migrations = []
             for row in cur.fetchall():
-                dir = cast(str, row[0])
-                version = cast(int, row[1])
-                filename = cast(str, row[2])
-                sql = cast(str, row[3])
-                hash = cast(str, row[4])
+                found_dir = cast(str, row[0])
+                found_version = cast(int, row[1])
+                found_filename = cast(str, row[2])
+                found_sql = cast(str, row[3])
+                found_hash = cast(str, row[4])
                 migrations.append(
                     Migration(
-                        dir=dir,
-                        version=version,
-                        filename=filename,
-                        sql=sql,
-                        hash=hash,
+                        dir=found_dir,
+                        version=found_version,
+                        filename=found_filename,
+                        sql=found_sql,
+                        hash=found_hash,
                         scope=self.migration_scope(),
                     )
                 )
