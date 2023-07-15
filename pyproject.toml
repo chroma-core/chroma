@@ -21,7 +21,7 @@ dependencies = [
   'hnswlib >= 0.7',
   'clickhouse_connect >= 0.5.7',
   'duckdb >= 0.7.1',
-  'fastapi>=0.85.1,<0.100.0',
+  'fastapi>=0.85.1,<=0.99.1',
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.21.6',
   'posthog >= 2.4.0',
