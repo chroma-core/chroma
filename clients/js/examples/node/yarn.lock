@@ -59,9 +59,7 @@ call-bind@^1.0.0:
     get-intrinsic "^1.0.2"
 
 "chromadb@file:../..":
-  version "1.2.1"
-  dependencies:
-    axios "^0.26.0"
+  version "1.5.0"
 
 cohere-ai@^5.0.2:
   version "5.0.2"

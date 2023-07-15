@@ -1,0 +1,3 @@
+CREATE TABLE table3 (
+    name TEXT PRIMARY KEY
+);

@@ -1,32 +1,41 @@
 import json
 import time
 from uuid import UUID
-from typing import Dict, List, Optional, Sequence, Callable, cast
+from typing import List, Optional, Sequence, cast
 from chromadb import __version__
-import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.db import DB
 from chromadb.api.types import (
     Documents,
+    EmbeddingFunction,
     Embeddings,
     GetResult,
     IDs,
     Include,
+    Metadata,
     Metadatas,
     QueryResult,
     Where,
     WhereDocument,
+    CollectionMetadata,
+    validate_metadata,
 )
 from chromadb.api.models.Collection import Collection
-
+from chromadb.config import System
+import chromadb.utils.embedding_functions as ef
 import re
 
 from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
+from overrides import override
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # mimics s3 bucket requirements for naming
-def check_index_name(index_name):
+def check_index_name(index_name: str) -> None:
     msg = (
         "Expected collection name that "
         "(1) contains 3-63 characters, "
@@ -47,119 +56,23 @@ def check_index_name(index_name):
 
 
 class LocalAPI(API):
-    def __init__(self, settings, db: DB, telemetry_client: Telemetry):
-        self._db = db
-        self._telemetry_client = telemetry_client
+    _db: DB
+    _telemetry_client: Telemetry
 
-    def heartbeat(self):
-        """Ping the database to ensure it is alive"""
-        return int(1000 * time.time_ns())
+    def __init__(self, system: System):
+        super().__init__(system)
+        self._db = self.require(DB)
+        self._telemetry_client = self.require(Telemetry)
+
+    @override
+    def heartbeat(self) -> int:
+        return int(time.time_ns())
 
     #
     # COLLECTION METHODS
     #
-    def create_collection(
-        self,
-        name: str,
-        metadata: Optional[Dict] = None,
-        embedding_function: Optional[Callable] = None,
-        get_or_create: bool = False,
-    ) -> Collection:
-        """Create a new collection with the given name and metadata.
-        Args:
-            name: The name of the collection to create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
-            get_or_create: If True, return the existing collection if it exists
-
-        Returns:
-            The newly created collection
-
-        Raises:
-            ValueError: If the collection already exists and get_or_create is False
-            ValueError: If the collection name is invalid
-
-        Examples:
-            >>> client.create_collection("my_collection")
-            collection(name="my_collection", metadata={})
-
-            >>> client.create_collection("my_collection", metadata={"foo": "bar"})
-            collection(name="my_collection", metadata={"foo": "bar"})
-        """
-        check_index_name(name)
-
-        res = self._db.create_collection(name, metadata, get_or_create)
-        return Collection(
-            client=self,
-            name=name,
-            embedding_function=embedding_function,
-            id=res[0][0],
-            metadata=res[0][2],
-        )
-
-    def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[Dict] = None,
-        embedding_function: Optional[Callable] = None,
-    ) -> Collection:
-        """Get or create a collection with the given name and metadata.
-        Args:
-            name: The name of the collection to get or create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
-
-        Returns:
-            The collection
-
-        Examples:
-            >>> client.get_or_create_collection("my_collection")
-            collection(name="my_collection", metadata={})
-        """
-        return self.create_collection(
-            name, metadata, embedding_function, get_or_create=True
-        )
-
-    def get_collection(
-        self,
-        name: str,
-        embedding_function: Optional[Callable] = None,
-    ) -> Collection:
-        """Get a collection with the given name.
-        Args:
-            name: The name of the collection to get
-            embedding_function: Optional function to use to embed documents
-
-        Returns:
-            The collection
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            >>> client.get_collection("my_collection")
-            collection(name="my_collection", metadata={})
-        """
-        res = self._db.get_collection(name)
-        if len(res) == 0:
-            raise ValueError(f"Collection {name} does not exist")
-        return Collection(
-            client=self,
-            name=name,
-            id=res[0][0],
-            embedding_function=embedding_function,
-            metadata=res[0][2],
-        )
-
+    @override
     def list_collections(self) -> Sequence[Collection]:
-        """List all collections.
-        Returns:
-            A list of collections
-
-        Examples:
-            >>> client.list_collections()
-            [collection(name="my_collection", metadata={})]
-        """
         collections = []
         db_collections = self._db.list_collections()
         for db_collection in db_collections:
@@ -173,47 +86,114 @@ class LocalAPI(API):
             )
         return collections
 
+    @override
+    def create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        get_or_create: bool = False,
+    ) -> Collection:
+        check_index_name(name)
+
+        if metadata is not None:
+            validate_metadata(metadata)
+
+        res = self._db.create_collection(name, metadata, get_or_create)
+        return Collection(
+            client=self,
+            name=name,
+            embedding_function=embedding_function,
+            id=res[0][0],
+            metadata=res[0][2],
+        )
+
+    @override
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        if metadata is not None:
+            validate_metadata(metadata)
+
+        return self.create_collection(
+            name, metadata, embedding_function, get_or_create=True
+        )
+
+    @override
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        res = self._db.get_collection(name)
+        if len(res) == 0:
+            raise ValueError(f"Collection {name} does not exist")
+        return Collection(
+            client=self,
+            name=name,
+            id=res[0][0],
+            embedding_function=embedding_function,
+            metadata=res[0][2],
+        )
+
+    @override
     def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-    ):
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
         if new_name is not None:
             check_index_name(new_name)
 
         self._db.update_collection(id, new_name, new_metadata)
 
-    def delete_collection(self, name: str):
-        """Delete a collection with the given name.
-        Args:
-            name: The name of the collection to delete
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            >>> client.delete_collection("my_collection")
-        """
-        return self._db.delete_collection(name)
+    @override
+    def delete_collection(self, name: str) -> None:
+        self._db.delete_collection(name)
 
     #
     # ITEM METHODS
     #
+    @override
     def _add(
         self,
-        ids,
+        ids: IDs,
         collection_id: UUID,
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
-        existing_ids = self._get(collection_id, ids=ids, include=[])["ids"]
+    ) -> bool:
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
         if len(existing_ids) > 0:
-            raise errors.IDAlreadyExistsError(
-                f"IDs {existing_ids} already exist in collection {collection_id}"
-            )
+            logger.info(f"Adding {len(existing_ids)} items with ids that already exist")
+            # Partially add the items that don't already exist
+            valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
+            if len(valid_indices) == 0:
+                return False
+            filtered_ids: IDs = []
+            filtered_embeddings: Embeddings = []
+            if metadatas is not None:
+                filtered_metadatas: Metadatas = []
+            if documents is not None:
+                filtered_documents: Documents = []
+            for index in valid_indices:
+                filtered_ids.append(ids[index])
+                filtered_embeddings.append(embeddings[index])
+                if metadatas is not None:
+                    filtered_metadatas.append(metadatas[index])
+                if documents is not None:
+                    filtered_documents.append(documents[index])
+            ids = filtered_ids
+            embeddings = filtered_embeddings
+            if metadatas is not None:
+                metadatas = filtered_metadatas
+            if documents is not None:
+                documents = filtered_documents
 
         added_uuids = self._db.add(
             collection_id,
@@ -229,6 +209,7 @@ class LocalAPI(API):
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True  # NIT: should this return the ids of the succesfully added items?
 
+    @override
     def _update(
         self,
         collection_id: UUID,
@@ -236,10 +217,11 @@ class LocalAPI(API):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> bool:
         self._db.update(collection_id, ids, embeddings, metadatas, documents)
         return True
 
+    @override
     def _upsert(
         self,
         collection_id: UUID,
@@ -248,7 +230,7 @@ class LocalAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         increment_index: bool = True,
-    ):
+    ) -> bool:
         # Determine which ids need to be added and which need to be updated based on the ids already in the collection
         existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
 
@@ -267,17 +249,17 @@ class LocalAPI(API):
                 if embeddings is not None:
                     embeddings_to_update.append(embeddings[i])
                 if metadatas is not None:
-                    metadatas_to_update.append(metadatas[i])
+                    metadatas_to_update.append(metadatas[i])  # type: ignore
                 if documents is not None:
-                    documents_to_update.append(documents[i])
+                    documents_to_update.append(documents[i])  # type: ignore
             else:
                 ids_to_add.append(id)
                 if embeddings is not None:
                     embeddings_to_add.append(embeddings[i])
                 if metadatas is not None:
-                    metadatas_to_add.append(metadatas[i])
+                    metadatas_to_add.append(metadatas[i])  # type: ignore
                 if documents is not None:
-                    documents_to_add.append(documents[i])
+                    documents_to_add.append(documents[i])  # type: ignore
 
         if len(ids_to_add) > 0:
             self._add(
@@ -301,6 +283,7 @@ class LocalAPI(API):
 
         return True
 
+    @override
     def _get(
         self,
         collection_id: UUID,
@@ -313,7 +296,7 @@ class LocalAPI(API):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
-    ):
+    ) -> GetResult:
         if where is None:
             where = {}
 
@@ -354,21 +337,28 @@ class LocalAPI(API):
 
         for entry in db_result:
             if include_embeddings:
-                cast(List, get_result["embeddings"]).append(
+                cast(List, get_result["embeddings"]).append(  # type: ignore
                     entry[column_index["embedding"]]
                 )
             if include_documents:
-                cast(List, get_result["documents"]).append(
+                cast(List, get_result["documents"]).append(  # type: ignore
                     entry[column_index["document"]]
                 )
             if include_metadatas:
-                cast(List, get_result["metadatas"]).append(
+                cast(List, get_result["metadatas"]).append(  # type: ignore
                     entry[column_index["metadata"]]
                 )
             get_result["ids"].append(entry[column_index["id"]])
         return get_result
 
-    def _delete(self, collection_id, ids=None, where=None, where_document=None):
+    @override
+    def _delete(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> IDs:
         if where is None:
             where = {}
 
@@ -387,28 +377,25 @@ class LocalAPI(API):
 
         return deleted_uuids
 
-    def _count(self, collection_id):
+    @override
+    def _count(self, collection_id: UUID) -> int:
         return self._db.count(collection_id)
 
-    def reset(self):
-        """Reset the database. This will delete all collections and items.
-
-        Returns:
-            True if the database was reset successfully
-
-        """
-        self._db.reset()
+    @override
+    def reset(self) -> bool:
+        self._db.reset_state()
         return True
 
+    @override
     def _query(
         self,
-        collection_id,
-        query_embeddings,
-        n_results=10,
-        where={},
-        where_document={},
+        collection_id: UUID,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
-    ):
+    ) -> QueryResult:
         uuids, distances = self._db.get_nearest_neighbors(
             collection_uuid=collection_id,
             where=where,
@@ -430,10 +417,10 @@ class LocalAPI(API):
             distances=[] if include_distances else None,
         )
         for i in range(len(uuids)):
-            embeddings = []
-            documents = []
-            ids = []
-            metadatas = []
+            embeddings: Embeddings = []
+            documents: Documents = []
+            ids: IDs = []
+            metadatas: List[Optional[Metadata]] = []
             # Remove plural from include since db columns are singular
             db_columns = [
                 column[:-1] for column in include if column != "distances"
@@ -457,47 +444,42 @@ class LocalAPI(API):
                 ids.append(entry[column_index["id"]])
 
             if include_embeddings:
-                cast(List, query_result["embeddings"]).append(embeddings)
+                cast(List[Embeddings], query_result["embeddings"]).append(embeddings)
             if include_documents:
-                cast(List, query_result["documents"]).append(documents)
+                cast(List[Documents], query_result["documents"]).append(documents)
             if include_metadatas:
-                cast(List, query_result["metadatas"]).append(metadatas)
+                cast(List[List[Optional[Metadata]]], query_result["metadatas"]).append(
+                    metadatas
+                )
             if include_distances:
-                cast(List, query_result["distances"]).append(distances[i].tolist())
+                cast(List[List[float]], query_result["distances"]).append(distances[i])
             query_result["ids"].append(ids)
 
         return query_result
 
-    def raw_sql(self, raw_sql):
-        return self._db.raw_sql(raw_sql)
+    @override
+    def raw_sql(self, sql: str) -> pd.DataFrame:
+        return self._db.raw_sql(sql)  # type: ignore
 
-    def create_index(self, collection_name: str):
+    @override
+    def create_index(self, collection_name: str) -> bool:
         collection_uuid = self._db.get_collection_uuid_from_name(collection_name)
         self._db.create_index(collection_uuid=collection_uuid)
         return True
 
-    def _peek(self, collection_id: UUID, n=10):
+    @override
+    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(
             collection_id=collection_id,
             limit=n,
             include=["embeddings", "documents", "metadatas"],
         )
 
-    def persist(self):
-        """Persist the database to disk.
-
-        Returns:
-            True if the database was persisted successfully
-
-        """
+    @override
+    def persist(self) -> bool:
         self._db.persist()
         return True
 
-    def get_version(self):
-        """Get the version of Chroma.
-
-        Returns:
-            The version of Chroma
-
-        """
+    @override
+    def get_version(self) -> str:
         return __version__

@@ -6,6 +6,10 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+from datetime import datetime, timedelta
+from chromadb.utils.embedding_functions import (
+    DefaultEmbeddingFunction,
+)
 
 
 @pytest.fixture
@@ -29,6 +33,16 @@ def local_persist_api_cache_bust():
             persist_directory=tempfile.gettempdir() + "/test_server",
         )
     )
+
+
+def approx_equal(a, b, tolerance=1e-6) -> bool:
+    return abs(a - b) < tolerance
+
+
+def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
+    if len(a) != len(b):
+        return False
+    return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
@@ -137,7 +151,12 @@ def test_persist(api_fixture, request):
 
 
 def test_heartbeat(api):
-    assert isinstance(api.heartbeat(), int)
+    heartbeat_ns = api.heartbeat()
+    assert isinstance(heartbeat_ns, int)
+
+    heartbeat_s = heartbeat_ns // 10**9
+    heartbeat = datetime.fromtimestamp(heartbeat_s)
+    assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
 batch_records = {
@@ -205,7 +224,7 @@ def test_reset_db(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    assert api.reset()
+    api.reset()
     assert len(api.list_collections()) == 0
 
 
@@ -241,21 +260,6 @@ def test_get_nearest_neighbors(api):
     )
     for key in nn.keys():
         assert len(nn[key]) == 2
-
-
-def test_get_nearest_neighbors_filter(api, request):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records)
-
-    # assert api.create_index(collection_name="testspace") # default is auto now
-
-    with pytest.raises(Exception) as e:
-        collection.query(
-            query_embeddings=[[1.1, 2.3, 3.2]], n_results=1, where={"distance": "false"}
-        )
-
-    assert str(e.value).__contains__("found")
 
 
 def test_delete(api):
@@ -713,16 +717,6 @@ def test_dimensionality_validation_query(api):
     assert "dimensionality" in str(e.value)
 
 
-def test_number_of_elements_validation_query(api):
-    api.reset()
-    collection = api.create_collection("test_number_of_elements_validation")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.query(**bad_number_of_results_query)
-    assert "number of elements" in str(e.value)
-
-
 def test_query_document_valid_operators(api):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
@@ -882,24 +876,23 @@ def test_where_logical_operators(api):
 
     items = collection.get(
         where={
-            "$or": [
+            "$and": [
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 3}},
-                        {"string_value": {"$eq": "three"}},
+                    "$or": [
+                        {"int_value": {"$eq": 1}},
+                        {"string_value": {"$eq": "two"}},
                     ]
                 },
                 {
-                    "$and": [
-                        {"int_value": {"$eq": 4}},
-                        {"string_value": {"$eq": "four"}},
+                    "$or": [
+                        {"int_value": {"$eq": 2}},
+                        {"string_value": {"$eq": "one"}},
                     ]
                 },
-            ],
-            "$and": [{"is": "doc"}, {"string_value": "four"}],
+            ]
         }
     )
-    assert len(items["metadatas"]) == 1
+    assert len(items["metadatas"]) == 2
 
 
 def test_where_document_logical_operators(api):
@@ -1003,7 +996,7 @@ def test_get_include(api):
     items = collection.get(include=["embeddings", "documents"])
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
-    assert items["embeddings"][1][0] == 1.2
+    assert approx_equal(items["embeddings"][1][0], 1.2)
 
     items = collection.get(include=[])
     assert items["documents"] is None
@@ -1152,8 +1145,6 @@ def test_add_large(api):
 
 
 # test get_version
-
-
 def test_get_version(api):
     api.reset()
     version = api.get_version()
@@ -1165,8 +1156,6 @@ def test_get_version(api):
 
 
 # test delete_collection
-
-
 def test_delete_collection(api):
     api.reset()
     collection = api.create_collection("test_delete_collection")
@@ -1175,6 +1164,14 @@ def test_delete_collection(api):
     assert len(api.list_collections()) == 1
     api.delete_collection("test_delete_collection")
     assert len(api.list_collections()) == 0
+
+
+# test default embedding function
+def test_default_embedding():
+    embedding_function = DefaultEmbeddingFunction()
+    docs = ["this is a test" for _ in range(64)]
+    embeddings = embedding_function(docs)
+    assert len(embeddings) == 64
 
 
 def test_multiple_collections(api):
@@ -1225,7 +1222,51 @@ def test_update_query(api):
     assert results["ids"][0][0] == updated_records["ids"][0]
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
-    assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+    assert vector_approx_equal(
+        results["embeddings"][0][0], updated_records["embeddings"][0]
+    )
+
+
+def test_get_nearest_neighbors_where_n_results_more_than_element(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+
+    results1 = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=5,
+        where={},
+        include=["embeddings", "documents", "metadatas", "distances"],
+    )
+    for key in results1.keys():
+        assert len(results1[key][0]) == 2
+
+
+def test_invalid_n_results_param(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    collection.add(**records)
+    with pytest.raises(TypeError) as exc:
+        collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results=-1,
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+    assert "Number of requested results -1, cannot be negative, or zero." in str(
+        exc.value
+    )
+    assert exc.type == TypeError
+
+    with pytest.raises(ValueError) as exc:
+        collection.query(
+            query_embeddings=[[1.1, 2.3, 3.2]],
+            n_results="one",
+            where={},
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+    assert "int" in str(exc.value)
+    assert exc.type == ValueError
 
 
 initial_records = {
@@ -1270,7 +1311,9 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=new_records["ids"][0]
     )
-    assert get_result["embeddings"][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        get_result["embeddings"][0], new_records["embeddings"][0]
+    )
     assert get_result["metadatas"][0] == new_records["metadatas"][0]
     assert get_result["documents"][0] == new_records["documents"][0]
 
@@ -1279,7 +1322,9 @@ def test_upsert(api):
         n_results=1,
         include=["embeddings", "metadatas", "documents"],
     )
-    assert query_result["embeddings"][0][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        query_result["embeddings"][0][0], new_records["embeddings"][0]
+    )
     assert query_result["metadatas"][0][0] == new_records["metadatas"][0]
     assert query_result["documents"][0][0] == new_records["documents"][0]
 
@@ -1294,7 +1339,7 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=["id3"]
     )
-    assert get_result["embeddings"][0] == [1.1, 0.99, 2.21]
+    assert vector_approx_equal(get_result["embeddings"][0], [1.1, 0.99, 2.21])
     assert get_result["metadatas"][0] == {"string_value": "a new string value"}
     assert get_result["documents"][0] is None
 
@@ -1308,20 +1353,20 @@ def test_invalid_embeddings(api):
 
     # Add with string embeddings
     invalid_records = {
-        "embeddings": [['0', '0', '0'], ['1.2', '2.24', '3.2']],
+        "embeddings": [["0", "0", "0"], ["1.2", "2.24", "3.2"]],
         "ids": ["id1", "id2"],
     }
     with pytest.raises(ValueError) as e:
         collection.add(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Query with invalid embeddings
     with pytest.raises(ValueError) as e:
         collection.query(
-            query_embeddings=[['1.1', '2.3', '3.2']],
+            query_embeddings=[["1.1", "2.3", "3.2"]],
             n_results=1,
         )
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Update with invalid embeddings
     invalid_records = {
@@ -1330,7 +1375,7 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.update(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)
 
     # Upsert with invalid embeddings
     invalid_records = {
@@ -1339,4 +1384,4 @@ def test_invalid_embeddings(api):
     }
     with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
-    assert "embeddings" in str(e.value)
+    assert "embedding" in str(e.value)

@@ -1,34 +1,34 @@
-from abc import ABC, abstractmethod
-from typing import Dict, List, Sequence, Optional, Tuple
+from abc import abstractmethod
+from typing import List, Sequence, Optional, Tuple
 from uuid import UUID
-import numpy.typing as npt
 from chromadb.api.types import (
     Embeddings,
     Documents,
     IDs,
     Metadatas,
+    Metadata,
     Where,
     WhereDocument,
 )
+from chromadb.config import Component
 
 
-class DB(ABC):
-    @abstractmethod
-    def __init__(self):
-        pass
-
+class DB(Component):
     @abstractmethod
     def create_collection(
-        self, name: str, metadata: Optional[Dict] = None, get_or_create: bool = False
-    ) -> Sequence:
+        self,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        get_or_create: bool = False,
+    ) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod
-    def get_collection(self, name: str) -> Sequence:
+    def get_collection(self, name: str) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod
-    def list_collections(self) -> Sequence:
+    def list_collections(self) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod
@@ -36,12 +36,12 @@ class DB(ABC):
         self,
         id: UUID,
         new_name: Optional[str] = None,
-        new_metadata: Optional[Dict] = None,
-    ):
+        new_metadata: Optional[Metadata] = None,
+    ) -> None:
         pass
 
     @abstractmethod
-    def delete_collection(self, name: str):
+    def delete_collection(self, name: str) -> None:
         pass
 
     @abstractmethod
@@ -55,14 +55,14 @@ class DB(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
-        ids: List[UUID],
+        ids: List[str],
     ) -> List[UUID]:
         pass
 
     @abstractmethod
     def add_incremental(
         self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
-    ):
+    ) -> None:
         pass
 
     @abstractmethod
@@ -77,7 +77,7 @@ class DB(ABC):
         offset: Optional[int] = None,
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
-    ) -> Sequence:
+    ) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod
@@ -88,11 +88,11 @@ class DB(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-    ):
+    ) -> bool:
         pass
 
     @abstractmethod
-    def count(self, collection_id: UUID):
+    def count(self, collection_id: UUID) -> int:
         pass
 
     @abstractmethod
@@ -102,36 +102,34 @@ class DB(ABC):
         collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ) -> List:
-        pass
-
-    @abstractmethod
-    def reset(self):
+    ) -> List[str]:
         pass
 
     @abstractmethod
     def get_nearest_neighbors(
         self,
         collection_uuid: UUID,
-        where,
-        embeddings,
-        n_results,
-        where_document,
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+        where: Where = {},
+        embeddings: Optional[Embeddings] = None,
+        n_results: int = 10,
+        where_document: WhereDocument = {},
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod
-    def get_by_ids(self, uuids, columns=None) -> Sequence:
+    def get_by_ids(
+        self, uuids: List[UUID], columns: Optional[List[str]] = None
+    ) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod
-    def raw_sql(self, raw_sql):
+    def raw_sql(self, raw_sql):  # type: ignore
         pass
 
     @abstractmethod
-    def create_index(self, collection_uuid: UUID):
+    def create_index(self, collection_uuid: UUID):  # type: ignore
         pass
 
     @abstractmethod
-    def persist(self):
+    def persist(self) -> None:
         pass

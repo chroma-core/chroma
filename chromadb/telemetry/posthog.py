@@ -1,15 +1,16 @@
 import posthog
 import logging
 import sys
-from chromadb.config import Settings
+from chromadb.config import System
 from chromadb.telemetry import Telemetry, TelemetryEvent
+from overrides import override
 
 logger = logging.getLogger(__name__)
 
 
 class Posthog(Telemetry):
-    def __init__(self, settings: Settings):
-        if not settings.anonymized_telemetry or "pytest" in sys.modules:
+    def __init__(self, system: System):
+        if not system.settings.anonymized_telemetry or "pytest" in sys.modules:
             posthog.disabled = True
         else:
             logger.info(
@@ -20,8 +21,10 @@ class Posthog(Telemetry):
         posthog_logger = logging.getLogger("posthog")
         # Silence posthog's logging
         posthog_logger.disabled = True
+        super().__init__(system)
 
-    def capture(self, event: TelemetryEvent):
+    @override
+    def capture(self, event: TelemetryEvent) -> None:
         try:
             posthog.capture(
                 self.user_id,

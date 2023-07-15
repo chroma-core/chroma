@@ -1,19 +1,32 @@
-from typing import Any, Optional, Union, Dict, Sequence, TypeVar, List
+from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
+from chromadb.types import (
+    Metadata,
+    UpdateMetadata,
+    Vector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+)
+
+# Re-export types from chromadb.types
+__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
 ID = str
 IDs = List[ID]
 
-Number = Union[int, float]
-Embedding = List[Number]
+Embedding = Vector
 Embeddings = List[Embedding]
 
-
-Metadata = Dict[str, Union[str, int, float]]
 Metadatas = List[Metadata]
 
-CollectionMetadata = Dict[Any, Any]
+CollectionMetadata = Dict[str, Any]
+UpdateCollectionMetadata = UpdateMetadata
 
 Document = str
 Documents = List[Document]
@@ -22,20 +35,24 @@ Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
-Include = List[Literal["documents", "embeddings", "metadatas", "distances"]]
-
-# Grammar for where expressions
-LiteralValue = Union[str, int, float]
-LogicalOperator = Literal["$and", "$or"]
-WhereOperator = Literal["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
+# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
+# However, this provokes an incompatibility with the Overrides library and Python 3.7
+Include = List[
+    Union[
+        Literal["documents"],
+        Literal["embeddings"],
+        Literal["metadatas"],
+        Literal["distances"],
+    ]
 ]
 
-WhereDocumentOperator = Literal["$contains", LogicalOperator]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+# Re-export types from chromadb.types
+LiteralValue = LiteralValue
+LogicalOperator = LogicalOperator
+WhereOperator = WhereOperator
+OperatorExpression = OperatorExpression
+Where = Where
+WhereDocumentOperator = WhereDocumentOperator
 
 
 class GetResult(TypedDict):
@@ -55,7 +72,12 @@ class QueryResult(TypedDict):
 
 class IndexMetadata(TypedDict):
     dimensionality: int
-    elements: int
+    # The current number of elements in the index (total = additions - deletes)
+    curr_elements: int
+    # The auto-incrementing ID of the last inserted element, never decreases so
+    # can be used as a count of total historical size. Should increase by 1 every add.
+    # Assume cannot overflow
+    total_elements_added: int
     time_created: float
 
 
@@ -87,6 +109,8 @@ def validate_ids(ids: IDs) -> IDs:
     """Validates ids to ensure it is a list of strings"""
     if not isinstance(ids, list):
         raise ValueError(f"Expected IDs to be a list, got {ids}")
+    if len(ids) == 0:
+        raise ValueError(f"Expected IDs to be a non-empty list, got {ids}")
     for id in ids:
         if not isinstance(id, str):
             raise ValueError(f"Expected ID to be a str, got {id}")
@@ -102,10 +126,31 @@ def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
     if not isinstance(metadata, dict):
         raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if len(metadata) == 0:
+        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            raise ValueError(
+                f"Expected metadata key to be a str, got {key} which is a {type(key)}"
+            )
+        # isinstance(True, int) evaluates to True, so we need to check for bools separately
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            raise ValueError(
+                f"Expected metadata value to be a str, int, or float, got {value} which is a {type(value)}"
+            )
+    return metadata
+
+
+def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if len(metadata) == 0:
+        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float)):
+        if not isinstance(value, (str, int, float, type(None))):
             raise ValueError(
                 f"Expected metadata value to be a str, int, or float, got {value}"
             )
@@ -128,6 +173,8 @@ def validate_where(where: Where) -> Where:
     """
     if not isinstance(where, dict):
         raise ValueError(f"Expected where to be a dict, got {where}")
+    if len(where) != 1:
+        raise ValueError(f"Expected where to have exactly one operator, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
@@ -234,14 +281,35 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     return include
 
 
+def validate_n_results(n_results: int) -> int:
+    """Validates n_results to ensure it is a positive Integer. Since hnswlib does not allow n_results to be negative."""
+    # Check Number of requested results
+    if not isinstance(n_results, int):
+        raise ValueError(
+            f"Expected requested number of results to be a int, got {n_results}"
+        )
+    if n_results <= 0:
+        raise TypeError(
+            f"Number of requested results {n_results}, cannot be negative, or zero."
+        )
+    return n_results
+
+
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
-    if not isinstance(embeddings[0], list):
-        raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
+    if len(embeddings) == 0:
+        raise ValueError(
+            f"Expected embeddings to be a list with at least one item, got {embeddings}"
+        )
+    if not all([isinstance(e, list) for e in embeddings]):
+        raise ValueError(
+            f"Expected each embedding in the embeddings to be a list, got {embeddings}"
+        )
     for embedding in embeddings:
-        for value in embedding:
-            if not isinstance(value, (int, float)):
-                raise ValueError(f"Expected embeddings to be a int, float, got {embeddings}")
+        if not all([isinstance(value, (int, float)) for value in embedding]):
+            raise ValueError(
+                f"Expected each value in the embedding to be a int or float, got {embeddings}"
+            )
     return embeddings

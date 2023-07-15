@@ -1,31 +1,33 @@
+import { ChromaClient } from '../../src/ChromaClient';
 // import env.ts
-import { ChromaClient } from "../../src/index";
 
 window.onload = async () => {
-  const chroma = new ChromaClient("http://localhost:8000");
+  const chroma = new ChromaClient({ path: "http://localhost:8000" });
   await chroma.reset();
 
-  const collection = await chroma.createCollection("test-from-js");
+  const collection = await chroma.createCollection({ name: "test-from-js" });
   console.log("collection", collection);
 
   // first generate some data
   var ids: string[] = [];
   var embeddings: Array<any> = [];
-  var metadata: Array<any> = [];
+  var metadatas: Array<any> = [];
   for (let i = 0; i < 100; i++) {
     ids.push("test-id-" + i.toString());
     embeddings.push([1, 2, 3, 4, 5]);
-    metadata.push({ test: "test" });
+    metadatas.push({ test: "test" });
   }
 
-  let add = await collection.add(ids, embeddings, metadata);
+  let add = await collection.add({ ids, embeddings, metadatas });
   console.log("add", add);
 
   let count = await collection.count();
   console.log("count", count);
 
-  const queryData = await collection.query([1, 2, 3, 4, 5], 5, {
-    test: "test",
+  const queryData = await collection.query({
+    queryEmbeddings: [1, 2, 3, 4, 5],
+    nResults: 5,
+    where: { test: "test" }
   });
 
   console.log("queryData", queryData);

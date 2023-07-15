@@ -1,0 +1,47 @@
+[project]
+name = "chromadb-client"
+dynamic = ["version"]
+
+authors = [
+  { name="Jeff Huber", email="jeff@trychroma.com" },
+  { name="Anton Troynikov", email="anton@trychroma.com" }
+]
+description = "Chroma Client."
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  'pandas >= 1.3',
+  'requests >= 2.28',
+  'pydantic >= 1.9',
+  'numpy >= 1.21.6',
+  'posthog >= 2.4.0',
+  'typing_extensions >= 4.5.0',
+  'overrides >= 7.3.1',
+]
+
+[tool.black]
+line-length = 88
+required-version = "23.3.0" # Black will refuse to run if it's not this version.
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[project.urls]
+"Homepage" = "https://github.com/chroma-core/chroma"
+"Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
+
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+local_scheme="no-local-version"
+
+[tool.setuptools]
+packages = ["chromadb"]
