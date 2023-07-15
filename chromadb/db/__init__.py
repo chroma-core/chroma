@@ -77,7 +77,25 @@ class DB(Component):
         offset: Optional[int] = None,
         where_document: WhereDocument = {},
         columns: Optional[List[str]] = None,
+        metadata_filter: Optional[Metadata] = None,
     ) -> Sequence:  # type: ignore
+        """
+        Get a collection or collections based on the provided parameters.
+        
+        Parameters:
+        where -- Optional filter for collection data
+        collection_name -- Optional name of the collection to get
+        collection_uuid -- Optional UUID of the collection to get
+        ids -- Optional list of IDs to filter the collection data
+        sort -- Optional sort order for the collection data
+        limit -- Optional limit for the number of collection data to get
+        offset -- Optional offset for the collection data to get
+        where_document -- Optional filter for collection documents
+        columns -- Optional list of columns to include in the result
+        metadata_filter -- Optional filter for collection metadata
+        
+        Returns a sequence of collections.
+        """
         pass
 
     @abstractmethod
