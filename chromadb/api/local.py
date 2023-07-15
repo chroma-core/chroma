@@ -296,6 +296,241 @@ class LocalAPI(API):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
+        metadata_filter: Optional[Metadata] = None,
+    ) -> GetResult:
+        if where is None:
+            where = {}
+
+        if where_document is None:
+            where_document = {}
+
+        if page and page_size:
+            offset = (page - 1) * page_size
+            limit = page_size
+
+        include_embeddings = "embeddings" in include
+        include_documents = "documents" in include
+        include_metadatas = "metadatas" in include
+
+        # Remove plural from include since db columns are singular
+        db_columns = [column[:-1] for column in include] + ["id"]
+        column_index = {
+            column_name: index for index, column_name in enumerate(db_columns)
+        }
+
+        db_result = self._db.get(
+            collection_uuid=collection_id,
+            ids=ids,
+            where=where,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            columns=db_columns,
+            metadata_filter=metadata_filter,
+        )
+
+        get_result = GetResult(
+            ids=[],
+            embeddings=[] if include_embeddings else None,
+            documents=[] if include_documents else None,
+            metadatas=[] if include_metadatas else None,
+        )
+
+        for entry in db_result:
+            if include_embeddings:
+                cast(List, get_result["embeddings"]).append(  # type: ignore
+                    entry[column_index["embedding"]]
+                )
+            if include_documents:
+                cast(List, get_result["documents"]).append(  # type: ignore
+                    entry[column_index["document"]]
+                )
+            if include_metadatas:
+                cast(List, get_result["metadatas"]).append(  # type: ignore
+                    entry[column_index["metadata"]]
+                )
+            get_result["ids"].append(entry[column_index["id"]])
+        return get_result
+
+    @override
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        metadata_filter: Optional[Metadata] = None,
+    ) -> Collection:
+        res = self._get(
+            collection_id=self._db.get_collection_uuid_from_name(name),
+            metadata_filter=metadata_filter,
+        )
+        if len(res) == 0:
+            raise ValueError(f"Collection {name} does not exist")
+        return Collection(
+            client=self,
+            name=name,
+            id=res[0][0],
+            embedding_function=embedding_function,
+            metadata=res[0][2],
+        )
+
+    @override
+    def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None:
+        if new_name is not None:
+            check_index_name(new_name)
+
+        self._db.update_collection(id, new_name, new_metadata)
+
+    @override
+    def delete_collection(self, name: str) -> None:
+        self._db.delete_collection(name)
+
+    #
+    # ITEM METHODS
+    #
+    @override
+    def _add(
+        self,
+        ids: IDs,
+        collection_id: UUID,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ) -> bool:
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
+        if len(existing_ids) > 0:
+            logger.info(f"Adding {len(existing_ids)} items with ids that already exist")
+            # Partially add the items that don't already exist
+            valid_indices = [i for i, id in enumerate(ids) if id not in existing_ids]
+            if len(valid_indices) == 0:
+                return False
+            filtered_ids: IDs = []
+            filtered_embeddings: Embeddings = []
+            if metadatas is not None:
+                filtered_metadatas: Metadatas = []
+            if documents is not None:
+                filtered_documents: Documents = []
+            for index in valid_indices:
+                filtered_ids.append(ids[index])
+                filtered_embeddings.append(embeddings[index])
+                if metadatas is not None:
+                    filtered_metadatas.append(metadatas[index])
+                if documents is not None:
+                    filtered_documents.append(documents[index])
+            ids = filtered_ids
+            embeddings = filtered_embeddings
+            if metadatas is not None:
+                metadatas = filtered_metadatas
+            if documents is not None:
+                documents = filtered_documents
+
+        added_uuids = self._db.add(
+            collection_id,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            ids=ids,
+        )
+
+        if increment_index:
+            self._db.add_incremental(collection_id, added_uuids, embeddings)
+
+        self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
+        return True  # NIT: should this return the ids of the succesfully added items?
+
+    @override
+    def _update(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+    ) -> bool:
+        self._db.update(collection_id, ids, embeddings, metadatas, documents)
+        return True
+
+    @override
+    def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        increment_index: bool = True,
+    ) -> bool:
+        # Determine which ids need to be added and which need to be updated based on the ids already in the collection
+        existing_ids = set(self._get(collection_id, ids=ids, include=[])["ids"])
+
+        ids_to_add = []
+        ids_to_update = []
+        embeddings_to_add: Embeddings = []
+        embeddings_to_update: Embeddings = []
+        metadatas_to_add: Optional[Metadatas] = [] if metadatas else None
+        metadatas_to_update: Optional[Metadatas] = [] if metadatas else None
+        documents_to_add: Optional[Documents] = [] if documents else None
+        documents_to_update: Optional[Documents] = [] if documents else None
+
+        for i, id in enumerate(ids):
+            if id in existing_ids:
+                ids_to_update.append(id)
+                if embeddings is not None:
+                    embeddings_to_update.append(embeddings[i])
+                if metadatas is not None:
+                    metadatas_to_update.append(metadatas[i])  # type: ignore
+                if documents is not None:
+                    documents_to_update.append(documents[i])  # type: ignore
+            else:
+                ids_to_add.append(id)
+                if embeddings is not None:
+                    embeddings_to_add.append(embeddings[i])
+                if metadatas is not None:
+                    metadatas_to_add.append(metadatas[i])  # type: ignore
+                if documents is not None:
+                    documents_to_add.append(documents[i])  # type: ignore
+
+        if len(ids_to_add) > 0:
+            self._add(
+                ids_to_add,
+                collection_id,
+                embeddings_to_add,
+                metadatas_to_add,
+                documents_to_add,
+                increment_index=increment_index,
+            )
+
+        if len(ids_to_update) > 0:
+            self._update(
+                collection_id,
+                ids_to_update,
+                embeddings_to_update,
+                metadatas_to_update,
+                documents_to_update,
+            )
+        self._db.update(collection_id, ids, embeddings, metadatas, documents)
+
+        return True
+
+    @override
+    def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
         if where is None:
             where = {}
