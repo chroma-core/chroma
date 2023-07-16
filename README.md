@@ -90,6 +90,25 @@ What are embeddings?
 
 Embeddings databases (also known as **vector databases**) store embeddings and allow you to search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/embeddings#default-sentence-transformers) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
 
+## HuggingFaceEmbeddingFunction
+
+The `HuggingFaceEmbeddingFunction` class is used to get embeddings for a list of texts using the HuggingFace API. It requires an API key and a model name. The default model name is "sentence-transformers/all-MiniLM-L6-v2".
+
+Here is an example of how to use the `HuggingFaceEmbeddingFunction` class:
+
+```python
+from chromadb.utils import HuggingFaceEmbeddingFunction
+
+hugging_face = HuggingFaceEmbeddingFunction(api_key="your_api_key")
+texts = ["Hello, world!", "How are you?"]
+embeddings = hugging_face(texts)
+```
+
+The `requests` package is required to use the `HuggingFaceEmbeddingFunction` class. You can install it with the following command:
+
+```bash
+pip install requests
+```
 ## Get involved
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
