@@ -148,9 +148,21 @@ class CohereEmbeddingFunction(EmbeddingFunction):
 
 
 class HuggingFaceEmbeddingFunction(EmbeddingFunction):
+    """
+    This class is used to get embeddings for a list of texts using the HuggingFace API.
+    It requires an API key and a model name. The default model name is "sentence-transformers/all-MiniLM-L6-v2".
+    """
+
     def __init__(
         self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     ):
+        """
+        Initialize the HuggingFaceEmbeddingFunction.
+
+        Args:
+            api_key (str): Your API key for the HuggingFace API.
+            model_name (str, optional): The name of the model to use for text embeddings. Defaults to "sentence-transformers/all-MiniLM-L6-v2".
+        """
         try:
             import requests
         except ImportError:
@@ -162,6 +174,20 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction):
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, texts: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            texts (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> hugging_face = HuggingFaceEmbeddingFunction(api_key="your_api_key")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = hugging_face(texts)
+        """
         # Call HuggingFace Embedding API for each document
         return self._session.post(  # type: ignore
             self._api_url, json={"inputs": texts, "options": {"wait_for_model": True}}
