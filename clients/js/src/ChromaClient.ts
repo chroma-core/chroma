@@ -1,4 +1,5 @@
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
+import { ChromaError, InvalidDimensionException, InvalidCollectionException, IDAlreadyExistsError, DuplicateIDError, InvalidUUIDError } from './errors';
 import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
@@ -87,7 +88,7 @@ export class ChromaClient {
      * @ignore
      */
     public async persist(): Promise<never> {
-        throw new Error("Not implemented in JS client");
+        throw new NotImplementedError("Not implemented in JS client");
     }
 
     /**
@@ -129,7 +130,7 @@ export class ChromaClient {
             .catch(handleError);
 
         if (newCollection.error) {
-            throw new Error(newCollection.error);
+            throw new InvalidCollectionException(newCollection.error);
         }
 
         return new Collection(name, newCollection.id, this.api, metadata, embeddingFunction);
@@ -175,7 +176,7 @@ export class ChromaClient {
             .catch(handleError);
 
         if (newCollection.error) {
-            throw new Error(newCollection.error);
+            throw new InvalidCollectionException(newCollection.error);
         }
 
         return new Collection(
@@ -231,7 +232,7 @@ export class ChromaClient {
             .catch(handleError);
 
         if (response.error) {
-            throw new Error(response.error);
+            throw new InvalidCollectionException(response.error);
         }
 
         return new Collection(
@@ -266,7 +267,7 @@ export class ChromaClient {
         return await this.api
             .deleteCollection(name, this.api.options)
             .then(handleSuccess)
-            .catch(handleError);
+            .catch(error => { throw new InvalidCollectionException(error.message); });
     }
 
 }
