@@ -1,4 +1,12 @@
 import {
+    ChromaError,
+    InvalidDimensionException,
+    InvalidCollectionException,
+    IDAlreadyExistsError,
+    DuplicateIDError,
+    InvalidUUIDError
+} from './errors';
+import {
     IncludeEnum,
     Metadata,
     Metadatas,
@@ -80,9 +88,7 @@ export class Collection {
 
         if (require_embeddings_or_documents) {
             if ((embeddings === undefined) && (documents === undefined)) {
-                throw new Error(
-                    "embeddings and documents cannot both be undefined",
-                );
+                throw new InvalidDimensionException("embeddings and documents cannot both be undefined");
             }
         }
 
@@ -91,13 +97,11 @@ export class Collection {
             if (this.embeddingFunction !== undefined) {
                 embeddings = await this.embeddingFunction.generate(documentsArray);
             } else {
-                throw new Error(
-                    "embeddingFunction is undefined. Please configure an embedding function"
-                );
+                throw new InvalidCollectionException("embeddingFunction is undefined. Please configure an embedding function");
             }
         }
         if (embeddings === undefined)
-            throw new Error("embeddings is undefined but shouldnt be");
+            throw new InvalidDimensionException("embeddings is undefined but shouldnt be");
 
         const idsArray = toArray(ids);
         const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
@@ -133,17 +137,13 @@ export class Collection {
             (documentsArray !== undefined &&
                 idsArray.length !== documentsArray.length)
         ) {
-            throw new Error(
-                "ids, embeddings, metadatas, and documents must all be the same length"
-            );
+            throw new InvalidDimensionException("ids, embeddings, metadatas, and documents must all be the same length");
         }
 
         const uniqueIds = new Set(idsArray);
         if (uniqueIds.size !== idsArray.length) {
             const duplicateIds = idsArray.filter((item, index) => idsArray.indexOf(item) !== index);
-            throw new Error(
-                `Expected IDs to be unique, found duplicates for: ${duplicateIds}`,
-            );
+            throw new DuplicateIDError(`Expected IDs to be unique, found duplicates for: ${duplicateIds}`);
         }
 
         return [idsArray, embeddingsArray, metadatasArray, documentsArray]
@@ -403,17 +403,13 @@ export class Collection {
             documents === undefined &&
             metadatas === undefined
         ) {
-            throw new Error(
-                "embeddings, documents, and metadatas cannot all be undefined"
-            );
+            throw new InvalidDimensionException("embeddings, documents, and metadatas cannot all be undefined");
         } else if (embeddings === undefined && documents !== undefined) {
             const documentsArray = toArray(documents);
             if (this.embeddingFunction !== undefined) {
                 embeddings = await this.embeddingFunction.generate(documentsArray);
             } else {
-                throw new Error(
-                    "embeddingFunction is undefined. Please configure an embedding function"
-                );
+                throw new InvalidCollectionException("embeddingFunction is undefined. Please configure an embedding function");
             }
         }
 
@@ -496,9 +492,7 @@ export class Collection {
             if (this.embeddingFunction !== undefined) {
                 queryEmbeddings = await this.embeddingFunction.generate(queryTextsArray);
             } else {
-                throw new Error(
-                    "embeddingFunction is undefined. Please configure an embedding function"
-                );
+                throw new InvalidCollectionException("embeddingFunction is undefined. Please configure an embedding function");
             }
         }
         if (queryEmbeddings === undefined)
