@@ -66,17 +66,26 @@ class LocalAPI(API):
 
     @override
     def heartbeat(self) -> int:
-        """Ping the database to ensure it is alive
-
-        Returns:
-            The current time in nanoseconds since epoch
-
-        """
         return int(time.time_ns())
 
     #
     # COLLECTION METHODS
     #
+    @override
+    def list_collections(self) -> Sequence[Collection]:
+        collections = []
+        db_collections = self._db.list_collections()
+        for db_collection in db_collections:
+            collections.append(
+                Collection(
+                    client=self,
+                    id=db_collection[0],
+                    name=db_collection[1],
+                    metadata=db_collection[2],
+                )
+            )
+        return collections
+
     @override
     def create_collection(
         self,
@@ -85,29 +94,6 @@ class LocalAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        """Create a new collection with the given name and metadata.
-        Args:
-            name: The name of the collection to create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
-            get_or_create: If True, return the existing collection if it exists
-
-        Returns:
-            The newly created collection
-
-        Raises:
-            ValueError: If the collection already exists and get_or_create is False
-            ValueError: If the collection name is invalid
-
-        Examples:
-            ```python
-            client.create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-
-            client.create_collection("my_collection", metadata={"foo": "bar"})
-            # collection(name="my_collection", metadata={"foo": "bar"})
-            ```
-        """
         check_index_name(name)
 
         if metadata is not None:
@@ -129,22 +115,6 @@ class LocalAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Get or create a collection with the given name and metadata.
-        Args:
-            name: The name of the collection to get or create
-            metadata: Optional metadata to associate with the collection
-            embedding_function: Optional function to use to embed documents
-
-        Returns:
-            The collection
-
-        Examples:
-            ```python
-            client.get_or_create_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-            ```
-        """
-
         if metadata is not None:
             validate_metadata(metadata)
 
@@ -158,23 +128,6 @@ class LocalAPI(API):
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        """Get a collection with the given name.
-        Args:
-            name: The name of the collection to get
-            embedding_function: Optional function to use to embed documents
-
-        Returns:
-            The collection
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            ```python
-            client.get_collection("my_collection")
-            # collection(name="my_collection", metadata={})
-            ```
-        """
         res = self._db.get_collection(name)
         if len(res) == 0:
             raise ValueError(f"Collection {name} does not exist")
@@ -185,31 +138,6 @@ class LocalAPI(API):
             embedding_function=embedding_function,
             metadata=res[0][2],
         )
-
-    @override
-    def list_collections(self) -> Sequence[Collection]:
-        """List all collections.
-        Returns:
-            A list of collections
-
-        Examples:
-            ```python
-            client.list_collections()
-            # [collection(name="my_collection", metadata={})]
-            ```
-        """
-        collections = []
-        db_collections = self._db.list_collections()
-        for db_collection in db_collections:
-            collections.append(
-                Collection(
-                    client=self,
-                    id=db_collection[0],
-                    name=db_collection[1],
-                    metadata=db_collection[2],
-                )
-            )
-        return collections
 
     @override
     def _modify(
@@ -225,18 +153,6 @@ class LocalAPI(API):
 
     @override
     def delete_collection(self, name: str) -> None:
-        """Delete a collection with the given name.
-        Args:
-            name: The name of the collection to delete
-
-        Raises:
-            ValueError: If the collection does not exist
-
-        Examples:
-            ```python
-            client.delete_collection("my_collection")
-            ```
-        """
         self._db.delete_collection(name)
 
     #
@@ -467,12 +383,6 @@ class LocalAPI(API):
 
     @override
     def reset(self) -> bool:
-        """Reset the database. This will delete all collections and items.
-
-        Returns:
-            True if the database was reset successfully
-
-        """
         self._db.reset_state()
         return True
 
@@ -542,7 +452,7 @@ class LocalAPI(API):
                     metadatas
                 )
             if include_distances:
-                cast(List[float], query_result["distances"]).append(distances[i])
+                cast(List[List[float]], query_result["distances"]).append(distances[i])
             query_result["ids"].append(ids)
 
         return query_result
@@ -567,21 +477,9 @@ class LocalAPI(API):
 
     @override
     def persist(self) -> bool:
-        """Persist the database to disk.
-
-        Returns:
-            True if the database was persisted successfully
-
-        """
         self._db.persist()
         return True
 
     @override
     def get_version(self) -> str:
-        """Get the version of Chroma.
-
-        Returns:
-            The version of Chroma
-
-        """
         return __version__
