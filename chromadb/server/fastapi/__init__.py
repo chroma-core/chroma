@@ -88,17 +88,33 @@ class FastAPI(chromadb.server.Server):
 
         self.router = fastapi.APIRouter()
 
-        self.router.add_api_route("/api/v1", self.root, methods=["GET"])
-        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
-        self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
-
         self.router.add_api_route(
-            "/api/v1/collections", self.list_collections, methods=["GET"]
+            "/api/v1", self.root, methods=["GET"], response_model=None
         )
         self.router.add_api_route(
-            "/api/v1/collections", self.create_collection, methods=["POST"]
+            "/api/v1/reset", self.reset, methods=["POST"], response_model=None
+        )
+        self.router.add_api_route(
+            "/api/v1/version", self.version, methods=["GET"], response_model=None
+        )
+        self.router.add_api_route(
+            "/api/v1/heartbeat", self.heartbeat, methods=["GET"], response_model=None
+        )
+        self.router.add_api_route(
+            "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
+        )
+
+        self.router.add_api_route(
+            "/api/v1/collections",
+            self.list_collections,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
+            "/api/v1/collections",
+            self.create_collection,
+            methods=["POST"],
+            response_model=None,
         )
 
         self.router.add_api_route(
@@ -106,46 +122,67 @@ class FastAPI(chromadb.server.Server):
             self.add,
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/update", self.update, methods=["POST"]
+            "/api/v1/collections/{collection_id}/update",
+            self.update,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/upsert", self.upsert, methods=["POST"]
+            "/api/v1/collections/{collection_id}/upsert",
+            self.upsert,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/get", self.get, methods=["POST"]
+            "/api/v1/collections/{collection_id}/get",
+            self.get,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/delete", self.delete, methods=["POST"]
+            "/api/v1/collections/{collection_id}/delete",
+            self.delete,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/count", self.count, methods=["GET"]
+            "/api/v1/collections/{collection_id}/count",
+            self.count,
+            methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/query",
             self.get_nearest_neighbors,
             methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}/create_index",
             self.create_index,
             methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
             self.get_collection,
             methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}",
             self.update_collection,
             methods=["PUT"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
             self.delete_collection,
             methods=["DELETE"],
+            response_model=None,
         )
 
         self._app.include_router(self.router)
