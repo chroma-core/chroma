@@ -309,9 +309,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         # Overquery by updated and deleted elements layered on the index because they may
         # hide the real nearest neighbors in the hnsw index
+        hnsw_k = k + self._curr_batch.update_count + self._curr_batch.delete_count
+        if hnsw_k > len(self._id_to_label):
+            hnsw_k = len(self._id_to_label)
         hnsw_query = VectorQuery(
             vectors=query["vectors"],
-            k=k + self._curr_batch.update_count + self._curr_batch.delete_count,
+            k=hnsw_k,
             allowed_ids=query["allowed_ids"],
             include_embeddings=query["include_embeddings"],
             options=query["options"],
