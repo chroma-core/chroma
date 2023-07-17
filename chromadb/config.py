@@ -18,6 +18,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+LEGACY_ERROR = "You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!"
+
+_legacy_config_keys = {
+    "chroma_db_impl",
+}
+
 _legacy_config_values = {
     "duckdb",
     "duckdb+parquet",
@@ -43,6 +50,9 @@ _abstract_type_keys: Dict[str, str] = {
 
 class Settings(BaseSettings):
     environment: str = ""
+
+    # Legacy config has to be kept around because pydantic will error on nonexisting keys
+    chroma_db_impl: Optional[str] = None
 
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
@@ -86,9 +96,7 @@ class Settings(BaseSettings):
         val = getattr(self, key)
         # Error on legacy config values
         if val in _legacy_config_values:
-            raise ValueError(
-                "You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!"
-            )
+            raise ValueError(LEGACY_ERROR)
         return val
 
     class Config:
@@ -150,6 +158,11 @@ class System(Component):
                     "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
             see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
                 )
+
+        # Validate settings don't contain any legacy config values
+        for key in _legacy_config_keys:
+            if settings[key] is not None:
+                raise ValueError(LEGACY_ERROR)
 
         self.settings = settings
         self._instances = {}
