@@ -32,18 +32,34 @@ class FastAPI(API):
         url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
-        self._api_url = f"{url_prefix}://{system.settings.chroma_server_host}:{system.settings.chroma_server_http_port}/api/v1"
+
         self._telemetry_client = self.require(Telemetry)
+
+        port_suffix = (
+            f":{system.settings.chroma_server_http_port}"
+            if system.settings.chroma_server_http_port
+            else ""
+        )
+        self._api_url = (
+            f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
+        )
+
+        self._header = system.settings.chroma_server_headers
+        self._session = requests.Session()
+        if self._header is not None:
+            self._session.headers.update(self._header)
 
     @override
     def heartbeat(self) -> int:
-        resp = requests.get(self._api_url)
+        """Returns the current server time in nanoseconds to check if the server is alive"""
+        resp = self._session.get(self._api_url)
         raise_chroma_error(resp)
         return int(resp.json()["nanosecond heartbeat"])
 
     @override
     def list_collections(self) -> Sequence[Collection]:
-        resp = requests.get(self._api_url + "/collections")
+        """Returns a list of all collections"""
+        resp = self._session.get(self._api_url + "/collections")
         raise_chroma_error(resp)
         json_collections = resp.json()
         collections = []
@@ -60,7 +76,8 @@ class FastAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        resp = requests.post(
+        """Creates a collection"""
+        resp = self._session.post(
             self._api_url + "/collections",
             data=json.dumps(
                 {"name": name, "metadata": metadata, "get_or_create": get_or_create}
@@ -82,7 +99,8 @@ class FastAPI(API):
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        resp = requests.get(self._api_url + "/collections/" + name)
+        """Returns a collection"""
+        resp = self._session.get(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
         resp_json = resp.json()
         return Collection(
@@ -112,7 +130,7 @@ class FastAPI(API):
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Updates a collection"""
-        resp = requests.put(
+        resp = self._session.put(
             self._api_url + "/collections/" + str(id),
             data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
         )
@@ -120,13 +138,14 @@ class FastAPI(API):
 
     @override
     def delete_collection(self, name: str) -> None:
-        resp = requests.delete(self._api_url + "/collections/" + name)
+        """Deletes a collection"""
+        resp = self._session.delete(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
 
     @override
     def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database"""
-        resp = requests.get(
+        resp = self._session.get(
             self._api_url + "/collections/" + str(collection_id) + "/count"
         )
         raise_chroma_error(resp)
@@ -158,7 +177,7 @@ class FastAPI(API):
             offset = (page - 1) * page_size
             limit = page_size
 
-        resp = requests.post(
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/get",
             data=json.dumps(
                 {
@@ -190,7 +209,8 @@ class FastAPI(API):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
-        resp = requests.post(
+        """Deletes embeddings from the database"""
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/delete",
             data=json.dumps(
                 {"where": where, "ids": ids, "where_document": where_document}
@@ -210,7 +230,13 @@ class FastAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        resp = requests.post(
+        """
+        Adds a batch of embeddings to the database
+        - pass in column oriented data lists
+        - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
+        -   and then manually create the index yourself with collection.create_index()
+        """
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/add",
             data=json.dumps(
                 {
@@ -235,7 +261,11 @@ class FastAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        resp = requests.post(
+        """
+        Updates a batch of embeddings in the database
+        - pass in column oriented data lists
+        """
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/update",
             data=json.dumps(
                 {
@@ -260,7 +290,11 @@ class FastAPI(API):
         documents: Optional[Documents] = None,
         increment_index: bool = True,
     ) -> bool:
-        resp = requests.post(
+        """
+        Upserts a batch of embeddings in the database
+        - pass in column oriented data lists
+        """
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/upsert",
             data=json.dumps(
                 {
@@ -286,7 +320,8 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
-        resp = requests.post(
+        """Gets the nearest neighbors of a single embedding"""
+        resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/query",
             data=json.dumps(
                 {
@@ -312,19 +347,22 @@ class FastAPI(API):
 
     @override
     def reset(self) -> bool:
-        resp = requests.post(self._api_url + "/reset")
+        """Resets the database"""
+        resp = self._session.post(self._api_url + "/reset")
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
     @override
     def persist(self) -> bool:
-        resp = requests.post(self._api_url + "/persist")
+        """Persists the database"""
+        resp = self._session.post(self._api_url + "/persist")
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
     @override
     def raw_sql(self, sql: str) -> pd.DataFrame:
-        resp = requests.post(
+        """Runs a raw SQL query against the database"""
+        resp = self._session.post(
             self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql})
         )
         raise_chroma_error(resp)
@@ -332,7 +370,8 @@ class FastAPI(API):
 
     @override
     def create_index(self, collection_name: str) -> bool:
-        resp = requests.post(
+        """Soon deprecated"""
+        resp = self._session.post(
             self._api_url + "/collections/" + collection_name + "/create_index"
         )
         raise_chroma_error(resp)
@@ -340,7 +379,8 @@ class FastAPI(API):
 
     @override
     def get_version(self) -> str:
-        resp = requests.get(self._api_url + "/version")
+        """Returns the version of the server"""
+        resp = self._session.get(self._api_url + "/version")
         raise_chroma_error(resp)
         return cast(str, resp.json())
 
