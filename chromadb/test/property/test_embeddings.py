@@ -1,13 +1,12 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Set, cast, Union, DefaultDict
+from typing import Dict, Set, cast, Union, DefaultDict
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.db.impl.sqlite import SqliteDB
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
@@ -237,16 +236,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                     # Sqlite merges the metadata, as opposed to old
                     # implementations which overwrites it
                     record_set_state = self.record_set_state["metadatas"][target_idx]
-                    if (
-                        hasattr(self.api, "_sysdb")
-                        and type(self.api._sysdb) == SqliteDB
-                        and record_set_state is not None
-                    ):
+                    if record_set_state is not None:
+                        record_set_state = cast(
+                            Dict[str, Union[str, int, float]], record_set_state
+                        )
                         record_set_state.update(normalized_record_set["metadatas"][idx])
-                    else:
-                        self.record_set_state["metadatas"][
-                            target_idx
-                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
                     self.record_set_state["documents"][
                         target_idx

@@ -1,6 +1,6 @@
 from typing import Sequence
-from typing_extensions import TypedDict
-import os
+from typing_extensions import TypedDict, NotRequired
+from importlib_resources.abc import Traversable
 import re
 import hashlib
 from chromadb.db.base import SqlDB, Cursor
@@ -9,6 +9,7 @@ from chromadb.config import System, Settings
 
 
 class MigrationFile(TypedDict):
+    path: NotRequired[Traversable]
     dir: str
     filename: str
     version: int
@@ -59,9 +60,12 @@ class InvalidMigrationFilename(Exception):
 class MigratableDB(SqlDB):
     """Simple base class for databases which support basic migrations.
 
-    Migrations are SQL files stored in a project-relative directory. All migrations in
-    the same directory are assumed to be dependent on previous migrations in the same
-    directory, where "previous" is defined on lexographical ordering of filenames.
+    Migrations are SQL files stored as package resources and accessed via
+    importlib_resources.
+
+    All migrations in the same directory are assumed to be dependent on previous
+    migrations in the same directory, where "previous" is defined on lexographical
+    ordering of filenames.
 
     Migrations have a ascending numeric version number and a hash of the file contents.
     When migrations are applied, the hashes of previous migrations are checked to ensure
@@ -87,7 +91,7 @@ class MigratableDB(SqlDB):
         pass
 
     @abstractmethod
-    def migration_dirs(self) -> Sequence[str]:
+    def migration_dirs(self) -> Sequence[Traversable]:
         """Directories containing the migration sequences that should be applied to this
         DB."""
         pass
@@ -103,7 +107,7 @@ class MigratableDB(SqlDB):
         pass
 
     @abstractmethod
-    def db_migrations(self, dir: str) -> Sequence[Migration]:
+    def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
         """Return a list of all migrations already applied to this database, from the
         given source directory, in ascending order."""
         pass
@@ -136,7 +140,7 @@ class MigratableDB(SqlDB):
             )
             if len(unapplied_migrations) > 0:
                 version = unapplied_migrations[0]["version"]
-                raise UnappliedMigrationsError(dir=dir, version=version)
+                raise UnappliedMigrationsError(dir=dir.name, version=version)
 
     def apply_migrations(self) -> None:
         """Validate existing migrations, and apply all new ones."""
@@ -157,13 +161,16 @@ class MigratableDB(SqlDB):
 filename_regex = re.compile(r"(\d+)-(.+)\.(.+)\.sql")
 
 
-def _parse_migration_filename(dir: str, filename: str) -> MigrationFile:
+def _parse_migration_filename(
+    dir: str, filename: str, path: Traversable
+) -> MigrationFile:
     """Parse a migration filename into a MigrationFile object"""
     match = filename_regex.match(filename)
     if match is None:
         raise InvalidMigrationFilename("Invalid migration filename: " + filename)
     version, _, scope = match.groups()
     return {
+        "path": path,
         "dir": dir,
         "filename": filename,
         "version": int(version),
@@ -203,13 +210,13 @@ def verify_migration_sequence(
     return source_migrations[len(db_migrations) :]
 
 
-def find_migrations(dir: str, scope: str) -> Sequence[Migration]:
+def find_migrations(dir: Traversable, scope: str) -> Sequence[Migration]:
     """Return a list of all migration present in the given directory, in ascending
     order. Filter by scope."""
     files = [
-        _parse_migration_filename(dir, filename)
-        for filename in os.listdir(dir)
-        if filename.endswith(".sql")
+        _parse_migration_filename(dir.name, t.name, t)
+        for t in dir.iterdir()
+        if t.name.endswith(".sql")
     ]
     files = list(filter(lambda f: f["scope"] == scope, files))
     files = sorted(files, key=lambda f: f["version"])
@@ -218,7 +225,11 @@ def find_migrations(dir: str, scope: str) -> Sequence[Migration]:
 
 def _read_migration_file(file: MigrationFile) -> Migration:
     """Read a migration file"""
-    sql = open(os.path.join(file["dir"], file["filename"])).read()
+    if "path" not in file or not file["path"].is_file():
+        raise FileNotFoundError(
+            f"No migration file found for dir {file['dir']} with filename {file['filename']} and scope {file['scope']} at version {file['version']}"
+        )
+    sql = file["path"].read_text()
     hash = hashlib.md5(sql.encode("utf-8")).hexdigest()
     return {
         "hash": hash,

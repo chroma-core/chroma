@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 import pytest
 from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
 from chromadb.config import System, Settings
@@ -23,15 +26,29 @@ from itertools import count
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
-    settings = Settings(sqlite_database=":memory:", allow_reset=True)
+    settings = Settings(allow_reset=True, is_persistent=False)
     system = System(settings)
     system.start()
     yield system
     system.stop()
 
 
+def sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for sqlite DB"""
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        allow_reset=True, is_persistent=True, persist_directory=save_path
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    return [sqlite]
+    return [sqlite, sqlite_persistent]
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
@@ -106,8 +123,8 @@ def sync(segment: MetadataReader, seq_id: SeqId) -> None:
 def test_insert_and_count(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
     producer = system.instance(Producer)
+    system.reset_state()
 
     topic = str(segment_definition["topic"])
 
@@ -144,9 +161,8 @@ def assert_equiv_records(
 def test_get(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     embeddings = [next(sample_embeddings) for i in range(10)]
@@ -242,9 +258,8 @@ def test_get(
 def test_fulltext(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -304,9 +319,8 @@ def test_fulltext(
 def test_delete(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -367,9 +381,8 @@ def test_delete(
 def test_update(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -395,9 +408,8 @@ def test_update(
 def test_upsert(
     system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
 ) -> None:
-    system.reset_state()
-
     producer = system.instance(Producer)
+    system.reset_state()
     topic = str(segment_definition["topic"])
 
     segment = SqliteMetadataSegment(system, segment_definition)

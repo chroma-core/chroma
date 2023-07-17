@@ -129,7 +129,3 @@ class DB(Component):
     @abstractmethod
     def create_index(self, collection_uuid: UUID):  # type: ignore
         pass
-
-    @abstractmethod
-    def persist(self) -> None:
-        pass

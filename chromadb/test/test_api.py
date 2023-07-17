@@ -16,10 +16,15 @@ from chromadb.utils.embedding_functions import (
 def local_persist_api():
     return chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=tempfile.gettempdir(),
+        ),
     )
 
 
@@ -28,10 +33,15 @@ def local_persist_api():
 def local_persist_api_cache_bust():
     return chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=tempfile.gettempdir(),
+        ),
     )
 
 
@@ -52,9 +62,6 @@ def test_persist_index_loading(api_fixture, request):
     collection = api.create_collection("test")
     collection.add(ids="id1", documents="hello")
 
-    api.persist()
-    del api
-
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
 
@@ -74,9 +81,6 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     api.reset()
     collection = api.create_collection("test", embedding_function=embedding_function)
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test", embedding_function=embedding_function)
@@ -99,9 +103,6 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
         "test", embedding_function=embedding_function
     )
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_or_create_collection(
@@ -135,16 +136,11 @@ def test_persist(api_fixture, request):
 
     assert collection.count() == 2
 
-    api.persist()
-    del api
-
     api = request.getfixturevalue(api_fixture.__name__)
     collection = api.get_collection("testspace")
     assert collection.count() == 2
 
     api.delete_collection("testspace")
-    api.persist()
-    del api
 
     api = request.getfixturevalue(api_fixture.__name__)
     assert api.list_collections() == []
@@ -1052,6 +1048,7 @@ def test_invalid_id(api):
 
 
 def test_index_params(api):
+    EPS = 1e-12
     # first standard add
     api.reset()
     collection = api.create_collection(name="test_index_params")
@@ -1073,8 +1070,8 @@ def test_index_params(api):
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert items["distances"][0][0] > 0
-    assert items["distances"][0][0] < 1
+    assert items["distances"][0][0] > 0 - EPS
+    assert items["distances"][0][0] < 1 + EPS
 
     # ip
     api.reset()
@@ -1108,14 +1105,16 @@ def test_invalid_index_params(api):
 def test_persist_index_loading_params(api, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
+    collection = api.create_collection(
+        "test",
+        metadata={"hnsw:space": "ip"},
+    )
     collection.add(ids="id1", documents="hello")
 
-    api.persist()
-    del api
-
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test")
+    collection = api2.get_collection(
+        "test",
+    )
 
     assert collection.metadata["hnsw:space"] == "ip"
 

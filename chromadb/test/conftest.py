@@ -8,7 +8,7 @@ import os
 import uvicorn
 import time
 import pytest
-from typing import Generator, List, Callable
+from typing import Generator, List, Callable, Optional, Tuple
 import shutil
 import logging
 import socket
@@ -39,13 +39,31 @@ def find_free_port() -> int:
         return s.getsockname()[1]  # type: ignore
 
 
-def _run_server(port: int) -> None:
+def _run_server(
+    port: int, is_persistent: bool = False, persist_directory: Optional[str] = None
+) -> None:
     """Run a Chroma server locally"""
-    settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb",
-        persist_directory=tempfile.gettempdir() + "/test_server",
-    )
+    if is_persistent and persist_directory:
+        settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            is_persistent=is_persistent,
+            persist_directory=persist_directory,
+            allow_reset=True,
+        )
+    else:
+        settings = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            is_persistent=False,
+            allow_reset=True,
+        )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
 
@@ -63,16 +81,22 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def fastapi() -> Generator[System, None, None]:
+def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
+
     port = find_free_port()
     logger.info(f"Running test FastAPI server on port {port}")
     ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
+    args: Tuple[int, bool, Optional[str]] = (port, False, None)
+    persist_directory = None
+    if is_persistent:
+        persist_directory = tempfile.mkdtemp()
+        args = (port, is_persistent, persist_directory)
+    proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
-        chroma_api_impl="rest",
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
@@ -84,38 +108,17 @@ def fastapi() -> Generator[System, None, None]:
     yield system
     system.stop()
     proc.kill()
+    if is_persistent and persist_directory is not None:
+        if os.path.exists(persist_directory):
+            shutil.rmtree(persist_directory)
 
 
-def duckdb() -> Generator[System, None, None]:
-    """Fixture generator for duckdb"""
-    settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb",
-        persist_directory=tempfile.gettempdir(),
-        allow_reset=True,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
+def fastapi() -> Generator[System, None, None]:
+    return _fastapi_fixture(is_persistent=False)
 
 
-def duckdb_parquet() -> Generator[System, None, None]:
-    """Fixture generator for duckdb+parquet"""
-
-    save_path = tempfile.gettempdir() + "/tests"
-    settings = Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb+parquet",
-        persist_directory=save_path,
-        allow_reset=True,
-    )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
+def fastapi_persistent() -> Generator[System, None, None]:
+    return _fastapi_fixture(is_persistent=True)
 
 
 def integration() -> Generator[System, None, None]:
@@ -137,7 +140,7 @@ def sqlite() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        sqlite_database=":memory:",
+        is_persistent=False,
         allow_reset=True,
     )
     system = System(settings)
@@ -146,8 +149,29 @@ def sqlite() -> Generator[System, None, None]:
     system.stop()
 
 
+def sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for segment-based API using persistent Sqlite"""
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [duckdb, duckdb_parquet, fastapi, sqlite]
+    fixtures = [fastapi, fastapi_persistent, sqlite, sqlite_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
