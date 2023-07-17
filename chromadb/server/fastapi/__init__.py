@@ -100,7 +100,7 @@ class FastAPI(chromadb.server.Server):
             "/api/v1/collections",
             self.list_collections,
             methods=["GET"],
-            # response_model=Sequence[Collection], # this fails
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections",
