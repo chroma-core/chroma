@@ -92,9 +92,9 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
-        # self.router.add_api_route(
-        #     "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
-        # )
+        self.router.add_api_route(
+            "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
+        )
 
         self.router.add_api_route(
             "/api/v1/collections",
