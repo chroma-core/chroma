@@ -385,3 +385,70 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         if "predictions" in response:
             return response["predictions"]
         return []
+    
+
+class ResnetEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name: str = "resnet50"):
+        try:
+            self.torch = importlib.import_module("torch")
+        except ImportError:
+            raise ValueError(
+                "The Pytorch Python package is not installed. Please install it with 'pip install torch'."
+                )
+        try:
+            self.transforms = importlib.import_module("torchvision").transforms
+            self.models = importlib.import_module("torchvision").models
+        except ImportError:
+            raise ValueError(
+                "The torchvision Python packge is not installed. Please install it with 'pip install torchvision'"
+                )
+        try:
+            # Equivalent to from PIL import Image
+            self.Image = importlib.import_module("PIL").Image
+        except ImportError:
+            raise ValueError(
+                "The Pillow python package is not installed. Please install it with `pip install pillow`"
+            )
+        self.model_names = ["resnet18", "resnet34", "resnet50", "resnet101", "resnet153"]
+        if model_name not in self.model_names:
+            raise ValueError(f"Invalid model name. Allowed model names are: {', '.join(self.model_names)}")
+        self.vectors = []
+        self.preprocess = self.transforms.Compose(
+            [
+            self.transforms.Resize((224, 224)),
+            self.transforms.ToTensor(),
+            self.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+            )       
+        self.model = self.get_model(model_name) 
+        self.model.fc = self.torch.nn.Identity() 
+        self.model.eval()
+
+    def __call__(self, images: List[str | np.ndarray]) -> List[np.ndarray]:
+        vectors = []
+        if not isinstance(images, list):
+            raise TypeError("Upload a list of str paths, np.ndarray or PIL images")
+        for image in images:
+            if type(image) == str:
+                image = self.Image.open(image).convert("RGB")
+            elif type(image) == np.ndarray:
+                image = self.Image.fromarray(image).convert("RGB")
+            elif type(image) == self.Image.Image:
+                image = image.convert('RGB')
+            else:
+                raise TypeError(f"Expected a str, numpy.ndarray, PIL image, got {type(image)}")
+            # Load and preprocess the image  
+            input_tensor = self.preprocess(image)
+            input_batch = input_tensor.unsqueeze(0)
+            # Pass the image through the model
+            with self.torch.no_grad():
+                output = self.model(input_batch)
+            # Flatten the output tensor
+            embedding = self.torch.flatten(output, start_dim=1)
+            vectors.append(embedding.numpy()[0])
+        return vectors
+    
+    def get_model(self, model_name: str):
+        weights = getattr(self.models, f"{model_name.replace('r','R').replace('n','N')}_Weights").DEFAULT
+        model = getattr(self.models, model_name)(weights = weights)
+        return model
