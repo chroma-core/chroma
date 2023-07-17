@@ -69,6 +69,31 @@ class GetAPITest(unittest.TestCase):
         )
         assert mock.called
 
+    @patch("chromadb.api.fastapi.FastAPI", autospec=True)
+    @patch.dict(os.environ, {}, clear=True)
+    def test_settings_pass_to_fastapi(self, mock: Mock) -> None:
+        settings = chromadb.config.Settings(
+            chroma_api_impl="rest",
+            chroma_server_host="foo",
+            chroma_server_http_port="80",
+            chroma_server_headers={"foo": "bar"},
+        )
+        chromadb.Client(settings)
+
+        # Check that the mock was called
+        assert mock.called
+
+        # Retrieve the arguments with which the mock was called
+        # `call_args` returns a tuple, where the first element is a tuple of positional arguments
+        # and the second element is a dictionary of keyword arguments. We assume here that
+        # the settings object is passed as a positional argument.
+        args, kwargs = mock.call_args
+        passed_settings = args[0] if args else None
+
+        # Check if the settings passed to the mock match the settings we used
+        # raise Exception(passed_settings.settings)
+        assert passed_settings.settings == settings
+
 
 def test_legacy_values() -> None:
     with pytest.raises(ValueError):
