@@ -1,3 +1,4 @@
+from typing import Dict
 import chromadb.config
 import logging
 from chromadb.telemetry.events import ClientStartEvent
@@ -50,6 +51,7 @@ def HttpClient(
     host: str = "localhost",
     port: str = "8000",
     ssl: bool = False,
+    headers: Dict[str, str] = {},
     settings: Settings = Settings(),
 ) -> API:
     """
@@ -61,13 +63,14 @@ def HttpClient(
         host: The hostname of the Chroma server. Defaults to "localhost".
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
+        headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
     """
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = host
     settings.chroma_server_http_port = port
     settings.chroma_server_ssl_enabled = ssl
-    # TODO: auth headers
+    settings.chroma_server_headers = headers
 
     return Client(settings)
 
