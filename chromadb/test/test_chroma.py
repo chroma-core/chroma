@@ -73,7 +73,7 @@ class GetAPITest(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_settings_pass_to_fastapi(self, mock: Mock) -> None:
         settings = chromadb.config.Settings(
-            chroma_api_impl="rest",
+            chroma_api_impl="chromadb.api.fastapi.FastAPI",
             chroma_server_host="foo",
             chroma_server_http_port="80",
             chroma_server_headers={"foo": "bar"},
