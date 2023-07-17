@@ -142,6 +142,14 @@ class System(Component):
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
+        if is_thin_client:
+            # The thin client is a system with only the API component
+            if settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
+                raise RuntimeError(
+                    "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
+            see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
+                )
+
         self.settings = settings
         self._instances = {}
         super().__init__(self)
