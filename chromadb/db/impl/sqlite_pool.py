@@ -18,11 +18,11 @@ class Connection:
         self._pool = pool
         self._db_file = db_file
         self._conn = sqlite3.connect(
-            db_file, timeout=1000, check_same_thread=False, *args, **kwargs
-        )
+            db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
+        )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
 
-    def execute(self, sql, parameters=...) -> sqlite3.Cursor:
+    def execute(self, sql: str, parameters=...) -> sqlite3.Cursor:  # type: ignore
         if parameters is ...:
             return self._conn.execute(sql)
         return self._conn.execute(sql, parameters)
