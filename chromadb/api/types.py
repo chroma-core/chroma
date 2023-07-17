@@ -124,8 +124,10 @@ def validate_ids(ids: IDs) -> IDs:
 
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if not isinstance(metadata, dict) and metadata is not None:
+        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+    if metadata is None:
+        return metadata
     if len(metadata) == 0:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
@@ -143,8 +145,10 @@ def validate_metadata(metadata: Metadata) -> Metadata:
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    if not isinstance(metadata, dict) and metadata is not None:
+        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+    if metadata is None:
+        return metadata
     if len(metadata) == 0:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
