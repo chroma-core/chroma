@@ -114,6 +114,7 @@ class FastAPI(chromadb.server.Server):
             self.add,
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/update",
@@ -140,7 +141,10 @@ class FastAPI(chromadb.server.Server):
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/count", self.count, methods=["GET"]
+            "/api/v1/collections/{collection_id}/count",
+            self.count,
+            methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/query",
@@ -158,6 +162,7 @@ class FastAPI(chromadb.server.Server):
             "/api/v1/collections/{collection_name}",
             self.get_collection,
             methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}",
