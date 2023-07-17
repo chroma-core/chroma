@@ -14,6 +14,8 @@ services:
       - ./:/chroma
       - index_data:/index_data
     command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
+    environment:
+      - IS_PERSISTENT=TRUE
     ports:
       - 8000:8000
     networks:
