@@ -87,7 +87,7 @@ class Settings(BaseSettings):
         # Error on legacy config values
         if val in _legacy_config_values:
             raise ValueError(
-                "You are using a deprecated configuration of Chroma. Please pip install chroma-migration and run `chroma-migration migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information."
+                "You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!"
             )
         return val
 
