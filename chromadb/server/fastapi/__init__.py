@@ -88,27 +88,19 @@ class FastAPI(chromadb.server.Server):
 
         self.router = fastapi.APIRouter()
 
-        self.router.add_api_route(
-            "/api/v1", self.root, methods=["GET"], response_model=None
-        )
-        self.router.add_api_route(
-            "/api/v1/reset", self.reset, methods=["POST"], response_model=None
-        )
-        self.router.add_api_route(
-            "/api/v1/version", self.version, methods=["GET"], response_model=None
-        )
-        self.router.add_api_route(
-            "/api/v1/heartbeat", self.heartbeat, methods=["GET"], response_model=None
-        )
-        self.router.add_api_route(
-            "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
-        )
+        self.router.add_api_route("/api/v1", self.root, methods=["GET"])
+        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
+        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
+        # self.router.add_api_route(
+        #     "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
+        # )
 
         self.router.add_api_route(
             "/api/v1/collections",
             self.list_collections,
             methods=["GET"],
-            response_model=None,
+            # response_model=Sequence[Collection], # this fails
         )
         self.router.add_api_route(
             "/api/v1/collections",
@@ -122,7 +114,6 @@ class FastAPI(chromadb.server.Server):
             self.add,
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
-            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/update",
@@ -149,10 +140,7 @@ class FastAPI(chromadb.server.Server):
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/count",
-            self.count,
-            methods=["GET"],
-            response_model=None,
+            "/api/v1/collections/{collection_id}/count", self.count, methods=["GET"]
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/query",
@@ -170,7 +158,6 @@ class FastAPI(chromadb.server.Server):
             "/api/v1/collections/{collection_name}",
             self.get_collection,
             methods=["GET"],
-            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}",
