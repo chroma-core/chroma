@@ -454,7 +454,12 @@ metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
     "metadatas": [
-        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {
+            "int_value": 1,
+            "string_value": "one",
+            "float_value": 1.001,
+            "string_list": ["one", "two"],
+        },
         {"int_value": 2},
     ],
 }
@@ -534,6 +539,21 @@ def test_metadata_update_get_int_float(api):
     assert items["metadatas"][0]["float_value"] == 2.002
 
 
+def test_metadata_update_list(api):
+    api.reset()
+    collection = api.create_collection("test_update_list")
+    collection.add(**metadata_records)
+
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"string_list": ["one", "two", "three"]}],
+    )
+
+    items = collection.get(ids=["id1"])
+    assert len(items["metadatas"][0]["string_list"]) == 3
+    assert "three" in items["metadatas"][0]["string_list"]
+
+
 bad_metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
@@ -574,8 +594,22 @@ operator_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
     "metadatas": [
-        {"int_value": 1, "string_value": "one", "float_value": 1.001},
-        {"int_value": 2, "float_value": 2.002, "string_value": "two"},
+        {
+            "int_value": 1,
+            "string_value": "one",
+            "float_value": 1.001,
+            "int_list": [1, 10],
+            "string_list": ["one", "ten"],
+            "float_list": [1.001, 10.001],
+        },
+        {
+            "int_value": 2,
+            "float_value": 2.002,
+            "string_value": "two",
+            "int_list": [2, 20],
+            "string_list": ["two", "twenty"],
+            "float_list": [2.002, 20.002],
+        },
     ],
 }
 
@@ -630,6 +664,21 @@ def test_where_ne_eq_number(api):
     assert len(items["metadatas"]) == 1
 
 
+def test_where_contains(api):
+    api.reset()
+    collection = api.create_collection("test_where_contains")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_list": {"$contains": "two"}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["string_value"] == "two"
+    items = collection.get(where={"int_list": {"$contains": 1}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["int_value"] == 1
+    items = collection.get(where={"float_list": {"$contains": 2.002}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["float_value"] == 2.002
+
+
 def test_where_valid_operators(api):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
@@ -664,13 +713,10 @@ def test_where_valid_operators(api):
         collection.get(where={"$or": []})
 
     with pytest.raises(ValueError):
-        collection.get(where={"a": {"$contains": "test"}})
-
-    with pytest.raises(ValueError):
         collection.get(
             where={
                 "$or": [
-                    {"a": {"$contains": "first"}},  # invalid
+                    {"a": {"$contains": ["invalid"]}},  # invalid
                     {"$contains": "second"},  # valid
                 ]
             }
@@ -821,10 +867,28 @@ logical_operator_records = {
     ],
     "ids": ["id1", "id2", "id3", "id4"],
     "metadatas": [
-        {"int_value": 1, "string_value": "one", "float_value": 1.001, "is": "doc"},
+        {
+            "int_value": 1,
+            "string_value": "one",
+            "float_value": 1.001,
+            "is": "doc",
+            "string_list": ["one", "ten"],
+        },
         {"int_value": 2, "float_value": 2.002, "string_value": "two", "is": "doc"},
-        {"int_value": 3, "float_value": 3.003, "string_value": "three", "is": "doc"},
-        {"int_value": 4, "float_value": 4.004, "string_value": "four", "is": "doc"},
+        {
+            "int_value": 3,
+            "float_value": 3.003,
+            "string_value": "three",
+            "is": "doc",
+            "int_list": [3, 30, 300],
+        },
+        {
+            "int_value": 4,
+            "float_value": 4.004,
+            "string_value": "four",
+            "is": "doc",
+            "float_list": [4.004, 4.005],
+        },
     ],
     "documents": [
         "this document is first and great",
@@ -887,6 +951,23 @@ def test_where_logical_operators(api):
                 },
             ]
         }
+    )
+    assert len(items["metadatas"]) == 2
+
+    items = collection.get(
+        where={
+            "$and": [
+                {
+                    "$or": [
+                        {"int_value": {"$eq": 2}},
+                        {"string_list": {"$contains": "one"}},
+                    ]
+                },
+                {
+                    "is": "doc",
+                },
+            ]
+        },
     )
     assert len(items["metadatas"]) == 2
 

@@ -2,7 +2,18 @@ import os
 import shutil
 import tempfile
 import pytest
-from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
+from typing import (
+    Generator,
+    List,
+    Callable,
+    Iterator,
+    Dict,
+    Mapping,
+    Optional,
+    Union,
+    Sequence,
+    Any,
+)
 from chromadb.config import System, Settings
 from chromadb.types import (
     SubmitEmbeddingRecord,
@@ -60,11 +71,20 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     def create_record(i: int) -> SubmitEmbeddingRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
-        metadata: Optional[Dict[str, Union[str, int, float]]]
+        metadata: Optional[
+            Dict[str, Union[str, int, float, List[Union[str, int, float]]]]
+        ]
         if i == 0:
             metadata = None
         else:
-            metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
+            metadata = {
+                "str_key": f"value_{i}",
+                "int_key": i,
+                "float_key": i + i * 0.1,
+                "str_list": [f"str_{i}", f"str_{i + 10}"],
+                "int_list": [i, i + 10],
+                "float_list": [i + i * 0.1, i + 10 + i * 0.1],
+            }
             if i % 3 == 0:
                 metadata["div_by_three"] = "true"
             metadata["chroma:document"] = _build_document(i)
@@ -147,6 +167,19 @@ def test_insert_and_count(
     assert segment.count() == 6
 
 
+# Metadatas may have lists returned in different orders, convert them to sets to compare
+def _metadata_lists_to_sets(
+    metadata: Optional[Mapping[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    if metadata is None:
+        return None
+    metadata_with_sets = dict(metadata)
+    for k, v in metadata.items():
+        if isinstance(v, list):
+            metadata_with_sets[k] = set(v)
+    return metadata_with_sets
+
+
 def assert_equiv_records(
     expected: Sequence[SubmitEmbeddingRecord], actual: Sequence[MetadataEmbeddingRecord]
 ) -> None:
@@ -155,7 +188,9 @@ def assert_equiv_records(
     sorted_actual = sorted(actual, key=lambda r: r["id"])
     for e, a in zip(sorted_expected, sorted_actual):
         assert e["id"] == a["id"]
-        assert e["metadata"] == a["metadata"]
+        assert _metadata_lists_to_sets(e["metadata"]) == _metadata_lists_to_sets(
+            a["metadata"]
+        )
 
 
 def test_get(
@@ -253,6 +288,38 @@ def test_get(
         where={"$and": [{"int_key": 3}, {"float_key": {"$lt": 5}}]}
     )
     assert len(result) == 1
+
+    # get with $contains string
+    result = segment.get_metadata(where={"str_list": {"$contains": "str_1"}})
+    assert len(result) == 1
+
+    # get with $contains int
+    result = segment.get_metadata(where={"int_list": {"$contains": 1}})
+    print(result)
+    assert len(result) == 1
+
+    # get with $contains float
+    result = segment.get_metadata(where={"float_list": {"$contains": 1.1}})
+    assert len(result) == 1
+
+    # query lists with $and condition
+    result = segment.get_metadata(
+        where={
+            "$and": [{"int_list": {"$contains": 1}}, {"float_list": {"$contains": 1.1}}]
+        }
+    )
+    assert len(result) == 1
+
+    # query lists with $or condition
+    result = segment.get_metadata(
+        where={
+            "$or": [
+                {"int_list": {"$contains": 1}},
+                {"str_list": {"$contains": "str_12"}},
+            ]
+        }
+    )
+    assert len(result) == 2
 
 
 def test_fulltext(
