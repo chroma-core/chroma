@@ -123,7 +123,7 @@ def validate_ids(ids: IDs) -> IDs:
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, or lists of those"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
     if metadata is None:
@@ -136,15 +136,21 @@ def validate_metadata(metadata: Metadata) -> Metadata:
                 f"Expected metadata key to be a str, got {key} which is a {type(key)}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        if not isinstance(value, (str, int, float, list)) or isinstance(value, bool):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value} which is a {type(value)}"
+                f"Expected metadata value to be a str, int, or float, or list got {value} which is a {type(value)}"
             )
+        if isinstance(value, list):
+            for v in value:
+                if not isinstance(v, (str, int, float)):
+                    raise ValueError(
+                        f"Expected metadata value to be a str, int, or float, got {v} which is a {type(v)}"
+                    )
     return metadata
 
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, or lists of those"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
     if metadata is None:
@@ -154,15 +160,21 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float, type(None))):
+        if not isinstance(value, (str, int, float, list, type(None))):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value}"
+                f"Expected metadata value to be a str, int, float, or list, or None, got {value}"
             )
+        if isinstance(value, list):
+            for v in value:
+                if not isinstance(v, (str, int, float)):
+                    raise ValueError(
+                        f"Expected metadata value to be a str, int, or float, got {v} which is a {type(v)}"
+                    )
     return metadata
 
 
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
-    """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, or floats"""
+    """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats, or lists"""
     if not isinstance(metadatas, list):
         raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
     for metadata in metadatas:
@@ -217,9 +229,17 @@ def validate_where(where: Where) -> Where:
                             f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
                         )
 
-                if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]:
+                if operator not in [
+                    "$gt",
+                    "$gte",
+                    "$lt",
+                    "$lte",
+                    "$ne",
+                    "$eq",
+                    "$contains",
+                ]:
                     raise ValueError(
-                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, got {operator}"
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $contains, got {operator}"
                     )
 
                 if not isinstance(operand, (str, int, float)):

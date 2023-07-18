@@ -3,8 +3,10 @@ from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Mapping[str, Union[str, int, float]]
-UpdateMetadata = Mapping[str, Union[int, float, str, None]]
+Metadata = Mapping[str, Union[str, int, float, List[Union[str, int, float]]]]
+UpdateMetadata = Mapping[
+    str, Union[int, float, str, List[Union[str, int, float]], None]
+]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -121,6 +123,7 @@ WhereOperator = Union[
     Literal["$lte"],
     Literal["$ne"],
     Literal["$eq"],
+    Literal["$contains"],
 ]
 OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
 
