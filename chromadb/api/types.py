@@ -55,19 +55,21 @@ Where = Where
 WhereDocumentOperator = WhereDocumentOperator
 
 
-class GetResult(TypedDict):
+class GetResult(TypedDict, total=False):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
     metadatas: Optional[List[Metadata]]
+    included_fields: Optional[Include]
 
 
-class QueryResult(TypedDict):
+class QueryResult(TypedDict, total=False):
     ids: List[IDs]
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
+    included_fields: Optional[Include]
 
 
 class IndexMetadata(TypedDict):

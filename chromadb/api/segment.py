@@ -341,12 +341,20 @@ class SegmentAPI(API):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
-        return GetResult(
+        get_result = GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors] if vectors else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
-            documents=documents if "documents" in include else None,  # type: ignore
         )
+
+        if vectors:
+            get_result["embeddings"] = [r["embedding"] for r in vectors]
+        if "metadatas" in include:
+            get_result["metadatas"] = _clean_metadatas(metadatas)  # type: ignore
+        if "documents" in include:
+            get_result["documents"] = documents  # type: ignore
+
+        get_result["included_fields"] = include
+
+        return get_result
 
     @override
     def _delete(
@@ -469,13 +477,27 @@ class SegmentAPI(API):
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
 
-        return QueryResult(
+        # only include the field if it is not empty
+
+        query_result = QueryResult(
             ids=ids,
-            distances=distances if distances else None,
-            metadatas=metadatas if metadatas else None,
-            embeddings=embeddings if embeddings else None,
-            documents=documents if documents else None,
         )
+
+        if documents:
+            query_result["documents"] = documents
+
+        if metadatas:
+            query_result["metadatas"] = metadatas
+
+        if distances:
+            query_result["distances"] = distances
+
+        if embeddings:
+            query_result["embeddings"] = embeddings
+
+        query_result["included_fields"] = include
+
+        return query_result
 
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
