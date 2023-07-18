@@ -72,7 +72,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
-
         Args:
             api_key (str, optional): Your API key for the OpenAI API. If not
                 provided, it will raise an error to provide an OpenAI API key.
@@ -85,8 +84,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
             api_type (str, optional): The type of the API deployment. This can be
                 used to specify a different deployment, such as 'azure'. If not
                 provided, it will use the default OpenAI deployment.
-            api_version (str, optional): The base api version for the API. If not provided,
-                it will use the base path for the OpenAI API. This can be used to
+            api_version (str, optional): The api version for the API. If not provided,
+                it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
 
         """
