@@ -1,4 +1,5 @@
-from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict
+from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
+
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
@@ -106,8 +107,11 @@ class SqliteMetadataSegment(MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
-        embeddings_t, metadata_t, fulltext_t = Tables(
-            "embeddings", "embedding_metadata", "embedding_fulltext"
+        embeddings_t, metadata_t, fulltext_t, metadata_list_t = Tables(
+            "embeddings",
+            "embedding_metadata",
+            "embedding_fulltext",
+            "embedding_metadata_lists",
         )
 
         q = (
@@ -116,6 +120,11 @@ class SqliteMetadataSegment(MetadataReader):
                 .from_(embeddings_t)
                 .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
+                .left_outer_join(metadata_list_t)
+                .on(
+                    (metadata_t.key == metadata_list_t.key)
+                    & (embeddings_t.id == metadata_list_t.id)
+                )
             )
             .select(
                 embeddings_t.id,
@@ -125,6 +134,9 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.string_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_list_t.string_value,
+                metadata_list_t.int_value,
+                metadata_list_t.float_value,
             )
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
@@ -133,7 +145,11 @@ class SqliteMetadataSegment(MetadataReader):
         )
 
         if where:
-            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
+            q = q.where(
+                self._where_map_criterion(
+                    q, where, embeddings_t, metadata_t, metadata_list_t
+                )
+            )
 
         if where_document:
             q = q.where(
@@ -172,13 +188,33 @@ class SqliteMetadataSegment(MetadataReader):
         _, embedding_id, seq_id = rows[0][:3]
         metadata = {}
         for row in rows:
-            key, string_value, int_value, float_value = row[3:]
+            (
+                key,
+                string_value,
+                int_value,
+                float_value,
+                int_elem,
+                str_elem,
+                float_elem,
+            ) = row[3:]
             if string_value is not None:
                 metadata[key] = string_value
             elif int_value is not None:
                 metadata[key] = int_value
             elif float_value is not None:
                 metadata[key] = float_value
+            elif int_elem is not None:
+                int_list = metadata.get(key, [])
+                int_list.append(int_elem)
+                metadata[key] = int_list
+            elif str_elem is not None:
+                str_list = metadata.get(key, [])
+                str_list.append(str_elem)
+                metadata[key] = str_list
+            elif float_elem is not None:
+                float_list = metadata.get(key, [])
+                float_list.append(float_elem)
+                metadata[key] = float_list
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
@@ -235,6 +271,19 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
+        lists_to_update = [k for k, v in metadata.items() if isinstance(v, list)]
+        if lists_to_update or to_delete:
+            t = Table("embedding_metadata_lists")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .where(t.id == ParameterValue(id))
+                .where(t.key.isin(ParameterValue([*lists_to_update, *to_delete])))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+
         if "chroma:document" in metadata:
             t = Table("embedding_fulltext")
             q = (
@@ -250,42 +299,48 @@ class SqliteMetadataSegment(MetadataReader):
 
     def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Insert or update each metadata row for a single embedding record"""
-        t = Table("embedding_metadata")
+        (
+            t,
+            list_t,
+        ) = Tables(
+            "embedding_metadata",
+            "embedding_metadata_lists",
+        )
         q = (
             self._db.querybuilder()
             .into(t)
             .columns(t.id, t.key, t.string_value, t.int_value, t.float_value)
         )
+        q_list = (
+            self._db.querybuilder()
+            .into(list_t)
+            .columns(
+                list_t.id,
+                list_t.key,
+                list_t.string_value,
+                list_t.int_value,
+                list_t.float_value,
+            )
+        )
+
         for key, value in metadata.items():
-            if isinstance(value, str):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    ParameterValue(value),
-                    None,
-                    None,
-                )
-            elif isinstance(value, int):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    None,
-                    ParameterValue(value),
-                    None,
-                )
-            elif isinstance(value, float):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    None,
-                    None,
-                    ParameterValue(value),
-                )
+            if isinstance(value, list):
+                q = _insert_metadata_row(q, id, key, None)
+                for val in value:
+                    q_list = _insert_metadata_row(q_list, id, key, val)
+
+            else:
+                q = _insert_metadata_row(q, id, key, value)
 
         sql, params = get_sql(q)
         sql = sql.replace("INSERT", "INSERT OR REPLACE")
         if sql:
             cur.execute(sql, params)
+
+        list_sql, params = get_sql(q_list)
+        list_sql = list_sql.replace("INSERT", "INSERT OR REPLACE")
+        if list_sql:
+            cur.execute(list_sql, params)
 
         if "chroma:document" in metadata:
             t = Table("embedding_fulltext")
@@ -318,11 +373,22 @@ class SqliteMetadataSegment(MetadataReader):
 
             # Manually delete metadata; cannot use cascade because
             # that triggers on replace
-            metadata_t = Table("embedding_metadata")
+            metadata_t, metadata_lists_t = Tables(
+                "embedding_metadata", "embedding_metadata_lists"
+            )
             q = (
                 self._db.querybuilder()
                 .from_(metadata_t)
                 .where(metadata_t.id == ParameterValue(id))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+
+            q = (
+                self._db.querybuilder()
+                .from_(metadata_lists_t)
+                .where(metadata_lists_t.id == ParameterValue(id))
                 .delete()
             )
             sql, params = get_sql(q)
@@ -376,32 +442,46 @@ class SqliteMetadataSegment(MetadataReader):
                     self._update_record(cur, record)
 
     def _where_map_criterion(
-        self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
+        self,
+        q: QueryBuilder,
+        where: Where,
+        embeddings_t: Table,
+        metadata_t: Table,
+        list_t: Table,
     ) -> Criterion:
-        clause: list[Criterion] = []
+        clause: List[Criterion] = []
 
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, embeddings_t, metadata_t, list_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x & y, criteria))
             elif k == "$or":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, embeddings_t, metadata_t, list_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key == ParameterValue(k))
-                    .where(_where_clause(expr, metadata_t))
-                )
+                if isinstance(expr, dict) and "$contains" in expr:
+                    sq = (
+                        self._db.querybuilder()
+                        .from_(list_t)
+                        .select(list_t.id)
+                        .where(list_t.key == ParameterValue(k))
+                        .where(_where_clause(expr, list_t))
+                    )
+                else:
+                    sq = (
+                        self._db.querybuilder()
+                        .from_(metadata_t)
+                        .select(metadata_t.id)
+                        .where(metadata_t.key == ParameterValue(k))
+                        .where(_where_clause(expr, metadata_t))
+                    )
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
@@ -515,7 +595,7 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
     else:
         cols = [table.int_value, table.float_value]
 
-    if op == "$eq":
+    if op == "$eq" or op == "$contains":
         col_exprs = [col == ParameterValue(value) for col in cols]
     elif op == "$ne":
         col_exprs = [col != ParameterValue(value) for col in cols]
@@ -532,3 +612,43 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
         return reduce(lambda x, y: x & y, col_exprs)
     else:
         return reduce(lambda x, y: x | y, col_exprs)
+
+
+def _insert_metadata_row(
+    q: QueryBuilder, id: int, key: str, value: Optional[Union[str, int, float]]
+) -> QueryBuilder:
+    """Add an insert operation for a metadata table to a query builder.
+    Works with both embedding_metadata and embedding_metadata_lists"""
+    if value is None:
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            None,
+            None,
+            None,
+        )
+    elif isinstance(value, str):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            ParameterValue(value),
+            None,
+            None,
+        )
+    elif isinstance(value, int):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            None,
+            ParameterValue(value),
+            None,
+        )
+    elif isinstance(value, float):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            None,
+            None,
+            ParameterValue(value),
+        )
+    return q
