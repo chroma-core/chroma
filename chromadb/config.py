@@ -19,9 +19,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-LEGACY_ERROR = """You are using a deprecated configuration of Chroma.
+LEGACY_ERROR = """\033[91mYou are using a deprecated configuration of Chroma.
 
-If you do not have data you wish to migrate, you only need to change how you construct
+\033[94mIf you do not have data you wish to migrate, you only need to change how you construct
 your Chroma client. Please see the "New Clients" section of https://docs.trychroma.com/migration.
 ________________________________________________________________________________________________
 
@@ -30,7 +30,7 @@ migrate your data to the new Chroma architecture.
 Please `pip install chroma-migrate` and run `chroma-migrate` to migrate your data and then
 change how you construct your Chroma client.
 
-See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!"""
+See https://docs.trychroma.com/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!\033[0m"""
 
 _legacy_config_keys = {
     "chroma_db_impl",
