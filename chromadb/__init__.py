@@ -12,6 +12,28 @@ __settings = Settings()
 
 __version__ = "0.4.1"
 
+# Workaround to deal with Colab's old sqlite3 version
+try:
+    import google.colab  # noqa: F401
+
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+
+if IN_COLAB:
+    # Check the version of sqlite3, hotswap to pysqlite-binary if it's too old
+    import sqlite3
+
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        import subprocess
+        import sys
+
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
+        )
+        __import__("pysqlite3")
+        sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+
 
 def configure(**kwargs) -> None:  # type: ignore
     """Override Chroma's default settings, environment variables or .env files"""
