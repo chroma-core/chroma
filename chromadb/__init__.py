@@ -1,6 +1,7 @@
 from typing import Dict
-import chromadb.config
 import logging
+import sqlite3
+import chromadb.config
 from chromadb.telemetry.events import ClientStartEvent
 from chromadb.telemetry import Telemetry
 from chromadb.config import Settings, System
@@ -20,11 +21,9 @@ try:
 except ImportError:
     IN_COLAB = False
 
-if IN_COLAB:
-    # Check the version of sqlite3, hotswap to pysqlite-binary if it's too old
-    import sqlite3
-
-    if sqlite3.sqlite_version_info < (3, 35, 0):
+if sqlite3.sqlite_version_info < (3, 35, 0):
+    if IN_COLAB:
+        # In Colab, hotswap to pysqlite-binary if it's too old
         import subprocess
         import sys
 
@@ -33,6 +32,11 @@ if IN_COLAB:
         )
         __import__("pysqlite3")
         sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+    else:
+        raise RuntimeError(
+            "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m"
+            "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
+        )
 
 
 def configure(**kwargs) -> None:  # type: ignore
