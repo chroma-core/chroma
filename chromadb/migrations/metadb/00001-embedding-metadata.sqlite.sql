@@ -21,4 +21,4 @@ CREATE TABLE max_seq_id (
     seq_id BLOB NOT NULL
 );
 
-CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id, string_value, tokenize="trigram");
+CREATE VIRTUAL TABLE embedding_fulltext USING fts5(id, string_value);
