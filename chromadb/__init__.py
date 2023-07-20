@@ -34,7 +34,7 @@ if sqlite3.sqlite_version_info < (3, 35, 0):
         sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
     else:
         raise RuntimeError(
-            "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m"
+            "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
             "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
         )
 
