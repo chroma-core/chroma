@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Callable, Generator, List, Tuple
+from typing import Generator, List, Tuple
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
+from chromadb import config
 from chromadb.api import API
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
@@ -18,48 +19,10 @@ import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
 import re
 import multiprocessing
-from chromadb import Client
 from chromadb.config import Settings
 
-MINIMUM_VERSION = "0.3.20"
-COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
+MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-
-
-def _patch_uppercase_coll_name(
-    collection: strategies.Collection, embeddings: strategies.RecordSet
-) -> None:
-    """Old versions didn't handle uppercase characters in collection names"""
-    collection.name = collection.name.lower()
-
-
-def _patch_empty_dict_metadata(
-    collection: strategies.Collection, embeddings: strategies.RecordSet
-) -> None:
-    """Old versions do the wrong thing when metadata is a single empty dict"""
-    if embeddings["metadatas"] == {}:
-        embeddings["metadatas"] = None
-
-
-version_patches: List[
-    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
-] = [
-    ("0.3.21", _patch_uppercase_coll_name),
-    ("0.3.21", _patch_empty_dict_metadata),
-]
-
-
-def patch_for_version(
-    version: str, collection: strategies.Collection, embeddings: strategies.RecordSet
-) -> None:
-    """Override aspects of the collection and embeddings, before testing, to account for
-    breaking changes in old versions."""
-
-    for patch_version, patch in version_patches:
-        if packaging_version.Version(version) <= packaging_version.Version(
-            patch_version
-        ):
-            patch(collection, embeddings)
 
 
 def versions() -> List[str]:
@@ -85,7 +48,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
                 chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
                 allow_reset=True,
                 is_persistent=True,
-                persist_directory=tempfile.gettempdir(),
+                persist_directory=tempfile.gettempdir() + "/persistence_test_chromadb",
             ),
         )
         for version in versions
@@ -182,7 +145,10 @@ def persist_generated_data_with_old_version(
 ) -> None:
     try:
         old_module = switch_to_version(version)
-        api: API = old_module.Client(settings)
+        system = old_module.config.System(settings)
+        api: API = system.instance(API)
+        system.start()
+
         api.reset()
         coll = api.create_collection(
             name=collection_strategy.name,
@@ -191,7 +157,7 @@ def persist_generated_data_with_old_version(
             embedding_function=not_implemented_ef(),
         )
         coll.add(**embeddings_strategy)
-        # We can't use the invariants module here because it uses the current version
+
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
 
@@ -204,6 +170,10 @@ def persist_generated_data_with_old_version(
         embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
+
+        # Shutdown system
+        system.stop()
+
     except Exception as e:
         conn.send(e)
         raise e
@@ -219,26 +189,29 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
 )
-@pytest.mark.skipif(
-    sys.version_info.major < 3
-    or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
-    reason="The mininum supported versions of chroma do not work with python <= 3.7",
-)
-@pytest.mark.xfail(
-    reason="As we migrate to sqlite, we will not support old versions of chromadb and instead require manual migration. The minimum version will be increased to 0.4.0 and this test will be expected to pass."
-)
 @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
-    # # Test backwards compatibility
-    # # For the current version, ensure that we can load a collection from
-    # # the previous versions
+    # Test backwards compatibility
+    # For the current version, ensure that we can load a collection from
+    # the previous versions
     version, settings = version_settings
 
-    patch_for_version(version, collection_strategy, embeddings_strategy)
+    # The strategies can generate metadatas of malformed inputs. Other tests
+    # will error check and cover these cases to make sure they error. Here we
+    # just convert them to valid values since the error cases are already tested
+    if embeddings_strategy["metadatas"] == {}:
+        embeddings_strategy["metadatas"] = None
+    if embeddings_strategy["metadatas"] is not None and isinstance(
+        embeddings_strategy["metadatas"], list
+    ):
+        embeddings_strategy["metadatas"] = [
+            m if m is None or len(m) > 0 else None  # type: ignore
+            for m in embeddings_strategy["metadatas"]
+        ]
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -262,7 +235,9 @@ def test_cycle_versions(
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
-    api = Client(settings)
+    system = config.System(settings)
+    api = system.instance(API)
+    system.start()
     coll = api.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),
@@ -272,3 +247,6 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+
+    # Shutdown system
+    system.stop()
