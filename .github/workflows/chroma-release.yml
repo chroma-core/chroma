@@ -29,11 +29,11 @@ jobs:
         fetch-depth: 0
     # https://github.com/docker/setup-qemu-action - for multiplatform builds
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@v1
+      uses: docker/setup-qemu-action@v2
     # https://github.com/docker/setup-buildx-action - for multiplatform builds
     - name: Set up Docker Buildx
       id: buildx
-      uses: docker/setup-buildx-action@v1
+      uses: docker/setup-buildx-action@v2
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
