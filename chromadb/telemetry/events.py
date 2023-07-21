@@ -46,7 +46,6 @@ class CollectionQueryEvent(TelemetryEvent):
     collection_uuid: str
     with_metadata_filter: bool
     with_document_filter: bool
-    query_with_embeddings: bool
     query_size: int
     n_neighbors: int
     including: str
