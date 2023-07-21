@@ -615,4 +615,6 @@ def _clean_metadata(metadata: Optional[t.Metadata]) -> Optional[t.Metadata]:
     for k, v in metadata.items():
         if not k.startswith("chroma:"):
             result[k] = v
+    if len(result) == 0:
+        return None
     return result
