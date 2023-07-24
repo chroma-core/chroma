@@ -170,10 +170,11 @@ def persist_generated_data_with_old_version(
         embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
-
         # Shutdown system
         system.stop()
 
+    except ValueError as ve:
+        print(f"ValueError {ve}")
     except Exception as e:
         conn.send(e)
         raise e

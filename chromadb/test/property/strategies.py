@@ -458,7 +458,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     value = collection.known_metadata_keys[key]
 
     legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
-    if not isinstance(value, str):
+    if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
