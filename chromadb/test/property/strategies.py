@@ -110,10 +110,11 @@ safe_floats = st.floats(
     max_value=1e6,
 )  # TODO: handle infinity and NAN
 
-safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+safe_values: List[SearchStrategy[Union[int, float, str, bool]]] = [
     safe_text,
     safe_integers,
     safe_floats,
+    st.booleans(),
 ]
 
 
