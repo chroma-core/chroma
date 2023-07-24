@@ -146,7 +146,7 @@ recordset_st = st.shared(
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
 )
 def test_filterable_metadata_get(
-    caplog, api: API, collection, record_set, filters
+    caplog, api: API, collection: strategies.Collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -156,6 +156,12 @@ def test_filterable_metadata_get(
         metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
+
+    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
+        with pytest.raises(Exception):
+            coll.add(**record_set)
+        return
+
     coll.add(**record_set)
 
     for filter in filters:
@@ -190,11 +196,17 @@ def test_filterable_metadata_query(
     api.reset()
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    coll.add(**record_set)
     normalized_record_set = invariants.wrap_all(record_set)
+
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            coll.add(**record_set)
+        return
+
+    coll.add(**record_set)
     total_count = len(normalized_record_set["ids"])
     # Pick a random vector
     random_query: Embedding
@@ -259,3 +271,20 @@ def test_empty_filter(api: API) -> None:
     assert res["embeddings"] is None
     assert res["distances"] == [[], []]
     assert res["metadatas"] == [[], []]
+
+
+@pytest.mark.xfail(reason="Boolean metadata is not supported yet")
+def test_boolean_metadata(api: API) -> None:
+    """Test that metadata with boolean values is correctly filtered"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_metadatas: Metadatas = [{"test": True}, {"test": False}, {"test": True}]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
+
+    res = coll.get(where={"test": True})
+
+    assert res["ids"] == ["1", "3"]

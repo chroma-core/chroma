@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -39,5 +39,8 @@
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish"
+  },
+  "dependencies": {
+    "isomorphic-fetch": "^3.0.0"
   }
 }

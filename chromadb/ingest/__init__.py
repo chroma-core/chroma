@@ -10,7 +10,6 @@ from chromadb.types import (
 from chromadb.config import Component
 from uuid import UUID
 import array
-from overrides import override
 
 
 def encode_vector(vector: Vector, encoding: ScalarEncoding) -> bytes:
@@ -51,13 +50,6 @@ class Producer(Component):
         self, topic_name: str, embedding: SubmitEmbeddingRecord
     ) -> SeqId:
         """Add an embedding record to the given topic. Returns the SeqID of the record."""
-        pass
-
-    @abstractmethod
-    @override
-    def reset(self) -> None:
-        """Delete all topics and data. For testing only, implementations intended for
-        production may throw an exception instead of implementing this method."""
         pass
 
 

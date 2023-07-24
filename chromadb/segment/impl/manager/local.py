@@ -1,32 +1,31 @@
+from threading import Lock
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
     MetadataReader,
     VectorReader,
+    S,
 )
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
-from chromadb.types import Collection, Segment, SegmentScope
-from typing import Dict, Set, Type, TypeVar
+from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
+from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
-import re
 
 
 class SegmentType(Enum):
     SQLITE = "urn:chroma:segment/metadata/sqlite"
     HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
+    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
 
 
 SEGMENT_TYPE_IMPLS = {
-    SegmentType.SQLITE: "chromadb.segment.impl.sqlite.SqliteMetadataReader",
+    SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
-}
-
-PROPAGATE_METADATA = {
-    SegmentType.HNSW_LOCAL_MEMORY: [r"^hnsw:.*"],
+    SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
 
 
@@ -35,56 +34,67 @@ class LocalSegmentManager(SegmentManager):
     _system: System
     _instances: Dict[UUID, SegmentImplementation]
     _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
+    _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
+    _lock: Lock
 
     def __init__(self, system: System):
+        super().__init__(system)
         self._sysdb = self.require(SysDB)
         self._system = system
         self._instances = {}
         self._segment_cache = defaultdict(dict)
-        super().__init__(system)
+        self._lock = Lock()
+
+        if self._system.settings.require("is_persistent"):
+            self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
 
     @override
     def start(self) -> None:
+        for instance in self._instances.values():
+            instance.start()
         super().start()
 
     @override
     def stop(self) -> None:
+        for instance in self._instances.values():
+            instance.stop()
         super().stop()
 
     @override
-    def reset(self) -> None:
+    def reset_state(self) -> None:
+        for instance in self._instances.values():
+            instance.stop()
         self._instances = {}
         self._segment_cache = defaultdict(dict)
-        super().reset()
+        super().reset_state()
 
     @override
-    def create_segments(self, collection: Collection) -> Set[Segment]:
+    def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
-            SegmentType.HNSW_LOCAL_MEMORY, SegmentScope.VECTOR, collection
+            self._vector_segment_type, SegmentScope.VECTOR, collection
         )
         metadata_segment = _segment(
             SegmentType.SQLITE, SegmentScope.METADATA, collection
         )
-        self._sysdb.create_segment(vector_segment)
-        self._sysdb.create_segment(metadata_segment)
-        return {vector_segment, metadata_segment}
+        return [vector_segment, metadata_segment]
 
     @override
-    def delete_segments(self, collection_id: UUID) -> None:
+    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
-            self._sysdb.delete_segment(segment["id"])
-            del self._instances[segment["id"]]
-            del self._segment_cache[collection_id][segment["scope"]]
-            del self._segment_cache[collection_id]
-
-    T = TypeVar("T", bound="SegmentImplementation")
+            if segment["id"] in self._instances:
+                del self._instances[segment["id"]]
+            if collection_id in self._segment_cache:
+                if segment["scope"] in self._segment_cache[collection_id]:
+                    del self._segment_cache[collection_id][segment["scope"]]
+                del self._segment_cache[collection_id]
+        return [s["id"] for s in segments]
 
     @override
-    def get_segment(self, collection_id: UUID, type: Type[T]) -> SegmentImplementation:
-        if type == Type[MetadataReader]:
+    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
+        if type == MetadataReader:
             scope = SegmentScope.METADATA
-        elif type == Type[VectorReader]:
+        elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
             raise ValueError(f"Invalid segment type: {type}")
@@ -96,26 +106,41 @@ class LocalSegmentManager(SegmentManager):
             segment = next(filter(lambda s: s["type"] in known_types, segments))
             self._segment_cache[collection_id][scope] = segment
 
-        return self._instance(self._segment_cache[collection_id][scope])
+        # Instances must be atomically created, so we use a lock to ensure that only one thread
+        # creates the instance.
+        with self._lock:
+            instance = self._instance(self._segment_cache[collection_id][scope])
+        return cast(S, instance)
+
+    @override
+    def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
+        # The local segment manager responds to hints by pre-loading both the metadata and vector
+        # segments for the given collection.
+        for type in [MetadataReader, VectorReader]:
+            # Just use get_segment to load the segment into the cache
+            self.get_segment(collection_id, type)
+
+    def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
+        classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
+        cls = get_class(classname, SegmentImplementation)
+        return cls
 
     def _instance(self, segment: Segment) -> SegmentImplementation:
         if segment["id"] not in self._instances:
-            classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
-            cls = get_class(classname, SegmentImplementation)
-            self._instances[segment["id"]] = cls(self._system, segment)
+            cls = self._cls(segment)
+            instance = cls(self._system, segment)
+            instance.start()
+            self._instances[segment["id"]] = instance
         return self._instances[segment["id"]]
 
 
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
-    metadata = {}
-    regexes = PROPAGATE_METADATA.get(type, [])
-    if collection["metadata"]:
-        for key, value in collection["metadata"].items():
-            for regex in regexes:
-                if re.match(regex, key):
-                    metadata[key] = value
-                    break
+    cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
+    collection_metadata = collection.get("metadata", None)
+    metadata: Optional[Metadata] = None
+    if collection_metadata:
+        metadata = cls.propagate_collection_metadata(collection_metadata)
 
     return Segment(
         id=uuid4(),

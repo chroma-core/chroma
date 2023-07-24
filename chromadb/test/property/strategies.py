@@ -230,6 +230,7 @@ def collections(
     with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
+    with_persistent_hnsw_params: bool = False,
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
@@ -240,10 +241,20 @@ def collections(
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
+    if with_persistent_hnsw_params and not with_hnsw_params:
+        raise ValueError(
+            "with_hnsw_params requires with_persistent_hnsw_params to be true"
+        )
+
     if with_hnsw_params:
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
+        if with_persistent_hnsw_params:
+            metadata["hnsw:batch_size"] = draw(st.integers(min_value=3, max_value=2000))
+            metadata["hnsw:sync_threshold"] = draw(
+                st.integers(min_value=3, max_value=2000)
+            )
         # Sometimes, select a space at random
         if draw(st.booleans()):
             # TODO: pull the distance functions from a source of truth that lives not
@@ -309,12 +320,20 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
 def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     """Strategy for generating documents that could be a part of the given collection"""
 
+    # Blacklist certain unicode characters that affect sqlite processing.
+    # For example, the null (/x00) character makes sqlite stop processing a string.
+    blacklist_categories = ("Cc", "Cs")
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
-        known_words_st = st.text(min_size=1)
+        known_words_st = st.text(
+            min_size=1,
+            alphabet=st.characters(blacklist_categories=blacklist_categories),
+        )
 
-    random_words_st = st.text(min_size=1)
+    random_words_st = st.text(
+        min_size=1, alphabet=st.characters(blacklist_categories=blacklist_categories)
+    )
     words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
 

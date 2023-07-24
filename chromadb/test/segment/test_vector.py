@@ -1,5 +1,5 @@
 import pytest
-from typing import Generator, List, Callable, Iterator, cast
+from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
 from chromadb.types import (
     SubmitEmbeddingRecord,
@@ -16,23 +16,58 @@ from chromadb.segment import VectorReader
 import uuid
 import time
 
-from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
+from chromadb.segment.impl.vector.local_hnsw import (
+    LocalHnswSegment,
+)
+
+from chromadb.segment.impl.vector.local_persistent_hnsw import (
+    PersistentLocalHnswSegment,
+)
 
 from pytest import FixtureRequest
 from itertools import count
+import tempfile
+import os
+import shutil
 
 
 def sqlite() -> Generator[System, None, None]:
     """Fixture generator for sqlite DB"""
-    settings = Settings(sqlite_database=":memory:", allow_reset=True)
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        allow_reset=True,
+        is_persistent=False,
+        persist_directory=save_path,
+    )
     system = System(settings)
     system.start()
     yield system
     system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
 
 
+def sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for sqlite DB"""
+    save_path = tempfile.mkdtemp()
+    settings = Settings(
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=save_path,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
+# We will excercise in memory, persistent sqlite with both ephemeral and persistent hnsw.
+# We technically never expose persitent sqlite with memory hnsw to users, but it's a valid
+# configuration, so we test it here.
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    return [sqlite]
+    return [sqlite, sqlite_persistent]
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
@@ -60,14 +95,24 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     return (create_record(i) for i in count())
 
 
-segment_definition = Segment(
-    id=uuid.uuid4(),
-    type="test_type",
-    scope=SegmentScope.VECTOR,
-    topic="persistent://test/test/test_topic_1",
-    collection=None,
-    metadata=None,
-)
+def vector_readers() -> List[Type[VectorReader]]:
+    return [LocalHnswSegment, PersistentLocalHnswSegment]
+
+
+@pytest.fixture(scope="module", params=vector_readers())
+def vector_reader(request: FixtureRequest) -> Generator[Type[VectorReader], None, None]:
+    yield request.param
+
+
+def create_random_segment_definition() -> Segment:
+    return Segment(
+        id=uuid.uuid4(),
+        type="test_type",
+        scope=SegmentScope.VECTOR,
+        topic="persistent://test/test/test_topic_1",
+        collection=None,
+        metadata=None,
+    )
 
 
 def sync(segment: VectorReader, seq_id: SeqId) -> None:
@@ -81,18 +126,21 @@ def sync(segment: VectorReader, seq_id: SeqId) -> None:
 
 
 def test_insert_and_count(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
 
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
     max_id = 0
     for i in range(3):
         max_id = producer.submit_embedding(topic, next(sample_embeddings))
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     sync(segment, max_id)
@@ -114,14 +162,16 @@ def approx_equal_vector(a: Vector, b: Vector, epsilon: float = 0.0001) -> bool:
 
 
 def test_get_vectors(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
-
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(10)]
@@ -157,14 +207,16 @@ def test_get_vectors(
 
 
 def test_ann_query(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
-
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(100)]
@@ -178,15 +230,25 @@ def test_ann_query(
     # Each item is its own nearest neighbor (one at a time)
     for e in embeddings:
         vector = cast(Vector, e["embedding"])
-        query = VectorQuery(vectors=[vector], k=1, allowed_ids=None, options=None)
+        query = VectorQuery(
+            vectors=[vector],
+            k=1,
+            allowed_ids=None,
+            options=None,
+            include_embeddings=True,
+        )
         results = segment.query_vectors(query)
         assert len(results) == 1
         assert len(results[0]) == 1
         assert results[0][0]["id"] == e["id"]
+        assert results[0][0]["embedding"] is not None
+        assert approx_equal_vector(results[0][0]["embedding"], vector)
 
     # Each item is its own nearest neighbor (all at once)
     vectors = [cast(Vector, e["embedding"]) for e in embeddings]
-    query = VectorQuery(vectors=vectors, k=1, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=vectors, k=1, allowed_ids=None, options=None, include_embeddings=False
+    )
     results = segment.query_vectors(query)
     assert len(results) == len(embeddings)
     for r, e in zip(results, embeddings):
@@ -196,7 +258,9 @@ def test_ann_query(
     # Each item's 3 nearest neighbors are itself and the item before and after
     test_embeddings = embeddings[1:-1]
     vectors = [cast(Vector, e["embedding"]) for e in test_embeddings]
-    query = VectorQuery(vectors=vectors, k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=vectors, k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     results = segment.query_vectors(query)
     assert len(results) == len(test_embeddings)
 
@@ -208,14 +272,16 @@ def test_ann_query(
 
 
 def test_delete(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
-
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     embeddings = [next(sample_embeddings) for i in range(5)]
@@ -249,6 +315,8 @@ def test_delete(
     assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
     results = segment.get_vectors()
     assert len(results) == 4
+    # get_vectors returns results in arbitrary order
+    results = sorted(results, key=lambda v: v["id"])
     for actual, expected in zip(results, embeddings[1:]):
         assert actual["id"] == expected["id"]
         assert approx_equal_vector(
@@ -257,7 +325,9 @@ def test_delete(
 
     # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
-    query = VectorQuery(vectors=[vector], k=10, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
     assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
@@ -323,7 +393,9 @@ def _test_update(
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
-    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[1]["id"]
     assert knn_results[1]["id"] == embeddings[2]["id"]
@@ -331,7 +403,9 @@ def _test_update(
 
     # Test querying at the new location
     vector = [10.0, 10.0]
-    query = VectorQuery(vectors=[vector], k=3, allowed_ids=None, options=None)
+    query = VectorQuery(
+        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+    )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[0]["id"]
     assert knn_results[1]["id"] == embeddings[2]["id"]
@@ -339,14 +413,16 @@ def _test_update(
 
 
 def test_update(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
-
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPDATE)
@@ -370,14 +446,16 @@ def test_update(
 
 
 def test_upsert(
-    system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
 ) -> None:
-    system.reset()
     producer = system.instance(Producer)
-
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    segment = LocalHnswSegment(system, segment_definition)
+    segment = vector_reader(system, segment_definition)
     segment.start()
 
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPSERT)

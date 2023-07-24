@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 import pytest
 from itertools import count
 from typing import (
@@ -26,15 +29,29 @@ from asyncio import Event, wait_for, TimeoutError
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
     """Fixture generator for sqlite Producer + Consumer"""
-    system = System(Settings(sqlite_database=":memory:", allow_reset=True))
+    system = System(Settings(allow_reset=True))
     db = system.require(SqliteDB)
     system.start()
     yield db, db
     system.stop()
 
 
+def sqlite_persistent() -> Generator[Tuple[Producer, Consumer], None, None]:
+    """Fixture generator for sqlite_persistent Producer + Consumer"""
+    save_path = tempfile.mkdtemp()
+    system = System(
+        Settings(allow_reset=True, is_persistent=True, persist_directory=save_path)
+    )
+    db = system.require(SqliteDB)
+    system.start()
+    yield db, db
+    system.stop()
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+
 def fixtures() -> List[Callable[[], Generator[Tuple[Producer, Consumer], None, None]]]:
-    return [sqlite]
+    return [sqlite, sqlite_persistent]
 
 
 @pytest.fixture(scope="module", params=fixtures())
@@ -120,7 +137,7 @@ async def test_backfill(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
 
     embeddings = [next(sample_embeddings) for _ in range(3)]
 
@@ -141,7 +158,7 @@ async def test_notifications(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     embeddings: List[SubmitEmbeddingRecord] = []
@@ -164,7 +181,7 @@ async def test_multiple_topics(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic_1")
     producer.create_topic("test_topic_2")
 
@@ -197,7 +214,7 @@ async def test_start_seq_id(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     consume_fn_1 = CapturingConsumeFn()
@@ -231,7 +248,7 @@ async def test_end_seq_id(
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
 ) -> None:
     producer, consumer = producer_consumer
-    producer.reset()
+    producer.reset_state()
     producer.create_topic("test_topic")
 
     consume_fn_1 = CapturingConsumeFn()

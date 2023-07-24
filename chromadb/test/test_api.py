@@ -6,6 +6,7 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
@@ -15,10 +16,15 @@ from chromadb.utils.embedding_functions import (
 def local_persist_api():
     return chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=tempfile.gettempdir(),
+        ),
     )
 
 
@@ -27,11 +33,26 @@ def local_persist_api():
 def local_persist_api_cache_bust():
     return chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=tempfile.gettempdir(),
+        ),
     )
+
+
+def approx_equal(a, b, tolerance=1e-6) -> bool:
+    return abs(a - b) < tolerance
+
+
+def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
+    if len(a) != len(b):
+        return False
+    return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
@@ -40,9 +61,6 @@ def test_persist_index_loading(api_fixture, request):
     api.reset()
     collection = api.create_collection("test")
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
@@ -63,9 +81,6 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     api.reset()
     collection = api.create_collection("test", embedding_function=embedding_function)
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test", embedding_function=embedding_function)
@@ -88,9 +103,6 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
         "test", embedding_function=embedding_function
     )
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_or_create_collection(
@@ -124,23 +136,23 @@ def test_persist(api_fixture, request):
 
     assert collection.count() == 2
 
-    api.persist()
-    del api
-
     api = request.getfixturevalue(api_fixture.__name__)
     collection = api.get_collection("testspace")
     assert collection.count() == 2
 
     api.delete_collection("testspace")
-    api.persist()
-    del api
 
     api = request.getfixturevalue(api_fixture.__name__)
     assert api.list_collections() == []
 
 
 def test_heartbeat(api):
-    assert isinstance(api.heartbeat(), int)
+    heartbeat_ns = api.heartbeat()
+    assert isinstance(heartbeat_ns, int)
+
+    heartbeat_s = heartbeat_ns // 10**9
+    heartbeat = datetime.fromtimestamp(heartbeat_s)
+    assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
 batch_records = {
@@ -980,7 +992,7 @@ def test_get_include(api):
     items = collection.get(include=["embeddings", "documents"])
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
-    assert items["embeddings"][1][0] == 1.2
+    assert approx_equal(items["embeddings"][1][0], 1.2)
 
     items = collection.get(include=[])
     assert items["documents"] is None
@@ -1036,6 +1048,7 @@ def test_invalid_id(api):
 
 
 def test_index_params(api):
+    EPS = 1e-12
     # first standard add
     api.reset()
     collection = api.create_collection(name="test_index_params")
@@ -1057,8 +1070,8 @@ def test_index_params(api):
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert items["distances"][0][0] > 0
-    assert items["distances"][0][0] < 1
+    assert items["distances"][0][0] > 0 - EPS
+    assert items["distances"][0][0] < 1 + EPS
 
     # ip
     api.reset()
@@ -1092,14 +1105,16 @@ def test_invalid_index_params(api):
 def test_persist_index_loading_params(api, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
+    collection = api.create_collection(
+        "test",
+        metadata={"hnsw:space": "ip"},
+    )
     collection.add(ids="id1", documents="hello")
 
-    api.persist()
-    del api
-
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test")
+    collection = api2.get_collection(
+        "test",
+    )
 
     assert collection.metadata["hnsw:space"] == "ip"
 
@@ -1206,7 +1221,9 @@ def test_update_query(api):
     assert results["ids"][0][0] == updated_records["ids"][0]
     assert results["documents"][0][0] == updated_records["documents"][0]
     assert results["metadatas"][0][0]["foo"] == "bar"
-    assert results["embeddings"][0][0] == updated_records["embeddings"][0]
+    assert vector_approx_equal(
+        results["embeddings"][0][0], updated_records["embeddings"][0]
+    )
 
 
 def test_get_nearest_neighbors_where_n_results_more_than_element(api):
@@ -1293,7 +1310,9 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=new_records["ids"][0]
     )
-    assert get_result["embeddings"][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        get_result["embeddings"][0], new_records["embeddings"][0]
+    )
     assert get_result["metadatas"][0] == new_records["metadatas"][0]
     assert get_result["documents"][0] == new_records["documents"][0]
 
@@ -1302,7 +1321,9 @@ def test_upsert(api):
         n_results=1,
         include=["embeddings", "metadatas", "documents"],
     )
-    assert query_result["embeddings"][0][0] == new_records["embeddings"][0]
+    assert vector_approx_equal(
+        query_result["embeddings"][0][0], new_records["embeddings"][0]
+    )
     assert query_result["metadatas"][0][0] == new_records["metadatas"][0]
     assert query_result["documents"][0][0] == new_records["documents"][0]
 
@@ -1317,7 +1338,7 @@ def test_upsert(api):
     get_result = collection.get(
         include=["embeddings", "metadatas", "documents"], ids=["id3"]
     )
-    assert get_result["embeddings"][0] == [1.1, 0.99, 2.21]
+    assert vector_approx_equal(get_result["embeddings"][0], [1.1, 0.99, 2.21])
     assert get_result["metadatas"][0] == {"string_value": "a new string value"}
     assert get_result["documents"][0] is None
 
