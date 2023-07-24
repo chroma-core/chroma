@@ -1,9 +1,11 @@
 from overrides import override
-from typing import Optional, Sequence, Dict, Set, List, Callable, Union, cast
+from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
-from chromadb.config import Component, System, Settings
+from chromadb.config import System, Settings
+from chromadb.segment.impl.vector.batch import Batch
+from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -16,95 +18,16 @@ from chromadb.types import (
     Vector,
 )
 from chromadb.errors import InvalidDimensionException
-import re
-import multiprocessing
 import hnswlib
-from threading import Lock
+from chromadb.utils.read_write_lock import ReadWriteLock, ReadRWLock, WriteRWLock
 import logging
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CAPACITY = 1000
 
-Validator = Callable[[Union[str, int, float]], bool]
 
-param_validators: Dict[str, Validator] = {
-    "hnsw:space": lambda p: bool(re.match(r"^(l2|cosine|ip)$", str(p))),
-    "hnsw:construction_ef": lambda p: isinstance(p, int),
-    "hnsw:search_ef": lambda p: isinstance(p, int),
-    "hnsw:M": lambda p: isinstance(p, int),
-    "hnsw:num_threads": lambda p: isinstance(p, int),
-    "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
-}
-
-
-class HnswParams:
-    space: str
-    construction_ef: int
-    search_ef: int
-    M: int
-    num_threads: int
-    resize_factor: float
-
-    def __init__(self, metadata: Metadata):
-        metadata = metadata or {}
-
-        for param, value in metadata.items():
-            if param.startswith("hnsw:"):
-                if param not in param_validators:
-                    raise ValueError(f"Unknown HNSW parameter: {param}")
-                if not param_validators[param](value):
-                    raise ValueError(
-                        f"Invalid value for HNSW parameter: {param} = {value}"
-                    )
-
-        self.space = str(metadata.get("hnsw:space", "l2"))
-        self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
-        self.search_ef = int(metadata.get("hnsw:search_ef", 10))
-        self.M = int(metadata.get("hnsw:M", 16))
-        self.num_threads = int(
-            metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
-        )
-        self.resize_factor = float(metadata.get("hnsw:resize_factor", 1.2))
-
-
-class Batch:
-    """Used to model the set of changes as an atomic operation"""
-
-    labels: List[Optional[int]]
-    vectors: List[Vector]
-    seq_ids: List[SeqId]
-    ids: List[str]
-    delete_labels: List[int]
-    delete_ids: List[str]
-    add_count: int
-    delete_count: int
-
-    def __init__(self) -> None:
-        self.labels = []
-        self.vectors = []
-        self.seq_ids = []
-        self.ids = []
-        self.delete_labels = []
-        self.delete_ids = []
-        self.add_count = 0
-        self.delete_count = 0
-
-    def add(self, label: Optional[int], record: EmbeddingRecord) -> None:
-        self.labels.append(label)
-        self.vectors.append(cast(Vector, record["embedding"]))
-        self.seq_ids.append(record["seq_id"])
-        self.ids.append(record["id"])
-        if not label:
-            self.add_count += 1
-
-    def delete(self, label: int, id: str) -> None:
-        self.delete_labels.append(label)
-        self.delete_ids.append(id)
-        self.delete_count += 1
-
-
-class LocalHnswSegment(Component, VectorReader):
+class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _topic: Optional[str]
@@ -114,10 +37,10 @@ class LocalHnswSegment(Component, VectorReader):
 
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
-    _elements: int
+    _total_elements_added: int
     _max_seq_id: SeqId
 
-    _lock: Lock
+    _lock: ReadWriteLock
 
     _id_to_label: Dict[str, int]
     _label_to_id: Dict[int, str]
@@ -139,8 +62,15 @@ class LocalHnswSegment(Component, VectorReader):
         self._id_to_label = {}
         self._label_to_id = {}
 
-        self._lock = Lock()
-        super().__init__(system)
+        self._lock = ReadWriteLock()
+        super().__init__(system, segment)
+
+    @staticmethod
+    @override
+    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
+        # Extract relevant metadata
+        segment_metadata = HnswParams.extract(metadata)
+        return segment_metadata
 
     @override
     def start(self) -> None:
@@ -201,7 +131,7 @@ class LocalHnswSegment(Component, VectorReader):
         labels: Set[int] = set()
         ids = query["allowed_ids"]
         if ids is not None:
-            labels = {self._id_to_label[id] for id in ids}
+            labels = {self._id_to_label[id] for id in ids if id in self._id_to_label}
             if len(labels) < k:
                 k = len(labels)
 
@@ -210,25 +140,38 @@ class LocalHnswSegment(Component, VectorReader):
 
         query_vectors = query["vectors"]
 
-        result_labels, distances = self._index.knn_query(
-            query_vectors, k=k, filter=filter_function if ids else None
-        )
+        with ReadRWLock(self._lock):
+            result_labels, distances = self._index.knn_query(
+                query_vectors, k=k, filter=filter_function if ids else None
+            )
 
-        distances = cast(List[List[float]], distances)
-        result_labels = cast(List[List[int]], result_labels)
+            # TODO: these casts are not correct, hnswlib returns np
+            # distances = cast(List[List[float]], distances)
+            # result_labels = cast(List[List[int]], result_labels)
 
-        all_results: List[List[VectorQueryResult]] = []
-        for result_i in range(len(result_labels)):
-            results: List[VectorQueryResult] = []
-            for label, distance in zip(result_labels[result_i], distances[result_i]):
-                id = self._label_to_id[label]
-                seq_id = self._id_to_seq_id[id]
-                results.append(
-                    VectorQueryResult(id=id, seq_id=seq_id, distance=distance)
-                )
-            all_results.append(results)
+            all_results: List[List[VectorQueryResult]] = []
+            for result_i in range(len(result_labels)):
+                results: List[VectorQueryResult] = []
+                for label, distance in zip(
+                    result_labels[result_i], distances[result_i]
+                ):
+                    id = self._label_to_id[label]
+                    seq_id = self._id_to_seq_id[id]
+                    if query["include_embeddings"]:
+                        embedding = self._index.get_items([label])[0]
+                    else:
+                        embedding = None
+                    results.append(
+                        VectorQueryResult(
+                            id=id,
+                            seq_id=seq_id,
+                            distance=distance.item(),
+                            embedding=embedding,
+                        )
+                    )
+                all_results.append(results)
 
-        return all_results
+            return all_results
 
     @override
     def max_seqid(self) -> SeqId:
@@ -277,45 +220,52 @@ class LocalHnswSegment(Component, VectorReader):
 
     def _apply_batch(self, batch: Batch) -> None:
         """Apply a batch of changes, as atomically as possible."""
+        deleted_ids = batch.get_deleted_ids()
+        written_ids = batch.get_written_ids()
+        vectors_to_write = batch.get_written_vectors(written_ids)
+        labels_to_write = [0] * len(vectors_to_write)
 
-        if batch.delete_ids:
+        if len(deleted_ids) > 0:
             index = cast(hnswlib.Index, self._index)
-            for i in range(len(batch.delete_ids)):
-                label = batch.delete_labels[i]
-                id = batch.delete_ids[i]
+            for i in range(len(deleted_ids)):
+                id = deleted_ids[i]
+                # Never added this id to hnsw, so we can safely ignore it for deletions
+                if id not in self._id_to_label:
+                    continue
+                label = self._id_to_label[id]
 
                 index.mark_deleted(label)
                 del self._id_to_label[id]
                 del self._label_to_id[label]
                 del self._id_to_seq_id[id]
 
-        if batch.ids:
-            self._ensure_index(batch.add_count, len(batch.vectors[0]))
+        if len(written_ids) > 0:
+            self._ensure_index(batch.add_count, len(vectors_to_write[0]))
 
             next_label = self._total_elements_added + 1
-            for i in range(len(batch.labels)):
-                if batch.labels[i] is None:
-                    batch.labels[i] = next_label
+            for i in range(len(written_ids)):
+                if written_ids[i] not in self._id_to_label:
+                    labels_to_write[i] = next_label
                     next_label += 1
-
-            labels = cast(List[int], batch.labels)
+                else:
+                    labels_to_write[i] = self._id_to_label[written_ids[i]]
 
             index = cast(hnswlib.Index, self._index)
 
             # First, update the index
-            index.add_items(batch.vectors, labels)
+            index.add_items(vectors_to_write, labels_to_write)
 
             # If that succeeds, update the mappings
-            for id, label, seq_id in zip(batch.ids, labels, batch.seq_ids):
-                self._id_to_seq_id[id] = seq_id
-                self._id_to_label[id] = label
-                self._label_to_id[label] = id
+            for i, id in enumerate(written_ids):
+                self._id_to_seq_id[id] = batch.get_record(id)["seq_id"]
+                self._id_to_label[id] = labels_to_write[i]
+                self._label_to_id[labels_to_write[i]] = id
 
             # If that succeeds, update the total count
             self._total_elements_added += batch.add_count
 
             # If that succeeds, finally the seq ID
-            self._max_seq_id = max(self._max_seq_id, max(batch.seq_ids))
+            self._max_seq_id = batch.max_seq_id
 
     def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
         """Add a batch of embeddings to the index"""
@@ -323,7 +273,7 @@ class LocalHnswSegment(Component, VectorReader):
             raise RuntimeError("Cannot add embeddings to stopped component")
 
         # Avoid all sorts of potential problems by ensuring single-threaded access
-        with self._lock:
+        with WriteRWLock(self._lock):
             batch = Batch()
 
             for record in records:
@@ -334,30 +284,24 @@ class LocalHnswSegment(Component, VectorReader):
 
                 if op == Operation.DELETE:
                     if label:
-                        batch.delete(label, id)
+                        batch.apply(record)
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
                     if record["embedding"] is not None:
                         if label is not None:
-                            batch.add(label, record)
+                            batch.apply(record)
                         else:
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['id']}"
                             )
                 elif op == Operation.ADD:
                     if not label:
-                        batch.add(label, record)
+                        batch.apply(record, False)
                     else:
                         logger.warning(f"Add of existing embedding ID: {id}")
                 elif op == Operation.UPSERT:
-                    batch.add(label, record)
+                    batch.apply(record, label is not None)
 
             self._apply_batch(batch)
-
-
-# TODO: Implement this as a performance improvement, if rebuilding the
-# index on startup is too slow. But test this first.
-class PersistentLocalHnswSegment(LocalHnswSegment):
-    pass

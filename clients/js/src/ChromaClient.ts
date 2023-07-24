@@ -84,13 +84,6 @@ export class ChromaClient {
     }
 
     /**
-     * @ignore
-     */
-    public async persist(): Promise<never> {
-        throw new Error("Not implemented in JS client");
-    }
-
-    /**
      * Creates a new collection with the specified properties.
      *
      * @param {Object} params - The parameters for creating a new collection.
@@ -241,6 +234,7 @@ export class ChromaClient {
             response.metadata,
             embeddingFunction
         );
+
     }
 
     /**

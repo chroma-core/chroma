@@ -13,8 +13,15 @@ import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachine,
     EmbeddingStateMachineStates,
+    collection_st as embedding_collection_st,
+    trace,
 )
-from hypothesis.stateful import run_state_machine_as_test, rule, precondition
+from hypothesis.stateful import (
+    run_state_machine_as_test,
+    rule,
+    precondition,
+    initialize,
+)
 import os
 import shutil
 import tempfile
@@ -23,24 +30,35 @@ CreatePersistAPI = Callable[[], API]
 
 configurations = [
     Settings(
-        chroma_api_impl="local",
-        chroma_db_impl="duckdb+parquet",
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
         persist_directory=tempfile.gettempdir() + "/tests",
-    )
+    ),
 ]
 
 
 @pytest.fixture(scope="module", params=configurations)
 def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     configuration = request.param
-    yield configuration
     save_path = configuration.persist_directory
+    # Create if it doesn't exist
+    if not os.path.exists(save_path):
+        os.makedirs(save_path, exist_ok=True)
+    yield configuration
     # Remove if it exists
     if os.path.exists(save_path):
         shutil.rmtree(save_path)
 
 
-collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+collection_st = st.shared(
+    strategies.collections(with_hnsw_params=True, with_persistent_hnsw_params=True),
+    key="coll",
+)
 
 
 @given(
@@ -60,6 +78,11 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
+    if not invariants.is_metadata_valid(invariants.wrap_all(embeddings_strategy)):
+        with pytest.raises(Exception):
+            coll.add(**embeddings_strategy)
+        return
+
     coll.add(**embeddings_strategy)
 
     invariants.count(coll, embeddings_strategy)
@@ -72,7 +95,6 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    api_1.persist()
     del api_1
 
     api_2 = chromadb.Client(settings)
@@ -125,6 +147,24 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         self.api.reset()
         super().__init__(self.api)
 
+    @initialize(collection=embedding_collection_st, batch_size=st.integers(min_value=3, max_value=2000), sync_threshold=st.integers(min_value=3, max_value=2000))  # type: ignore
+    def initialize(
+        self, collection: strategies.Collection, batch_size: int, sync_threshold: int
+    ):
+        self.api.reset()
+        self.collection = self.api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,
+            embedding_function=collection.embedding_function,
+        )
+        self.embedding_function = collection.embedding_function
+        trace("init")
+        self.on_state_change(EmbeddingStateMachineStates.initialize)
+
+        self.record_set_state = strategies.StateMachineRecordSet(
+            ids=[], metadatas=[], documents=[], embeddings=[]
+        )
+
     @precondition(
         lambda self: len(self.record_set_state["ids"]) >= 1
         and self.last_persist_delay <= 0
@@ -132,7 +172,6 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
     @rule()
     def persist(self) -> None:
         self.on_state_change(PersistEmbeddingsStateMachineStates.persist)
-        self.api.persist()
         collection_name = self.collection.name
         # Create a new process and then inside the process run the invariants
         # TODO: Once we switch off of duckdb and onto sqlite we can remove this
@@ -154,6 +193,9 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
             self.last_persist_delay = 10
         else:
             self.last_persist_delay -= 1
+
+    def teardown(self) -> None:
+        self.api.reset()
 
 
 def test_persist_embeddings_state(

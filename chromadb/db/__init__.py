@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import List, Sequence, Optional, Tuple
 from uuid import UUID
-import numpy.typing as npt
 from chromadb.api.types import (
     Embeddings,
     Documents,
@@ -12,7 +11,6 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component
-from overrides import override
 
 
 class DB(Component):
@@ -108,11 +106,6 @@ class DB(Component):
         pass
 
     @abstractmethod
-    @override
-    def reset(self) -> None:
-        pass
-
-    @abstractmethod
     def get_nearest_neighbors(
         self,
         collection_uuid: UUID,
@@ -120,7 +113,7 @@ class DB(Component):
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
         where_document: WhereDocument = {},
-    ) -> Tuple[List[List[UUID]], npt.NDArray]:
+    ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
     @abstractmethod
@@ -135,8 +128,4 @@ class DB(Component):
 
     @abstractmethod
     def create_index(self, collection_uuid: UUID):  # type: ignore
-        pass
-
-    @abstractmethod
-    def persist(self) -> None:
         pass
