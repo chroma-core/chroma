@@ -19,14 +19,19 @@ Chroma needs to be running in order for this client to talk to it. Please see th
 
 ```js
 import { ChromaClient } from "chromadb";
-const chroma = new ChromaClient("http://localhost:8000");
-const collection = await chroma.createCollection("test-from-js");
+const chroma = new ChromaClient({ path: "http://localhost:8000" });
+const collection = await chroma.createCollection({ name: "test-from-js" });
 for (let i = 0; i < 20; i++) {
-  await collection.add("test-id-" + i.toString(), [1, 2, 3, 4, 5], {
-    test: "test",
+  await collection.add({
+    ids: ["test-id-" + i.toString()],
+    embeddings, [1, 2, 3, 4, 5],
+    documents: ["test"],
   });
 }
-const queryData = await collection.query([1, 2, 3, 4, 5], 5, { test: "test" });
+const queryData = await collection.query({
+  queryEmbeddings: [1, 2, 3, 4, 5],
+  queryTexts: ["test"],
+});
 ```
 
 ## Local development
