@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Generator, List, Tuple, Dict, Any
+from typing import Generator, List, Tuple, Dict, Any, Callable
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
@@ -34,6 +34,45 @@ def versions() -> List[str]:
     versions = [v for v in versions if version_re.match(v)]
     versions.sort(key=packaging_version.Version)
     return [MINIMUM_VERSION, versions[-1]]
+
+
+def _patch_boolean_metadata(
+    collection: strategies.Collection, embeddings: strategies.RecordSet
+) -> None:
+    # Since the old version does not support boolean value metadata, we will convert
+    # boolean value metadata to int
+    collection_metadata = collection.metadata
+    if collection_metadata is not None:
+        collection_metadata = bool_to_int(collection_metadata)
+
+    if embeddings["metadatas"] is not None:
+        if isinstance(embeddings["metadatas"], list):
+            for metadata in embeddings["metadatas"]:
+                if metadata is not None and isinstance(metadata, dict):
+                    bool_to_int(metadata)
+        elif isinstance(embeddings["metadatas"], dict):
+            metadata = embeddings["metadatas"]
+            bool_to_int(metadata)
+
+
+version_patches: List[
+    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
+] = [
+    ("0.4.3", _patch_boolean_metadata),
+]
+
+
+def patch_for_version(
+    version: str, collection: strategies.Collection, embeddings: strategies.RecordSet
+) -> None:
+    """Override aspects of the collection and embeddings, before testing, to account for
+    breaking changes in old versions."""
+
+    for patch_version, patch in version_patches:
+        if packaging_version.Version(version) <= packaging_version.Version(
+            patch_version
+        ):
+            patch(collection, embeddings)
 
 
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
@@ -203,7 +242,6 @@ def test_cycle_versions(
     # For the current version, ensure that we can load a collection from
     # the previous versions
     version, settings = version_settings
-
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
     # just convert them to valid values since the error cases are already tested
@@ -217,21 +255,8 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
-    # Since the old version does not support boolean value metadata, we will convert
-    # boolean value metadata to int
-    collection_metadata = collection_strategy.metadata
-    if collection_metadata is not None:
-        collection_metadata = bool_to_int(collection_metadata)
+    patch_for_version(version, collection_strategy, embeddings_strategy)
 
-    if embeddings_strategy["metadatas"] is not None:
-        if isinstance(embeddings_strategy["metadatas"], list):
-            for metadata in embeddings_strategy["metadatas"]:
-                if metadata is not None and isinstance(metadata, dict):
-                    bool_to_int(metadata)
-        elif isinstance(embeddings_strategy["metadatas"], dict):
-            metadata = embeddings_strategy["metadatas"]
-            bool_to_int(metadata)
-            
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
     collection_strategy.known_metadata_keys = {}
