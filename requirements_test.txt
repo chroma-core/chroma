@@ -1,0 +1,6 @@
+cohere==4.11.2
+google-generativeai==0.1.0
+InstructorEmbedding==1.0.1
+openai==0.27.8
+sentence-transformers==2.2.2
+text2vec==1.2.1
