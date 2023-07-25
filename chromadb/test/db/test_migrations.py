@@ -1,4 +1,5 @@
 import pytest
+from importlib_resources import files
 from typing import Generator, List, Callable
 import chromadb.db.migrations as migrations
 from chromadb.db.impl.sqlite import SqliteDB
@@ -9,11 +10,16 @@ import copy
 
 def sqlite() -> Generator[migrations.MigratableDB, None, None]:
     """Fixture generator for sqlite DB"""
-    yield SqliteDB(
+    db = SqliteDB(
         System(
-            Settings(sqlite_database=":memory:", migrations="none", allow_reset=True)
+            Settings(
+                migrations="none",
+                allow_reset=True,
+            )
         )
     )
+    db.start()
+    yield db
 
 
 def db_fixtures() -> List[Callable[[], Generator[migrations.MigratableDB, None, None]]]:
@@ -33,7 +39,7 @@ def test_exception_propagation(db: migrations.MigratableDB) -> None:
 
 
 def test_setup_migrations(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
     db.setup_migrations()
     db.setup_migrations()  # idempotent
 
@@ -45,10 +51,9 @@ def test_setup_migrations(db: migrations.MigratableDB) -> None:
 def test_migrations(db: migrations.MigratableDB) -> None:
     db.initialize_migrations()
 
-    db_migrations = db.db_migrations("chromadb/test/db/migrations")
-    source_migrations = migrations.find_migrations(
-        "chromadb/test/db/migrations", db.migration_scope()
-    )
+    dir = files("chromadb.test.db.migrations")
+    db_migrations = db.db_migrations(dir)
+    source_migrations = migrations.find_migrations(dir, db.migration_scope())
 
     unapplied_migrations = migrations.verify_migration_sequence(
         db_migrations, source_migrations
@@ -64,7 +69,7 @@ def test_migrations(db: migrations.MigratableDB) -> None:
         for m in unapplied_migrations[:-1]:
             db.apply_migration(cur, m)
 
-    db_migrations = db.db_migrations("chromadb/test/db/migrations")
+    db_migrations = db.db_migrations(dir)
     unapplied_migrations = migrations.verify_migration_sequence(
         db_migrations, source_migrations
     )
@@ -83,7 +88,7 @@ def test_migrations(db: migrations.MigratableDB) -> None:
         for m in unapplied_migrations:
             db.apply_migration(cur, m)
 
-    db_migrations = db.db_migrations("chromadb/test/db/migrations")
+    db_migrations = db.db_migrations(dir)
     unapplied_migrations = migrations.verify_migration_sequence(
         db_migrations, source_migrations
     )
@@ -96,15 +101,14 @@ def test_migrations(db: migrations.MigratableDB) -> None:
 
 
 def test_tampered_migration(db: migrations.MigratableDB) -> None:
-    db.reset()
+    db.reset_state()
 
     db.setup_migrations()
 
-    source_migrations = migrations.find_migrations(
-        "chromadb/test/db/migrations", db.migration_scope()
-    )
+    dir = files("chromadb.test.db.migrations")
+    source_migrations = migrations.find_migrations(dir, db.migration_scope())
 
-    db_migrations = db.db_migrations("chromadb/test/db/migrations")
+    db_migrations = db.db_migrations(dir)
 
     unapplied_migrations = migrations.verify_migration_sequence(
         db_migrations, source_migrations
@@ -114,7 +118,7 @@ def test_tampered_migration(db: migrations.MigratableDB) -> None:
         for m in unapplied_migrations:
             db.apply_migration(cur, m)
 
-    db_migrations = db.db_migrations("chromadb/test/db/migrations")
+    db_migrations = db.db_migrations(dir)
     unapplied_migrations = migrations.verify_migration_sequence(
         db_migrations, source_migrations
     )
@@ -140,8 +144,9 @@ def test_tampered_migration(db: migrations.MigratableDB) -> None:
 def test_initialization(
     monkeypatch: pytest.MonkeyPatch, db: migrations.MigratableDB
 ) -> None:
-    db.reset()
-    monkeypatch.setattr(db, "migration_dirs", lambda: ["chromadb/test/db/migrations"])
+    db.reset_state()
+    dir = files("chromadb.test.db.migrations")
+    monkeypatch.setattr(db, "migration_dirs", lambda: [dir])
 
     assert not db.migrations_initialized()
 

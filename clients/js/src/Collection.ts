@@ -14,7 +14,8 @@ import {
     GetResponse,
     QueryResponse,
     AddResponse,
-    CollectionMetadata
+    CollectionMetadata,
+    ConfigOptions
 } from "./types";
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { ApiApi as DefaultApi } from "./generated";
@@ -29,7 +30,7 @@ export class Collection {
     /**
      * @ignore
      */
-    private api: DefaultApi;
+    private api: DefaultApi & ConfigOptions;
     /**
      * @ignore
      */
@@ -155,7 +156,7 @@ export class Collection {
      * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
      * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
      * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-     * @returns {Promise<AddResponse>} - The response from the API. True if successful.
+    * @returns {Promise<AddResponse>} - The response from the API. True if successful.
      *
      * @example
      * ```typescript
@@ -194,8 +195,9 @@ export class Collection {
                 embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
                 // @ts-ignore
                 documents: documentsArray,
+                // @ts-ignore
                 metadatas: metadatasArray,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -247,8 +249,10 @@ export class Collection {
                 embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
                 //@ts-ignore
                 documents: documentsArray,
+                //@ts-ignore
                 metadatas: metadatasArray,
             },
+            this.api.options
         )
             .then(handleSuccess)
             .catch(handleError);
@@ -267,7 +271,7 @@ export class Collection {
      * ```
      */
     public async count(): Promise<number> {
-        const response = await this.api.count(this.id);
+        const response = await this.api.count(this.id, this.api.options);
         return handleSuccess(response);
     }
 
@@ -300,6 +304,7 @@ export class Collection {
                     new_name: name,
                     new_metadata: metadata,
                 },
+                this.api.options
             )
             .then(handleSuccess)
             .catch(handleError);
@@ -358,9 +363,10 @@ export class Collection {
                 where,
                 limit,
                 offset,
+                //@ts-ignore
                 include,
                 where_document: whereDocument,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
@@ -427,6 +433,7 @@ export class Collection {
                     documents: documents,
                     metadatas: metadatas
                 },
+                this.api.options
             )
             .then(handleSuccess)
             .catch(handleError);
@@ -508,8 +515,9 @@ export class Collection {
                 where,
                 n_results: nResults,
                 where_document: whereDocument,
+                //@ts-ignore
                 include: include,
-            })
+            }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
@@ -532,7 +540,7 @@ export class Collection {
         if (limit === undefined) limit = 10;
         const response = await this.api.aGet(this.id, {
             limit: limit,
-        });
+        }, this.api.options);
         return handleSuccess(response);
     }
 
@@ -566,7 +574,7 @@ export class Collection {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
         return await this.api
-            .aDelete(this.id, { ids: idsArray, where: where, where_document: whereDocument })
+            .aDelete(this.id, { ids: idsArray, where: where, where_document: whereDocument }, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }

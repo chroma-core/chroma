@@ -23,4 +23,9 @@ else
   sed -i -e '/import "whatwg-fetch";/d' -e 's/window.fetch/fetch/g' src/generated/runtime.ts
 fi
 
+# Add isomorphic-fetch dependency to runtime.ts
+echo "import 'isomorphic-fetch';" > temp.txt
+cat src/generated/runtime.ts >> temp.txt
+mv temp.txt src/generated/runtime.ts
+
 rm openapi.json

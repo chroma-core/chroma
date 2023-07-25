@@ -20,6 +20,8 @@ test("it should get a collection", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
+
+
 test("wrong code returns an error", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
@@ -52,4 +54,13 @@ test("test gt, lt, in a simple small way", async () => {
   const items = await collection.get({ where: { float_value: { $gt: -1.4 } } });
   expect(items.ids.length).toBe(2);
   expect(["test2", "test3"]).toEqual(expect.arrayContaining(items.ids));
+});
+
+
+test("it should throw an error if the collection does not exist", async () => {
+  await chroma.reset();
+
+  await expect(
+    async () => await chroma.getCollection({ name: "test" })
+  ).rejects.toThrow(Error);
 });

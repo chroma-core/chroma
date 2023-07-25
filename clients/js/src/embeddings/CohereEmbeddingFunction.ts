@@ -10,6 +10,7 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
         try {
             // eslint-disable-next-line global-require,import/no-extraneous-dependencies
             CohereAiApi = require("cohere-ai");
+            CohereAiApi.init(cohere_api_key);
         } catch {
             throw new Error(
                 "Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`"

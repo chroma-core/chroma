@@ -6,12 +6,13 @@ import uuid
 import time
 from threading import Event, Thread
 import chromadb
+from chromadb.config import Component
 from pathlib import Path
 from enum import Enum
 
 TELEMETRY_WHITELISTED_SETTINGS = [
-    "chroma_db_impl",
     "chroma_api_impl",
+    "is_persistent",
     "chroma_server_ssl_enabled",
 ]
 
@@ -53,7 +54,7 @@ class RepeatedTelemetry:
         self.thread.join()
 
 
-class Telemetry:
+class Telemetry(Component):
     USER_ID_PATH = str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
     UNKNOWN_USER_ID = "UNKNOWN"
     SERVER_CONTEXT: ServerContext = ServerContext.NONE
