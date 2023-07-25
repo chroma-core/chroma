@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Generator, List, Tuple
+from typing import Generator, List, Tuple, Dict, Any
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
@@ -172,9 +172,6 @@ def persist_generated_data_with_old_version(
         assert actual_ids == check_embeddings["ids"]
         # Shutdown system
         system.stop()
-
-    except ValueError as ve:
-        print(f"ValueError {ve}")
     except Exception as e:
         conn.send(e)
         raise e
@@ -184,6 +181,12 @@ def persist_generated_data_with_old_version(
 collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )
+
+
+def bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata.update((k, 1) for k, v in metadata.items() if v is True)
+    metadata.update((k, 0) for k, v in metadata.items() if v is False)
+    return metadata
 
 
 @given(
@@ -214,6 +217,21 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
+    # Since the old version does not support boolean value metadata, we will convert
+    # boolean value metadata to int
+    collection_metadata = collection_strategy.metadata
+    if collection_metadata is not None:
+        collection_metadata = bool_to_int(collection_metadata)
+
+    if embeddings_strategy["metadatas"] is not None:
+        if isinstance(embeddings_strategy["metadatas"], list):
+            for metadata in embeddings_strategy["metadatas"]:
+                if metadata is not None and isinstance(metadata, dict):
+                    bool_to_int(metadata)
+        elif isinstance(embeddings_strategy["metadatas"], dict):
+            metadata = embeddings_strategy["metadatas"]
+            bool_to_int(metadata)
+            
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
     collection_strategy.known_metadata_keys = {}
