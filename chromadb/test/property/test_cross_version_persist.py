@@ -36,6 +36,12 @@ def versions() -> List[str]:
     return [MINIMUM_VERSION, versions[-1]]
 
 
+def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata.update((k, 1) for k, v in metadata.items() if v is True)
+    metadata.update((k, 0) for k, v in metadata.items() if v is False)
+    return metadata
+
+
 def _patch_boolean_metadata(
     collection: strategies.Collection, embeddings: strategies.RecordSet
 ) -> None:
@@ -43,16 +49,16 @@ def _patch_boolean_metadata(
     # boolean value metadata to int
     collection_metadata = collection.metadata
     if collection_metadata is not None:
-        collection_metadata = bool_to_int(collection_metadata)
+        _bool_to_int(collection_metadata)
 
     if embeddings["metadatas"] is not None:
         if isinstance(embeddings["metadatas"], list):
             for metadata in embeddings["metadatas"]:
                 if metadata is not None and isinstance(metadata, dict):
-                    bool_to_int(metadata)
+                    _bool_to_int(metadata)
         elif isinstance(embeddings["metadatas"], dict):
             metadata = embeddings["metadatas"]
-            bool_to_int(metadata)
+            _bool_to_int(metadata)
 
 
 version_patches: List[
@@ -220,12 +226,6 @@ def persist_generated_data_with_old_version(
 collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
 )
-
-
-def bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    metadata.update((k, 1) for k, v in metadata.items() if v is True)
-    metadata.update((k, 0) for k, v in metadata.items() if v is False)
-    return metadata
 
 
 @given(
