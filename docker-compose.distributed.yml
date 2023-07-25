@@ -21,6 +21,14 @@ services:
     networks:
       - net
 
+  pulsar:
+    image: apachepulsar/pulsar
+    ports:
+      - '6650:6650'
+      - '9090:8080'
+    networks:
+      - net
+
 volumes:
   index_data:
     driver: local
