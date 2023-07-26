@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import pytest
 import chromadb
 from chromadb.api import API
-from chromadb.config import Settings
+from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -70,7 +70,10 @@ def test_persist(
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
-    api_1 = chromadb.Client(settings)
+    system_1 = System(settings)
+    api_1 = system_1.instance(API)
+    system_1.start()
+
     api_1.reset()
     coll = api_1.create_collection(
         name=collection_strategy.name,
@@ -96,8 +99,12 @@ def test_persist(
     )
 
     del api_1
+    system_1.stop()
 
-    api_2 = chromadb.Client(settings)
+    system_2 = System(settings)
+    api_2 = system_2.instance(API)
+    system_2.start()
+
     coll = api_2.get_collection(
         name=collection_strategy.name,
         embedding_function=collection_strategy.embedding_function,
@@ -112,6 +119,8 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
+    system_2.stop()
+
 
 def load_and_check(
     settings: Settings,
@@ -120,7 +129,10 @@ def load_and_check(
     conn: Connection,
 ) -> None:
     try:
-        api = chromadb.Client(settings)
+        system = System(settings)
+        api = system.instance(API)
+        system.start()
+
         coll = api.get_collection(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),
@@ -130,6 +142,8 @@ def load_and_check(
         invariants.documents_match(coll, record_set)
         invariants.ids_match(coll, record_set)
         invariants.ann_accuracy(coll, record_set)
+
+        system.stop()
     except Exception as e:
         conn.send(e)
         raise e
