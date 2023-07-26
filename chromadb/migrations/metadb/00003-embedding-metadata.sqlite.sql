@@ -4,5 +4,6 @@ CREATE TABLE embedding_metadata_lists (
     string_value TEXT,
     float_value REAL,
     int_value INTEGER,
+    bool_value BOOLEAN,
     FOREIGN KEY (id, key) REFERENCES embedding_metadata(id, key) ON DELETE CASCADE
 );

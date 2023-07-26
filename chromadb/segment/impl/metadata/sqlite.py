@@ -329,6 +329,7 @@ class SqliteMetadataSegment(MetadataReader):
                 list_t.string_value,
                 list_t.int_value,
                 list_t.float_value,
+                list_t.bool_value,
             )
         )
 
@@ -638,12 +639,14 @@ def _insert_metadata_row(
             None,
             None,
             None,
+            None,
         )
     elif isinstance(value, str):
         q = q.insert(
             ParameterValue(id),
             ParameterValue(key),
             ParameterValue(value),
+            None,
             None,
             None,
         )
@@ -654,6 +657,7 @@ def _insert_metadata_row(
             None,
             ParameterValue(value),
             None,
+            None,
         )
     elif isinstance(value, float):
         q = q.insert(
@@ -662,6 +666,7 @@ def _insert_metadata_row(
             None,
             None,
             ParameterValue(value),
+            None,
         )
     elif isinstance(value, bool):
         q = q.insert(

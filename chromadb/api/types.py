@@ -144,9 +144,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             )
         if isinstance(value, list):
             for v in value:
-                if not isinstance(v, (str, int, float)):
+                if not isinstance(v, (str, int, float)) and not isinstance(v, bool):
                     raise ValueError(
-                        f"Expected metadata value to be a str, int, or float, got {v} which is a {type(v)}"
+                        f"Expected metadata value to be a str, int, float, or bool, got {v} which is a {type(v)}"
                     )
     return metadata
 
@@ -171,9 +171,9 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
             )
         if isinstance(value, list):
             for v in value:
-                if not isinstance(v, (str, int, float)):
+                if not isinstance(v, (str, int, float)) and not isinstance(v, bool):
                     raise ValueError(
-                        f"Expected metadata value to be a str, int, or float, got {v} which is a {type(v)}"
+                        f"Expected metadata value to be a str, int, float, or bool, got {v} which is a {type(v)}"
                     )
     return metadata
 

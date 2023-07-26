@@ -3,9 +3,11 @@ from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Mapping[str, Union[str, int, float, bool, List[Union[str, int, float]]]]
+Metadata = Mapping[
+    str, Union[str, int, float, bool, List[Union[str, int, float, bool]]]
+]
 UpdateMetadata = Mapping[
-    str, Union[int, float, str, bool, List[Union[str, int, float]], None]
+    str, Union[int, float, str, bool, List[Union[str, int, float, bool]], None]
 ]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
