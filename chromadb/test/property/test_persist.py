@@ -52,7 +52,7 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     yield configuration
     # Remove if it exists
     if os.path.exists(save_path):
-        shutil.rmtree(save_path)
+        shutil.rmtree(save_path, ignore_errors=True)
 
 
 collection_st = st.shared(
@@ -197,6 +197,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         )
         p.start()
         p.join()
+        p.close()
 
         if conn1.poll():
             e = conn1.recv()
