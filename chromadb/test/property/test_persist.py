@@ -197,11 +197,12 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         )
         p.start()
         p.join()
-        p.close()
 
         if conn1.poll():
             e = conn1.recv()
             raise e
+
+        p.close()
 
     def on_state_change(self, new_state: str) -> None:
         if new_state == PersistEmbeddingsStateMachineStates.persist:

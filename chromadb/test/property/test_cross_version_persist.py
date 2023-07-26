@@ -277,6 +277,8 @@ def test_cycle_versions(
         e = conn1.recv()
         raise e
 
+    p.close()
+
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
