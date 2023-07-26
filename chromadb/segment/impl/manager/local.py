@@ -10,10 +10,14 @@ from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
+from chromadb.segment.impl.vector.local_persistent_hnsw import (
+    PersistentLocalHnswSegment,
+)
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Dict, Type, Sequence, Optional, cast
+from typing import Any, Callable, Dict, Generic, Type, Sequence, Optional, TypeVar, cast
 from uuid import UUID, uuid4
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+import resource
 
 
 class SegmentType(Enum):
@@ -29,13 +33,46 @@ SEGMENT_TYPE_IMPLS = {
 }
 
 
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class LRUCache(Generic[K, V]):
+    def __init__(self, capacity: int, callback: Optional[Callable[[K, V], Any]] = None):
+        self.capacity = capacity
+        self.cache: OrderedDict[K, V] = OrderedDict()
+        self.callback = callback
+
+    def get(self, key: K) -> Optional[V]:
+        if key not in self.cache:
+            return None
+        value = self.cache.pop(key)
+        self.cache[key] = value
+        return value
+
+    def set(self, key: K, value: V) -> None:
+        if key in self.cache:
+            self.cache.pop(key)
+        elif len(self.cache) == self.capacity:
+            evicted_key, evicted_value = self.cache.popitem(last=False)
+            if self.callback:
+                self.callback(evicted_key, evicted_value)
+        self.cache[key] = value
+
+
 class LocalSegmentManager(SegmentManager):
     _sysdb: SysDB
     _system: System
     _instances: Dict[UUID, SegmentImplementation]
-    _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
+    _vector_instances_file_handle_cache: LRUCache[
+        UUID, PersistentLocalHnswSegment
+    ]  # LRU cache to manage file handles across vector segment instances
+    _segment_cache: Dict[
+        UUID, Dict[SegmentScope, Segment]
+    ]  # Tracks which segments are loaded for a given collection
     _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
     _lock: Lock
+    _max_file_handles: int
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -47,6 +84,15 @@ class LocalSegmentManager(SegmentManager):
 
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
+            # TODO: make work for Windows
+            self._max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+            segment_limit = (
+                self._max_file_handles
+                // PersistentLocalHnswSegment.get_file_handle_count()
+            )
+            self._vector_instances_file_handle_cache = LRUCache(
+                segment_limit, callback=lambda _, v: v.close_persistent_index()
+            )
 
     @override
     def start(self) -> None:
@@ -118,7 +164,13 @@ class LocalSegmentManager(SegmentManager):
         # segments for the given collection.
         for type in [MetadataReader, VectorReader]:
             # Just use get_segment to load the segment into the cache
-            self.get_segment(collection_id, type)
+            instance = self.get_segment(collection_id, type)
+            # If the segment is a vector segment, we need to keep segments in an LRU cache
+            # to avoid hitting the OS file handle limit.
+            if type == VectorReader and self._system.settings.require("is_persistent"):
+                instance = cast(PersistentLocalHnswSegment, instance)
+                instance.open_persistent_index()
+                self._vector_instances_file_handle_cache.set(collection_id, instance)
 
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
         classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]

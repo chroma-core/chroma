@@ -23,6 +23,7 @@ from chromadb.types import (
 )
 import hnswlib
 import logging
+import psutil
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
@@ -186,8 +187,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._persist_data.label_to_id = self._label_to_id
         self._persist_data.id_to_seq_id = self._id_to_seq_id
 
-        with open(self._get_metadata_file(), "wb") as metadata_file:
-            pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+        try:
+            with open(self._get_metadata_file(), "wb") as metadata_file:
+                pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
+            proc = psutil.Process()
+            print(proc.open_files())
+            raise e
 
     @override
     def _apply_batch(self, batch: Batch) -> None:
@@ -377,3 +383,21 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         )
                     results.append(curr_results)
             return results
+
+    @staticmethod
+    def get_file_handle_count() -> int:
+        """Return how many file handles are used by the index"""
+        hnswlib_count = hnswlib.Index.file_handle_count
+        hnswlib_count = cast(int, hnswlib_count)
+        # One extra for the metadata file
+        return hnswlib_count + 1
+
+    def open_persistent_index(self) -> None:
+        """Open the persistent index"""
+        if self._index is not None:
+            self._index.open_file_handles()
+
+    def close_persistent_index(self) -> None:
+        """Close the persistent index"""
+        if self._index is not None:
+            self._index.close_file_handles()
