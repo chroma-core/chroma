@@ -1,8 +1,5 @@
-CREATE TABLE embedding_metadata_lists (
-    id INTEGER REFERENCES embeddings(id),
-    key TEXT NOT NULL,
-    string_value TEXT,
-    float_value REAL,
-    int_value INTEGER,
-    FOREIGN KEY (id, key) REFERENCES embedding_metadata(id, key) ON DELETE CASCADE
-);
+-- SQLite does not support adding check with alter table, as a result, adding a check
+-- involve creating a new table and copying the data over. It is over kill with adding
+-- a boolean type column. The application write to the table needs to ensure the data
+-- integrity.
+ALTER TABLE embedding_metadata ADD COLUMN bool_value INTEGER

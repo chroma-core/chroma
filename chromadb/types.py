@@ -3,9 +3,9 @@ from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Mapping[str, Union[str, int, float, List[Union[str, int, float]]]]
+Metadata = Mapping[str, Union[str, int, float, bool, List[Union[str, int, float]]]]
 UpdateMetadata = Mapping[
-    str, Union[int, float, str, List[Union[str, int, float]], None]
+    str, Union[int, float, str, bool, List[Union[str, int, float]], None]
 ]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
@@ -101,7 +101,7 @@ class VectorQuery(TypedDict):
     k: int
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
-    options: Optional[Dict[str, Union[str, int, float]]]
+    options: Optional[Dict[str, Union[str, int, float, bool]]]
 
 
 class VectorQueryResult(TypedDict):
@@ -114,7 +114,7 @@ class VectorQueryResult(TypedDict):
 
 
 # Metadata Query Grammar
-LiteralValue = Union[str, int, float]
+LiteralValue = Union[str, int, float, bool]
 LogicalOperator = Union[Literal["$and"], Literal["$or"]]
 WhereOperator = Union[
     Literal["$gt"],

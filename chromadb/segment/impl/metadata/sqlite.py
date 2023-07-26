@@ -134,6 +134,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.string_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
                 metadata_list_t.string_value,
                 metadata_list_t.int_value,
                 metadata_list_t.float_value,
@@ -193,6 +194,7 @@ class SqliteMetadataSegment(MetadataReader):
                 string_value,
                 int_value,
                 float_value,
+                bool_value,
                 int_elem,
                 str_elem,
                 float_elem,
@@ -215,6 +217,11 @@ class SqliteMetadataSegment(MetadataReader):
                 float_list = metadata.get(key, [])
                 float_list.append(float_elem)
                 metadata[key] = float_list
+            elif bool_value is not None:
+                if bool_value == 1:
+                    metadata[key] = True
+                else:
+                    metadata[key] = False
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
@@ -309,7 +316,9 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .into(t)
-            .columns(t.id, t.key, t.string_value, t.int_value, t.float_value)
+            .columns(
+                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+            )
         )
         q_list = (
             self._db.querybuilder()
@@ -574,7 +583,7 @@ def _where_clause(
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
-    if isinstance(expr, (str, int, float)):
+    if isinstance(expr, (str, int, float, bool)):
         return _where_clause({"$eq": expr}, table)
 
     # Operator dict case
@@ -588,6 +597,9 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
 
     if isinstance(value, str):
         cols = [table.string_value]
+    # isinstance(True, int) evaluates to True, so we need to check for bools separately
+    elif isinstance(value, bool) and op in ("$eq", "$ne"):
+        cols = [table.bool_value]
     elif isinstance(value, int) and op in ("$eq", "$ne"):
         cols = [table.int_value]
     elif isinstance(value, float) and op in ("$eq", "$ne"):
@@ -647,6 +659,15 @@ def _insert_metadata_row(
         q = q.insert(
             ParameterValue(id),
             ParameterValue(key),
+            None,
+            None,
+            ParameterValue(value),
+        )
+    elif isinstance(value, bool):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            None,
             None,
             None,
             ParameterValue(value),
