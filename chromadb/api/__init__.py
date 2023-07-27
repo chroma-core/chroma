@@ -377,19 +377,6 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
-    def create_index(self, collection_name: str) -> bool:
-        """Creates an index for the given collection
-
-        Args:
-            collection_name: The collection to create the index for. Defaults to None.
-
-        Returns:
-            bool: True if the index was created successfully
-
-        """
-        pass
-
-    @abstractmethod
     def get_version(self) -> str:
         """Get the version of Chroma.
 

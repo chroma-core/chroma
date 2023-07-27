@@ -236,7 +236,6 @@ def test_get_nearest_neighbors(api):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    # assert api.create_index(collection_name="testspace") # default is auto now
 
     nn = collection.query(
         query_embeddings=[1.1, 2.3, 3.2],
@@ -367,24 +366,6 @@ def test_increment_index_on(api):
     assert collection.count() == 2
 
     # increment index
-    # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
-    nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]],
-        n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
-    )
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-
-def test_increment_index_off(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    collection.create_index()
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,

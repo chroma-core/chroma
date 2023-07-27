@@ -125,7 +125,3 @@ class DB(Component):
     @abstractmethod
     def raw_sql(self, raw_sql):  # type: ignore
         pass
-
-    @abstractmethod
-    def create_index(self, collection_uuid: UUID):  # type: ignore
-        pass
