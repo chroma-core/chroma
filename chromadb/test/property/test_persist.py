@@ -99,8 +99,9 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    del api_1
     system_1.stop()
+    del api_1
+    del system_1
 
     gc.collect()  # Windows needs this to clean up the file handle
 
@@ -123,6 +124,8 @@ def test_persist(
     )
 
     system_2.stop()
+    del api_2
+    del system_2
 
     gc.collect()  # Windows needs this to clean up the file handle
 
