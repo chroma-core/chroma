@@ -14,10 +14,12 @@ from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Any, Callable, Dict, Generic, Type, Sequence, Optional, TypeVar, cast
+from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 import platform
+
+from chromadb.utils.lru_cache import LRUCache
 
 if platform.system() != "Windows":
     import resource
@@ -36,33 +38,6 @@ SEGMENT_TYPE_IMPLS = {
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
     SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
-
-
-K = TypeVar("K")
-V = TypeVar("V")
-
-
-class LRUCache(Generic[K, V]):
-    def __init__(self, capacity: int, callback: Optional[Callable[[K, V], Any]] = None):
-        self.capacity = capacity
-        self.cache: OrderedDict[K, V] = OrderedDict()
-        self.callback = callback
-
-    def get(self, key: K) -> Optional[V]:
-        if key not in self.cache:
-            return None
-        value = self.cache.pop(key)
-        self.cache[key] = value
-        return value
-
-    def set(self, key: K, value: V) -> None:
-        if key in self.cache:
-            self.cache.pop(key)
-        elif len(self.cache) == self.capacity:
-            evicted_key, evicted_value = self.cache.popitem(last=False)
-            if self.callback:
-                self.callback(evicted_key, evicted_value)
-        self.cache[key] = value
 
 
 class LocalSegmentManager(SegmentManager):

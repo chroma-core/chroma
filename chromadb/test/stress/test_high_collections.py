@@ -14,11 +14,10 @@ def test_high_collections(api: API) -> None:
     D = 10
 
     metadata = None
-    # TODO: done
     if api.get_settings().is_persistent:
         metadata = {"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
     else:
-        return  # FOR NOW
+        return  # We only want to test persistent configurations in this way, since the main point is to test the file handle limit
 
     num_collections = 10000
     collections: List[Collection] = []
