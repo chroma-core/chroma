@@ -17,7 +17,12 @@ from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadat
 from typing import Any, Callable, Dict, Generic, Type, Sequence, Optional, TypeVar, cast
 from uuid import UUID, uuid4
 from collections import defaultdict, OrderedDict
-import resource
+import platform
+
+if platform.system() != "Windows":
+    import resource
+elif platform.system() == "Windows":
+    import ctypes
 
 
 class SegmentType(Enum):
@@ -84,8 +89,10 @@ class LocalSegmentManager(SegmentManager):
 
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
-            # TODO: make work for Windows
-            self._max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+            if platform.system() != "Windows":
+                self._max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+            else:
+                self._max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
             segment_limit = (
                 self._max_file_handles
                 // PersistentLocalHnswSegment.get_file_handle_count()
