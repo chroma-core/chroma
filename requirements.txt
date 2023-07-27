@@ -1,4 +1,4 @@
-chroma-hnswlib @ git+https://github.com/chroma-core/hnswlib@42d66eba13c6dffdcc23e41dd314b49d00381a18
+chroma-hnswlib==0.7.2
 fastapi>=0.95.2, <0.100.0
 graphlib_backport==1.0.3; python_version < '3.9'
 importlib-resources
