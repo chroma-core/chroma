@@ -45,7 +45,7 @@ jobs:
       matrix:
         python: ['3.7']
         platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
-        testfile: ["chromadb/test/stress/*"]
+        testfile: ["'chromadb/test/stress/'"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
