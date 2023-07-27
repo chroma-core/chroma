@@ -37,7 +37,7 @@ configurations = [
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
         allow_reset=True,
         is_persistent=True,
-        persist_directory=tempfile.gettempdir() + "/tests",
+        persist_directory=tempfile.mkdtemp(),
     ),
 ]
 
