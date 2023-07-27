@@ -25,6 +25,7 @@ from hypothesis.stateful import (
 import os
 import shutil
 import tempfile
+import gc
 
 CreatePersistAPI = Callable[[], API]
 
@@ -101,6 +102,8 @@ def test_persist(
     del api_1
     system_1.stop()
 
+    gc.collect()  # Windows needs this to clean up the file handle
+
     system_2 = System(settings)
     api_2 = system_2.instance(API)
     system_2.start()
@@ -120,6 +123,8 @@ def test_persist(
     )
 
     system_2.stop()
+
+    gc.collect()  # Windows needs this to clean up the file handle
 
 
 def load_and_check(
