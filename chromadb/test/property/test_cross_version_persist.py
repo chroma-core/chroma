@@ -118,7 +118,7 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     # Cleanup the persisted data
     data_path = configuration[1].persist_directory
     if os.path.exists(data_path):
-        shutil.rmtree(data_path)
+        shutil.rmtree(data_path, ignore_errors=True)
 
 
 def get_path_to_version_install(version: str) -> str:
@@ -276,6 +276,8 @@ def test_cycle_versions(
     if conn1.poll():
         e = conn1.recv()
         raise e
+
+    p.close()
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection

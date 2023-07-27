@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.7', '3.8', '3.9', '3.10']
-        platform: [ubuntu-latest]
+        platform: [ubuntu-latest, windows-latest]
         testfile: ["--ignore-glob 'chromadb/test/property/*'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
@@ -34,5 +34,8 @@ jobs:
         python-version: ${{ matrix.python }}
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+    - name: Upgrade SQLite
+      run: python bin/windows_upgrade_sqlite.py
+      if: runner.os == 'Windows'
     - name: Test
       run: python -m pytest ${{ matrix.testfile }}
