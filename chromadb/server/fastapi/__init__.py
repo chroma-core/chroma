@@ -8,7 +8,6 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
-import pandas as pd
 
 import chromadb
 from chromadb.api.models.Collection import Collection
@@ -26,7 +25,6 @@ from chromadb.server.fastapi.types import (
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
-    RawSql,  # Results,
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
@@ -92,9 +90,6 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
-        self.router.add_api_route(
-            "/api/v1/raw_sql", self.raw_sql, methods=["POST"], response_model=None
-        )
 
         self.router.add_api_route(
             "/api/v1/collections",
@@ -289,9 +284,6 @@ class FastAPI(chromadb.server.Server):
             include=query.include,
         )
         return nnresult
-
-    def raw_sql(self, raw_sql: RawSql) -> pd.DataFrame:
-        return self._api.raw_sql(raw_sql.raw_sql)
 
     def create_index(self, collection_name: str) -> bool:
         return self._api.create_index(collection_name)
