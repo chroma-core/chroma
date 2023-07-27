@@ -25,7 +25,6 @@ from hypothesis.stateful import (
 import os
 import shutil
 import tempfile
-import gc
 
 CreatePersistAPI = Callable[[], API]
 
@@ -222,7 +221,7 @@ def test_persist_embeddings_state(
     caplog: pytest.LogCaptureFixture, settings: Settings
 ) -> None:
     caplog.set_level(logging.ERROR)
-    # api = chromadb.Client(settings)
-    # run_state_machine_as_test(
-    #     lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
-    # )  # type: ignore
+    api = chromadb.Client(settings)
+    run_state_machine_as_test(
+        lambda: PersistEmbeddingsStateMachine(settings=settings, api=api)
+    )  # type: ignore

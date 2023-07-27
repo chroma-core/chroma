@@ -5,7 +5,7 @@ import time
 
 
 # Borrowed from https://github.com/rogerbinns/apsw/blob/master/apsw/tests.py#L224
-# Used to delete files on Windows that are in use, since Windows file locking
+# Used to delete sqlite files on Windows, since Windows file locking
 # behaves differently to other operating systems
 # This should only be used for test or non-production code, such as in reset_state.
 def delete_file(name: str) -> None:
@@ -13,6 +13,7 @@ def delete_file(name: str) -> None:
         os.remove(name)
     except Exception:
         pass
+
     chars = list("abcdefghijklmn")
     random.shuffle(chars)
     newname = name + "-n-" + "".join(chars)
@@ -22,22 +23,16 @@ def delete_file(name: str) -> None:
         try:
             os.rename(name, newname)
         except Exception:
-            if count > 30:  # 3 seconds we have been at this!
-                # So give up and give it a stupid name.  The sooner
-                # this so called operating system withers into obscurity
-                # the better
+            if count > 30:
                 n = list("abcdefghijklmnopqrstuvwxyz")
                 random.shuffle(n)
                 final_name = "".join(n)
                 try:
-                    os.rename(name, "windowssucks-" + final_name + ".deletememanually")
+                    os.rename(
+                        name, "chroma-to-clean" + final_name + ".deletememanually"
+                    )
                 except Exception:
                     pass
                 break
-            # Make windows happy
             time.sleep(0.1)
             gc.collect()
-    if os.path.exists(newname):
-        # bgdelq.put(newname)
-        # Give bg thread a chance to run
-        time.sleep(0.1)
