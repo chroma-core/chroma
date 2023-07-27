@@ -46,7 +46,7 @@ jobs:
         python: ['3.7']
         platform: ['large-ubuntu-latest', 'large-windows-latest']
         testfile: ["chromadb/test/stress/*"]
-      runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
       uses: actions/checkout@v3
