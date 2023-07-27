@@ -103,8 +103,6 @@ def test_persist(
     del api_1
     del system_1
 
-    gc.collect()  # Windows needs this to clean up the file handle
-
     system_2 = System(settings)
     api_2 = system_2.instance(API)
     system_2.start()
@@ -126,8 +124,6 @@ def test_persist(
     system_2.stop()
     del api_2
     del system_2
-
-    gc.collect()  # Windows needs this to clean up the file handle
 
 
 def load_and_check(
