@@ -3,7 +3,7 @@ CREATE TABLE segments (
     type TEXT NOT NULL,
     scope TEXT NOT NULL,
     topic TEXT,
-    collection TEXT REFERENCES collection(id)
+    collection TEXT REFERENCES collections(id)
 );
 
 CREATE TABLE segment_metadata (
