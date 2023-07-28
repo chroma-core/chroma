@@ -34,7 +34,6 @@ import chromadb.types as t
 from typing import Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
-import pandas as pd
 import time
 import logging
 import re
@@ -493,10 +492,6 @@ class SegmentAPI(API):
     def reset(self) -> bool:
         self._system.reset_state()
         return True
-
-    @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        raise NotImplementedError()
 
     @override
     def get_settings(self) -> Settings:

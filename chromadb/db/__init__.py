@@ -121,7 +121,3 @@ class DB(Component):
         self, uuids: List[UUID], columns: Optional[List[str]] = None
     ) -> Sequence:  # type: ignore
         pass
-
-    @abstractmethod
-    def raw_sql(self, raw_sql):  # type: ignore
-        pass
