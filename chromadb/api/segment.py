@@ -239,7 +239,6 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
@@ -277,7 +276,6 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)

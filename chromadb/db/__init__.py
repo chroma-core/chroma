@@ -60,12 +60,6 @@ class DB(Component):
         pass
 
     @abstractmethod
-    def add_incremental(
-        self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
-    ) -> None:
-        pass
-
-    @abstractmethod
     def get(
         self,
         where: Where = {},

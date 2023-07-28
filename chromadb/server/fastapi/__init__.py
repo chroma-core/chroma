@@ -226,7 +226,6 @@ class FastAPI(chromadb.server.Server):
                 metadatas=add.metadatas,
                 documents=add.documents,
                 ids=add.ids,
-                increment_index=add.increment_index,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -248,7 +247,6 @@ class FastAPI(chromadb.server.Server):
             embeddings=upsert.embeddings,
             documents=upsert.documents,
             metadatas=upsert.metadatas,
-            increment_index=upsert.increment_index,
         )
 
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:

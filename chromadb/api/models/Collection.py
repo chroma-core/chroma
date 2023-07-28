@@ -72,7 +72,6 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
-        increment_index: bool = True,
     ) -> None:
         """Add embeddings to the data store.
         Args:
@@ -97,9 +96,7 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents
         )
 
-        self._client._add(
-            ids, self.id, embeddings, metadatas, documents, increment_index
-        )
+        self._client._add(ids, self.id, embeddings, metadatas, documents)
 
     def get(
         self,
@@ -281,7 +278,6 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
-        increment_index: bool = True,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -305,7 +301,6 @@ class Collection(BaseModel):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
-            increment_index=increment_index,
         )
 
     def delete(

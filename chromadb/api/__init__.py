@@ -182,7 +182,6 @@ class API(Component, ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -230,7 +229,6 @@ class API(Component, ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -242,8 +240,6 @@ class API(Component, ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-            increment_index: If True, will incrementally add to the ANN index.
-                                          Defaults to True.
         """
         pass
 
