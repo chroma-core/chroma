@@ -10,7 +10,8 @@ with it going forward.
 This means when making this kind of change we need to think through what we are doing as
 best we can prior to release. And as we go forward we need to stick to our decisions as
 much as possible. All technical decisions have pros and cons so it is important we
-capture the thought process that lead to a decision or design to avoid flip-flopping needlessly.
+capture the thought process that lead to a decision or design to avoid flip-flopping
+needlessly.
 
 Hopefully we can make these proportional in effort to their magnitude — small changes
 should just need a couple brief paragraphs, whereas large changes need detailed design
@@ -30,15 +31,16 @@ impact of an incompatibility will be and how big the payoff is.
 ## What is considered a "major change" that needs a CIP?
 
 - Any of the following should be considered a major change:
-- Any major new feature, subsystem, or piece of functionality
-- Any change that impacts the public interfaces of the project
+  - Any major new feature, subsystem, or piece of functionality
+  - Any change that impacts the public interfaces of the project
 
 What are the "public interfaces" of the project?
 
 All of the following are public interfaces that people build around:
 
 - Index or Metadata storage format
-- The network protocol and api behavior
+- The network protocol
+- The api behavior
 - Configuration, especially client configuration
 - Monitoring
 - Command line tools and arguments
@@ -48,6 +50,7 @@ All of the following are public interfaces that people build around:
 A CIP should contain the following sections:
 
 - Motivation: describe the problem to be solved
+- Impact: describe what percentage of users do we think will be impacted by the proposed change.
 - Proposed Change: describe the new thing you want to do. This may be fairly extensive and have large subsections of its own. Or it may be a few sentences, depending on the scope of the change.
 - New or Changed Public Interfaces: impact to any of the "compatibility commitments" described above. We want to call these out in particular so everyone thinks about them.
 - Migration Plan and Compatibility: if this feature requires additional support for a no-downtime upgrade describe how that will work
@@ -55,5 +58,6 @@ A CIP should contain the following sections:
 
 ## Who should initiate the CIP?
 
-Anyone can initiate a CIP but you shouldn't do it unless you have an intention of
-getting the work done to implement itß.
+Anyone can initiate a CIP - we welcome ideas about how to improve Chroma, the core
+Chroma team will review, provide feedback, and come to a decision on if the proposal
+makes sense for the long term direction of Chroma.
