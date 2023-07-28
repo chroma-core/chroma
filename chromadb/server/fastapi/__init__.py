@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
+from prometheus_fastapi_instrumentator import Instrumentator
 import pandas as pd
 
 import chromadb
@@ -178,7 +179,7 @@ class FastAPI(chromadb.server.Server):
         )
 
         self._app.include_router(self.router)
-
+        Instrumentator().instrument(self._app).expose(self._app)
         use_route_names_as_operation_ids(self._app)
 
     def app(self) -> fastapi.FastAPI:

@@ -1,5 +1,6 @@
 chroma-hnswlib==0.7.2
 fastapi>=0.95.2, <0.100.0
+prometheus-fastapi-instrumentator==6.1.0
 graphlib_backport==1.0.3; python_version < '3.9'
 importlib-resources
 numpy==1.21.6
