@@ -46,10 +46,6 @@ class GetEmbedding(BaseModel):  # type: ignore
     include: Include = ["metadatas", "documents"]
 
 
-class RawSql(BaseModel):  # type: ignore
-    raw_sql: str
-
-
 class DeleteEmbedding(BaseModel):  # type: ignore
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
