@@ -325,7 +325,7 @@ class SegmentAPI(API):
             offset=offset,
         )
 
-        vectors = None
+        vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
@@ -342,7 +342,9 @@ class SegmentAPI(API):
 
         return GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors] if vectors else None,
+            embeddings=[r["embedding"] for r in vectors]
+            if "embeddings" in include
+            else None,
             metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )

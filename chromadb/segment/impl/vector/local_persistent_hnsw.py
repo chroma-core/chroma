@@ -261,7 +261,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        """Get the embeddings from the HNSW index and layered brute force batch index. It is assumed that all ids are valid."""
+        """Get the embeddings from the HNSW index and layered brute force
+        batch index."""
+
         ids_hnsw: Set[str] = set()
         ids_bf: Set[str] = set()
 
@@ -274,13 +276,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
         hnsw_labels = []
 
-        results: List[Optional[VectorEmbeddingRecord]] = [None] * len(target_ids)
+        results: List[Optional[VectorEmbeddingRecord]] = []
         id_to_index: Dict[str, int] = {}
         for i, id in enumerate(target_ids):
             if id in ids_bf:
-                results[i] = self._brute_force_index.get_vectors([id])[0]
+                results.append(self._brute_force_index.get_vectors([id])[0])
             elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
                 hnsw_labels.append(self._id_to_label[id])
+                # Placeholder for hnsw results to be filled in down below so we
+                # can batch the hnsw get() call
+                results.append(None)
             id_to_index[id] = i
 
         if len(hnsw_labels) > 0 and self._index is not None:

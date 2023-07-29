@@ -81,6 +81,11 @@ def _field_matches(
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
+
+    if collection.count() == 0:
+        assert isinstance(actual_field, list) and len(actual_field) == 0
+        return
+
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
     assert actual_field is not None
