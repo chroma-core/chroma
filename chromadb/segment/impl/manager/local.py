@@ -92,6 +92,7 @@ class LocalSegmentManager(SegmentManager):
     def reset_state(self) -> None:
         for instance in self._instances.values():
             instance.stop()
+            instance.reset_state()
         self._instances = {}
         self._segment_cache = defaultdict(dict)
         super().reset_state()
