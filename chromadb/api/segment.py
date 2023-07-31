@@ -494,13 +494,6 @@ class SegmentAPI(API):
         return True
 
     @override
-    def create_index(self, collection_name: str) -> bool:
-        logger.warning(
-            "Calling create_index is unnecessary, data is now automatically indexed"
-        )
-        return True
-
-    @override
     def get_settings(self) -> Settings:
         return self._settings
 

@@ -121,7 +121,3 @@ class DB(Component):
         self, uuids: List[UUID], columns: Optional[List[str]] = None
     ) -> Sequence:  # type: ignore
         pass
-
-    @abstractmethod
-    def create_index(self, collection_uuid: UUID):  # type: ignore
-        pass
