@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package chroma;
+
+enum Operation {
+    ADD = 0;
+    UPDATE = 1;
+    UPSERT = 2;
+    DELETE = 3;
+}
+
+enum ScalarEncoding {
+    FLOAT32 = 0;
+    INT32 = 1;
+}
+
+message Vector {
+    int32 dimension = 1;
+    bytes vector = 2;
+}
+
+
+message SubmitEmbeddingRecord {
+    string id = 1;
+    optional Vector vector = 2;
+
+}
