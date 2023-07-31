@@ -60,13 +60,20 @@ def system(request: FixtureRequest) -> Generator[System, None, None]:
 def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
     def create_record(i: int) -> SubmitEmbeddingRecord:
         vector = [i + i * 0.1, i + 1 + i * 0.1]
-        metadata: Optional[Dict[str, Union[str, int, float]]]
+        metadata: Optional[Dict[str, Union[str, int, float, bool]]]
         if i == 0:
             metadata = None
         else:
-            metadata = {"str_key": f"value_{i}", "int_key": i, "float_key": i + i * 0.1}
+            metadata = {
+                "str_key": f"value_{i}",
+                "int_key": i,
+                "float_key": i + i * 0.1,
+                "bool_key": True,
+            }
             if i % 3 == 0:
                 metadata["div_by_three"] = "true"
+            if i % 2 == 0:
+                metadata["bool_key"] = False
             metadata["chroma:document"] = _build_document(i)
 
         record = SubmitEmbeddingRecord(
@@ -175,6 +182,13 @@ def test_get(
     segment.start()
 
     sync(segment, seq_ids[-1])
+
+    # get with bool key
+    result = segment.get_metadata(where={"bool_key": True})
+    assert len(result) == 5
+
+    result = segment.get_metadata(where={"bool_key": False})
+    assert len(result) == 4
 
     # Get all records
     results = segment.get_metadata()

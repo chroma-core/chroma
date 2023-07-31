@@ -125,6 +125,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.string_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
@@ -172,13 +173,18 @@ class SqliteMetadataSegment(MetadataReader):
         _, embedding_id, seq_id = rows[0][:3]
         metadata = {}
         for row in rows:
-            key, string_value, int_value, float_value = row[3:]
+            key, string_value, int_value, float_value, bool_value = row[3:]
             if string_value is not None:
                 metadata[key] = string_value
             elif int_value is not None:
                 metadata[key] = int_value
             elif float_value is not None:
                 metadata[key] = float_value
+            elif bool_value is not None:
+                if bool_value == 1:
+                    metadata[key] = True
+                else:
+                    metadata[key] = False
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
@@ -254,7 +260,9 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .into(t)
-            .columns(t.id, t.key, t.string_value, t.int_value, t.float_value)
+            .columns(
+                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+            )
         )
         for key, value in metadata.items():
             if isinstance(value, str):
@@ -264,6 +272,17 @@ class SqliteMetadataSegment(MetadataReader):
                     ParameterValue(value),
                     None,
                     None,
+                    None,
+                )
+            # isinstance(True, int) evaluates to True, so we need to check for bools separately
+            elif isinstance(value, bool):
+                q = q.insert(
+                    ParameterValue(id),
+                    ParameterValue(key),
+                    None,
+                    None,
+                    None,
+                    ParameterValue(value),
                 )
             elif isinstance(value, int):
                 q = q.insert(
@@ -271,6 +290,7 @@ class SqliteMetadataSegment(MetadataReader):
                     ParameterValue(key),
                     None,
                     ParameterValue(value),
+                    None,
                     None,
                 )
             elif isinstance(value, float):
@@ -280,6 +300,7 @@ class SqliteMetadataSegment(MetadataReader):
                     None,
                     None,
                     ParameterValue(value),
+                    None,
                 )
 
         sql, params = get_sql(q)
@@ -494,7 +515,7 @@ def _where_clause(
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
-    if isinstance(expr, (str, int, float)):
+    if isinstance(expr, (str, int, float, bool)):
         return _where_clause({"$eq": expr}, table)
 
     # Operator dict case
@@ -508,6 +529,9 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
 
     if isinstance(value, str):
         cols = [table.string_value]
+    # isinstance(True, int) evaluates to True, so we need to check for bools separately
+    elif isinstance(value, bool) and op in ("$eq", "$ne"):
+        cols = [table.bool_value]
     elif isinstance(value, int) and op in ("$eq", "$ne"):
         cols = [table.int_value]
     elif isinstance(value, float) and op in ("$eq", "$ne"):

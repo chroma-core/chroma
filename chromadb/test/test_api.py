@@ -6,15 +6,19 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+import os
+import shutil
 from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
 
+persist_dir = tempfile.mkdtemp()
+
 
 @pytest.fixture
 def local_persist_api():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -23,15 +27,17 @@ def local_persist_api():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir(),
+            persist_directory=persist_dir,
         ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -40,9 +46,11 @@ def local_persist_api_cache_bust():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir(),
+            persist_directory=persist_dir,
         ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 def approx_equal(a, b, tolerance=1e-6) -> bool:
