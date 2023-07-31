@@ -1,4 +1,5 @@
 import os
+import shutil
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
@@ -378,13 +379,19 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     results.append(curr_results)
             return results
 
+    @override
+    def reset_state(self) -> None:
+        data_path = self._get_storage_folder()
+        if os.path.exists(data_path):
+            shutil.rmtree(data_path, ignore_errors=True)
+
     @staticmethod
     def get_file_handle_count() -> int:
         """Return how many file handles are used by the index"""
         hnswlib_count = hnswlib.Index.file_handle_count
         hnswlib_count = cast(int, hnswlib_count)
         # One extra for the metadata file
-        return hnswlib_count + 1
+        return hnswlib_count + 1  # type: ignore
 
     def open_persistent_index(self) -> None:
         """Open the persistent index"""
