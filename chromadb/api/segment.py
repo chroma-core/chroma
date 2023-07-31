@@ -34,7 +34,6 @@ import chromadb.types as t
 from typing import Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
-import pandas as pd
 import time
 import logging
 import re
@@ -490,17 +489,6 @@ class SegmentAPI(API):
     @override
     def reset(self) -> bool:
         self._system.reset_state()
-        return True
-
-    @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        raise NotImplementedError()
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        logger.warning(
-            "Calling create_index is unnecessary, data is now automatically indexed"
-        )
         return True
 
     @override

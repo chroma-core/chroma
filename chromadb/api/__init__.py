@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
-import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -357,31 +356,6 @@ class API(Component, ABC):
 
         Returns:
             bool: True if the database was reset successfully.
-        """
-        pass
-
-    @abstractmethod
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database
-
-        Args:
-            sql: The SQL query to run
-
-        Returns:
-            pd.DataFrame: A pandas dataframe containing the results of the query
-        """
-        pass
-
-    @abstractmethod
-    def create_index(self, collection_name: str) -> bool:
-        """Creates an index for the given collection
-
-        Args:
-            collection_name: The collection to create the index for. Defaults to None.
-
-        Returns:
-            bool: True if the index was created successfully
-
         """
         pass
 

@@ -326,9 +326,6 @@ class Collection(BaseModel):
         )
         self._client._delete(self.id, ids, where, where_document)
 
-    def create_index(self) -> None:
-        self._client.create_index(self.name)
-
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],

@@ -1,4 +1,5 @@
 venv
+.conda
 .git
 examples
 clients
