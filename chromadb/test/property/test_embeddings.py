@@ -346,10 +346,11 @@ def test_query_without_add(api: API) -> None:
 def test_get_non_existent(api: API) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
-    result = coll.get(ids=["a"])
+    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
     assert len(result["ids"]) == 0
     assert len(result["metadatas"]) == 0
     assert len(result["documents"]) == 0
+    assert len(result["embeddings"]) == 0
 
 
 # TODO: Use SQL escaping correctly internally

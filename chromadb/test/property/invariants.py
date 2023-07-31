@@ -82,7 +82,7 @@ def _field_matches(
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
 
-    if collection.count() == 0:
+    if len(normalized_record_set["ids"]) == 0:
         assert isinstance(actual_field, list) and len(actual_field) == 0
         return
 
