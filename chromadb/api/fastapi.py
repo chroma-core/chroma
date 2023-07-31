@@ -230,7 +230,6 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
@@ -244,7 +243,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )
@@ -288,7 +286,6 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
@@ -302,7 +299,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )
