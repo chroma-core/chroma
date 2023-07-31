@@ -176,6 +176,7 @@ class TestOpenAIEmbeddingFunction(_TestEmbeddingFunction):
     organization_id = "organization_id"
     api_base = "api_base"
     api_type = "azure"
+    api_version = "1.2.3"
 
     good_model_name = "text-embedding-ada-002"
     embedding_function = OpenAIEmbeddingFunction
@@ -221,12 +222,14 @@ class TestOpenAIEmbeddingFunction(_TestEmbeddingFunction):
                 organization_id=self.organization_id,
                 api_base=self.api_base,
                 api_type=self.api_type,
+                api_version=self.api_version,
             )
 
             assert openai.api_key == self.api_key
             assert openai.organization == self.organization_id
             assert openai.api_type == self.api_type
             assert openai.api_base == self.api_base
+            assert openai.api_version == self.api_version
 
     def test_embeddings(self) -> None:
         self._test_callable_instances()
