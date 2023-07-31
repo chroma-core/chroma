@@ -262,8 +262,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        """Get the embeddings from the HNSW index and layered brute force batch index"""
-        results = []
+        """Get the embeddings from the HNSW index and layered brute force
+        batch index."""
+
         ids_hnsw: Set[str] = set()
         ids_bf: Set[str] = set()
 
@@ -276,11 +277,17 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
         hnsw_labels = []
 
-        for id in target_ids:
+        results: List[Optional[VectorEmbeddingRecord]] = []
+        id_to_index: Dict[str, int] = {}
+        for i, id in enumerate(target_ids):
             if id in ids_bf:
                 results.append(self._brute_force_index.get_vectors([id])[0])
             elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
                 hnsw_labels.append(self._id_to_label[id])
+                # Placeholder for hnsw results to be filled in down below so we
+                # can batch the hnsw get() call
+                results.append(None)
+            id_to_index[id] = i
 
         if len(hnsw_labels) > 0 and self._index is not None:
             vectors = cast(Sequence[Vector], self._index.get_items(hnsw_labels))
@@ -288,11 +295,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]
                 seq_id = self._id_to_seq_id[id]
-                results.append(
-                    VectorEmbeddingRecord(id=id, seq_id=seq_id, embedding=vector)
+                results[id_to_index[id]] = VectorEmbeddingRecord(
+                    id=id, seq_id=seq_id, embedding=vector
                 )
 
-        return results
+        return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
 
     @override
     def query_vectors(

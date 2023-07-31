@@ -210,6 +210,13 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             embedding_function=self.embedding_function,
         )
 
+    @invariant()
+    def fields_match(self) -> None:
+        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)
+        invariants.embeddings_match(self.collection, self.record_set_state)
+        invariants.metadatas_match(self.collection, self.record_set_state)
+        invariants.documents_match(self.collection, self.record_set_state)
+
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -334,6 +341,16 @@ def test_query_without_add(api: API) -> None:
         field_results = results[field]
         assert field_results is not None
         assert all([len(result) == 0 for result in field_results])
+
+
+def test_get_non_existent(api: API) -> None:
+    api.reset()
+    coll = api.create_collection(name="foo")
+    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
+    assert len(result["ids"]) == 0
+    assert len(result["metadatas"]) == 0
+    assert len(result["documents"]) == 0
+    assert len(result["embeddings"]) == 0
 
 
 # TODO: Use SQL escaping correctly internally
