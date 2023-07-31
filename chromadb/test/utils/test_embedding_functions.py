@@ -468,17 +468,15 @@ class TestGooglePalmEmbeddingFunction(_TestEmbeddingFunction):
 class TestGoogleVertexEmbeddingFunction(_TestEmbeddingFunction):
     required_package = "requests"
     api_key = os.getenv("VORTEX_TOKEN", default="thisisanapikey")
-    good_model_name = "textembedding-gecko-001"
+    good_model_name = "textembedding-gecko"
     project_id = "cloud-large-language-models"
     region = "us-central1"
-    api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/endpoints/{good_model_name}:predict"
+    api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{good_model_name}:predict"
     headers = {"Authorization": f"Bearer {api_key}"}
     documents = ["document 1", "document 2"]
     embedding_function = GoogleVertexEmbeddingFunction
     embedding_dim = 10
-    embeddings = {
-        "predictions": [embedding_dim * [0.020755], embedding_dim * [-0.00542279]]
-    }
+    embeddings = {"predictions": {"embeddings": {"values": embedding_dim * [0.020755]}}}
 
     try:
         import requests
@@ -503,9 +501,3 @@ class TestGoogleVertexEmbeddingFunction(_TestEmbeddingFunction):
 
     def test_embeddings(self) -> None:
         self._test_callable_instances()
-        # if predictions are None
-        if self.required_package in sys.modules:
-            self.vortex_api_response._content = json.dumps("").encode("ascii")
-            self.documents = []
-            self.embedding_dim = 0
-            self._test_callable_instances()
