@@ -67,7 +67,7 @@ def main(
     # Check if the OPENAI_API_KEY environment variable is set. Prompt the user to set it if not.
     if "OPENAI_API_KEY" not in os.environ:
         openai.api_key = input(
-            "Please enter your OpenAI API Key. You can get it from https://beta.openai.com/account/api-keys\n"
+            "Please enter your OpenAI API Key. You can get it from https://platform.openai.com/account/api-keys\n"
         )
 
     # Instantiate a persistent chroma client in the persist_directory.
