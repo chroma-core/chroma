@@ -19,9 +19,21 @@ message Vector {
     bytes vector = 2;
 }
 
+message UpdateMetadataValue {
+    oneof value {
+        string string_value = 1;
+        int64 int_value = 2;
+        double float_value = 3;
+    }
+}
+
+message UpdateMetadata {
+    map<string, UpdateMetadataValue> metadata = 1;
+}
 
 message SubmitEmbeddingRecord {
     string id = 1;
     optional Vector vector = 2;
-
+    optional UpdateMetadata metadata = 3;
+    Operation operation = 4;
 }

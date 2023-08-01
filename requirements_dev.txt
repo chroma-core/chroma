@@ -3,6 +3,7 @@ build
 httpx
 hypothesis
 hypothesis[numpy]
+mypy-protobuf
 pre-commit
 pytest
 pytest-asyncio

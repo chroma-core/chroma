@@ -3,6 +3,8 @@ from chromadb.config import System
 from chromadb.ingest import Consumer, ConsumerCallbackFn, Producer
 from overrides import overrides, EnforceOverrides
 from uuid import UUID
+from chromadb.proto.convert import to_proto_submit
+import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
 
@@ -18,6 +20,8 @@ class PulsarProducer(Producer, EnforceOverrides):
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = _create_pulsar_connection_str(pulsar_host, pulsar_port)
+        self._topic_to_producer = {}
+        super().__init__(system)
 
     @overrides
     def start(self) -> None:
@@ -43,7 +47,8 @@ class PulsarProducer(Producer, EnforceOverrides):
     ) -> SeqId:
         """Add an embedding record to the given topic. Returns the SeqID of the record."""
         producer = self._topic_to_producer[topic_name]
-        msg_id: pulsar.MessageId = producer.send(embedding)
+        proto_submit: proto.SubmitEmbeddingRecord = to_proto_submit(embedding)
+        msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
         return pulsar_to_int(msg_id)
 
     def _get_or_create_producer(self, topic_name: str) -> pulsar.Producer:

@@ -16,16 +16,25 @@ services:
     command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
     environment:
       - IS_PERSISTENT=TRUE
+      - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
+      - PULSAR_BROKER_URL=pulsar
+      - PULSAR_BROKER_PORT=6650
     ports:
       - 8000:8000
+    depends_on:
+      - pulsar
     networks:
       - net
 
   pulsar:
     image: apachepulsar/pulsar
+    volumes:
+      - pulsardata:/pulsar/data
+      - pulsarconf:/pulsar/conf
+    command: bin/pulsar standalone
     ports:
-      - '6650:6650'
-      - '9090:8080'
+      - 6650:6650
+      - 8080:8080
     networks:
       - net
 
@@ -33,4 +42,8 @@ volumes:
   index_data:
     driver: local
   backups:
+    driver: local
+  pulsardata:
+    driver: local
+  pulsarconf:
     driver: local
