@@ -8,7 +8,7 @@ on:
   pull_request:
     branches:
       - main
-      - '*'
+      - '**'
 
 jobs:
   test:
@@ -16,8 +16,8 @@ jobs:
     strategy:
       matrix:
         python: ['3.7', '3.8', '3.9', '3.10']
-        platform: [ubuntu-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*'",
+        platform: [ubuntu-latest, windows-latest]
+        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
@@ -34,5 +34,30 @@ jobs:
         python-version: ${{ matrix.python }}
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+    - name: Upgrade SQLite
+      run: python bin/windows_upgrade_sqlite.py
+      if: runner.os == 'Windows'
+    - name: Test
+      run: python -m pytest ${{ matrix.testfile }}
+  stress-test:
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        python: ['3.7']
+        platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
+        testfile: ["'chromadb/test/stress/'"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install test dependencies
+      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+    - name: Upgrade SQLite
+      run: python bin/windows_upgrade_sqlite.py
+      if: runner.os == 'Windows'
     - name: Test
       run: python -m pytest ${{ matrix.testfile }}

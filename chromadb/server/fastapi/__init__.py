@@ -8,7 +8,6 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
-import pandas as pd
 
 import chromadb
 from chromadb.api.models.Collection import Collection
@@ -26,7 +25,6 @@ from chromadb.server.fastapi.types import (
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
-    RawSql,  # Results,
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
@@ -92,14 +90,18 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
-        self.router.add_api_route("/api/v1/persist", self.persist, methods=["POST"])
-        self.router.add_api_route("/api/v1/raw_sql", self.raw_sql, methods=["POST"])
 
         self.router.add_api_route(
-            "/api/v1/collections", self.list_collections, methods=["GET"]
+            "/api/v1/collections",
+            self.list_collections,
+            methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections", self.create_collection, methods=["POST"]
+            "/api/v1/collections",
+            self.create_collection,
+            methods=["POST"],
+            response_model=None,
         )
 
         self.router.add_api_route(
@@ -107,46 +109,61 @@ class FastAPI(chromadb.server.Server):
             self.add,
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/update", self.update, methods=["POST"]
+            "/api/v1/collections/{collection_id}/update",
+            self.update,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/upsert", self.upsert, methods=["POST"]
+            "/api/v1/collections/{collection_id}/upsert",
+            self.upsert,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/get", self.get, methods=["POST"]
+            "/api/v1/collections/{collection_id}/get",
+            self.get,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/delete", self.delete, methods=["POST"]
+            "/api/v1/collections/{collection_id}/delete",
+            self.delete,
+            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/{collection_id}/count", self.count, methods=["GET"]
+            "/api/v1/collections/{collection_id}/count",
+            self.count,
+            methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/query",
             self.get_nearest_neighbors,
             methods=["POST"],
-        )
-        self.router.add_api_route(
-            "/api/v1/collections/{collection_name}/create_index",
-            self.create_index,
-            methods=["POST"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
             self.get_collection,
             methods=["GET"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}",
             self.update_collection,
             methods=["PUT"],
+            response_model=None,
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
             self.delete_collection,
             methods=["DELETE"],
+            response_model=None,
         )
 
         self._app.include_router(self.router)
@@ -161,9 +178,6 @@ class FastAPI(chromadb.server.Server):
 
     def heartbeat(self) -> Dict[str, int]:
         return self.root()
-
-    def persist(self) -> None:
-        self._api.persist()
 
     def version(self) -> str:
         return self._api.get_version()
@@ -201,7 +215,6 @@ class FastAPI(chromadb.server.Server):
                 metadatas=add.metadatas,
                 documents=add.documents,
                 ids=add.ids,
-                increment_index=add.increment_index,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -223,7 +236,6 @@ class FastAPI(chromadb.server.Server):
             embeddings=upsert.embeddings,
             documents=upsert.documents,
             metadatas=upsert.metadatas,
-            increment_index=upsert.increment_index,
         )
 
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
@@ -264,9 +276,3 @@ class FastAPI(chromadb.server.Server):
             include=query.include,
         )
         return nnresult
-
-    def raw_sql(self, raw_sql: RawSql) -> pd.DataFrame:
-        return self._api.raw_sql(raw_sql.raw_sql)
-
-    def create_index(self, collection_name: str) -> bool:
-        return self._api.create_index(collection_name)

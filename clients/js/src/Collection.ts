@@ -195,6 +195,7 @@ export class Collection {
                 embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
                 // @ts-ignore
                 documents: documentsArray,
+                // @ts-ignore
                 metadatas: metadatasArray,
             }, this.api.options)
             .then(handleSuccess)
@@ -248,6 +249,7 @@ export class Collection {
                 embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
                 //@ts-ignore
                 documents: documentsArray,
+                //@ts-ignore
                 metadatas: metadatasArray,
             },
             this.api.options
@@ -361,6 +363,7 @@ export class Collection {
                 where,
                 limit,
                 offset,
+                //@ts-ignore
                 include,
                 where_document: whereDocument,
             }, this.api.options)
@@ -512,6 +515,7 @@ export class Collection {
                 where,
                 n_results: nResults,
                 where_document: whereDocument,
+                //@ts-ignore
                 include: include,
             }, this.api.options)
             .then(handleSuccess)

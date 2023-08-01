@@ -3,6 +3,7 @@ from abc import abstractmethod
 from chromadb.types import (
     Collection,
     MetadataEmbeddingRecord,
+    Operation,
     VectorEmbeddingRecord,
     Where,
     WhereDocument,
@@ -104,4 +105,11 @@ class SegmentManager(Component):
         method repeatedly rather than storing the result (thereby giving this
         implementation full control over which segment impls are in or out of memory at
         a given time.)"""
+        pass
+
+    @abstractmethod
+    def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
+        """Signal to the segment manager that a collection is about to be used, so that
+        it can preload segments as needed. This is only a hint, and implementations are
+        free to ignore it."""
         pass

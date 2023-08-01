@@ -1,13 +1,12 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Set, cast, Union, DefaultDict
+from typing import Dict, Set, cast, Union, DefaultDict
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
-from chromadb.db.impl.sqlite import SqliteDB
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
     Bundle,
@@ -211,6 +210,13 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             embedding_function=self.embedding_function,
         )
 
+    @invariant()
+    def fields_match(self) -> None:
+        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)
+        invariants.embeddings_match(self.collection, self.record_set_state)
+        invariants.metadatas_match(self.collection, self.record_set_state)
+        invariants.documents_match(self.collection, self.record_set_state)
+
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -237,16 +243,11 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
                     # Sqlite merges the metadata, as opposed to old
                     # implementations which overwrites it
                     record_set_state = self.record_set_state["metadatas"][target_idx]
-                    if (
-                        hasattr(self.api, "_sysdb")
-                        and type(self.api._sysdb) == SqliteDB
-                        and record_set_state is not None
-                    ):
+                    if record_set_state is not None:
+                        record_set_state = cast(
+                            Dict[str, Union[str, int, float]], record_set_state
+                        )
                         record_set_state.update(normalized_record_set["metadatas"][idx])
-                    else:
-                        self.record_set_state["metadatas"][
-                            target_idx
-                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
                     self.record_set_state["documents"][
                         target_idx
@@ -340,6 +341,16 @@ def test_query_without_add(api: API) -> None:
         field_results = results[field]
         assert field_results is not None
         assert all([len(result) == 0 for result in field_results])
+
+
+def test_get_non_existent(api: API) -> None:
+    api.reset()
+    coll = api.create_collection(name="foo")
+    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
+    assert len(result["ids"]) == 0
+    assert len(result["metadatas"]) == 0
+    assert len(result["documents"]) == 0
+    assert len(result["embeddings"]) == 0
 
 
 # TODO: Use SQL escaping correctly internally

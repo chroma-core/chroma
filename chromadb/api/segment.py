@@ -1,13 +1,13 @@
 from chromadb.api import API
-from chromadb.config import System
+from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
-import chromadb.api.local as old_api
 from chromadb import __version__
 from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     CollectionMetadata,
@@ -24,26 +24,52 @@ from chromadb.api.types import (
     QueryResult,
     validate_metadata,
     validate_update_metadata,
+    validate_where,
+    validate_where_document,
 )
+from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
 import chromadb.types as t
 
 from typing import Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
-import pandas as pd
 import time
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+# mimics s3 bucket requirements for naming
+def check_index_name(index_name: str) -> None:
+    msg = (
+        "Expected collection name that "
+        "(1) contains 3-63 characters, "
+        "(2) starts and ends with an alphanumeric character, "
+        "(3) otherwise contains only alphanumeric characters, underscores or hyphens (-), "
+        "(4) contains no two consecutive periods (..) and "
+        "(5) is not a valid IPv4 address, "
+        f"got {index_name}"
+    )
+    if len(index_name) < 3 or len(index_name) > 63:
+        raise ValueError(msg)
+    if not re.match("^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$", index_name):
+        raise ValueError(msg)
+    if ".." in index_name:
+        raise ValueError(msg)
+    if re.match("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", index_name):
+        raise ValueError(msg)
 
 
 class SegmentAPI(API):
     """API implementation utilizing the new segment-based internal architecture"""
 
+    _settings: Settings
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
+    # TODO: fire telemetry events
     _telemetry_client: Telemetry
     _tenant_id: str
     _topic_ns: str
@@ -51,6 +77,7 @@ class SegmentAPI(API):
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
         self._telemetry_client = self.require(Telemetry)
@@ -71,7 +98,7 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
@@ -94,8 +121,8 @@ class SegmentAPI(API):
             else:
                 raise ValueError(f"Collection {name} already exists.")
 
-        # backwards compatibility in naming requirements (for now)
-        old_api.check_index_name(name)
+        # TODO: remove backwards compatibility in naming requirements
+        check_index_name(name)
 
         id = uuid4()
         coll = t.Collection(
@@ -120,7 +147,7 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         return self.create_collection(
             name=name,
@@ -136,7 +163,7 @@ class SegmentAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
@@ -175,7 +202,7 @@ class SegmentAPI(API):
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
-            old_api.check_index_name(new_name)
+            check_index_name(new_name)
 
         if new_metadata:
             validate_update_metadata(new_metadata)
@@ -211,14 +238,15 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
 
+        self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
 
     @override
@@ -231,6 +259,7 @@ class SegmentAPI(API):
         documents: Optional[Documents] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
         for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
@@ -246,9 +275,10 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
+
         for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
@@ -269,6 +299,13 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
 
         if sort is not None:
@@ -286,7 +323,7 @@ class SegmentAPI(API):
             offset=offset,
         )
 
-        vectors = None
+        vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
@@ -303,7 +340,9 @@ class SegmentAPI(API):
 
         return GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors] if vectors else None,
+            embeddings=[r["embedding"] for r in vectors]
+            if "embeddings" in include
+            else None,
             metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
@@ -316,7 +355,15 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
         coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
         # time a bad idea?
@@ -333,6 +380,9 @@ class SegmentAPI(API):
             self._validate_embedding_record(coll, r)
             self._producer.submit_embedding(coll["topic"], r)
 
+        self._telemetry_client.capture(
+            CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
+        )
         return ids_to_delete
 
     @override
@@ -350,6 +400,13 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
+        where = validate_where(where) if where is not None and len(where) > 0 else where
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else where_document
+        )
+
         allowed_ids = None
 
         coll = self._get_collection(collection_id)
@@ -395,7 +452,16 @@ class SegmentAPI(API):
             records = metadata_reader.get_metadata(ids=list(all_ids))
             metadata_by_id = {r["id"]: r["metadata"] for r in records}
             for id_list in ids:
-                metadata_list = [metadata_by_id[id] for id in id_list]
+                # In the segment based architecture, it is possible for one segment
+                # to have a record that another segment does not have. This results in
+                # data inconsistency. For the case of the local segments and the
+                # local segment manager, there is a case where a thread writes
+                # a record to the vector segment but not the metadata segment.
+                # Then a query'ing thread reads from the vector segment and
+                # queries the metadata segment. The metadata segment does not have
+                # the record. In this case we choose to return potentially
+                # incorrect data in the form of None.
+                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
                 if "metadatas" in include:
                     metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
                 if "documents" in include:
@@ -428,22 +494,8 @@ class SegmentAPI(API):
         return True
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        raise NotImplementedError()
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        logger.warning(
-            "Calling create_index is unnecessary, data is now automatically indexed"
-        )
-        return True
-
-    @override
-    def persist(self) -> bool:
-        logger.warning(
-            "Calling persist is unnecessary, data is now automatically indexed."
-        )
-        return True
+    def get_settings(self) -> Settings:
+        return self._settings
 
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
@@ -551,4 +603,6 @@ def _clean_metadata(metadata: Optional[t.Metadata]) -> Optional[t.Metadata]:
     for k, v in metadata.items():
         if not k.startswith("chroma:"):
             result[k] = v
+    if len(result) == 0:
+        return None
     return result

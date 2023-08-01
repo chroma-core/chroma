@@ -11,8 +11,8 @@ from pathlib import Path
 from enum import Enum
 
 TELEMETRY_WHITELISTED_SETTINGS = [
-    "chroma_db_impl",
     "chroma_api_impl",
+    "is_persistent",
     "chroma_server_ssl_enabled",
 ]
 

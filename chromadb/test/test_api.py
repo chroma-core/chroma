@@ -6,33 +6,51 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+import os
+import shutil
 from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
 
+persist_dir = tempfile.mkdtemp()
+
 
 @pytest.fixture
 def local_persist_api():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=persist_dir,
+        ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
-            chroma_api_impl="local",
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=tempfile.gettempdir() + "/test_server",
-        )
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+            persist_directory=persist_dir,
+        ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 def approx_equal(a, b, tolerance=1e-6) -> bool:
@@ -51,9 +69,6 @@ def test_persist_index_loading(api_fixture, request):
     api.reset()
     collection = api.create_collection("test")
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
@@ -74,9 +89,6 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
     api.reset()
     collection = api.create_collection("test", embedding_function=embedding_function)
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test", embedding_function=embedding_function)
@@ -99,9 +111,6 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
         "test", embedding_function=embedding_function
     )
     collection.add(ids="id1", documents="hello")
-
-    api.persist()
-    del api
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_or_create_collection(
@@ -135,16 +144,11 @@ def test_persist(api_fixture, request):
 
     assert collection.count() == 2
 
-    api.persist()
-    del api
-
     api = request.getfixturevalue(api_fixture.__name__)
     collection = api.get_collection("testspace")
     assert collection.count() == 2
 
     api.delete_collection("testspace")
-    api.persist()
-    del api
 
     api = request.getfixturevalue(api_fixture.__name__)
     assert api.list_collections() == []
@@ -232,7 +236,6 @@ def test_get_nearest_neighbors(api):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    # assert api.create_index(collection_name="testspace") # default is auto now
 
     nn = collection.query(
         query_embeddings=[1.1, 2.3, 3.2],
@@ -363,7 +366,6 @@ def test_increment_index_on(api):
     assert collection.count() == 2
 
     # increment index
-    # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,
@@ -371,35 +373,6 @@ def test_increment_index_on(api):
     )
     for key in nn.keys():
         assert len(nn[key]) == 1
-
-
-def test_increment_index_off(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    collection.create_index()
-    nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]],
-        n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
-    )
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-
-def skipping_indexing_will_fail(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    with pytest.raises(Exception) as e:
-        collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
-    assert str(e.value).__contains__("index not found")
 
 
 def test_add_a_collection(api):
@@ -1052,6 +1025,7 @@ def test_invalid_id(api):
 
 
 def test_index_params(api):
+    EPS = 1e-12
     # first standard add
     api.reset()
     collection = api.create_collection(name="test_index_params")
@@ -1073,8 +1047,8 @@ def test_index_params(api):
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert items["distances"][0][0] > 0
-    assert items["distances"][0][0] < 1
+    assert items["distances"][0][0] > 0 - EPS
+    assert items["distances"][0][0] < 1 + EPS
 
     # ip
     api.reset()
@@ -1108,14 +1082,16 @@ def test_invalid_index_params(api):
 def test_persist_index_loading_params(api, request):
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", metadata={"hnsw:space": "ip"})
+    collection = api.create_collection(
+        "test",
+        metadata={"hnsw:space": "ip"},
+    )
     collection.add(ids="id1", documents="hello")
 
-    api.persist()
-    del api
-
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test")
+    collection = api2.get_collection(
+        "test",
+    )
 
     assert collection.metadata["hnsw:space"] == "ip"
 

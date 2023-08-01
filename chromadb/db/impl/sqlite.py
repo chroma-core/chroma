@@ -1,8 +1,10 @@
+from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
+from chromadb.utils.delete_file import delete_file
 import sqlite3
 from overrides import override
 import pypika
@@ -12,12 +14,18 @@ from types import TracebackType
 import os
 from uuid import UUID
 from threading import local
+from importlib_resources import files
+from importlib_resources.abc import Traversable
 
 
 class TxWrapper(base.TxWrapper):
-    def __init__(self, conn: sqlite3.Connection, stack: local) -> None:
+    _conn: Connection
+    _pool: Pool
+
+    def __init__(self, conn_pool: Pool, stack: local):
         self._tx_stack = stack
-        self._conn = conn
+        self._conn = conn_pool.connect()
+        self._pool = conn_pool
 
     @override
     def __enter__(self) -> base.Cursor:
@@ -39,32 +47,46 @@ class TxWrapper(base.TxWrapper):
                 self._conn.commit()
             else:
                 self._conn.rollback()
+        self._pool.return_to_pool(self._conn)
         return False
 
 
 class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
-    _conn: sqlite3.Connection
+    _conn_pool: Pool
     _settings: Settings
-    _migration_dirs: Sequence[str]
+    _migration_imports: Sequence[Traversable]
     _db_file: str
     _tx_stack: local
+    _is_persistent: bool
 
     def __init__(self, system: System):
         self._settings = system.settings
-        self._migration_dirs = [
-            "migrations/embeddings_queue",
-            "migrations/sysdb",
-            "migrations/metadb",
+        self._migration_imports = [
+            files("chromadb.migrations.embeddings_queue"),
+            files("chromadb.migrations.sysdb"),
+            files("chromadb.migrations.metadb"),
         ]
-        self._db_file = self._settings.require("sqlite_database")
+        self._is_persistent = self._settings.require("is_persistent")
+        if not self._is_persistent:
+            # In order to allow sqlite to be shared between multiple threads, we need to use a
+            # URI connection string with shared cache.
+            # See https://www.sqlite.org/sharedcache.html
+            # https://stackoverflow.com/questions/3315046/sharing-a-memory-database-between-different-threads-in-python-using-sqlite3-pa
+            self._db_file = "file::memory:?cache=shared"
+            self._conn_pool = LockPool(self._db_file, is_uri=True)
+        else:
+            self._db_file = (
+                self._settings.require("persist_directory") + "/chroma.sqlite3"
+            )
+            if not os.path.exists(self._db_file):
+                os.makedirs(os.path.dirname(self._db_file), exist_ok=True)
+            self._conn_pool = PerThreadPool(self._db_file)
         self._tx_stack = local()
         super().__init__(system)
 
     @override
     def start(self) -> None:
         super().start()
-        self._conn = sqlite3.connect(self._db_file)
-        self._conn.isolation_level = None  # Handle commits explicitly
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
@@ -73,7 +95,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def stop(self) -> None:
         super().stop()
-        self._conn.close()
+        self._conn_pool.close()
 
     @staticmethod
     @override
@@ -91,14 +113,14 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         return "sqlite"
 
     @override
-    def migration_dirs(self) -> Sequence[str]:
-        return self._migration_dirs
+    def migration_dirs(self) -> Sequence[Traversable]:
+        return self._migration_imports
 
     @override
     def tx(self) -> TxWrapper:
         if not hasattr(self._tx_stack, "stack"):
             self._tx_stack.stack = []
-        return TxWrapper(self._conn, stack=self._tx_stack)
+        return TxWrapper(self._conn_pool, stack=self._tx_stack)
 
     @override
     def reset_state(self) -> None:
@@ -106,10 +128,19 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             raise ValueError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
-        self._conn.close()
-        db_file = self._settings.require("sqlite_database")
-        if db_file != ":memory:":
-            os.remove(db_file)
+        with self.tx() as cur:
+            # Drop all tables
+            cur.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type='table'
+                """
+            )
+            for row in cur.fetchall():
+                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+        self._conn_pool.close()
+        if self._is_persistent:
+            delete_file(self._db_file)
         self.start()
         super().reset_state()
 
@@ -143,7 +174,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 return True
 
     @override
-    def db_migrations(self, dir: str) -> Sequence[Migration]:
+    def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
         with self.tx() as cur:
             cur.execute(
                 """
@@ -152,23 +183,23 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                 WHERE dir = ?
                 ORDER BY version ASC
                 """,
-                (dir,),
+                (dir.name,),
             )
 
             migrations = []
             for row in cur.fetchall():
-                dir = cast(str, row[0])
-                version = cast(int, row[1])
-                filename = cast(str, row[2])
-                sql = cast(str, row[3])
-                hash = cast(str, row[4])
+                found_dir = cast(str, row[0])
+                found_version = cast(int, row[1])
+                found_filename = cast(str, row[2])
+                found_sql = cast(str, row[3])
+                found_hash = cast(str, row[4])
                 migrations.append(
                     Migration(
-                        dir=dir,
-                        version=version,
-                        filename=filename,
-                        sql=sql,
-                        hash=hash,
+                        dir=found_dir,
+                        version=found_version,
+                        filename=found_filename,
+                        sql=found_sql,
+                        hash=found_hash,
                         scope=self.migration_scope(),
                     )
                 )

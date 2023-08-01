@@ -110,10 +110,11 @@ safe_floats = st.floats(
     max_value=1e6,
 )  # TODO: handle infinity and NAN
 
-safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+safe_values: List[SearchStrategy[Union[int, float, str, bool]]] = [
     safe_text,
     safe_integers,
     safe_floats,
+    st.booleans(),
 ]
 
 
@@ -230,6 +231,7 @@ def collections(
     with_hnsw_params: bool = False,
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
+    with_persistent_hnsw_params: bool = False,
 ) -> Collection:
     """Strategy to generate a Collection object. If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data."""
 
@@ -240,10 +242,20 @@ def collections(
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
+    if with_persistent_hnsw_params and not with_hnsw_params:
+        raise ValueError(
+            "with_hnsw_params requires with_persistent_hnsw_params to be true"
+        )
+
     if with_hnsw_params:
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
+        if with_persistent_hnsw_params:
+            metadata["hnsw:batch_size"] = draw(st.integers(min_value=3, max_value=2000))
+            metadata["hnsw:sync_threshold"] = draw(
+                st.integers(min_value=3, max_value=2000)
+            )
         # Sometimes, select a space at random
         if draw(st.booleans()):
             # TODO: pull the distance functions from a source of truth that lives not
@@ -446,7 +458,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     value = collection.known_metadata_keys[key]
 
     legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
-    if not isinstance(value, str):
+    if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors

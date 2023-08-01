@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
-import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -16,7 +15,7 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
-from chromadb.config import Component
+from chromadb.config import Component, Settings
 import chromadb.utils.embedding_functions as ef
 
 
@@ -182,7 +181,6 @@ class API(Component, ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -230,7 +228,6 @@ class API(Component, ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -242,8 +239,6 @@ class API(Component, ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-            increment_index: If True, will incrementally add to the ANN index.
-                                          Defaults to True.
         """
         pass
 
@@ -365,47 +360,21 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database
-
-        Args:
-            sql: The SQL query to run
-
-        Returns:
-            pd.DataFrame: A pandas dataframe containing the results of the query
-        """
-        pass
-
-    @abstractmethod
-    def create_index(self, collection_name: str) -> bool:
-        """Creates an index for the given collection
-
-        Args:
-            collection_name: The collection to create the index for. Defaults to None.
-
-        Returns:
-            bool: True if the index was created successfully
-
-        """
-        pass
-
-    @abstractmethod
-    def persist(self) -> bool:
-        """Persist the database to disk
-
-        Returns:
-            bool: True if the database was persisted successfully
-
-        """
-
-        pass
-
-    @abstractmethod
     def get_version(self) -> str:
         """Get the version of Chroma.
 
         Returns:
             str: The version of Chroma
+
+        """
+        pass
+
+    @abstractmethod
+    def get_settings(self) -> Settings:
+        """Get the settings used to initialize the client.
+
+        Returns:
+            Settings: The settings used to initialize the client.
 
         """
         pass

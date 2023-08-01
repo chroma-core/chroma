@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - main
-      - '*'
+      - '**'
 
 jobs:
   test:
@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.7', '3.8', '3.9', '3.10']
-        platform: [ubuntu-latest]
+        platform: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout

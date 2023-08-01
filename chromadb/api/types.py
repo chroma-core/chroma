@@ -123,9 +123,11 @@ def validate_ids(ids: IDs) -> IDs:
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    if not isinstance(metadata, dict) and metadata is not None:
+        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+    if metadata is None:
+        return metadata
     if len(metadata) == 0:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
@@ -134,23 +136,28 @@ def validate_metadata(metadata: Metadata) -> Metadata:
                 f"Expected metadata key to be a str, got {key} which is a {type(key)}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        if not isinstance(value, bool) and not isinstance(value, (str, int, float)):
             raise ValueError(
-                f"Expected metadata value to be a str, int, or float, got {value} which is a {type(value)}"
+                f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value)}"
             )
     return metadata
 
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, or floats"""
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Expected metadata to be a dict, got {metadata}")
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
+    if not isinstance(metadata, dict) and metadata is not None:
+        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+    if metadata is None:
+        return metadata
     if len(metadata) == 0:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
-        if not isinstance(value, (str, int, float, type(None))):
+        # isinstance(True, int) evaluates to True, so we need to check for bools separately
+        if not isinstance(value, bool) and not isinstance(
+            value, (str, int, float, type(None))
+        ):
             raise ValueError(
                 f"Expected metadata value to be a str, int, or float, got {value}"
             )
@@ -158,7 +165,7 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
 
 
 def validate_metadatas(metadatas: Metadatas) -> Metadatas:
-    """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, or floats"""
+    """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats or bools"""
     if not isinstance(metadatas, list):
         raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
     for metadata in metadatas:

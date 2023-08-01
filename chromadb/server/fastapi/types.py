@@ -14,7 +14,6 @@ class AddEmbedding(BaseModel):  # type: ignore
     metadatas: Optional[List[Dict[Any, Any]]] = None
     documents: Optional[List[str]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
 class UpdateEmbedding(BaseModel):  # type: ignore
@@ -22,7 +21,6 @@ class UpdateEmbedding(BaseModel):  # type: ignore
     metadatas: Optional[List[Dict[Any, Any]]] = None
     documents: Optional[List[str]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
 class QueryEmbedding(BaseModel):  # type: ignore
@@ -44,10 +42,6 @@ class GetEmbedding(BaseModel):  # type: ignore
     limit: Optional[int] = None
     offset: Optional[int] = None
     include: Include = ["metadatas", "documents"]
-
-
-class RawSql(BaseModel):  # type: ignore
-    raw_sql: str
 
 
 class DeleteEmbedding(BaseModel):  # type: ignore

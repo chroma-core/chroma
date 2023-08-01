@@ -1,6 +1,6 @@
 import math
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Dict
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +8,8 @@ from chromadb.api import types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
+
+from chromadb.utils import distance_functions
 
 T = TypeVar("T")
 
@@ -66,7 +68,9 @@ def count(collection: Collection, record_set: RecordSet) -> None:
 def _field_matches(
     collection: Collection,
     normalized_record_set: NormalizedRecordSet,
-    field_name: Union[Literal["documents"], Literal["metadatas"]],
+    field_name: Union[
+        Literal["documents"], Literal["metadatas"], Literal["embeddings"]
+    ],
 ) -> None:
     """
     The actual embedding field is equal to the expected field
@@ -77,6 +81,11 @@ def _field_matches(
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
+
+    if len(normalized_record_set["ids"]) == 0:
+        assert isinstance(actual_field, list) and len(actual_field) == 0
+        return
+
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
     assert actual_field is not None
@@ -93,7 +102,10 @@ def _field_matches(
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
         expected_field = [None] * len(normalized_record_set["ids"])  # type: ignore
-    assert field_values == expected_field
+    if field_name == "embeddings":
+        assert np.allclose(np.array(field_values), np.array(expected_field))
+    else:
+        assert field_values == expected_field
 
 
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
@@ -119,28 +131,23 @@ def documents_match(collection: Collection, record_set: RecordSet) -> None:
     _field_matches(collection, normalized_record_set, "documents")
 
 
+def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
+    """The actual embedding documents is equal to the expected documents"""
+    normalized_record_set = wrap_all(record_set)
+    _field_matches(collection, normalized_record_set, "embeddings")
+
+
 def no_duplicates(collection: Collection) -> None:
     ids = collection.get()["ids"]
     assert len(ids) == len(set(ids))
 
 
-# These match what the spec of hnswlib is
-# This epsilon is used to prevent division by zero and the value is the same
-# https://github.com/nmslib/hnswlib/blob/359b2ba87358224963986f709e593d799064ace6/python_bindings/bindings.cpp#L238
-NORM_EPS = 1e-30
-distance_functions: Dict[str, Callable[[npt.ArrayLike, npt.ArrayLike], float]] = {
-    "l2": lambda x, y: np.linalg.norm(x - y) ** 2,  # type: ignore
-    "cosine": lambda x, y: 1 - np.dot(x, y) / ((np.linalg.norm(x) + NORM_EPS) * (np.linalg.norm(y) + NORM_EPS)),  # type: ignore
-    "ip": lambda x, y: 1 - np.dot(x, y),  # type: ignore
-}
-
-
 def _exact_distances(
     query: types.Embeddings,
     targets: types.Embeddings,
-    distance_fn: Callable[[npt.ArrayLike, npt.ArrayLike], float] = distance_functions[
-        "l2"
-    ],
+    distance_fn: Callable[
+        [npt.ArrayLike, npt.ArrayLike], float
+    ] = distance_functions.l2,
 ) -> Tuple[List[List[int]], List[List[float]]]:
     """Return the ordered indices and distances from each query to each target"""
     np_query = np.array(query)
@@ -168,6 +175,7 @@ def ann_accuracy(
     n_results: int = 1,
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,
+    query_indices: Optional[List[int]] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -185,7 +193,7 @@ def ann_accuracy(
         embeddings = embedding_function(normalized_record_set["documents"])
 
     # l2 is the default distance function
-    distance_function = distance_functions["l2"]
+    distance_function = distance_functions.l2
     accuracy_threshold = 1e-6
     assert collection.metadata is not None
     assert embeddings is not None
@@ -200,19 +208,25 @@ def ann_accuracy(
         accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
         if space == "cosine":
-            distance_function = distance_functions["cosine"]
-
+            distance_function = distance_functions.cosine
         if space == "ip":
-            distance_function = distance_functions["ip"]
+            distance_function = distance_functions.ip
 
     # Perform exact distance computation
+    query_embeddings = (
+        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
+    )
+    query_documents = normalized_record_set["documents"]
+    if query_indices is not None and query_documents is not None:
+        query_documents = [query_documents[i] for i in query_indices]
+
     indices, distances = _exact_distances(
-        embeddings, embeddings, distance_fn=distance_function
+        query_embeddings, embeddings, distance_fn=distance_function
     )
 
     query_results = collection.query(
-        query_embeddings=normalized_record_set["embeddings"],
-        query_texts=normalized_record_set["documents"] if not have_embeddings else None,
+        query_embeddings=query_embeddings if have_embeddings else None,
+        query_texts=query_documents if not have_embeddings else None,
         n_results=n_results,
         include=["embeddings", "documents", "metadatas", "distances"],
     )

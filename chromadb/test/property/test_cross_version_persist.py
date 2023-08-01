@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Callable, Generator, List, Tuple
+from typing import Generator, List, Tuple, Dict, Any, Callable
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
+from chromadb import config
 from chromadb.api import API
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
@@ -18,34 +19,52 @@ import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
 import re
 import multiprocessing
-from chromadb import Client
 from chromadb.config import Settings
 
-MINIMUM_VERSION = "0.3.20"
-COLLECTION_NAME_LOWERCASE_VERSION = "0.3.21"
+MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
-def _patch_uppercase_coll_name(
-    collection: strategies.Collection, embeddings: strategies.RecordSet
-) -> None:
-    """Old versions didn't handle uppercase characters in collection names"""
-    collection.name = collection.name.lower()
+def versions() -> List[str]:
+    """Returns the pinned minimum version and the latest version of chromadb."""
+    url = "https://pypi.org/pypi/chromadb/json"
+    data = json.load(request.urlopen(request.Request(url)))
+    versions = list(data["releases"].keys())
+    # Older versions on pypi contain "devXYZ" suffixes
+    versions = [v for v in versions if version_re.match(v)]
+    versions.sort(key=packaging_version.Version)
+    return [MINIMUM_VERSION, versions[-1]]
 
 
-def _patch_empty_dict_metadata(
+def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata.update((k, 1) for k, v in metadata.items() if v is True)
+    metadata.update((k, 0) for k, v in metadata.items() if v is False)
+    return metadata
+
+
+def _patch_boolean_metadata(
     collection: strategies.Collection, embeddings: strategies.RecordSet
 ) -> None:
-    """Old versions do the wrong thing when metadata is a single empty dict"""
-    if embeddings["metadatas"] == {}:
-        embeddings["metadatas"] = None
+    # Since the old version does not support boolean value metadata, we will convert
+    # boolean value metadata to int
+    collection_metadata = collection.metadata
+    if collection_metadata is not None:
+        _bool_to_int(collection_metadata)
+
+    if embeddings["metadatas"] is not None:
+        if isinstance(embeddings["metadatas"], list):
+            for metadata in embeddings["metadatas"]:
+                if metadata is not None and isinstance(metadata, dict):
+                    _bool_to_int(metadata)
+        elif isinstance(embeddings["metadatas"], dict):
+            metadata = embeddings["metadatas"]
+            _bool_to_int(metadata)
 
 
 version_patches: List[
     Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
 ] = [
-    ("0.3.21", _patch_uppercase_coll_name),
-    ("0.3.21", _patch_empty_dict_metadata),
+    ("0.4.3", _patch_boolean_metadata),
 ]
 
 
@@ -62,25 +81,19 @@ def patch_for_version(
             patch(collection, embeddings)
 
 
-def versions() -> List[str]:
-    """Returns the pinned minimum version and the latest version of chromadb."""
-    url = "https://pypi.org/pypi/chromadb/json"
-    data = json.load(request.urlopen(request.Request(url)))
-    versions = list(data["releases"].keys())
-    # Older versions on pypi contain "devXYZ" suffixes
-    versions = [v for v in versions if version_re.match(v)]
-    versions.sort(key=packaging_version.Version)
-    return [MINIMUM_VERSION, versions[-1]]
-
-
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
     return [
         (
             version,
             Settings(
-                chroma_api_impl="local",
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=tempfile.gettempdir() + "/tests/" + version + "/",
+                chroma_api_impl="chromadb.api.segment.SegmentAPI",
+                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+                allow_reset=True,
+                is_persistent=True,
+                persist_directory=tempfile.gettempdir() + "/persistence_test_chromadb",
             ),
         )
         for version in versions
@@ -105,7 +118,7 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     # Cleanup the persisted data
     data_path = configuration[1].persist_directory
     if os.path.exists(data_path):
-        shutil.rmtree(data_path)
+        shutil.rmtree(data_path, ignore_errors=True)
 
 
 def get_path_to_version_install(version: str) -> str:
@@ -177,7 +190,10 @@ def persist_generated_data_with_old_version(
 ) -> None:
     try:
         old_module = switch_to_version(version)
-        api: API = old_module.Client(settings)
+        system = old_module.config.System(settings)
+        api: API = system.instance(API)
+        system.start()
+
         api.reset()
         coll = api.create_collection(
             name=collection_strategy.name,
@@ -186,7 +202,7 @@ def persist_generated_data_with_old_version(
             embedding_function=not_implemented_ef(),
         )
         coll.add(**embeddings_strategy)
-        # We can't use the invariants module here because it uses the current version
+
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
 
@@ -199,7 +215,8 @@ def persist_generated_data_with_old_version(
         embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
-        api.persist()
+        # Shutdown system
+        system.stop()
     except Exception as e:
         conn.send(e)
         raise e
@@ -215,24 +232,28 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     collection_strategy=collection_st,
     embeddings_strategy=strategies.recordsets(collection_st),
 )
-@pytest.mark.skipif(
-    sys.version_info.major < 3
-    or (sys.version_info.major == 3 and sys.version_info.minor <= 7),
-    reason="The mininum supported versions of chroma do not work with python <= 3.7",
-)
-@pytest.mark.xfail(
-    reason="As we migrate to sqlite, we will not support old versions of chromadb and instead require manual migration. The minimum version will be increased to 0.4.0 and this test will be expected to pass."
-)
 @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
-    # # Test backwards compatibility
-    # # For the current version, ensure that we can load a collection from
-    # # the previous versions
+    # Test backwards compatibility
+    # For the current version, ensure that we can load a collection from
+    # the previous versions
     version, settings = version_settings
+    # The strategies can generate metadatas of malformed inputs. Other tests
+    # will error check and cover these cases to make sure they error. Here we
+    # just convert them to valid values since the error cases are already tested
+    if embeddings_strategy["metadatas"] == {}:
+        embeddings_strategy["metadatas"] = None
+    if embeddings_strategy["metadatas"] is not None and isinstance(
+        embeddings_strategy["metadatas"], list
+    ):
+        embeddings_strategy["metadatas"] = [
+            m if m is None or len(m) > 0 else None  # type: ignore
+            for m in embeddings_strategy["metadatas"]
+        ]
 
     patch_for_version(version, collection_strategy, embeddings_strategy)
 
@@ -256,9 +277,13 @@ def test_cycle_versions(
         e = conn1.recv()
         raise e
 
+    p.close()
+
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
-    api = Client(settings)
+    system = config.System(settings)
+    api = system.instance(API)
+    system.start()
     coll = api.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),
@@ -268,3 +293,6 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+
+    # Shutdown system
+    system.stop()
