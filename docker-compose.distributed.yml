@@ -1,3 +1,6 @@
+# This docker compose file is not meant to be used. It is a work in progress
+# for the distributed version of Chroma. It is not yet functional.
+
 version: '3.9'
 
 networks:
