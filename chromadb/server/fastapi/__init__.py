@@ -69,6 +69,16 @@ def _uuid(uuid_str: str) -> UUID:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
+class APIRouter(fastapi.APIRouter):
+    def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
+        fastapi.APIRouter.add_api_route(self, path, *args, **kwargs)
+        if path.endswith("/"):
+            path = path[:-1]
+        else:
+            path = path + "/"
+        fastapi.APIRouter.add_api_route(self, path, *args, **kwargs)
+
+
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
@@ -84,7 +94,7 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
 
-        self.router = fastapi.APIRouter()
+        self.router = APIRouter()
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
