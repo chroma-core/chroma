@@ -20,12 +20,15 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
       - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
+      - CHROMA_CONSUMER_IMPL=chromadb.ingest.impl.pulsar.PulsarConsumer
       - PULSAR_BROKER_URL=pulsar
       - PULSAR_BROKER_PORT=6650
+      - PULSAR_ADMIN_PORT=8080
     ports:
       - 8000:8000
     depends_on:
-      - pulsar
+      pulsar:
+        condition: service_healthy
     networks:
       - net
 
@@ -40,6 +43,17 @@ services:
       - 8080:8080
     networks:
       - net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "localhost:8080/admin/v2/brokers/health"
+        ]
+      interval: 3s
+      timeout: 1m
+      retries: 10
 
 volumes:
   index_data:

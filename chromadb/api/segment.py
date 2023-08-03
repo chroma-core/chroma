@@ -129,6 +129,9 @@ class SegmentAPI(API):
         coll = t.Collection(
             id=id, name=name, metadata=metadata, topic=self._topic(id), dimension=None
         )
+        # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
+        # and the producer should just be responsible for publishing messages. Coordinator should
+        # be responsible for all management of topics.
         self._producer.create_topic(coll["topic"])
         segments = self._manager.create_segments(coll)
         self._sysdb.create_collection(coll)
