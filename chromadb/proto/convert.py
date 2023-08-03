@@ -1,5 +1,6 @@
 import array
 from typing import Union
+from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import Operation, ScalarEncoding, SubmitEmbeddingRecord, Vector
 
@@ -16,6 +17,23 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
         )
 
     return proto.Vector(dimension=len(vector), vector=as_bytes)
+
+
+def from_proto_vector(
+    vector: proto.Vector, encoding: proto.ScalarEncoding
+) -> Embedding:
+    if encoding == proto.ScalarEncoding.FLOAT32:
+        as_array = array.array("f")
+    elif encoding == proto.ScalarEncoding.INT32:
+        as_array = array.array("i")
+    else:
+        raise ValueError(
+            f"Unknown encoding {encoding}, expected one of \
+            {proto.ScalarEncoding.FLOAT32} or {proto.ScalarEncoding.INT32}"
+        )
+
+    as_array.frombytes(vector.vector)
+    return as_array.tolist()
 
 
 def to_proto_metadata_update_value(

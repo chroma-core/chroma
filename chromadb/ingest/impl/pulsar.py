@@ -133,8 +133,9 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         def wrap_callback(consumer, message: pulsar.Message) -> None:
             msg_data = message.data()
             msg_id = pulsar_to_int(message.message_id())
-            submit_embedding_record = proto.SubmitEmbeddingRecord.ParseFromString(
-                msg_data
+            submit_embedding_record = proto.SubmitEmbeddingRecord()
+            proto.SubmitEmbeddingRecord.ParseFromString(
+                submit_embedding_record, msg_data
             )
             record = EmbeddingRecord(
                 id=submit_embedding_record.id,
