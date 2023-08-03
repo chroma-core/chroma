@@ -4,9 +4,10 @@ This folder contains a (very) minimal, self-contained example of how to make an 
 It uses the 2022 and 2023 U.S state of the union addresses as example documents.
 
 ## How it works
+
 The basic flow is as follows:
 
-0. The documents in the `documents` folder are loaded, and embedded and stored line by line in a Chroma collection.
+0. The text documents in the `documents` folder are loaded line by line, then embedded and stored in a Chroma collection.
 
 1. When the user submits a question, it gets embedded using the same model as the documents, and the lines most relevant to the query are retrieved by Chroma.
 2. The user-submitted question is passed to OpenAI's API, along with the extra context retrieved by Chroma. The OpenAI API generates generates a response.
@@ -23,7 +24,7 @@ Install dependencies and run the example:
 pip install -r requirements.txt
 
 # Load the example documents into Chroma
-python load_documents.py
+python load_data.py
 
 # Run the chatbot
 python main.py
@@ -49,4 +50,4 @@ Lastly, it is mentioned that the pandemic also disrupted global supply chains. A
 In conclusion, based on the provided context, it is stated that the pandemic has been punishing and has resulted in the closure of schools and the shutdown of various activities. Progress is mentioned in fighting against the pandemic, though the specifics are not given. The pandemic is also said to have worsened pre-existing issues such as bullying and violence among children, and disrupted global supply chains.
 ```
 
-You can replace the example documents in the `documents` folder with your own documents, and the chatbot will use those instead.
+You can replace the example text documents in the `documents` folder with your own documents, and the chatbot will use those instead.

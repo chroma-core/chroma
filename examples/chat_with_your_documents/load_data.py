@@ -4,25 +4,6 @@ import argparse
 from tqdm import tqdm
 
 import chromadb
-from chromadb.api.models.Collection import Collection
-
-
-def get_or_create_collection(
-    collection_name: str, persist_directory: str = "."
-) -> Collection:
-    """
-    Instantiates the Chroma client, and creates a collection, using OpenAI embeddings.
-    """
-
-    # Instantiate a persistent chroma client in the persist_directory.
-    # Learn more at docs.trychroma.com
-    client = chromadb.PersistentClient(path=persist_directory)
-
-    # If the collection already exists, we just return it. This allows us to add more
-    # data to an existing collection.
-    collection = client.get_or_create_collection(name=collection_name)
-
-    return collection
 
 
 def main(
