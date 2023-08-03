@@ -70,13 +70,23 @@ def _uuid(uuid_str: str) -> UUID:
 
 
 class APIRouter(fastapi.APIRouter):
+    # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
+    # same as URLs without. Docs will only contain URLs without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
-        fastapi.APIRouter.add_api_route(self, path, *args, **kwargs)
+        include_in_schema_passed = "include_in_schema" in kwargs
+
+        if not include_in_schema_passed:
+            kwargs["include_in_schema"] = not path.endswith("/")
+        super().add_api_route(path, *args, **kwargs)
+
         if path.endswith("/"):
             path = path[:-1]
         else:
             path = path + "/"
-        fastapi.APIRouter.add_api_route(self, path, *args, **kwargs)
+
+        if not include_in_schema_passed:
+            kwargs["include_in_schema"] = not path.endswith("/")
+        super().add_api_route(path, *args, **kwargs)
 
 
 class FastAPI(chromadb.server.Server):
