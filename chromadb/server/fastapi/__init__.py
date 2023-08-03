@@ -73,10 +73,14 @@ class APIRouter(fastapi.APIRouter):
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
     # same as URLs without. Docs will only contain URLs without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
-        include_in_schema_passed = "include_in_schema" in kwargs
+        # If kwargs["include_in_schema"] isn't passed OR is True, we should only
+        # include the non-"/" path. If kwargs["include_in_schema"] is False, include
+        # neither.
+        exclude_from_schema = (
+            "include_in_schema" in kwargs and not kwargs["include_in_schema"]
+        )
 
-        if not include_in_schema_passed:
-            kwargs["include_in_schema"] = not path.endswith("/")
+        kwargs["include_in_schema"] = not exclude_from_schema and not path.endswith("/")
         super().add_api_route(path, *args, **kwargs)
 
         if path.endswith("/"):
@@ -84,8 +88,7 @@ class APIRouter(fastapi.APIRouter):
         else:
             path = path + "/"
 
-        if not include_in_schema_passed:
-            kwargs["include_in_schema"] = not path.endswith("/")
+        kwargs["include_in_schema"] = not exclude_from_schema and not path.endswith("/")
         super().add_api_route(path, *args, **kwargs)
 
 
