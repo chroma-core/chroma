@@ -6,9 +6,9 @@ from overrides import overrides, EnforceOverrides
 from uuid import UUID
 from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
 from chromadb.ingest.impl.utils import create_pulsar_connection_str
-from chromadb.proto.convert import to_proto_submit
+from chromadb.proto.convert import from_proto_submit, to_proto_submit
 import chromadb.proto.chroma_pb2 as proto
-from chromadb.types import SeqId, SubmitEmbeddingRecord, EmbeddingRecord
+from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
 
 from chromadb.utils.messageid import pulsar_to_int
@@ -55,7 +55,7 @@ class PulsarProducer(Producer, EnforceOverrides):
         """Add an embedding record to the given topic. Returns the SeqID of the record."""
         producer = self._get_or_create_producer(topic_name)
         proto_submit: proto.SubmitEmbeddingRecord = to_proto_submit(embedding)
-        # TODO: batch performance?
+        # TODO: batch performance / async
         msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
         return pulsar_to_int(msg_id)
 
@@ -68,14 +68,12 @@ class PulsarProducer(Producer, EnforceOverrides):
 
 class PulsarConsumer(Consumer, EnforceOverrides):
     _connection_str: str
-    _topic_to_consumer: Dict[str, pulsar.Consumer]
     _client: pulsar.Client
 
     def __init__(self, system: System) -> None:
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
-        self._topic_to_consumer = {}
         super().__init__(system)
 
     @overrides
@@ -118,7 +116,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
 
         subscription_id = (
             id or uuid.uuid4()
-        )  # TODO: how to store this / make it knowable?
+        )  # TODO: this should really be created by the coordinator and stored in sysdb
 
         # start, end = self._validate_range(start, end)
 
@@ -130,29 +128,27 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         # self._backfill(subscription)
         # self._subscriptions[topic_name].add(subscription)
 
-        def wrap_callback(consumer, message: pulsar.Message) -> None:
+        def wrap_callback(consumer: pulsar.Consumer, message: pulsar.Message) -> None:
             msg_data = message.data()
             msg_id = pulsar_to_int(message.message_id())
             submit_embedding_record = proto.SubmitEmbeddingRecord()
             proto.SubmitEmbeddingRecord.ParseFromString(
                 submit_embedding_record, msg_data
             )
-            record = EmbeddingRecord(
-                id=submit_embedding_record.id,
-                seq_id=msg_id,
-                embedding=submit_embedding_record.embedding,
-                encoding=submit_embedding_record.encoding,
-                metadata=submit_embedding_record.metadata,
-                operation=submit_embedding_record.operation,
-            )
+            embedding_record = from_proto_submit(submit_embedding_record, msg_id)
+            consume_fn([embedding_record])
+            consumer.acknowledge(message)
+            if msg_id == end:
+                consumer.close()
 
-        if topic_name not in self._topic_to_consumer:
-            consumer = self._client.subscribe(
-                topic_name,
-                subscription_id.hex,
-                message_listener=lets_just_make_a_function,
-            )
-            self._topic_to_consumer[topic_name] = consumer
+        consumer = self._client.subscribe(
+            topic_name,
+            subscription_id.hex,
+            message_listener=wrap_callback,
+        )
+        if start is None:
+            # TODO: race condition between subscribing and seeking?
+            consumer.seek(pulsar.MessageId.earliest)
 
         return subscription_id
 
@@ -165,9 +161,9 @@ class PulsarConsumer(Consumer, EnforceOverrides):
     @overrides
     def min_seqid(self) -> SeqId:
         """Return the minimum possible SeqID in this implementation."""
-        pass
+        return -1
 
     @overrides
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
-        pass
+        return 2**191 - 1

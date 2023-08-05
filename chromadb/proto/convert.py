@@ -1,31 +1,42 @@
 import array
-from typing import Union
+from typing import Tuple, Union
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
-from chromadb.types import Operation, ScalarEncoding, SubmitEmbeddingRecord, Vector
+from chromadb.types import (
+    EmbeddingRecord,
+    Metadata,
+    Operation,
+    ScalarEncoding,
+    SeqId,
+    SubmitEmbeddingRecord,
+    Vector,
+)
 
 
 def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
     if encoding == ScalarEncoding.FLOAT32:
         as_bytes = array.array("f", vector).tobytes()
+        proto_encoding = proto.ScalarEncoding.FLOAT32
     elif encoding == ScalarEncoding.INT32:
         as_bytes = array.array("i", vector).tobytes()
+        proto_encoding = proto.ScalarEncoding.INT32
     else:
         raise ValueError(
             f"Unknown encoding {encoding}, expected one of {ScalarEncoding.FLOAT32} \
             or {ScalarEncoding.INT32}"
         )
 
-    return proto.Vector(dimension=len(vector), vector=as_bytes)
+    return proto.Vector(dimension=len(vector), vector=as_bytes, encoding=proto_encoding)
 
 
-def from_proto_vector(
-    vector: proto.Vector, encoding: proto.ScalarEncoding
-) -> Embedding:
+def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
+    encoding = vector.encoding
     if encoding == proto.ScalarEncoding.FLOAT32:
         as_array = array.array("f")
+        out_encoding = ScalarEncoding.FLOAT32
     elif encoding == proto.ScalarEncoding.INT32:
         as_array = array.array("i")
+        out_encoding = ScalarEncoding.INT32
     else:
         raise ValueError(
             f"Unknown encoding {encoding}, expected one of \
@@ -33,7 +44,49 @@ def from_proto_vector(
         )
 
     as_array.frombytes(vector.vector)
-    return as_array.tolist()
+    return (as_array.tolist(), out_encoding)
+
+
+def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
+    if operation == proto.Operation.ADD:
+        return Operation.ADD
+    elif operation == proto.Operation.UPDATE:
+        return Operation.UPDATE
+    elif operation == proto.Operation.UPSERT:
+        return Operation.UPSERT
+    elif operation == proto.Operation.DELETE:
+        return Operation.DELETE
+    else:
+        raise RuntimeError(f"Unknown operation {operation}")  # TODO: full error
+
+
+def from_proto_metadata(metadata: proto.UpdateMetadata) -> Metadata:
+    out_metadata = {}
+    for key, value in metadata.metadata.items():
+        if value.HasField("string_value"):
+            out_metadata[key] = value.string_value
+        elif value.HasField("int_value"):
+            out_metadata[key] = value.int_value
+        elif value.HasField("float_value"):
+            out_metadata[key] = value.float_value
+        else:
+            raise RuntimeError(f"Unknown metadata value type {value}")
+    return out_metadata
+
+
+def from_proto_submit(
+    submit_embedding_record: proto.SubmitEmbeddingRecord, seq_id: SeqId
+) -> EmbeddingRecord:
+    embedding, encoding = from_proto_vector(submit_embedding_record.vector)
+    record = EmbeddingRecord(
+        id=submit_embedding_record.id,
+        seq_id=seq_id,
+        embedding=embedding,
+        encoding=encoding,
+        metadata=from_proto_metadata(submit_embedding_record.metadata),
+        operation=from_proto_operation(submit_embedding_record.operation),
+    )
+    return record
 
 
 def to_proto_metadata_update_value(
@@ -74,7 +127,7 @@ def to_proto_submit(
     submit_record: SubmitEmbeddingRecord,
 ) -> proto.SubmitEmbeddingRecord:
     vector = None
-    if submit_record["embedding"] is not None:
+    if submit_record["embedding"] is not None and submit_record["encoding"] is not None:
         vector = to_proto_vector(submit_record["embedding"], submit_record["encoding"])
 
     metadata = None

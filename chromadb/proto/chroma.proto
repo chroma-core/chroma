@@ -17,6 +17,7 @@ enum ScalarEncoding {
 message Vector {
     int32 dimension = 1;
     bytes vector = 2;
+    ScalarEncoding encoding = 3;
 }
 
 message UpdateMetadataValue {

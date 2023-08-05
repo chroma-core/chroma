@@ -469,9 +469,9 @@ def _escape_characters(string: str) -> str:
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
     """Encode a SeqID into a byte array"""
-    if seq_id.bit_length() < 64:
+    if seq_id.bit_length() <= 64:
         return int.to_bytes(seq_id, 8, "big")
-    elif seq_id.bit_length() < 192:
+    elif seq_id.bit_length() <= 192:
         return int.to_bytes(seq_id, 24, "big")
     else:
         raise ValueError(f"Unsupported SeqID: {seq_id}")

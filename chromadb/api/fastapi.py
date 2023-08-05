@@ -15,6 +15,7 @@ from chromadb.api.types import (
     CollectionMetadata,
 )
 import chromadb.utils.embedding_functions as ef
+
 import pandas as pd
 import requests
 import json
