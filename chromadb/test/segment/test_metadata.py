@@ -146,12 +146,108 @@ def test_insert_and_count(
 
     assert segment.count() == 3
 
-    for i in range(3):
+    for i in range(7):
         max_id = producer.submit_embedding(topic, next(sample_embeddings))
 
     sync(segment, max_id)
+    #count with no filter
+    assert segment.count() == 10
 
-    assert segment.count() == 6
+    #count with simle where
+    result = segment.count(where = {'bool_key': True})
+    assert result == 5
+    result = segment.count(where = {'bool_key': False})
+    assert result == 4
+
+    #count with gt/gte/lt/lte on int keys
+    result = segment.count(where={"int_key": {"$gt": 5}})
+    assert result == 4
+    result = segment.count(where={"int_key": {"$gte": 5}})
+    assert result == 5
+    result = segment.count(where={"int_key": {"$lt": 5}})
+    assert result == 4
+    result = segment.count(where={"int_key": {"$lte": 5}})
+    assert result == 5
+
+    # Count with gt/lt on float keys with float values
+    result = segment.count(where={"float_key": {"$gt": 5.01}})
+    assert result == 5
+    result = segment.count(where={"float_key": {"$lt": 4.99}})
+    assert result == 4
+
+    # Count with gt/lt on float keys with int values
+    result = segment.count(where={"float_key": {"$gt": 5}})
+    assert result == 5
+    result = segment.count(where={"float_key": {"$lt": 5}})
+    assert result == 4
+
+    # Count with gt/lt on int keys with float values
+    result = segment.count(where={"int_key": {"$gt": 5.01}})
+    assert result == 4
+    result = segment.count(where={"int_key": {"$lt": 4.99}})
+    assert result == 4
+
+    # Count with $ne
+    result = segment.count(where={"int_key": {"$ne": 5}})
+    assert result == 8
+
+    # Count with multiple heterogenous conditions
+    result = segment.count(where={"div_by_three": "true", "int_key": {"$gt": 5}})
+    assert result == 2
+
+    # Count with OR conditions
+    result = segment.count(where={"$or": [{"int_key": 1}, {"int_key": 2}]})
+    assert result == 2
+
+    # Count with AND conditions
+    result = segment.count(
+        where={"$and": [{"int_key": 3}, {"float_key": {"$gt": 5}}]}
+    )
+    assert result == 0
+    result = segment.count(
+        where={"$and": [{"int_key": 3}, {"float_key": {"$lt": 5}}]}
+    )
+    assert result == 1
+
+    #test count with where_documet
+    for i in range(90):
+        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+
+    # Test single result
+    result = segment.count(where_document={"$contains": "one two"})
+    assert result == 1
+
+    # Test many results
+    result = segment.count(where_document={"$contains": "zero"})
+    assert result == 9
+
+    # test $and
+    result = segment.count(
+        where_document={"$and": [{"$contains": "one"}, {"$contains": "four"}]}
+    )
+    assert result == 2
+
+    # test $or
+    result = segment.count(
+        where_document={"$or": [{"$contains": "zero"}, {"$contains": "one"}]}
+    )
+    assert result == 27
+
+    # test combo with where clause (negative case)
+    result = segment.count(
+        where={"int_key": {"$eq": 42}}, where_document={"$contains": "zero"}
+    )
+    assert result == 0
+
+    # test combo with where clause (positive case)
+    result = segment.count(
+        where={"int_key": {"$eq": 42}}, where_document={"$contains": "four"}
+    )
+    assert result == 1
+
+    # test partial words
+    result = segment.count(where_document={"$contains": "zer"})
+    assert result == 9
 
 
 def assert_equiv_records(

@@ -16,6 +16,8 @@ from chromadb.types import (
     Metadata,
     Operation,
     Vector,
+    Where,
+    WhereDocument
 )
 from chromadb.errors import InvalidDimensionException
 import hnswlib
@@ -178,7 +180,12 @@ class LocalHnswSegment(VectorReader):
         return self._max_seq_id
 
     @override
-    def count(self) -> int:
+    def count(
+        self,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids: Optional[Sequence[str]] = None,
+        ) -> int:
         return len(self._id_to_label)
 
     def _init_index(self, dimensionality: int) -> None:

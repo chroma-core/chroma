@@ -23,7 +23,12 @@ class SegmentImplementation(Component):
         pass
 
     @abstractmethod
-    def count(self) -> int:
+    def count(
+        self,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids: Optional[Sequence[str]] = None,
+        ) -> int:
         """Get the number of embeddings in this segment"""
         pass
 

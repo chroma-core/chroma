@@ -385,10 +385,31 @@ class SegmentAPI(API):
         )
         return ids_to_delete
 
+    # @override
+    # def _count(self, collection_id: UUID) -> int:
+    #     metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+    #     return metadata_segment.count()
     @override
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+    ) -> int:
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-        return metadata_segment.count()
+        count = metadata_segment.count(
+            ids = ids,
+            where = where,
+            where_document = where_document,
+        )
+        return count
 
     @override
     def _query(

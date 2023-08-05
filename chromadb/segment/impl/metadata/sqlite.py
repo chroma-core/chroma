@@ -22,7 +22,7 @@ from chromadb.types import (
     WhereOperator,
 )
 from uuid import UUID
-from pypika import Table, Tables
+from pypika import Table, Tables, Field
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion, Function
@@ -80,16 +80,38 @@ class SqliteMetadataSegment(MetadataReader):
                 return _decode_seq_id(result[0])
 
     @override
-    def count(self) -> int:
-        embeddings_t = Table("embeddings")
+    def count(
+        self,
+        where : Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids : Optional[Sequence[str]] = None,
+        ) -> int:
+        embeddings_t, metadata_t, fulltext_t = Tables(
+            "embeddings", "embedding_metadata", "embedding_fulltext"
+        )
         q = (
-            self._db.querybuilder()
-            .from_(embeddings_t)
+              (
+                self._db.querybuilder()
+                .from_(embeddings_t)
+                .left_join(metadata_t)
+                .on(embeddings_t.id == metadata_t.id)
+            )
+            .select(
+                  fn.Count(embeddings_t.id).distinct()
+            )
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
-            .select(fn.Count(embeddings_t.id))
-        )
+         )
+        if where:
+            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
+        if where_document:
+            q = q.where(
+                self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
+            )
+            pass
+        if ids:
+            q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
         sql, params = get_sql(q)
         with self._db.tx() as cur:
             result = cur.execute(sql, params).fetchone()[0]

@@ -243,7 +243,13 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self, 
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+        ) -> int:
         """[Internal] Returns the number of entries in a collection specified by UUID.
 
         Args:

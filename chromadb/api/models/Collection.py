@@ -57,14 +57,28 @@ class Collection(BaseModel):
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"
 
-    def count(self) -> int:
+    def count(
+            self, 
+            ids: Optional[OneOrMany[ID]] = None,
+            where: Optional[Where] = None,
+            where_document: Optional[WhereDocument] = None,
+        ) -> int:
         """The total number of embeddings added to the database
 
         Returns:
             int: The total number of embeddings added to the database
 
         """
-        return self._client._count(collection_id=self.id)
+        where = validate_where(where) if where else None
+        where_document = (
+            validate_where_document(where_document) if where_document else None
+        )
+        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
+        return self._client._count(collection_id = self.id,
+                                   ids = ids,
+                                   where = where,
+                                   where_document = where_document,
+                                   )
 
     def add(
         self,
