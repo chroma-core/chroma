@@ -199,7 +199,7 @@ class SegmentAPI(API):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-    ) -> None:
+    ) -> Collection:
         if new_name:
             # backwards compatibility in naming requirements (for now)
             check_index_name(new_name)
@@ -215,9 +215,20 @@ class SegmentAPI(API):
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        existing = self._sysdb.get_collections(id=id)
+        if existing:
+            return Collection(
+                client=self,
+                id=existing[0]["id"],
+                name=existing[0]["name"],
+                metadata=existing[0]["metadata"],  # type: ignore
+                embedding_function=None,
+            )
+        else:
+            raise ValueError(f"Collection {id} does not exist.")
 
     @override
-    def delete_collection(self, name: str) -> None:
+    def delete_collection(self, name: str) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
         if existing:
@@ -227,6 +238,8 @@ class SegmentAPI(API):
             self._producer.delete_topic(existing[0]["topic"])
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
+            return Collection(id=existing[0]["id"], name=existing[0]["name"], metadata=existing[0]["metadata"],
+                              client=self)
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
