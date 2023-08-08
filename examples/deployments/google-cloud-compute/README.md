@@ -25,7 +25,7 @@ export TF_VAR_chroma_release=0.4.5 #set the chroma release to deploy
 terraform apply -auto-approve
 ```
 
-### 4. Check your public IP and that croma is running
+### 4. Check your public IP and that Chroma is running
 
 Get the public IP of your instance
 
@@ -36,7 +36,7 @@ terraform output instance_public_ip
 Check that chroma is running
 ```bash
 export instance_public_ip=$(terraform output instance_public_ip | sed 's/"//g')
-curl -v http://$instance_public_ip:8000/api/v1
+curl -v http://$instance_public_ip:8000/api/v1/heartbeat
 ```
 
 ### 5. Destroy your application
