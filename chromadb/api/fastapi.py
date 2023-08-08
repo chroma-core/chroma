@@ -145,7 +145,13 @@ class FastAPI(API):
         raise_chroma_error(resp)
 
     @override
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self, 
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {}
+        ) -> int:
         """Returns the number of embeddings in the database"""
         resp = self._session.get(
             self._api_url + "/collections/" + str(collection_id) + "/count"

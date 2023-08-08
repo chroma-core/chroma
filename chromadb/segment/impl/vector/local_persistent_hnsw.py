@@ -253,11 +253,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     self._brute_force_index.clear()
 
     @override
-    def count(
-        self,
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = None,
-        ids: Optional[Sequence[str]] = None,) -> int:
+    def count(self) -> int:
         return (
             len(self._id_to_label)
             + self._curr_batch.add_count

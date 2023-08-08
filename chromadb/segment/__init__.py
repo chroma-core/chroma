@@ -15,7 +15,7 @@ from chromadb.types import (
 )
 from chromadb.config import Component, System
 from uuid import UUID
-
+from overrides import override
 
 class SegmentImplementation(Component):
     @abstractmethod
@@ -23,12 +23,7 @@ class SegmentImplementation(Component):
         pass
 
     @abstractmethod
-    def count(
-        self,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
-        ids: Optional[Sequence[str]] = None,
-        ) -> int:
+    def count(self) -> int:
         """Get the number of embeddings in this segment"""
         pass
 
@@ -61,6 +56,16 @@ class MetadataReader(SegmentImplementation):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
+        pass
+
+    @override
+    def count(
+        self,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids: Optional[Sequence[str]] = None,
+        ) -> int:
+        """Get the number of embeddings in this segment"""
         pass
 
 

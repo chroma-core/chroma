@@ -385,10 +385,6 @@ class SegmentAPI(API):
         )
         return ids_to_delete
 
-    # @override
-    # def _count(self, collection_id: UUID) -> int:
-    #     metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-    #     return metadata_segment.count()
     @override
     def _count(
         self,

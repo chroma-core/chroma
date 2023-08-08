@@ -146,12 +146,33 @@ def test_insert_and_count(
 
     assert segment.count() == 3
 
-    for i in range(7):
+    for i in range(3):
         max_id = producer.submit_embedding(topic, next(sample_embeddings))
 
     sync(segment, max_id)
-    #count with no filter
-    assert segment.count() == 10
+    
+    assert segment.count() == 6
+
+def test_count(
+        system: System, sample_embeddings: Iterator[SubmitEmbeddingRecord]
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    topic = str(segment_definition["topic"])
+
+    embeddings = [next(sample_embeddings) for i in range(10)]
+
+    seq_ids = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    sync(segment, seq_ids[-1])
+
+    result = segment.count()
+    assert result == 10
 
     #count with simle where
     result = segment.count(where = {'bool_key': True})
@@ -209,9 +230,24 @@ def test_insert_and_count(
     )
     assert result == 1
 
-    #test count with where_documet
-    for i in range(90):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+def test_full_text_for_count(
+        system: System, 
+        sample_embeddings: Iterator[SubmitEmbeddingRecord]
+        ) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    topic = str(segment_definition["topic"])
+
+    embeddings = [next(sample_embeddings) for i in range(100)]
+
+    seq_ids = []
+    for e in embeddings:
+        seq_ids.append(producer.submit_embedding(topic, e))
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    sync(segment, seq_ids[-1])
 
     # Test single result
     result = segment.count(where_document={"$contains": "one two"})

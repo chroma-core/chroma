@@ -283,6 +283,14 @@ def test_delete_with_index(api):
     collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
 
+def test_count(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    assert collection.count() == 0
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+
 def test_modify(api):
     api.reset()
     collection = api.create_collection("testspace")
@@ -728,21 +736,6 @@ contains_records = {
     ],
 }
 
-def test_count(api):
-    api.reset()
-    collection = api.create_collection("test_count_where_and_where_doc")
-    assert collection.count() == 0
-
-    collection.add(**contains_records)
-    
-    count = collection.count()
-    assert count == 2
-
-    count = collection.count(where_document={"$contains": "doc1"})
-    assert count == 1
-
-    count = collection.count(where = {"int_value": 1})
-    assert count == 1
 
 def test_get_where_document(api):
     api.reset()

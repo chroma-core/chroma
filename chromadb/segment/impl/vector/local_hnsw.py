@@ -180,12 +180,7 @@ class LocalHnswSegment(VectorReader):
         return self._max_seq_id
 
     @override
-    def count(
-        self,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
-        ids: Optional[Sequence[str]] = None,
-        ) -> int:
+    def count(self) -> int:
         return len(self._id_to_label)
 
     def _init_index(self, dimensionality: int) -> None:
