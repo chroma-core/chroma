@@ -75,7 +75,7 @@ message VectorQueryResults {
 /* Segment Server Interface */
 
 // TODO: figure out subpackaging, ideally this file is colocated with the segment server implementation
-service SegmentServer { 
+service SegmentServer {
     rpc LoadSegment (Segment) returns (SegmentServerResponse) {}
     rpc ReleaseSegment (Segment) returns (SegmentServerResponse) {} // TODO: this maybe should only take id/type/scope
 }
@@ -111,6 +111,3 @@ message QueryVectorsRequest {
 message QueryVectorsResponse {
     repeated VectorQueryResults results = 1;
 }
-
-
-

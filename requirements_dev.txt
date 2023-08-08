@@ -1,5 +1,6 @@
 black==23.3.0 # match what's in pyproject.toml
 build
+grpcio-tools
 httpx
 hypothesis
 hypothesis[numpy]
@@ -10,4 +11,3 @@ pytest-asyncio
 setuptools_scm
 types-protobuf
 types-requests==2.30.0.0
-grpcio-tools
