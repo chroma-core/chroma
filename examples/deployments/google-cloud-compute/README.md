@@ -35,7 +35,7 @@ terraform output instance_public_ip
 
 Check that chroma is running
 ```bash
-export instance_public_ip=$(terraform output instance_public_ip)
+export instance_public_ip=$(terraform output instance_public_ip | sed 's/"//g')
 curl -v http://$instance_public_ip:8000/api/v1
 ```
 
