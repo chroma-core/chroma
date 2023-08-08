@@ -3,6 +3,7 @@ from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
     MetadataReader,
+    SegmentType,
     VectorReader,
     S,
 )
@@ -14,12 +15,6 @@ from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadat
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
-
-
-class SegmentType(Enum):
-    SQLITE = "urn:chroma:segment/metadata/sqlite"
-    HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
-    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
 
 
 SEGMENT_TYPE_IMPLS = {

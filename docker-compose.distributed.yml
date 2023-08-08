@@ -32,6 +32,31 @@ services:
     networks:
       - net
 
+  # Rename to segment-worker
+  segment-server:
+    image: segment-server
+    build:
+      context: .
+      dockerfile: Dockerfile_Distributed
+    volumes:
+      - ./:/chroma
+      - index_data:/index_data
+    command: python -m chromadb.segment.impl.distributed.server
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
+      - CHROMA_CONSUMER_IMPL=chromadb.ingest.impl.pulsar.PulsarConsumer
+      - PULSAR_BROKER_URL=pulsar
+      - PULSAR_BROKER_PORT=6650
+      - PULSAR_ADMIN_PORT=8080
+    ports:
+      - 50051:50051 # TODO: parameterize this in env
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    networks:
+      - net
+
   pulsar:
     image: apachepulsar/pulsar
     volumes:

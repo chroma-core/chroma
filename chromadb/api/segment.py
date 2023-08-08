@@ -512,6 +512,8 @@ class SegmentAPI(API):
     def get_settings(self) -> Settings:
         return self._settings
 
+    # TODO: promote collection -> topic to a base class method so that it can be
+    # used for channel assignment in the distributed version of the system.
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
 

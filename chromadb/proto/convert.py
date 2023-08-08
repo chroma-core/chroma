@@ -1,5 +1,6 @@
 import array
 from typing import Tuple, Union
+from uuid import UUID
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import (
@@ -7,10 +8,14 @@ from chromadb.types import (
     Metadata,
     Operation,
     ScalarEncoding,
+    Segment,
+    SegmentScope,
     SeqId,
     SubmitEmbeddingRecord,
     Vector,
 )
+
+# TODO: Unit tests for this file, handling optional states etc
 
 
 def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
@@ -87,6 +92,28 @@ def from_proto_submit(
         operation=from_proto_operation(submit_embedding_record.operation),
     )
     return record
+
+
+def from_proto_segment(segment: proto.Segment) -> Segment:
+    return Segment(
+        id=UUID(hex=segment.id),
+        type=segment.type,
+        scope=from_proto_segment_scope(segment.scope),
+        topic=segment.topic,
+        collection=None
+        if not segment.HasField("collection")
+        else UUID(hex=segment.collection),
+        metadata=from_proto_metadata(segment.metadata),
+    )
+
+
+def from_proto_segment_scope(segment_scope: proto.SegmentScope) -> SegmentScope:
+    if segment_scope == proto.SegmentScope.VECTOR:
+        return SegmentScope.VECTOR
+    elif segment_scope == proto.SegmentScope.METADATA:
+        return SegmentScope.METADATA
+    else:
+        raise RuntimeError(f"Unknown segment scope {segment_scope}")
 
 
 def to_proto_metadata_update_value(

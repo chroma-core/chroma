@@ -10,3 +10,4 @@ pytest-asyncio
 setuptools_scm
 types-protobuf
 types-requests==2.30.0.0
+grpcio-tools
