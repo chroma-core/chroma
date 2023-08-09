@@ -94,6 +94,7 @@ service VectorReader {
 
 message GetVectorsRequest {
     repeated string ids = 1;
+    string segment_id = 2;
 }
 
 message GetVectorsResponse {
@@ -105,6 +106,7 @@ message QueryVectorsRequest {
     int32 k = 2;
     repeated string allowed_ids = 3;
     bool include_embeddings = 4;
+    string segment_id = 5;
     // TODO: options as in types.py, its currently unused so can add later
 }
 

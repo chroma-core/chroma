@@ -1,4 +1,4 @@
-from typing import Dict, Type
+from typing import Dict, Type, cast
 from uuid import UUID
 from chromadb.config import Settings, System, get_class
 from chromadb.proto.chroma_pb2_grpc import (
@@ -10,10 +10,11 @@ from chromadb.proto.chroma_pb2_grpc import (
 import chromadb.proto.chroma_pb2 as proto
 import grpc
 from concurrent import futures
-from chromadb.proto.convert import from_proto_segment
-from chromadb.segment import SegmentImplementation, SegmentType
+from chromadb.proto.convert import from_proto_segment, to_proto_seq_id, to_proto_vector
+from chromadb.segment import SegmentImplementation, SegmentType, VectorReader
 from chromadb.config import System
-from chromadb.types import Segment, SegmentScope
+from chromadb.types import ScalarEncoding, Segment, SegmentScope
+import logging
 
 
 # Run this with python -m chromadb.segment.impl.distributed.server
@@ -38,6 +39,7 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
         self._system = system
 
     def LoadSegment(self, request: proto.Segment, context):
+        logging.info(f"LoadSegment scope {request.type}")
         id = UUID(hex=request.id)
         if id in self._segment_cache:
             # TODO: already loaded state
@@ -45,17 +47,23 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
                 success=True,
             )
         else:
-            if request.scope == SegmentScope.METADATA:
+            if request.scope == proto.SegmentScope.METADATA:
                 context.set_code(grpc.StatusCode.UNIMPLEMENTED)
                 context.set_details("Metadata segments are not yet implemented")
                 return proto.SegmentServerResponse(success=False)
-            elif request.scope == SegmentScope.VECTOR:
-                if request.type == SegmentType.HNSW_DISTRIBUTED:
+            elif request.scope == proto.SegmentScope.VECTOR:
+                logging.info(f"Loading segment {request}")
+                if request.type == SegmentType.HNSW_DISTRIBUTED.value:
                     self._create_instance(from_proto_segment(request))
+                    return proto.SegmentServerResponse(success=True)
                 else:
                     context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                    context.set_details("Segment type not implemented")
+                    context.set_details("Segment type not implemented yet")
                     return proto.SegmentServerResponse(success=False)
+            else:
+                context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+                context.set_details("Segment scope not implemented")
+                return proto.SegmentServerResponse(success=False)
 
     def ReleaseSegment(self, request, context):
         return super().ReleaseSegment(request, context)
@@ -63,8 +71,29 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
     def QueryVectors(self, request, context):
         return super().QueryVectors(request, context)
 
-    def GetVectors(self, request, context):
-        return super().GetVectors(request, context)
+    def GetVectors(self, request: proto.GetVectorsRequest, context):
+        segment_id = UUID(hex=request.segment_id)
+        if segment_id not in self._segment_cache:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details("Segment not found")
+            return proto.GetVectorsResponse()
+        else:
+            segment = self._segment_cache[segment_id]
+            segment = cast(VectorReader, segment)
+            segment_results = segment.get_vectors(request.ids)
+            return_records = []
+            for record in segment_results:
+                # TODO: encoding should be based on stored
+                # TODO: add a to_proto_record method to convert.py
+                proto_vector = to_proto_vector(
+                    record["embedding"], ScalarEncoding.FLOAT32
+                )
+                proto_seq_id = to_proto_seq_id(record["seq_id"])
+                return_record = proto.VectorEmbeddingRecord(
+                    id=record["id"], seq_id=proto_seq_id, vector=proto_vector
+                )
+                return_records.append(return_record)
+            return proto.GetVectorsResponse(records=return_records)
 
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
         classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
@@ -80,6 +109,7 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     # TODO: parameterize the setings from env
     settings = Settings(
         is_persistent=True,

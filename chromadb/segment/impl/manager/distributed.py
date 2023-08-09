@@ -1,4 +1,8 @@
 from threading import Lock
+
+import grpc
+from chromadb.proto.chroma_pb2_grpc import SegmentServerStub
+from chromadb.proto.convert import to_proto_segment
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
@@ -12,37 +16,110 @@ from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Dict, Type, Sequence, Optional, cast
+from typing import Dict, List, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
 
 # TODO: it is odd that the segment manager is different for distributed vs local
 # implementations.  This should be refactored to be more consistent and shared.
 # needed in this is the ability to specify the desired segment types for a collection
+# It is odd that segment manager is coupled to the segment implementation. We need to rethink
+# this abstraction.
 
 SEGMENT_TYPE_IMPLS = {
-    SegmentType.HNSW_DISTRIBUTED: "chromadb.segment.impl.vector.grpc_segment.GrpcSegment",
+    SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
+    SegmentType.HNSW_DISTRIBUTED: "chromadb.segment.impl.vector.grpc_segment.GrpcVectorSegment",
 }
 
 
 class DistributedSegmentManager(SegmentManager):
+    _sysdb: SysDB
+    _system: System
+    _instances: Dict[UUID, SegmentImplementation]
+    _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
+    _lock: Lock
+    _segment_server_stub: SegmentServerStub
+
+    def __init__(self, system: System):
+        super().__init__(system)
+        self._sysdb = self.require(SysDB)
+        self._system = system
+        self._instances = {}
+        self._segment_cache = defaultdict(dict)
+        self._lock = Lock()
+
+        # TODO: this should be configurable based on segment info in sysdb metadata
+        channel = grpc.insecure_channel("segment-server:50051")
+        self._segment_server_stub = SegmentServerStub(channel)
+
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )
+        metadata_segment = _segment(
+            SegmentType.SQLITE, SegmentScope.METADATA, collection
+        )
+        return [vector_segment, metadata_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        return super().delete_segments(collection_id)
+        raise NotImplementedError()
 
     @override
     def get_segment(self, collection_id: UUID, type: type[S]) -> S:
-        return super().get_segment(collection_id, type)
+        if type == MetadataReader:
+            scope = SegmentScope.METADATA
+        elif type == VectorReader:
+            scope = SegmentScope.VECTOR
+        else:
+            raise ValueError(f"Invalid segment type: {type}")
+
+        if scope not in self._segment_cache[collection_id]:
+            segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
+            known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
+            # Get the first segment of a known type
+            segment = next(filter(lambda s: s["type"] in known_types, segments))
+            self._segment_cache[collection_id][scope] = segment
+
+        # Instances must be atomically created, so we use a lock to ensure that only one thread
+        # creates the instance.
+        with self._lock:
+            instance = self._instance(self._segment_cache[collection_id][scope])
+        return cast(S, instance)
 
     @override
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
-        return super().hint_use_collection(collection_id, hint_type)
+        # TODO: this should call load/release on the target node, node should be stored in metadata
+        # for now this is fine, but cache invalidation is a problem btwn sysdb and segment manager
+        types = [MetadataReader, VectorReader]
+        for type in types:
+            self.get_segment(
+                collection_id, type
+            )  # TODO: this is a hack that mirrors local segment manager to force load the relevant instances
+            if type == VectorReader:
+                # Load the remote segment
+                segments = self._sysdb.get_segments(
+                    collection=collection_id, scope=SegmentScope.VECTOR
+                )
+                known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
+                segment = next(filter(lambda s: s["type"] in known_types, segments))
+                print(f"Loading segment {segment}")
+                self._segment_server_stub.LoadSegment(to_proto_segment(segment))
+
+    # TODO: rethink duplication from local segment manager
+    def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
+        classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]
+        cls = get_class(classname, SegmentImplementation)
+        return cls
+
+    def _instance(self, segment: Segment) -> SegmentImplementation:
+        if segment["id"] not in self._instances:
+            cls = self._cls(segment)
+            instance = cls(self._system, segment)
+            instance.start()
+            self._instances[segment["id"]] = instance
+        return self._instances[segment["id"]]
 
 
 # TODO: rethink duplication from local segment manager

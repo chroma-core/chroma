@@ -40,6 +40,8 @@ class LocalSegmentManager(SegmentManager):
         self._segment_cache = defaultdict(dict)
         self._lock = Lock()
 
+        # TODO: prototyping with distributed segment for now, but this should be a configurable option
+        # we need to think about how to handle this configuration
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
 
