@@ -242,15 +242,16 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
-            t = Table("embedding_fulltext")
-            q = (
-                self._db.querybuilder()
-                .from_(t)
-                .where(t.id == ParameterValue(id))
-                .delete()
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
+            # t = Table("embedding_fulltext")
+            # q = (
+            #     self._db.querybuilder()
+            #     .from_(t)
+            #     .where(t.id == ParameterValue(id))
+            #     .delete()
+            # )
+            # sql, params = get_sql(q)
+            # cur.execute(sql, params)
+            pass
 
         self._insert_metadata(cur, id, metadata)
 

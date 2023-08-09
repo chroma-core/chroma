@@ -274,3 +274,23 @@ async def test_end_seq_id(
     # Should never produce a 7th
     with pytest.raises(TimeoutError):
         _ = await wait_for(consume_fn_2.get(7), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_submit_multiple(
+    producer_consumer: Tuple[Producer, Consumer],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+) -> None:
+    producer, consumer = producer_consumer
+    producer.reset_state()
+
+    embeddings = [next(sample_embeddings) for _ in range(100)]
+
+    producer.create_topic("test_topic")
+    producer.submit_embeddings("test_topic", embeddings=embeddings)
+
+    consume_fn = CapturingConsumeFn()
+    consumer.subscribe("test_topic", consume_fn, start=consumer.min_seqid())
+
+    recieved = await consume_fn.get(100)
+    assert_records_match(embeddings, recieved)

@@ -242,9 +242,11 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
+        records = []
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records.append(r)
+        self._producer.submit_embeddings(coll["topic"], records)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
