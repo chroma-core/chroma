@@ -1,3 +1,4 @@
+import { dynamicImportModule } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 // Dynamically import module
@@ -30,7 +31,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
       // Also, since we use `"module": "commonjs"` in tsconfig.json, we use the following workaround to ensure
       // the dynamic import is not transpiled to a `require` statement.
       // For more information, see https://github.com/microsoft/TypeScript/issues/43329#issuecomment-1008361973
-      TransformersApi = Function('return import("@xenova/transformers")')();
+      TransformersApi = dynamicImportModule("@xenova/transformers");
     } catch (e) {
       throw new Error(
         "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`."
