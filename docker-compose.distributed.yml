@@ -21,6 +21,7 @@ services:
       - IS_PERSISTENT=TRUE
       - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
       - CHROMA_CONSUMER_IMPL=chromadb.ingest.impl.pulsar.PulsarConsumer
+      - CHROMA_SEGMENT_MANAGER_IMPL=chromadb.segment.impl.manager.distributed.DistributedSegmentManager
       - PULSAR_BROKER_URL=pulsar
       - PULSAR_BROKER_PORT=6650
       - PULSAR_ADMIN_PORT=8080

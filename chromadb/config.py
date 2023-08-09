@@ -72,11 +72,8 @@ class Settings(BaseSettings):
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    # chroma_segment_manager_impl: str = (
-    #     "chromadb.segment.impl.manager.local.LocalSegmentManager"
-    # )
     chroma_segment_manager_impl: str = (
-        "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
+        "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
 
     tenant_id: str = "default"
