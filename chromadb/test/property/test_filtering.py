@@ -293,39 +293,45 @@ def test_boolean_metadata(api: API) -> None:
 
     assert res["ids"] == ["1", "3"]
 
-def test_count(api: API) -> None:
-    """Test count with where and where_document"""
+@settings(
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+    ]
+)
+@given(
+    collection=collection_st,
+    record_set=recordset_st,
+    filters=st.lists(
+        strategies.filters(collection_st, recordset_st, include_all_ids=True),
+        min_size=1,
+    ),
+)
+def test_filterable_count(
+    caplog: pytest.LogCaptureFixture,
+    api: API,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    filters: List[strategies.Filter],
+) -> None:
+    """Test count with where and where_document"""  
+    caplog.set_level(logging.ERROR)
     api.reset()
-    coll = api.create_collection(name = "test-count")
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,  # type: ignore
+        embedding_function=collection.embedding_function,
+    )
+    normalized_record_set = invariants.wrap_all(record_set)
 
-    embeddings = [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2]]
-    documents = ['doc1', 'doc2', 'doc3']
-    metadatas = [{'chapter': 3, 'verse': 16, 'bool':True},
-                 {'chapter': 3, 'verse': 5, 'bool':True},
-                 {'chapter': 29, 'verse': 11,'bool':False}]
-    ids = ['id1', 'id2', 'id3']
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            coll.add(**record_set)
+        return
 
-    coll.add(
-        embeddings=embeddings, 
-        metadatas=metadatas, 
-        documents=documents, 
-        ids=ids
-        )
-    result = coll.count()
-    assert result == 3
-    #test with where
-    result = coll.count(where={"chapter":3})
-    assert result == 2
-    result = coll.count(where={"verse":{"$gt":5}})
-    assert result == 2
-    result = coll.count(where = {"$and": [{"chapter": 3}, {"verse": {"$gte": 5}}]})
-    assert result == 1
-    #test negative case
-    result = coll.count(where={"chapter":2})
-    assert result == 0
-    #test with where_document
-    result = coll.count(where_document={'$contains': "doc1"})
-    assert result == 1
-    result = coll.count(where_document={'$contains': "doc"})
-    assert result == 3
+    coll.add(**record_set)
     
+    for filter in filters:
+        result = coll.count(**filter)
+        expected_ids = _filter_embedding_set(record_set, filter)
+        assert result == len(expected_ids)

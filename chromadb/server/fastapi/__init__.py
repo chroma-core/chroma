@@ -28,6 +28,7 @@ from chromadb.server.fastapi.types import (
     CreateCollection,
     UpdateCollection,
     UpdateEmbedding,
+    CountEmbedding
 )
 from starlette.requests import Request
 
@@ -165,7 +166,7 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/count",
             self.count,
-            methods=["GET"],
+            methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
@@ -285,8 +286,13 @@ class FastAPI(chromadb.server.Server):
             where_document=delete.where_document,
         )
 
-    def count(self, collection_id: str) -> int:
-        return self._api._count(_uuid(collection_id))
+    def count(self, collection_id: str, count: CountEmbedding) -> int:
+        return self._api._count(
+            collection_id = _uuid(collection_id),
+            ids = count.ids,
+            where = count.where,
+            where_document = count.where_document)
+
 
     def reset(self) -> bool:
         return self._api.reset()

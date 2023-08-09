@@ -43,6 +43,11 @@ class GetEmbedding(BaseModel):  # type: ignore
     offset: Optional[int] = None
     include: Include = ["metadatas", "documents"]
 
+class CountEmbedding(BaseModel):  #type: ignore
+    ids: Optional[List[str]] = None
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
+
 
 class DeleteEmbedding(BaseModel):  # type: ignore
     ids: Optional[List[str]] = None

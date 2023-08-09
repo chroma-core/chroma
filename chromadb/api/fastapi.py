@@ -153,8 +153,15 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {}
         ) -> int:
         """Returns the number of embeddings in the database"""
-        resp = self._session.get(
-            self._api_url + "/collections/" + str(collection_id) + "/count"
+        resp = self._session.post(
+            self._api_url + "/collections/" + str(collection_id) + "/count",
+            data=json.dumps(
+                {
+                    "ids": ids,
+                    "where": where,
+                    "where_document": where_document,
+                }
+            ),
         )
         raise_chroma_error(resp)
         return cast(int, resp.json())
