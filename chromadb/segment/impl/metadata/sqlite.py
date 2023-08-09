@@ -650,6 +650,16 @@ def _insert_metadata_row(
             None,
             None,
         )
+    # isinstance(True, int) evaluates to True, so we need to check for bools separately
+    elif isinstance(value, bool):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            None,
+            None,
+            None,
+            ParameterValue(value),
+        )
     elif isinstance(value, int):
         q = q.insert(
             ParameterValue(id),
@@ -668,13 +678,5 @@ def _insert_metadata_row(
             ParameterValue(value),
             None,
         )
-    elif isinstance(value, bool):
-        q = q.insert(
-            ParameterValue(id),
-            ParameterValue(key),
-            None,
-            None,
-            None,
-            ParameterValue(value),
-        )
+
     return q
