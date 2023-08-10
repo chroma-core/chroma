@@ -1,4 +1,3 @@
-from chromadb.api.types import Embedding
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
 from chromadb.ingest import (
     Producer,
@@ -113,13 +112,16 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if not self._running:
             raise RuntimeError("Component not running")
 
+        if len(embeddings) == 0:
+            return []
+
         t = Table("embeddings_queue")
         insert = (
             self.querybuilder()
             .into(t)
             .columns(t.operation, t.topic, t.id, t.vector, t.encoding, t.metadata)
         )
-        id_to_idx = {}
+        id_to_idx: Dict[str, int] = {}
         for embedding in embeddings:
             (
                 embedding_bytes,
@@ -142,7 +144,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             sql = f"{sql} RETURNING seq_id, id"  # Pypika doesn't support RETURNING
             results = cur.execute(sql, params).fetchall()
             # Reorder the results
-            seq_ids = [None] * len(results)
+            seq_ids = [cast(SeqId, None)] * len(
+                results
+            )  # Lie to mypy: https://stackoverflow.com/questions/76694215/python-type-casting-when-preallocating-list
             embedding_records = []
             for seq_id, id in results:
                 seq_ids[id_to_idx[id]] = seq_id
@@ -159,8 +163,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 )
                 embedding_records.append(embedding_record)
             self._notify_all(topic_name, embedding_records)
-
-            seq_ids = cast(Sequence[SeqId], seq_ids)  # We know that there are no Nones
             return seq_ids
 
     @override
