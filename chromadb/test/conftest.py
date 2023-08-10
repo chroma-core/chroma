@@ -13,12 +13,12 @@ from typing import (
     Generator,
     Iterator,
     List,
-    Protocol,
     Optional,
     Sequence,
     Tuple,
     Callable,
 )
+from typing_extensions import Protocol
 import shutil
 import logging
 import socket
