@@ -242,11 +242,11 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
-        records = []
+        records_to_submit = []
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            records.append(r)
-        self._producer.submit_embeddings(coll["topic"], records)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
@@ -263,9 +263,11 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
+        records_to_submit = []
         for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -281,9 +283,11 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
 
+        records_to_submit = []
         for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -378,9 +382,11 @@ class SegmentAPI(API):
         else:
             ids_to_delete = ids
 
+        records_to_submit = []
         for r in _records(t.Operation.DELETE, ids_to_delete):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(
             CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
