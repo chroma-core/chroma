@@ -426,14 +426,16 @@ class SqliteMetadataSegment(MetadataReader):
         return reduce(lambda x, y: x & y, clause)
 
     class EscapedLike(Function):  # type: ignore
-        def __init__(self, column_name: str, search_term: str, escape_char: str = "\\"):
+        def __init__(
+            self, column_name: str, search_term: ParameterValue, escape_char: str = "\\"
+        ):
             self.column_name = column_name
             self.search_term = search_term
             self.escape_char = escape_char
             super().__init__("LIKE", column_name, search_term)
 
         def get_function_sql(self, **kwargs: Any) -> str:
-            return f"{self.column_name} LIKE {self.search_term} ESCAPE '{self.escape_char}'"
+            return f"{self.column_name} LIKE {self.search_term.get_sql()} ESCAPE '{self.escape_char}'"
 
     def _where_doc_criterion(
         self,
@@ -466,6 +468,12 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(
                         self.EscapedLike(
                             fulltext_t.string_value,
+                            ParameterValue(search_term),
+                        )
+                    )
+                    .where(
+                        self.EscapedLike(
+                            fulltext_t.get_table_name(),
                             ParameterValue(search_term),
                         )
                     )
