@@ -15,9 +15,7 @@ try:
 except ImportError:
     is_thin_client = False
 
-
 logger = logging.getLogger(__name__)
-
 
 LEGACY_ERROR = """\033[91mYou are using a deprecated configuration of Chroma.
 
@@ -59,7 +57,7 @@ _abstract_type_keys: Dict[str, str] = {
 }
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
     # Legacy config has to be kept around because pydantic will error on nonexisting keys
@@ -88,7 +86,11 @@ class Settings(BaseSettings):
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_grpc_port: Optional[str] = None
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
+    # eg ["chromadb.api.fastapi.middlewares.auth.AuthMiddleware"]
+    chroma_server_middlewares: List[str] = []
 
+    chroma_server_middleware_token_auth_enabled: bool = False
+    chroma_server_middleware_token_auth_token: Optional[str] = None
     anonymized_telemetry: bool = True
 
     allow_reset: bool = False

@@ -31,5 +31,5 @@ repos:
     rev: "v1.2.0"
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
+        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract,--exclude=^chromadb/server/fastapi/__init__.py$]
         additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy"]

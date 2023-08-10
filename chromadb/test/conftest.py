@@ -8,7 +8,7 @@ import os
 import uvicorn
 import time
 import pytest
-from typing import Generator, List, Callable, Optional, Tuple
+from typing import Generator, List, Callable, Optional, Tuple, Any, Dict, Union
 import shutil
 import logging
 import socket
@@ -16,7 +16,6 @@ import multiprocessing
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,10 @@ def find_free_port() -> int:
 
 
 def _run_server(
-    port: int, is_persistent: bool = False, persist_directory: Optional[str] = None
+    port: int,
+    is_persistent: bool = False,
+    persist_directory: Optional[str] = None,
+    **additional_settings: Optional[dict[Any, Any]],
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -53,6 +55,7 @@ def _run_server(
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
+            **additional_settings,
         )
     else:
         settings = Settings(
@@ -63,6 +66,7 @@ def _run_server(
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             is_persistent=False,
             allow_reset=True,
+            **additional_settings,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -81,7 +85,11 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, None]:
+def _fastapi_fixture(
+    is_persistent: bool = False,
+    client_headers: Optional[dict[str, str]] = None,
+    additional_args: Optional[Dict[str, Union[bool, List[str], str]]] = None,
+) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
@@ -90,16 +98,25 @@ def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, Non
     ctx = multiprocessing.get_context("spawn")
     args: Tuple[int, bool, Optional[str]] = (port, False, None)
     persist_directory = None
+    if additional_args is None:
+        additional_args = {}
     if is_persistent:
         persist_directory = tempfile.mkdtemp()
-        args = (port, is_persistent, persist_directory)
-    proc = ctx.Process(target=_run_server, args=args, daemon=True)
+        args = (
+            port,
+            is_persistent,
+            persist_directory,
+        )
+    proc = ctx.Process(
+        target=_run_server, args=args, kwargs=additional_args, daemon=True
+    )
     proc.start()
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
+        chroma_server_headers=client_headers,
     )
     system = System(settings)
     api = system.instance(API)
@@ -119,6 +136,19 @@ def fastapi() -> Generator[System, None, None]:
 
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
+
+
+def fastapi_persistent_w_middleware() -> Generator[System, None, None]:
+    return _fastapi_fixture(
+        is_persistent=True,
+        additional_args={
+            "chroma_middleware_impl": [
+                "chromadb.server.middlewares.SimpleTokenAuthMiddleware"
+            ],
+            "chroma_server_middleware_token_auth_enabled": True,
+            "chroma_server_middleware_token_auth_token": "test",
+        },
+    )
 
 
 def integration() -> Generator[System, None, None]:
