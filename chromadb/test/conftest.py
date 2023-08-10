@@ -206,10 +206,6 @@ def api(system: System) -> Generator[API, None, None]:
 # Producer / Consumer fixtures #
 
 
-# ProducerFn = Callable[
-#     [Producer, str, Iterator[SubmitEmbeddingRecord], int],
-#     Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]],
-# ]
 class ProducerFn(Protocol):
     def __call__(
         self,
