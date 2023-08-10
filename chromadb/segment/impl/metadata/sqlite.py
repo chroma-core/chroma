@@ -22,7 +22,7 @@ from chromadb.types import (
     WhereOperator,
 )
 from uuid import UUID
-from pypika import Table, Tables
+from pypika import Table, Tables, Field
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion, Function
@@ -140,8 +140,6 @@ class SqliteMetadataSegment(MetadataReader):
             q = q.where(
                 self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
             )
-            pass
-            # q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
 
         if ids:
             q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
@@ -242,16 +240,16 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
-            # t = Table("embedding_fulltext")
-            # q = (
-            #     self._db.querybuilder()
-            #     .from_(t)
-            #     .where(t.id == ParameterValue(id))
-            #     .delete()
-            # )
-            # sql, params = get_sql(q)
-            # cur.execute(sql, params)
-            pass
+            t = Table("embedding_fulltext")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .where(t.id == ParameterValue(id))
+                .where(Field(t.get_table_name()) == ParameterValue(id))
+                .delete()
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
 
         self._insert_metadata(cur, id, metadata)
 
