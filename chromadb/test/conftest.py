@@ -1,5 +1,6 @@
 from chromadb.config import Settings, System
 from chromadb.api import API
+from chromadb.ingest import Producer
 import chromadb.server.fastapi
 from requests.exceptions import ConnectionError
 import hypothesis
@@ -8,14 +9,26 @@ import os
 import uvicorn
 import time
 import pytest
-from typing import Generator, List, Callable, Optional, Tuple, Any, Dict, Union
+from typing import (
+    Generator,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Callable,
+)
+from typing_extensions import Protocol
 import shutil
 import logging
 import socket
 import multiprocessing
 
+from chromadb.types import SeqId, SubmitEmbeddingRecord
+
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +52,7 @@ def find_free_port() -> int:
 
 
 def _run_server(
-    port: int,
-    is_persistent: bool = False,
-    persist_directory: Optional[str] = None,
-    **additional_settings: Optional[dict[Any, Any]],
+    port: int, is_persistent: bool = False, persist_directory: Optional[str] = None
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -55,7 +65,6 @@ def _run_server(
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
-            **additional_settings,
         )
     else:
         settings = Settings(
@@ -66,7 +75,6 @@ def _run_server(
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             is_persistent=False,
             allow_reset=True,
-            **additional_settings,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -85,11 +93,7 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def _fastapi_fixture(
-    is_persistent: bool = False,
-    client_headers: Optional[dict[str, str]] = None,
-    additional_args: Optional[Dict[str, Union[bool, List[str], str]]] = None,
-) -> Generator[System, None, None]:
+def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
@@ -98,25 +102,16 @@ def _fastapi_fixture(
     ctx = multiprocessing.get_context("spawn")
     args: Tuple[int, bool, Optional[str]] = (port, False, None)
     persist_directory = None
-    if additional_args is None:
-        additional_args = {}
     if is_persistent:
         persist_directory = tempfile.mkdtemp()
-        args = (
-            port,
-            is_persistent,
-            persist_directory,
-        )
-    proc = ctx.Process(
-        target=_run_server, args=args, kwargs=additional_args, daemon=True
-    )
+        args = (port, is_persistent, persist_directory)
+    proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
-        chroma_server_headers=client_headers,
     )
     system = System(settings)
     api = system.instance(API)
@@ -136,19 +131,6 @@ def fastapi() -> Generator[System, None, None]:
 
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
-
-
-def fastapi_persistent_w_middleware() -> Generator[System, None, None]:
-    return _fastapi_fixture(
-        is_persistent=True,
-        additional_args={
-            "chroma_middleware_impl": [
-                "chromadb.server.middlewares.SimpleTokenAuthMiddleware"
-            ],
-            "chroma_server_middleware_token_auth_enabled": True,
-            "chroma_server_middleware_token_auth_token": "test",
-        },
-    )
 
 
 def integration() -> Generator[System, None, None]:
@@ -219,3 +201,59 @@ def api(system: System) -> Generator[API, None, None]:
     system.reset_state()
     api = system.instance(API)
     yield api
+
+
+# Producer / Consumer fixtures #
+
+
+class ProducerFn(Protocol):
+    def __call__(
+        self,
+        producer: Producer,
+        topic: str,
+        embeddings: Iterator[SubmitEmbeddingRecord],
+        n: int,
+    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+        ...
+
+
+def produce_n_single(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids = []
+    for _ in range(n):
+        e = next(embeddings)
+        seq_id = producer.submit_embedding(topic, e)
+        submitted_embeddings.append(e)
+        seq_ids.append(seq_id)
+    return submitted_embeddings, seq_ids
+
+
+def produce_n_batch(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids: Sequence[SeqId] = []
+    for _ in range(n):
+        e = next(embeddings)
+        submitted_embeddings.append(e)
+    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    return submitted_embeddings, seq_ids
+
+
+def produce_fn_fixtures() -> List[ProducerFn]:
+    return [produce_n_single, produce_n_batch]
+
+
+@pytest.fixture(scope="module", params=produce_fn_fixtures())
+def produce_fns(
+    request: pytest.FixtureRequest,
+) -> Generator[ProducerFn, None, None]:
+    yield request.param
