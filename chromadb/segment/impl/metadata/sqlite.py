@@ -604,15 +604,14 @@ def _where_clause(
 def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
-
     if isinstance(value, str):
         cols = [table.string_value]
     # isinstance(True, int) evaluates to True, so we need to check for bools separately
-    elif isinstance(value, bool) and op in ("$eq", "$ne"):
+    elif isinstance(value, bool) and op in ("$eq", "$ne", "$contains"):
         cols = [table.bool_value]
-    elif isinstance(value, int) and op in ("$eq", "$ne"):
+    elif isinstance(value, int) and op in ("$eq", "$ne", "$contains"):
         cols = [table.int_value]
-    elif isinstance(value, float) and op in ("$eq", "$ne"):
+    elif isinstance(value, float) and op in ("$eq", "$ne", "$contains"):
         cols = [table.float_value]
     else:
         cols = [table.int_value, table.float_value]
