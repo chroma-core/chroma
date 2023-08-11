@@ -138,6 +138,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_list_t.string_value,
                 metadata_list_t.int_value,
                 metadata_list_t.float_value,
+                metadata_list_t.bool_value,
             )
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
@@ -198,6 +199,7 @@ class SqliteMetadataSegment(MetadataReader):
                 int_elem,
                 str_elem,
                 float_elem,
+                bool_elem,
             ) = row[3:]
             if string_value is not None:
                 metadata[key] = string_value
@@ -205,6 +207,11 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata[key] = int_value
             elif float_value is not None:
                 metadata[key] = float_value
+            elif bool_value is not None:
+                if bool_value == 1:
+                    metadata[key] = True
+                else:
+                    metadata[key] = False
             elif int_elem is not None:
                 int_list = metadata.get(key, [])
                 int_list.append(int_elem)
@@ -217,11 +224,13 @@ class SqliteMetadataSegment(MetadataReader):
                 float_list = metadata.get(key, [])
                 float_list.append(float_elem)
                 metadata[key] = float_list
-            elif bool_value is not None:
-                if bool_value == 1:
-                    metadata[key] = True
+            elif bool_elem is not None:
+                bool_list = metadata.get(key, [])
+                if bool_elem == 1:
+                    bool_list.append(True)
                 else:
-                    metadata[key] = False
+                    bool_list.append(False)
+                metadata[key] = bool_list
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
@@ -628,7 +637,7 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
 
 
 def _insert_metadata_row(
-    q: QueryBuilder, id: int, key: str, value: Optional[Union[str, int, float]]
+    q: QueryBuilder, id: int, key: str, value: Optional[Union[str, int, float, bool]]
 ) -> QueryBuilder:
     """Add an insert operation for a metadata table to a query builder.
     Works with both embedding_metadata and embedding_metadata_lists"""
