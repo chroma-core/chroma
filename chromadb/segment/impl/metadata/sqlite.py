@@ -471,12 +471,6 @@ class SqliteMetadataSegment(MetadataReader):
                             ParameterValue(search_term),
                         )
                     )
-                    # .where(
-                    #     self.EscapedLike(
-                    #         fulltext_t.get_table_name(),
-                    #         ParameterValue(search_term),
-                    #     )
-                    # )
                 )
                 return embeddings_t.id.isin(sq)
             else:

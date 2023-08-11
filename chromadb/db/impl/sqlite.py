@@ -89,7 +89,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         super().start()
         with self.tx() as cur:
             cur.execute("PRAGMA foreign_keys = ON")
-            # cur.execute("PRAGMA case_sensitive_like = ON")
+            cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
 
     @override
