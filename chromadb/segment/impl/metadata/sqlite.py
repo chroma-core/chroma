@@ -22,7 +22,7 @@ from chromadb.types import (
     WhereOperator,
 )
 from uuid import UUID
-from pypika import Table, Tables, Field
+from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion, Function
@@ -244,8 +244,15 @@ class SqliteMetadataSegment(MetadataReader):
             q = (
                 self._db.querybuilder()
                 .from_(t)
-                .where(t.id == ParameterValue(id))
-                .where(Field(t.get_table_name()) == ParameterValue(id))
+                # .where(
+                #     self.EscapedLike(
+                #         t.id,
+                #         ParameterValue(
+                #             f"%{id}%",
+                #         ),
+                #     )
+                # )
+                .where(t.id.like(ParameterValue(f"%{id}%")))
                 .delete()
             )
             sql, params = get_sql(q)
