@@ -156,10 +156,11 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		/**
 		 * @summary Count
 		 * @param {string} collectionId
+		 * @param {Api.CountEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		count(collectionId: string, options: RequestInit = {}): FetchArgs {
+		count(collectionId: string, request: Api.CountEmbedding, options: RequestInit = {}): FetchArgs {
 			// verify required parameter 'collectionId' is not null or undefined
 			if (collectionId === null || collectionId === undefined) {
 				throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling count.');
@@ -167,7 +168,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			let localVarPath = `/api/v1/collections/{collection_id}/count`
 				.replace('{collection_id}', encodeURIComponent(String(collectionId)));
 			const localVarPathQueryStart = localVarPath.indexOf("?");
-			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
+			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
 			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
 			if (localVarPathQueryStart !== -1) {
@@ -690,11 +691,12 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		/**
 		 * @summary Count
 		 * @param {string} collectionId
+		 * @param {Api.CountEmbedding} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		count(collectionId: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Count200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).count(collectionId, options);
+		count(collectionId: string, request: Api.CountEmbedding, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Count200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).count(collectionId, request, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1087,11 +1089,12 @@ export class ApiApi extends BaseAPI {
 	/**
 	 * @summary Count
 	 * @param {string} collectionId
+	 * @param {Api.CountEmbedding} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public count(collectionId: string, options?: RequestInit) {
-		return ApiApiFp(this.configuration).count(collectionId, options)(this.fetch, this.basePath);
+	public count(collectionId: string,request: Api.CountEmbedding,options?: RequestInit) {
+		return ApiApiFp(this.configuration).count(collectionId, request, options)(this.fetch, this.basePath);
 	}
 
 	/**

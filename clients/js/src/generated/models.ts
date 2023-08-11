@@ -44,7 +44,24 @@ export namespace Api {
 
 	export interface Count200Response {
 	}
+    export interface CountEmbedding{
+		ids?: string[];
+		where?: Api.CountEmbedding.Where;
+		'where_document'?: Api.CountEmbedding.WhereDocument;
+	}
+	/**
+	 * @export
+	 * @namespace CountEmbedding
+	 */
+	export namespace CountEmbedding {
+		export interface Where {
+		}
 
+		export interface WhereDocument {
+		}
+
+	}
+	
 	export interface CreateCollection {
 		name: string;
 		metadata?: Api.CreateCollection.Metadata;

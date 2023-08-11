@@ -263,6 +263,10 @@ export class Collection {
 
     /**
      * Count the number of items in the collection
+     * @param {Object} params - The parameters for the query.
+     * @param {ID | IDs} [params.ids] - Optional IDs of the items to get.
+     * @param {Where} [params.where] - Optional where clause to filter items by.
+     * @param {WhereDocument} [params.whereDocument] - Optional where clause to filter items by.
      * @returns {Promise<number>} - The response from the API.
      *
      * @example
@@ -270,8 +274,25 @@ export class Collection {
      * const response = await collection.count();
      * ```
      */
-    public async count(): Promise<number> {
-        const response = await this.api.count(this.id, this.api.options);
+    public async count({
+        ids,
+        where,
+        whereDocument,
+    }:{
+        ids?: ID | IDs,
+        where?: Where,
+        whereDocument?: WhereDocument
+    } = {}): Promise<number> {
+        let idsArray = undefined;
+        if (ids !== undefined) idsArray = toArray(ids);
+        const response = await this.api.count(
+            this.id,
+            {
+                ids: idsArray,
+                where,
+                where_document: whereDocument,
+            },
+            this.api.options);
         return handleSuccess(response);
     }
 
