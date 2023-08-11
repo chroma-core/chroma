@@ -8,12 +8,10 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 
-from starlette.middleware.base import BaseHTTPMiddleware
-
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
-from chromadb.config import Settings, get_class
+from chromadb.config import Settings
 import chromadb.server
 import chromadb.api
 from chromadb.errors import (
@@ -112,13 +110,10 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
 
-        if (
-            settings.chroma_server_middlewares is not None
-            and len(settings.chroma_server_middlewares) > 0
-        ):
-            for middleware in settings.chroma_server_middlewares:
-                _cls = get_class(middleware, BaseHTTPMiddleware)
-                self._app.add_middleware(_cls, settings=settings)
+        if settings.chroma_server_auth_provider is not None:
+            self._app.add_middleware(
+                chromadb.config.ChromaAuthMiddleware, settings=settings
+            )
 
         self.router = ChromaAPIRouter()
 

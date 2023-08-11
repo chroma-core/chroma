@@ -50,6 +50,8 @@ class FastAPI(API):
         self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
+        if system.auth_provider is not None:
+            system.auth_provider.authenticate(self._session)
 
     @override
     def heartbeat(self) -> int:

@@ -1,12 +1,21 @@
-from pydantic import BaseSettings
-from typing import Optional, List, Any, Dict, TypeVar, Set, cast, Iterable, Type
-from typing_extensions import Literal
-from abc import ABC
+import base64
 import importlib
-import logging
-from overrides import EnforceOverrides, override
-from graphlib import TopologicalSorter
 import inspect
+import logging
+from abc import ABC, abstractmethod
+from graphlib import TopologicalSorter
+from typing import Optional, List, Any, Dict, Set, Iterable
+from typing import Type, TypeVar, cast
+
+import requests
+from overrides import override
+from overrides import overrides, EnforceOverrides
+from pydantic import BaseSettings, SecretStr
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
+from starlette.types import ASGIApp
+from typing_extensions import Literal
 
 # The thin client will have a flag to control which implementations to use
 is_thin_client = False
@@ -57,6 +66,24 @@ _abstract_type_keys: Dict[str, str] = {
 }
 
 
+class ClientAuthProvider(ABC, EnforceOverrides):
+    def __init__(self, settings: "Settings") -> None:
+        self._settings = settings
+
+    @abstractmethod
+    def authenticate(self, session: requests.Session) -> None:
+        pass
+
+
+class ServerAuthProvider(ABC, EnforceOverrides):
+    def __init__(self, settings: "Settings") -> None:
+        self._settings = settings
+
+    @abstractmethod
+    def authenticate(self, request: Request) -> Response | None:
+        pass
+
+
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
@@ -89,8 +116,10 @@ class Settings(BaseSettings):  # type: ignore
     # eg ["chromadb.api.fastapi.middlewares.auth.AuthMiddleware"]
     chroma_server_middlewares: List[str] = []
 
-    chroma_server_middleware_token_auth_enabled: bool = False
-    chroma_server_middleware_token_auth_token: Optional[str] = None
+    chroma_server_auth_provider: Optional[str] = None
+    chroma_server_auth_provider_config: Optional[Dict[str, Any]] = None
+    chroma_client_auth_provider: Optional[str] = None
+    chroma_client_auth_provider_config: Optional[Dict[str, Any]] = None
     anonymized_telemetry: bool = True
 
     allow_reset: bool = False
@@ -108,7 +137,7 @@ class Settings(BaseSettings):  # type: ignore
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
         # Error on legacy config values
-        if val in _legacy_config_values:
+        if isinstance(val, str) and val in _legacy_config_values:
             raise ValueError(LEGACY_ERROR)
         return val
 
@@ -160,7 +189,7 @@ class Component(ABC, EnforceOverrides):
 
 class System(Component):
     settings: Settings
-
+    auth_provider: Optional["ClientAuthProvider"]
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
@@ -171,6 +200,11 @@ class System(Component):
                     "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
             see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
                 )
+        if settings.chroma_client_auth_provider is not None:
+            print("provider: ", settings.chroma_client_auth_provider)
+            self.auth_provider = get_class(
+                settings.chroma_client_auth_provider, ClientAuthProvider
+            )(settings)
 
         # Validate settings don't contain any legacy config values
         for key in _legacy_config_keys:
@@ -230,6 +264,69 @@ class System(Component):
             raise ValueError("Resetting is not allowed by this configuration")
         for component in reversed(list(self.components())):
             component.reset_state()
+
+
+class BasicAuthClientProvider(ClientAuthProvider):
+    def __init__(self, settings: "Settings") -> None:
+        super().__init__(settings)
+        self._settings = settings
+        self._settings.require("chroma_client_auth_provider_config")
+        if self._settings.chroma_client_auth_provider_config:
+            self._basic_auth_token = SecretStr(
+                base64.b64encode(
+                    f"{self._settings.chroma_client_auth_provider_config['username']}:"
+                    f"{self._settings.chroma_client_auth_provider_config['password']}".encode(
+                        "utf-8"
+                    )
+                ).decode("utf-8")
+            )
+
+    @overrides
+    def authenticate(self, session: requests.Session) -> None:
+        session.headers.update({"Authorization": f"Basic {self._basic_auth_token}"})
+
+
+class ChromaAuthMiddleware(BaseHTTPMiddleware):  # type: ignore
+    def __init__(self, app: ASGIApp, settings: "Settings") -> None:
+        super().__init__(app)
+        self._settings = settings
+        self._settings.require("chroma_server_auth_provider")
+        if settings.chroma_server_auth_provider:
+            _cls = get_class(settings.chroma_server_auth_provider, ServerAuthProvider)
+            self._auth_provider = _cls(settings)
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        response = self._auth_provider.authenticate(request)
+        if response is not None:
+            return response
+        return await call_next(request)
+
+
+class BasicAuthServerProvider(ServerAuthProvider):
+    def __init__(self, settings: "Settings") -> None:
+        super().__init__(settings)
+        self._settings = settings
+        self._settings.require("chroma_server_auth_provider_config")
+        if self._settings.chroma_server_auth_provider_config:
+            # encode the username and password base64
+            self._basic_auth_token = SecretStr(
+                base64.b64encode(
+                    f"{self._settings.chroma_server_auth_provider_config['username']}:"
+                    f"{self._settings.chroma_server_auth_provider_config['password']}".encode(
+                        "utf-8"
+                    )
+                ).decode("utf-8")
+            )
+
+    @overrides
+    def authenticate(self, request: Request) -> Response | None:
+        auth_header = request.headers.get("Authorization", "").split()
+        # Check if the header exists and the token is correct
+        if len(auth_header) != 2 or auth_header[1] != self._basic_auth_token:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return None
 
 
 C = TypeVar("C")
