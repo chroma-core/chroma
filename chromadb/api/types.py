@@ -15,7 +15,14 @@ from chromadb.types import (
 )
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "WhereOperator",
+    "LogicalOperator",
+]
 
 ID = str
 IDs = List[ID]

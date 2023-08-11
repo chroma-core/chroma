@@ -110,11 +110,17 @@ safe_floats = st.floats(
     max_value=1e6,
 )  # TODO: handle infinity and NAN
 
-safe_values: List[SearchStrategy[Union[int, float, str, bool]]] = [
+safe_values: List[
+    SearchStrategy[Union[int, float, str, bool, List[Union[int, float, str, bool]]]]
+] = [
     safe_text,
     safe_integers,
     safe_floats,
     st.booleans(),
+    st.lists(st.booleans()),
+    st.lists(safe_text),
+    st.lists(safe_integers),
+    st.lists(safe_floats),
 ]
 
 
@@ -308,12 +314,15 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     if collection.known_metadata_keys:
         for key in collection.known_metadata_keys.keys():
             if key in metadata:
-                del metadata[key]
+                del metadata[key]  # type: ignore
         # Finally, add in some of the known keys for the collection
-        sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
-            k: st.just(v) for k, v in collection.known_metadata_keys.items()
-        }
-        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))
+        sampling_dict: Dict[
+            str,
+            st.SearchStrategy[
+                Union[str, int, float, bool, List[Union[str, int, float, bool]]]
+            ],
+        ] = {k: st.just(v) for k, v in collection.known_metadata_keys.items()}
+        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
     return metadata
 
 
@@ -451,21 +460,28 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
 @st.composite
 def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
-
     known_keys = sorted(collection.known_metadata_keys.keys())
 
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
-    if not isinstance(value, str) and not isinstance(value, bool):
-        legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
-    if isinstance(value, float):
-        # Add or subtract a small number to avoid floating point rounding errors
-        value = value + draw(st.sampled_from([1e-6, -1e-6]))
+    legal_ops: List[Optional[str]] = []
+    if isinstance(value, list):
+        legal_ops.append("$contains")
+        value = draw(st.sampled_from(value) if value else st.nothing())
+    else:
+        legal_ops.extend([None, "$eq", "$ne"])
+
+        if not isinstance(value, bool) and not isinstance(value, str):
+            legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
+        if isinstance(value, float):
+            # Add or subtract a small number to avoid floating point rounding errors
+            value = value + draw(st.sampled_from([1e-6, -1e-6]))
 
     op: types.WhereOperator = draw(st.sampled_from(legal_ops))
 
+    # If value was a list, the where clause should be for a single element
+    assert not isinstance(value, list)
     if op is None:
         return {key: value}
     else:

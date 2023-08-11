@@ -54,6 +54,9 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         return key in metadata and metadata_key == val
     elif op == "$ne":
         return key in metadata and metadata_key != val
+    elif op == "$contains":
+        assert isinstance(metadata_key, list)
+        return key in metadata and val in metadata_key
 
     # The following conditions only make sense for numeric values
     assert isinstance(metadata_key, int) or isinstance(metadata_key, float)
