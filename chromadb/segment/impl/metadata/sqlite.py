@@ -107,7 +107,7 @@ class SqliteMetadataSegment(MetadataReader):
         """Query for embedding metadata."""
 
         embeddings_t, metadata_t, fulltext_t = Tables(
-            "embeddings", "embedding_metadata", "embedding_fulltext"
+            "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
 
         q = (
@@ -240,7 +240,7 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
-            t = Table("embedding_fulltext")
+            t = Table("embedding_fulltext_search")
             q = (
                 self._db.querybuilder()
                 .from_(t)
@@ -308,7 +308,7 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
-            t = Table("embedding_fulltext")
+            t = Table("embedding_fulltext_search")
             q = (
                 self._db.querybuilder()
                 .into(t)
@@ -471,12 +471,12 @@ class SqliteMetadataSegment(MetadataReader):
                             ParameterValue(search_term),
                         )
                     )
-                    .where(
-                        self.EscapedLike(
-                            fulltext_t.get_table_name(),
-                            ParameterValue(search_term),
-                        )
-                    )
+                    # .where(
+                    #     self.EscapedLike(
+                    #         fulltext_t.get_table_name(),
+                    #         ParameterValue(search_term),
+                    #     )
+                    # )
                 )
                 return embeddings_t.id.isin(sq)
             else:
