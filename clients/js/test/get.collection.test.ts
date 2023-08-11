@@ -29,7 +29,7 @@ test("wrong code returns an error", async () => {
   const results = await collection.get({
     where: {
       //@ts-ignore supposed to fail
-      test: { $contains: "hello" },
+      test: { $in: "hello" },
     }
   });
   expect(results.error).toBeDefined();

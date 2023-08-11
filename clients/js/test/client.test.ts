@@ -189,7 +189,7 @@ test('wrong code returns an error', async () => {
     const metadatas = [{ test: 'test1' }, { test: 'test2' }, { test: 'test3' }]
     await collection.add({ ids, embeddings, metadatas })
     // @ts-ignore - supposed to fail
-    const results = await collection.get({ where: { "test": { "$contains": "hello" } } });
+    const results = await collection.get({ where: { "test": { "$in": "hello" } } });
     expect(results.error).toBeDefined()
-    expect(results.error).toBe("ValueError('Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, got $contains')")
+    expect(results.error).toBe("ValueError('Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $contains, got $in')")
 })
