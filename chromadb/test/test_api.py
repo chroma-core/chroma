@@ -539,6 +539,29 @@ def test_metadata_update_get_int_float(api):
     assert items["metadatas"][0]["float_value"] == 2.002
 
 
+def test_metadata_list_order(api):
+    api.reset()
+    collection = api.create_collection("test_list_order")
+    collection.add(
+        ids=["id1", "id2"],
+        embeddings=[[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+        documents=["doc1", "doc2"],
+        metadatas=[
+            {
+                "int_list": [x for x in range(100)],
+                "int_list_reverse": [x for x in range(100, 0, -1)],
+            },
+            {
+                "string_list": [str(x) for x in range(100)],
+            },
+        ],
+    )
+    items = collection.get()
+    assert items["metadatas"][0]["int_list"] == [x for x in range(100)]
+    assert items["metadatas"][0]["int_list_reverse"] == [x for x in range(100, 0, -1)]
+    assert items["metadatas"][1]["string_list"] == [str(x) for x in range(100)]
+
+
 def test_metadata_update_list(api):
     api.reset()
     collection = api.create_collection("test_update_list")

@@ -135,6 +135,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.int_value,
                 metadata_t.float_value,
                 metadata_t.bool_value,
+                metadata_list_t.list_index,
                 metadata_list_t.string_value,
                 metadata_list_t.int_value,
                 metadata_list_t.float_value,
@@ -196,6 +197,7 @@ class SqliteMetadataSegment(MetadataReader):
                 int_value,
                 float_value,
                 bool_value,
+                list_index,
                 int_elem,
                 str_elem,
                 float_elem,
@@ -214,22 +216,22 @@ class SqliteMetadataSegment(MetadataReader):
                     metadata[key] = False
             elif int_elem is not None:
                 int_list = metadata.get(key, [])
-                int_list.append(int_elem)
+                int_list.insert(list_index, int_elem)
                 metadata[key] = int_list
             elif str_elem is not None:
                 str_list = metadata.get(key, [])
-                str_list.append(str_elem)
+                str_list.insert(list_index, str_elem)
                 metadata[key] = str_list
             elif float_elem is not None:
                 float_list = metadata.get(key, [])
-                float_list.append(float_elem)
+                float_list.insert(list_index, float_elem)
                 metadata[key] = float_list
             elif bool_elem is not None:
                 bool_list = metadata.get(key, [])
                 if bool_elem == 1:
-                    bool_list.append(True)
+                    bool_list.insert(list_index, True)
                 else:
-                    bool_list.append(False)
+                    bool_list.insert(list_index, False)
                 metadata[key] = bool_list
 
         return MetadataEmbeddingRecord(
@@ -335,6 +337,7 @@ class SqliteMetadataSegment(MetadataReader):
             .columns(
                 list_t.id,
                 list_t.key,
+                list_t.list_index,
                 list_t.string_value,
                 list_t.int_value,
                 list_t.float_value,
@@ -345,8 +348,8 @@ class SqliteMetadataSegment(MetadataReader):
         for key, value in metadata.items():
             if isinstance(value, list):
                 q = _insert_metadata_row(q, id, key, None)
-                for val in value:
-                    q_list = _insert_metadata_row(q_list, id, key, val)
+                for index, val in enumerate(value):
+                    q_list = _insert_metadata_list_row(q_list, id, key, index, val)
 
             else:
                 q = _insert_metadata_row(q, id, key, value)
@@ -638,8 +641,7 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
 def _insert_metadata_row(
     q: QueryBuilder, id: int, key: str, value: Optional[Union[str, int, float, bool]]
 ) -> QueryBuilder:
-    """Add an insert operation for a metadata table to a query builder.
-    Works with both embedding_metadata and embedding_metadata_lists"""
+    """Add an insert operation for a metadata row to a query builder."""
     if value is None:
         q = q.insert(
             ParameterValue(id),
@@ -681,6 +683,59 @@ def _insert_metadata_row(
         q = q.insert(
             ParameterValue(id),
             ParameterValue(key),
+            None,
+            None,
+            ParameterValue(value),
+            None,
+        )
+
+    return q
+
+
+def _insert_metadata_list_row(
+    q: QueryBuilder,
+    id: int,
+    key: str,
+    list_index: int,
+    value: Union[str, int, float, bool],
+) -> QueryBuilder:
+    """Add an insert operation for a metadata list row to a query builder."""
+    if isinstance(value, str):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            ParameterValue(list_index),
+            ParameterValue(value),
+            None,
+            None,
+            None,
+        )
+    # isinstance(True, int) evaluates to True, so we need to check for bools separately
+    elif isinstance(value, bool):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            ParameterValue(list_index),
+            None,
+            None,
+            None,
+            ParameterValue(value),
+        )
+    elif isinstance(value, int):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            ParameterValue(list_index),
+            None,
+            ParameterValue(value),
+            None,
+            None,
+        )
+    elif isinstance(value, float):
+        q = q.insert(
+            ParameterValue(id),
+            ParameterValue(key),
+            ParameterValue(list_index),
             None,
             None,
             ParameterValue(value),

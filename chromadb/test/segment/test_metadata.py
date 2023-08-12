@@ -8,11 +8,9 @@ from typing import (
     Callable,
     Iterator,
     Dict,
-    Mapping,
     Optional,
     Union,
     Sequence,
-    Any,
 )
 from chromadb.config import System, Settings
 from chromadb.types import (
@@ -170,19 +168,6 @@ def test_insert_and_count(
     assert segment.count() == 6
 
 
-# Metadatas may have lists returned in different orders, convert them to sets to compare
-def _metadata_lists_to_sets(
-    metadata: Optional[Mapping[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    if metadata is None:
-        return None
-    metadata_with_sets = dict(metadata)
-    for k, v in metadata.items():
-        if isinstance(v, list):
-            metadata_with_sets[k] = set(v)
-    return metadata_with_sets
-
-
 def assert_equiv_records(
     expected: Sequence[SubmitEmbeddingRecord], actual: Sequence[MetadataEmbeddingRecord]
 ) -> None:
@@ -191,9 +176,7 @@ def assert_equiv_records(
     sorted_actual = sorted(actual, key=lambda r: r["id"])
     for e, a in zip(sorted_expected, sorted_actual):
         assert e["id"] == a["id"]
-        assert _metadata_lists_to_sets(e["metadata"]) == _metadata_lists_to_sets(
-            a["metadata"]
-        )
+        assert e["metadata"] == a["metadata"]
 
 
 def test_get(
