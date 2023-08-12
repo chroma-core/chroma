@@ -25,7 +25,7 @@ from uuid import UUID
 from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
-from pypika.terms import Criterion, Function
+from pypika.terms import Criterion
 from itertools import islice, groupby
 from functools import reduce
 import sqlite3
@@ -239,24 +239,24 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        if "chroma:document" in metadata:
-            t = Table("embedding_fulltext_search")
-            q = (
-                self._db.querybuilder()
-                .from_(t)
-                # .where(
-                #     self.EscapedLike(
-                #         t.id,
-                #         ParameterValue(
-                #             f"%{id}%",
-                #         ),
-                #     )
-                # )
-                .where(t.id.like(ParameterValue(f"%{id}%")))
-                .delete()
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
+        # if "chroma:document" in metadata:
+        #     t = Table("embedding_fulltext_search")
+        #     q = (
+        #         self._db.querybuilder()
+        #         .from_(t)
+        #         # .where(
+        #         #     self.EscapedLike(
+        #         #         t.id,
+        #         #         ParameterValue(
+        #         #             f"%{id}%",
+        #         #         ),
+        #         #     )
+        #         # )
+        #         .where(t.id.like(ParameterValue(f"%{id}%")))
+        #         .delete()
+        #     )
+        #     sql, params = get_sql(q)
+        #     cur.execute(sql, params)
 
         self._insert_metadata(cur, id, metadata)
 
@@ -316,14 +316,40 @@ class SqliteMetadataSegment(MetadataReader):
 
         if "chroma:document" in metadata:
             t = Table("embedding_fulltext_search")
-            q = (
-                self._db.querybuilder()
-                .into(t)
-                .columns(t.id, t.string_value)
-                .insert(ParameterValue(id), ParameterValue(metadata["chroma:document"]))
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
+
+            # q = (
+            #     self._db.querybuilder()
+            #     .into(t)
+            #     .columns(t.id, t.string_value)
+            #     .insert(ParameterValue(id), ParameterValue(metadata["chroma:document"]))
+            # )
+            # sql, params = get_sql(q)
+            # cur.execute(sql, params)
+            def insert_into_fulltext_search() -> None:
+                q = (
+                    self._db.querybuilder()
+                    .into(t)
+                    .columns(t.rowid, t.string_value)
+                    .insert(
+                        ParameterValue(id),
+                        ParameterValue(metadata["chroma:document"]),
+                    )
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+
+            try:
+                insert_into_fulltext_search()
+            except sqlite3.IntegrityError:
+                q = (
+                    self._db.querybuilder()
+                    .from_(t)
+                    .where(t.rowid == ParameterValue(id))
+                    .delete()
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+                insert_into_fulltext_search()
 
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
@@ -432,18 +458,6 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
-    class EscapedLike(Function):  # type: ignore
-        def __init__(
-            self, column_name: str, search_term: ParameterValue, escape_char: str = "\\"
-        ):
-            self.column_name = column_name
-            self.search_term = search_term
-            self.escape_char = escape_char
-            super().__init__("LIKE", column_name, search_term)
-
-        def get_function_sql(self, **kwargs: Any) -> str:
-            return f"{self.column_name} LIKE {self.search_term.get_sql()} ESCAPE '{self.escape_char}'"
-
     def _where_doc_criterion(
         self,
         q: QueryBuilder,
@@ -466,34 +480,18 @@ class SqliteMetadataSegment(MetadataReader):
                 return reduce(lambda x, y: x | y, criteria)
             elif k == "$contains":
                 v = cast(str, v)
-                search_term = f"%{_escape_characters(v)}%"
+                search_term = f"%{v}%"
 
                 sq = (
                     self._db.querybuilder()
                     .from_(fulltext_t)
-                    .select(fulltext_t.id)
-                    .where(
-                        self.EscapedLike(
-                            fulltext_t.string_value,
-                            ParameterValue(search_term),
-                        )
-                    )
+                    .select(fulltext_t.rowid)
+                    .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
-
-
-def _escape_characters(string: str) -> str:
-    """Escape % and _ characters in a string with a backslash as they are reserved in
-    LIKE clauses"""
-    escaped_string = ""
-    for char in string:
-        if char == "%" or char == "_":
-            escaped_string += "\\"
-        escaped_string += char
-    return escaped_string
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
