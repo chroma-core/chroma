@@ -349,9 +349,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
             self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx"
         ):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
-            self._download(
-                self.MODEL_DOWNLOAD_URL, self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME
-            )
+            if not os.path.exists(self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME):
+                self._download(
+                    self.MODEL_DOWNLOAD_URL, self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME
+                )
             with tarfile.open(
                 self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME, "r:gz"
             ) as tar:
