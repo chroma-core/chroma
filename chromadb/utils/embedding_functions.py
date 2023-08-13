@@ -326,14 +326,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
     def _init_model_and_tokenizer(self) -> None:
         if self.model is None and self.tokenizer is None:
             self.tokenizer = self.Tokenizer.from_file(
-                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "tokenizer.json")
+                os.path.join(
+                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+                )
             )
             # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
             self.model = self.ort.InferenceSession(
-                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx")
+                os.path.join(
+                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
+                )
             )
 
     def __call__(self, texts: Documents) -> Embeddings:
@@ -346,7 +350,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
     def _download_model_if_not_exists(self) -> None:
         # Model is not downloaded yet
         if not os.path.exists(
-            self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx"
+            os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx")
         ):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME):
