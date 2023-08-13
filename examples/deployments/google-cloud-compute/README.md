@@ -19,6 +19,27 @@ terraform init
 ```
 
 ### 3. Deploy your application
-```angular2html
-terraform apply -var="project_id=<your_project_id> -auto-approve"
+```bash
+export TF_VAR_project_id=<your_project_id> #take note of this as it must be present in all of the subsequent steps
+export TF_VAR_chroma_release=0.4.5 #set the chroma release to deploy
+terraform apply -auto-approve
+```
+
+### 4. Check your public IP and that Chroma is running
+
+Get the public IP of your instance
+
+```bash
+terraform output instance_public_ip
+```
+
+Check that chroma is running
+```bash
+export instance_public_ip=$(terraform output instance_public_ip | sed 's/"//g')
+curl -v http://$instance_public_ip:8000/api/v1/heartbeat
+```
+
+### 5. Destroy your application
+```bash
+terraform destroy -auto-approve
 ```

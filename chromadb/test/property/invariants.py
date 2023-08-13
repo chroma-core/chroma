@@ -68,7 +68,9 @@ def count(collection: Collection, record_set: RecordSet) -> None:
 def _field_matches(
     collection: Collection,
     normalized_record_set: NormalizedRecordSet,
-    field_name: Union[Literal["documents"], Literal["metadatas"]],
+    field_name: Union[
+        Literal["documents"], Literal["metadatas"], Literal["embeddings"]
+    ],
 ) -> None:
     """
     The actual embedding field is equal to the expected field
@@ -79,6 +81,11 @@ def _field_matches(
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
+
+    if len(normalized_record_set["ids"]) == 0:
+        assert isinstance(actual_field, list) and len(actual_field) == 0
+        return
+
     # This assert should never happen, if we include metadatas/documents it will be
     # [None, None..] if there is no metadata. It will not be just None.
     assert actual_field is not None
@@ -95,7 +102,10 @@ def _field_matches(
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
         expected_field = [None] * len(normalized_record_set["ids"])  # type: ignore
-    assert field_values == expected_field
+    if field_name == "embeddings":
+        assert np.allclose(np.array(field_values), np.array(expected_field))
+    else:
+        assert field_values == expected_field
 
 
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
@@ -119,6 +129,12 @@ def documents_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding documents is equal to the expected documents"""
     normalized_record_set = wrap_all(record_set)
     _field_matches(collection, normalized_record_set, "documents")
+
+
+def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
+    """The actual embedding documents is equal to the expected documents"""
+    normalized_record_set = wrap_all(record_set)
+    _field_matches(collection, normalized_record_set, "embeddings")
 
 
 def no_duplicates(collection: Collection) -> None:

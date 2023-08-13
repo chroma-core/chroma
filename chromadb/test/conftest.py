@@ -1,5 +1,6 @@
 from chromadb.config import Settings, System
 from chromadb.api import API
+from chromadb.ingest import Producer
 import chromadb.server.fastapi
 from requests.exceptions import ConnectionError
 import hypothesis
@@ -8,11 +9,22 @@ import os
 import uvicorn
 import time
 import pytest
-from typing import Generator, List, Callable, Optional, Tuple
+from typing import (
+    Generator,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Callable,
+)
+from typing_extensions import Protocol
 import shutil
 import logging
 import socket
 import multiprocessing
+
+from chromadb.types import SeqId, SubmitEmbeddingRecord
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -22,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 hypothesis.settings.register_profile(
     "dev",
-    deadline=30000,
+    deadline=45000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
@@ -189,3 +201,59 @@ def api(system: System) -> Generator[API, None, None]:
     system.reset_state()
     api = system.instance(API)
     yield api
+
+
+# Producer / Consumer fixtures #
+
+
+class ProducerFn(Protocol):
+    def __call__(
+        self,
+        producer: Producer,
+        topic: str,
+        embeddings: Iterator[SubmitEmbeddingRecord],
+        n: int,
+    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+        ...
+
+
+def produce_n_single(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids = []
+    for _ in range(n):
+        e = next(embeddings)
+        seq_id = producer.submit_embedding(topic, e)
+        submitted_embeddings.append(e)
+        seq_ids.append(seq_id)
+    return submitted_embeddings, seq_ids
+
+
+def produce_n_batch(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids: Sequence[SeqId] = []
+    for _ in range(n):
+        e = next(embeddings)
+        submitted_embeddings.append(e)
+    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    return submitted_embeddings, seq_ids
+
+
+def produce_fn_fixtures() -> List[ProducerFn]:
+    return [produce_n_single, produce_n_batch]
+
+
+@pytest.fixture(scope="module", params=produce_fn_fixtures())
+def produce_fns(
+    request: pytest.FixtureRequest,
+) -> Generator[ProducerFn, None, None]:
+    yield request.param

@@ -6,12 +6,45 @@ from chromadb.telemetry.events import ClientStartEvent
 from chromadb.telemetry import Telemetry
 from chromadb.config import Settings, System
 from chromadb.api import API
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import (
+    CollectionMetadata,
+    Documents,
+    EmbeddingFunction,
+    Embeddings,
+    IDs,
+    Include,
+    Metadata,
+    Where,
+    QueryResult,
+    GetResult,
+    WhereDocument,
+    UpdateCollectionMetadata,
+)
+
+# Re-export types from chromadb.types
+__all__ = [
+    "Collection",
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "Documents",
+    "IDs",
+    "Embeddings",
+    "EmbeddingFunction",
+    "Include",
+    "CollectionMetadata",
+    "UpdateCollectionMetadata",
+    "QueryResult",
+    "GetResult",
+]
+
 
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.3"
+__version__ = "0.4.5"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:

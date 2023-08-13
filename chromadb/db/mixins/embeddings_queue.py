@@ -16,7 +16,7 @@ from chromadb.types import (
 from chromadb.config import System
 from overrides import override
 from collections import defaultdict
-from typing import Tuple, Optional, Dict, Set, cast
+from typing import Sequence, Tuple, Optional, Dict, Set, cast
 from uuid import UUID
 from pypika import Table, functions
 import uuid
@@ -103,22 +103,32 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if not self._running:
             raise RuntimeError("Component not running")
 
-        if embedding["embedding"]:
-            encoding_type = cast(ScalarEncoding, embedding["encoding"])
-            encoding = encoding_type.value
-            embedding_bytes = encode_vector(embedding["embedding"], encoding_type)
+        return self.submit_embeddings(topic_name, [embedding])[0]
 
-        else:
-            embedding_bytes = None
-            encoding = None
-        metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
+    @override
+    def submit_embeddings(
+        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+    ) -> Sequence[SeqId]:
+        if not self._running:
+            raise RuntimeError("Component not running")
+
+        if len(embeddings) == 0:
+            return []
 
         t = Table("embeddings_queue")
         insert = (
             self.querybuilder()
             .into(t)
             .columns(t.operation, t.topic, t.id, t.vector, t.encoding, t.metadata)
-            .insert(
+        )
+        id_to_idx: Dict[str, int] = {}
+        for embedding in embeddings:
+            (
+                embedding_bytes,
+                encoding,
+                metadata,
+            ) = self._prepare_vector_encoding_metadata(embedding)
+            insert = insert.insert(
                 ParameterValue(_operation_codes[embedding["operation"]]),
                 ParameterValue(topic_name),
                 ParameterValue(embedding["id"]),
@@ -126,21 +136,34 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 ParameterValue(encoding),
                 ParameterValue(metadata),
             )
-        )
+            id_to_idx[embedding["id"]] = len(id_to_idx)
         with self.tx() as cur:
             sql, params = get_sql(insert, self.parameter_format())
-            sql = f"{sql} RETURNING seq_id"  # Pypika doesn't support RETURNING
-            seq_id = int(cur.execute(sql, params).fetchone()[0])
-            embedding_record = EmbeddingRecord(
-                id=embedding["id"],
-                seq_id=seq_id,
-                embedding=embedding["embedding"],
-                encoding=embedding["encoding"],
-                metadata=embedding["metadata"],
-                operation=embedding["operation"],
-            )
-            self._notify_all(topic_name, embedding_record)
-            return seq_id
+            # The returning clause does not guarantee order, so we need to do reorder
+            # the results. https://www.sqlite.org/lang_returning.html
+            sql = f"{sql} RETURNING seq_id, id"  # Pypika doesn't support RETURNING
+            results = cur.execute(sql, params).fetchall()
+            # Reorder the results
+            seq_ids = [cast(SeqId, None)] * len(
+                results
+            )  # Lie to mypy: https://stackoverflow.com/questions/76694215/python-type-casting-when-preallocating-list
+            embedding_records = []
+            for seq_id, id in results:
+                seq_ids[id_to_idx[id]] = seq_id
+                submit_embedding_record = embeddings[id_to_idx[id]]
+                # We allow notifying consumers out of order relative to one call to
+                # submit_embeddings so we do not reorder the records before submitting them
+                embedding_record = EmbeddingRecord(
+                    id=id,
+                    seq_id=seq_id,
+                    embedding=submit_embedding_record["embedding"],
+                    encoding=submit_embedding_record["encoding"],
+                    metadata=submit_embedding_record["metadata"],
+                    operation=submit_embedding_record["operation"],
+                )
+                embedding_records.append(embedding_record)
+            self._notify_all(topic_name, embedding_records)
+            return seq_ids
 
     @override
     def subscribe(
@@ -185,6 +208,19 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def max_seqid(self) -> SeqId:
         return 2**63 - 1
 
+    def _prepare_vector_encoding_metadata(
+        self, embedding: SubmitEmbeddingRecord
+    ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        if embedding["embedding"]:
+            encoding_type = cast(ScalarEncoding, embedding["encoding"])
+            encoding = encoding_type.value
+            embedding_bytes = encode_vector(embedding["embedding"], encoding_type)
+        else:
+            embedding_bytes = None
+            encoding = None
+        metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
+        return embedding_bytes, encoding, metadata
+
     def _backfill(self, subscription: Subscription) -> None:
         """Backfill the given subscription with any currently matching records in the
         DB"""
@@ -211,14 +247,16 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     vector = None
                 self._notify_one(
                     subscription,
-                    EmbeddingRecord(
-                        seq_id=row[0],
-                        operation=_operation_codes_inv[row[1]],
-                        id=row[2],
-                        embedding=vector,
-                        encoding=encoding,
-                        metadata=json.loads(row[5]) if row[5] else None,
-                    ),
+                    [
+                        EmbeddingRecord(
+                            seq_id=row[0],
+                            operation=_operation_codes_inv[row[1]],
+                            id=row[2],
+                            embedding=vector,
+                            encoding=encoding,
+                            metadata=json.loads(row[5]) if row[5] else None,
+                        )
+                    ],
                 )
 
     def _validate_range(
@@ -242,29 +280,37 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(q.get_sql())
             return int(cur.fetchone()[0]) + 1
 
-    def _notify_all(self, topic: str, embedding: EmbeddingRecord) -> None:
+    def _notify_all(self, topic: str, embeddings: Sequence[EmbeddingRecord]) -> None:
         """Send a notification to each subscriber of the given topic."""
         if self._running:
             for sub in self._subscriptions[topic]:
-                self._notify_one(sub, embedding)
+                self._notify_one(sub, embeddings)
 
-    def _notify_one(self, sub: Subscription, embedding: EmbeddingRecord) -> None:
+    def _notify_one(
+        self, sub: Subscription, embeddings: Sequence[EmbeddingRecord]
+    ) -> None:
         """Send a notification to a single subscriber."""
-        if embedding["seq_id"] > sub.end:
-            self.unsubscribe(sub.id)
-            return
-
-        if embedding["seq_id"] <= sub.start:
-            return
+        # Filter out any embeddings that are not in the subscription range
+        should_unsubscribe = False
+        filtered_embeddings = []
+        for embedding in embeddings:
+            if embedding["seq_id"] <= sub.start:
+                continue
+            if embedding["seq_id"] > sub.end:
+                should_unsubscribe = True
+                break
+            filtered_embeddings.append(embedding)
 
         # Log errors instead of throwing them to preserve async semantics
         # for consistency between local and distributed configurations
         try:
-            sub.callback([embedding])
+            if len(filtered_embeddings) > 0:
+                sub.callback(filtered_embeddings)
+            if should_unsubscribe:
+                self.unsubscribe(sub.id)
         except BaseException as e:
-            id = embedding.get("id", embedding.get("delete_id"))
             logger.error(
                 f"Exception occurred invoking consumer for subscription {sub.id}"
-                + f"to topic {sub.topic_name} for embedding id {id} ",
+                + f"to topic {sub.topic_name}",
                 e,
             )
