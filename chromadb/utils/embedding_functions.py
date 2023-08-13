@@ -345,9 +345,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
 
     def _download_model_if_not_exists(self) -> None:
         # Model is not downloaded yet
-        model_path = os.paths.join(
-            self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
-        )
+        model_path = self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx"
         if not os.path.exists(model_path):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             self._download(
@@ -413,7 +411,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, texts: Documents) -> Embeddings:
-
         embeddings = []
         for text in texts:
             response = self._session.post(
