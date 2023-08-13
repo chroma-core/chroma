@@ -233,6 +233,9 @@ class SqliteMetadataSegment(MetadataReader):
                 else:
                     bool_list.insert(list_index, False)
                 metadata[key] = bool_list
+            else:
+                # if no value, must be an empty list
+                metadata[key] = []
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
