@@ -350,10 +350,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
             self._download(
                 self.MODEL_DOWNLOAD_URL, self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME
             )
-            with tarfile.open(
-                self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME, "r:gz"
-            ) as tar:
-                tar.extractall(self.DOWNLOAD_PATH)
+        with tarfile.open(self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME, "r:gz") as tar:
+            tar.extractall(self.DOWNLOAD_PATH)
 
 
 def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction]:
@@ -410,7 +408,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, texts: Documents) -> Embeddings:
-
         embeddings = []
         for text in texts:
             response = self._session.post(
