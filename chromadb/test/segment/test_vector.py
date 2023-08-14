@@ -25,6 +25,7 @@ from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
 
+from chromadb.test.property.strategies import test_hnsw_config
 from pytest import FixtureRequest
 from itertools import count
 import tempfile
@@ -112,7 +113,7 @@ def create_random_segment_definition() -> Segment:
         scope=SegmentScope.VECTOR,
         topic="persistent://test/test/test_topic_1",
         collection=None,
-        metadata=None,
+        metadata=test_hnsw_config,
     )
 
 
