@@ -1,10 +1,12 @@
 import base64
 import importlib
 import inspect
+import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from graphlib import TopologicalSorter
-from typing import Optional, List, Any, Dict, Set, Iterable
+from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
 
 import requests
@@ -117,7 +119,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_middlewares: List[str] = []
 
     chroma_server_auth_provider: Optional[str] = None
-    chroma_server_auth_provider_config: Optional[Dict[str, Any]] = None
+    chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
     chroma_client_auth_provider: Optional[str] = None
     chroma_client_auth_provider_config: Optional[Dict[str, Any]] = None
     anonymized_telemetry: bool = True
@@ -305,20 +307,42 @@ class ChromaAuthMiddleware(BaseHTTPMiddleware):  # type: ignore
 
 
 class BasicAuthServerProvider(ServerAuthProvider):
+    @staticmethod
+    def _create_token(username: str, password: str) -> SecretStr:
+        return SecretStr(
+            base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("utf-8")
+        )
+
     def __init__(self, settings: "Settings") -> None:
         super().__init__(settings)
         self._settings = settings
-        self._settings.require("chroma_server_auth_provider_config")
-        if self._settings.chroma_server_auth_provider_config:
-            # encode the username and password base64
-            self._basic_auth_token = SecretStr(
-                base64.b64encode(
-                    f"{self._settings.chroma_server_auth_provider_config['username']}:"
-                    f"{self._settings.chroma_server_auth_provider_config['password']}".encode(
-                        "utf-8"
+        # self._settings.require("chroma_server_auth_provider_config")
+        if self._settings.chroma_server_auth_provider_config and isinstance(
+            self._settings.chroma_server_auth_provider_config, str
+        ):
+            if os.path.exists(self._settings.chroma_server_auth_provider_config):
+                with open(self._settings.chroma_server_auth_provider_config) as f:
+                    _auth_data = json.loads(f.read())
+                    self._basic_auth_token = self._create_token(
+                        _auth_data["username"], _auth_data["password"]
                     )
-                ).decode("utf-8")
-            )
+            elif self._settings.chroma_server_auth_provider_config and isinstance(
+                self._settings.chroma_server_auth_provider_config, dict
+            ):
+                # encode the username and password base64
+                self._basic_auth_token = self._create_token(
+                    self._settings.chroma_server_auth_provider_config["username"],
+                    self._settings.chroma_server_auth_provider_config["password"],
+                )
+            elif os.environ.get("CHROMA_BASIC_AUTH_USERNAME") and os.environ.get(
+                "CHROMA_BASIC_AUTH_PASSWORD"
+            ):
+                self._basic_auth_token = self._create_token(
+                    os.environ.get("CHROMA_BASIC_AUTH_USERNAME", ""),
+                    os.environ.get("CHROMA_BASIC_AUTH_PASSWORD", ""),
+                )
+            else:
+                raise ValueError("Basic auth credentials not found")
 
     @overrides
     def authenticate(self, request: Request) -> Response | None:
