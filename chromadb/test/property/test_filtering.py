@@ -17,6 +17,10 @@ import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
+from chromadb.utils.query_helper import (
+    Where as WhereFilter,
+    WhereDocument as WhereDocumentFilter,
+)
 
 
 def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
@@ -292,3 +296,67 @@ def test_boolean_metadata(api: API) -> None:
     res = coll.get(where={"test": True})
 
     assert res["ids"] == ["1", "3"]
+
+
+def test_fluid_filter_helper_and_eq_contains(api: API) -> None:
+    """Test that a filter where no document matches returns an empty result"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    coll.upsert(
+        documents=["Article by john", "Article by Jack", "Article by Jill"],
+        metadatas=[
+            {"author": "john", "category": "chroma"},
+            {"author": "jack", "category": "ml"},
+            {"author": "jill", "category": "lifestyle"},
+        ],
+        ids=["1", "2", "3"],
+    )
+
+    where_filter = WhereFilter().and_(
+        WhereFilter().eq("category", "chroma"),
+        WhereFilter().or_(
+            WhereFilter().eq("author", "john"), WhereFilter().eq("author", "jack")
+        ),
+    )
+
+    where_document_filter = WhereDocumentFilter().contains("Article")
+    assert where_filter.to_filter() == {
+        "$and": [
+            {"category": {"$eq": "chroma"}},
+            {"$or": [{"author": {"$eq": "john"}}, {"author": {"$eq": "jack"}}]},
+        ]
+    }
+    assert where_document_filter.to_filter() == {"$contains": "Article"}
+    res = coll.get(
+        where_document=where_document_filter.to_filter(), where=where_filter.to_filter()
+    )
+    assert res["ids"] == ["1"]
+    assert res["metadatas"] == [{"author": "john", "category": "chroma"}]
+
+
+def test_fluid_filter_helper_gt_lt(api: API) -> None:
+    """Test that a filter where no document matches returns an empty result"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    coll.upsert(
+        documents=["Article by john", "Article by Jack", "Article by Jill"],
+        metadatas=[
+            {"author": "john", "category": "chroma", "age": 21},
+            {"author": "jack", "category": "ml", "age": 30},
+            {"author": "jill", "category": "lifestyle", "age": 25},
+        ],
+        ids=["1", "2", "3"],
+    )
+
+    where_filter = WhereFilter().and_(
+        WhereFilter().gt("age", 21), WhereFilter().lt("age", 30)
+    )
+    print(where_filter.to_filter())
+    assert where_filter.to_filter() == {
+        "$and": [{"age": {"$gt": 21}}, {"age": {"$lt": 30}}]
+    }
+    res = coll.get(where=where_filter.to_filter())
+    assert res["ids"] == ["3"]
+    assert res["metadatas"] == [{"author": "jill", "category": "lifestyle", "age": 25}]
