@@ -239,25 +239,6 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        # if "chroma:document" in metadata:
-        #     t = Table("embedding_fulltext_search")
-        #     q = (
-        #         self._db.querybuilder()
-        #         .from_(t)
-        #         # .where(
-        #         #     self.EscapedLike(
-        #         #         t.id,
-        #         #         ParameterValue(
-        #         #             f"%{id}%",
-        #         #         ),
-        #         #     )
-        #         # )
-        #         .where(t.id.like(ParameterValue(f"%{id}%")))
-        #         .delete()
-        #     )
-        #     sql, params = get_sql(q)
-        #     cur.execute(sql, params)
-
         self._insert_metadata(cur, id, metadata)
 
     def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
@@ -317,14 +298,6 @@ class SqliteMetadataSegment(MetadataReader):
         if "chroma:document" in metadata:
             t = Table("embedding_fulltext_search")
 
-            # q = (
-            #     self._db.querybuilder()
-            #     .into(t)
-            #     .columns(t.id, t.string_value)
-            #     .insert(ParameterValue(id), ParameterValue(metadata["chroma:document"]))
-            # )
-            # sql, params = get_sql(q)
-            # cur.execute(sql, params)
             def insert_into_fulltext_search() -> None:
                 q = (
                     self._db.querybuilder()
