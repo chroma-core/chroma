@@ -225,7 +225,7 @@ class System(Component):
     def reset_state(self) -> None:
         """Reset the state of this system and all constituents in reverse dependency order"""
         if not self.settings.allow_reset:
-            raise ValueError("Resetting is not allowed by this configuration")
+            raise ValueError("Resetting is not allowed by this configuration (to enable it, set `allow_reset` to `True` in your Settings() or include `ALLOW_RESET=TRUE` in your environment variables)")
         for component in reversed(list(self.components())):
             component.reset_state()
 
