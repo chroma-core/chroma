@@ -12,7 +12,7 @@ from chromadb.types import (
     Where,
 )
 
-
+#TODO: This kind of works but can/must be improved. It is supposed to match where_document() and where() to be passed to the AST parser
 def extract_conditions(line):
     # The regex pattern matches the conditions inside the where function
     print(f"Extracting conditions from: {line}")
@@ -109,6 +109,8 @@ class Filter(Dict[str, Any]):
         _filter_expr = _process_ast(ast.parse(_exp))
         return cast(Where, _filter_expr)
 
+
+    #TODO: This is meh and needs some love.
     @staticmethod
     def where_document(prm: Any) -> WhereDocument:
         stack = traceback.extract_stack()
