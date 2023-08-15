@@ -1,198 +1,145 @@
-from typing import List, Union, Literal, Any, Dict, cast
+import ast
+import re
+import sys
+import time
+import traceback
+from typing import Any, Dict, cast, get_args
 
 from chromadb.types import (
     WhereOperator,
     LiteralValue,
     WhereDocument,
     Where,
-    LogicalOperator,
 )
 
 
-class WhereFilters(Where):
-    """
-    A builder class for creating a where clause for a filter.
-    """
-
-    def _add_condition(
-        self,
-        field: str,
-        operator: Union[WhereOperator, Literal["$in"]],
-        value: Union[LiteralValue, List[LiteralValue]],
-    ) -> "Where":
-        """
-        Add a condition to the filter query.
-        """
-        if field not in self.keys():
-            self[field] = {}
-        self[field][operator] = value
-        return self
-
-    def gt(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add a greater than condition to the filter query.
-        """
-        return self._add_condition(field, "$gt", value)
-
-    def gte(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add a greater than or equal to condition to the filter query.
-        """
-        return self._add_condition(field, "$gte", value)
-
-    def lt(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add a less than condition to the filter query.
-        """
-        return self._add_condition(field, "$lt", value)
-
-    def lte(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add a less than or equal to condition to the filter query.
-        """
-        return self._add_condition(field, "$lte", value)
-
-    def ne(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add a not equal to condition to the filter query.
-        """
-        return self._add_condition(field, "$ne", value)
-
-    def eq(self, field: str, value: LiteralValue) -> "Where":
-        """
-        Add an equal to condition to the filter query.
-        """
-        return self._add_condition(field, "$eq", value)
-
-    def and_(self, *conditions: "Where") -> "Where":
-        """
-        Add an and condition to the filter query.
-        """
-        if "$and" not in self.keys():
-            self["$and"] = []
-        for condition in conditions:
-            self["$and"].append(condition)
-        return self
-
-    def or_(self, *conditions: "Where") -> "Where":
-        """
-        Add an or condition to the filter query.
-        """
-        if "$or" not in self.keys():
-            self["$or"] = []
-        for condition in conditions:
-            self["$or"].append(condition)
-        return self
-
-    def to_filter(self) -> Dict[str, Any]:
-        """
-        Return the filter query.
-        """
-        return self
+def extract_conditions(line):
+    # The regex pattern matches the conditions inside the where function
+    print(f"Extracting conditions from: {line}")
+    pattern = r"(where\_document|where)\((.*)\)"
+    match = re.search(pattern, line)
+    print(f"Match: {match.group(2)}")
+    if match:
+        return match.group(2)
+    return None
 
 
-class WhereDocumentFilter(WhereDocument):
-    """
-    A builder class for creating a where clause for a filter.
-    """
-
-    def contains(self, value: str) -> "WhereDocumentFilter":
-        """
-        Add a contains condition to the filter query.
-        """
-        self["$contains"] = value
-        return self
-
-    def and_(self, *conditions: "WhereDocumentFilter") -> "WhereDocumentFilter":
-        """
-        Add an and condition to the filter query.
-        """
-        self["$and"] = [condition for condition in conditions]
-        return self
-
-    def or_(self, *conditions: "WhereDocumentFilter") -> "WhereDocumentFilter":
-        """
-        Add an or condition to the filter query.
-        """
-        self["$or"] = [condition for condition in conditions]
-        return self
+def _map_ast_operator_to_where_operator(operator: ast.operator) -> WhereOperator:
+    if isinstance(operator, ast.Eq):
+        return "$eq"
+    elif isinstance(operator, ast.NotEq):
+        return "$ne"
+    elif isinstance(operator, ast.Gt):
+        return "$gt"
+    elif isinstance(operator, ast.GtE):
+        return "$gte"
+    elif isinstance(operator, ast.Lt):
+        return "$lt"
+    elif isinstance(operator, ast.LtE):
+        return "$lte"
+    elif isinstance(operator, ast.In):
+        return "$in"
+    elif isinstance(operator, ast.NotIn):
+        return "$nin"
+    else:
+        raise ValueError(f"Unsupported operator: {operator}")
 
 
-class Filters(object):
-    """Global Filter class"""
-
-    @staticmethod
-    def where() -> "WhereFilters":
-        """
-        Return a new WhereFilters instance.
-        """
-        return WhereFilters()
-
-    @staticmethod
-    def where_document() -> "WhereDocumentFilter":
-        """
-        Return a new WhereDocumentFilter instance.
-        """
-        return WhereDocumentFilter()
+def _process_ast_wd(node: Any) -> Dict[str, Any]:
+    pass
 
 
-class AttrGroup(Where):
-    def __init__(
-        self,
-        lhs: Union[LiteralValue, "AttrGroup"],
-        operator: Union[WhereOperator, LogicalOperator, Literal["$not"]],
-        rhs: Union[List[LiteralValue], LiteralValue, "AttrGroup"],
-    ):
-        # self.lhs = lhs
-        # self.operator = operator
-        # self.rhs = rhs
-        print(f"addd: {lhs} {operator} {rhs}")
-        if operator in ["$and", "$or"]:
-            self[operator] = [lhs, rhs]
-        elif operator == "$in":
-            self[operator] = {lhs: rhs}
-        elif (
-            operator == "$not"
-            and isinstance(lhs, type(self))
-            and list(lhs.keys())[0] == "$in"
+def _process_ast(node: Any) -> Dict[str, Any]:
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            return {"$and": [_process_ast(value) for value in node.values]}
+        elif isinstance(node.op, ast.Or):
+            return {"$or": [_process_ast(value) for value in node.values]}
+    elif isinstance(node, ast.Compare):
+        if not isinstance(node.left.value, str):
+            # TODO throw exception that lhs must always be a str which is an attribute in the metadata
+            raise ValueError(
+                f"Unsupported left hand side type: {type(node.left.value)}. Must be a string."
+            )
+        left = node.left.s
+        operator = node.ops[0]
+        # print(f"operator: {operator}")
+        right = node.comparators[0]
+        if not isinstance(
+            operator,
+            (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Gt, ast.GtE, ast.Lt, ast.LtE),
         ):
-            print("-----")
-            self["$nin"] = lhs["$in"]
+            raise ValueError(f"Unsupported operator: {operator}")
+        if isinstance(right, (ast.Str, ast.Num, ast.Constant)):
+            right_value = right.value
+        elif isinstance(right, ast.List):
+            right_value = [_process_ast(value) for value in right.elts]
+        if isinstance(
+            operator,
+            (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Gt, ast.GtE, ast.Lt, ast.LtE),
+        ):
+            return {
+                f"{left}": {
+                    f"{_map_ast_operator_to_where_operator(operator)}": right_value
+                }
+            }
         else:
-            self[lhs] = {operator: rhs}
+            raise ValueError(
+                f"Unsupported right hand side type: {type(right)}. Must be a string or a list of strings."
+            )
+    elif isinstance(node, ast.Module):
+        return _process_ast(node.body[0])
+    elif isinstance(node, ast.Expr):
+        return _process_ast(node.value)
+    elif isinstance(node, get_args(LiteralValue)):
+        return node.value
+    elif isinstance(node, ast.Constant) and isinstance(
+        node.value, get_args(LiteralValue)
+    ):
+        return cast(type(node.value), node.value)
+    raise ValueError(f"Unsupported node type: {type(node)}")
 
-    def __and__(self, other: "AttrGroup") -> "AttrGroup":
-        print("dqwweqw")
-        return AttrGroup(self, "$and", other)
 
-    def __or__(self, other: "AttrGroup") -> "AttrGroup":
-        return AttrGroup(self, "$or", other)
+class Filter(Dict[str, Any]):
+    @staticmethod
+    def where(_: Any) -> Where:
+        stack = traceback.extract_stack()
+        _exp = extract_conditions(stack[:-1][0].line)[0:-1]
+        print(f"Evaluating: {_exp}")
+        _filter_expr = _process_ast(ast.parse(_exp))
+        return cast(Where, _filter_expr)
 
-    def __invert__(self) -> "AttrGroup":
-        return AttrGroup(self, "$not", None)
-
-
-class Attr:
-    def __init__(self, name: str):
-        self.name = name
-
-    def __eq__(self, other: LiteralValue) -> AttrGroup:
-        print("EQ")
-        return AttrGroup(self.name, "$eq", other)
-
-    def __str__(self) -> str:
-        return self.name
-
-    def __and__(self, other):
-        print("dwqweqw")
-
-    def __rshift__(self, other):
-        return AttrGroup(self.name, "$in", other)
+    @staticmethod
+    def where_document(prm: Any) -> WhereDocument:
+        stack = traceback.extract_stack()
+        _exp = extract_conditions(stack[:-1][0].line)[0:-1]
+        print(f"Evaluating: {_exp}")
+        _filter_expr = _process_ast(ast.parse(_exp))
+        return cast(Where, _filter_expr)
 
 
 if __name__ == "__main__":
-    print((Attr("a") == 1) | ((Attr("category") == 10) & (Attr("price") == 100)))
-    print((Attr("category") == 10) & (Attr("price") == 100))
-    print((Attr("category") == 10))
-    print((Attr("category") >> ["business", "sports"]))
-    print(~(Attr("category") >> ["business", "sports"]))
+    start_time = time.time()
+    print(Filter.where("k" == "10" and ("p" == "x" or "p" == "y")))
+    print(Filter.where("k" == "10" and "p" == "x" or "p" == "y"))
+    print(Filter.where("k" in [1, 2, 3, 4]))
+    print(Filter.where("m" in ["a", "b", "c"]))
+    print(Filter.where("k" not in ["a", "b", "c"]))
+    try:
+        print(Filter.where(1 in ["a", "b", "c"]))
+    except Exception as e:
+        print(e, file=sys.stdout)
+    print(Filter.where("a" != "b"))
+    try:
+        print(Filter.where(not "a"))
+    except Exception as e:
+        print(e, file=sys.stdout)
+
+    print(Filter.where("a" == True))
+    print(Filter.where("a" in [True, False]))
+    end_time = time.time()
+
+    elapsed_time = end_time - start_time
+    print(f"Function executed in: {elapsed_time} seconds")
+
+    # print(Filter.where_document(True) in ["a", "b", "c"])
