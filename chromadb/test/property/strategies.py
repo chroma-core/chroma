@@ -123,6 +123,12 @@ safe_values: List[
     st.lists(safe_floats),
 ]
 
+collection_metadata_safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+    safe_text,
+    safe_integers,
+    safe_floats,
+]
+
 
 def one_or_both(
     strategy_a: st.SearchStrategy[Any], strategy_b: st.SearchStrategy[Any]
@@ -157,7 +163,7 @@ def collection_name(draw: st.DrawFn) -> str:
 
 
 collection_metadata = st.one_of(
-    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values))
+    st.none(), st.dictionaries(safe_text, st.one_of(*collection_metadata_safe_values))
 )
 
 
@@ -272,7 +278,7 @@ def collections(
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
-            known_metadata_keys[key] = draw(st.one_of(*safe_values))
+            known_metadata_keys[key] = draw(st.one_of(*collection_metadata_safe_values))
 
     if has_documents is None:
         has_documents = draw(st.booleans())
