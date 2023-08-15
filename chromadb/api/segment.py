@@ -6,7 +6,9 @@ from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
-from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+from chromadb.errors import (
+    InvalidDimensionException, InvalidCollectionException, CollectionAlreadyExistsError
+)
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
@@ -119,7 +121,7 @@ class SegmentAPI(API):
                     embedding_function=embedding_function,
                 )
             else:
-                raise ValueError(f"Collection {name} already exists.")
+                raise CollectionAlreadyExistsError(f"Collection {name} already exists.")
 
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
@@ -176,7 +178,7 @@ class SegmentAPI(API):
                 embedding_function=embedding_function,
             )
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise InvalidCollectionException(f"Collection {name} does not exist.")
 
     @override
     def list_collections(self) -> Sequence[Collection]:
@@ -228,7 +230,7 @@ class SegmentAPI(API):
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise InvalidCollectionException(f"Collection {name} does not exist.")
 
     @override
     def _add(
