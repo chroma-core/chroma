@@ -492,9 +492,7 @@ def test_upsert(
 
 def test_delete_without_add(
     system: System,
-    sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
-    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -513,4 +511,8 @@ def test_delete_without_add(
         metadata=None,
         operation=Operation.DELETE,
     )
-    producer.submit_embedding(topic, delete_record)
+
+    try:
+        producer.submit_embedding(topic, delete_record)
+    except BaseException:
+        pytest.fail("Unexpected error. Deleting on an empty segment should not raise.")
