@@ -33,6 +33,10 @@ _operation_codes = {
 }
 _operation_codes_inv = {v: k for k, v in _operation_codes.items()}
 
+# Set in conftest.py to rethrow errors in the "async" path during testing
+# https://doc.pytest.org/en/latest/example/simple.html#detect-if-running-from-within-a-pytest-run
+_called_from_test = False
+
 
 class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     """A SQL database that stores embeddings, allowing a traditional RDBMS to be used as
@@ -310,7 +314,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 self.unsubscribe(sub.id)
         except BaseException as e:
             logger.error(
-                f"Exception occurred invoking consumer for subscription {sub.id}"
-                + f"to topic {sub.topic_name}",
-                e,
+                f"Exception occurred invoking consumer for subscription {sub.id.hex}"
+                + f"to topic {sub.topic_name} %s",
+                str(e),
             )
+            if _called_from_test:
+                raise e

@@ -381,7 +381,12 @@ def test_delete_empty_fails(api: API):
         coll.delete(where_document={})
 
     with pytest.raises(ValueError):
-        coll.delete(ids=["a"], where_document={})
-
-    with pytest.raises(ValueError):
         coll.delete(where_document={}, where={})
+
+    # Should not raise
+    coll.delete(where_document={"$contains": "bar"})
+    coll.delete(where={"foo": "bar"})
+    coll.delete(ids=["foo"])
+    coll.delete(ids=["foo"], where={"foo": "bar"})
+    coll.delete(ids=["foo"], where_document={"$contains": "bar"})
+    coll.delete(ids=["foo"], where_document={"$contains": "bar"}, where={"foo": "bar"})

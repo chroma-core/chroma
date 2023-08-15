@@ -73,6 +73,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # via brute force search.
     _batch_size: int
     _brute_force_index: Optional[BruteForceIndex]
+    _index_initialized: bool = False
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
     _sync_threshold: int
@@ -168,6 +169,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         self._index = index
         self._dimensionality = dimensionality
+        self._index_initialized = True
 
     def _persist(self) -> None:
         """Persist the index and data to disk"""
@@ -209,6 +211,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             for record in records:
                 if record["embedding"] is not None:
                     self._ensure_index(len(records), len(record["embedding"]))
+                if not self._index_initialized:
+                    # If the index is not initialized here, it means that we have
+                    # not yet added any records to the index. So we can just
+                    # ignore the record since it was a delete.
+                    continue
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
                 self._max_seq_id = max(self._max_seq_id, record["seq_id"])
