@@ -285,6 +285,10 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
             raise ValueError(
                 f"Expected where document operand value for operator $contains to be a str, got {operand}"
             )
+        elif len(operand) == 0:
+            raise ValueError(
+                "Expected where document operand value for operator $contains to be a non-empty str"
+            )
     return where_document
 
 
