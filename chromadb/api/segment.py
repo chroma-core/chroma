@@ -371,8 +371,6 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
-        # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
-        # time a bad idea?
         if (where or where_document) or not ids:
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(

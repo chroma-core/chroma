@@ -122,9 +122,11 @@ class Collection(BaseModel):
             GetResult: A GetResult object containing the results.
 
         """
-        where = validate_where(where) if where else None
+        where = validate_where(where) if where is not None else None
         where_document = (
-            validate_where_document(where_document) if where_document else None
+            validate_where_document(where_document)
+            if where_document is not None
+            else None
         )
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
@@ -177,9 +179,11 @@ class Collection(BaseModel):
             ValueError: If you provide both query_embeddings and query_texts
 
         """
-        where = validate_where(where) if where else None
+        where = validate_where(where) if where is not None else None
         where_document = (
-            validate_where_document(where_document) if where_document else None
+            validate_where_document(where_document)
+            if where_document is not None
+            else None
         )
         query_embeddings = (
             validate_embeddings(maybe_cast_one_to_many(query_embeddings))
@@ -320,10 +324,26 @@ class Collection(BaseModel):
             None
         """
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
-        where = validate_where(where) if where else None
+        where = validate_where(where) if where is not None else None
         where_document = (
-            validate_where_document(where_document) if where_document else None
+            validate_where_document(where_document)
+            if where_document is not None
+            else None
         )
+
+        # You must have at least one of ids, where, or where_document.
+        if (
+            (ids is None or (ids is not None and len(ids) == 0))
+            and where is None
+            and where_document is None
+        ):
+            raise ValueError(
+                "You must provide either ids, where, or where_document to delete. If \
+                you want to delete all data in a collection you can delete the \
+                collection itself using the delete_collection method. Or alternatively,\
+                you can get() all the relevant ids and then delete them."
+            )
+
         self._client._delete(self.id, ids, where, where_document)
 
     def _validate_embedding_set(

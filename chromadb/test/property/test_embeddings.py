@@ -363,3 +363,25 @@ def test_escape_chars_in_ids(api: API) -> None:
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
+
+
+def test_delete_empty_fails(api: API):
+    api.reset()
+    coll = api.create_collection(name="foo")
+    with pytest.raises(ValueError):
+        coll.delete()
+
+    with pytest.raises(ValueError):
+        coll.delete(ids=[])
+
+    with pytest.raises(ValueError):
+        coll.delete(where={})
+
+    with pytest.raises(ValueError):
+        coll.delete(where_document={})
+
+    with pytest.raises(ValueError):
+        coll.delete(ids=["a"], where_document={})
+
+    with pytest.raises(ValueError):
+        coll.delete(where_document={}, where={})
