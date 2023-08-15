@@ -17,6 +17,7 @@ import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
+import re
 
 
 def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
@@ -83,6 +84,11 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     # Simple $contains clause
     assert isinstance(expr, str)
     if key == "$contains":
+        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
+        # treat them as wildcards
+        if "%" in expr or "_" in expr:
+            expr = expr.replace("%", ".").replace("_", ".")
+            return re.search(expr, doc) is not None
         return expr in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
