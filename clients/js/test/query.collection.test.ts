@@ -29,6 +29,22 @@ test("it should query a collection", async () => {
   expect(["test3"]).not.toEqual(expect.arrayContaining(results.ids[0]));
 });
 
+
+test("it should query a collection with metadata lists", async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS });
+  const results = await collection.query({
+    queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    nResults: 2,
+    where: { list: { $contains: 22 } }
+  });
+  expect(results).toBeDefined();
+  expect(results).toBeInstanceOf(Object);
+  expect(results.ids.length).toBe(1);
+  expect(["test2"]).toEqual(expect.arrayContaining(results.ids[0]));
+});
+
 // test where_document
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();

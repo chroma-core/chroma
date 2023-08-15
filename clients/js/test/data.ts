@@ -5,9 +5,9 @@ const EMBEDDINGS = [
   [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
 ];
 const METADATAS = [
-  { test: "test1", float_value: -2 },
-  { test: "test2", float_value: 0 },
-  { test: "test3", float_value: 2 },
+  { test: "test1", float_value: -2, list: [1, 10, 11] },
+  { test: "test2", float_value: 0, list: [2, 20, 22]},
+  { test: "test3", float_value: 2, list: [3, 30, 33] },
 ];
 const DOCUMENTS = [
   "This is a test",

@@ -49,7 +49,7 @@ test('It should return an error when inserting duplicate IDs in the same batch',
   const collection = await chroma.createCollection({ name: "test" });
   const ids = IDS.concat(["test1"])
   const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
-  const metadatas = METADATAS.concat([{ test: 'test1', 'float_value': 0.1 }])
+  const metadatas = METADATAS.concat([{ test: 'test1', 'float_value': 0.1, list: [1, 10, 11]}])
   try {
     await collection.add({ ids, embeddings, metadatas });
   } catch (e: any) {

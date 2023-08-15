@@ -9,7 +9,7 @@ type Number = number;
 export type Embedding = Array<Number>;
 export type Embeddings = Array<Embedding>;
 
-export type Metadata = Record<string, string | number | boolean>;
+export type Metadata = Partial<Record<string, string | number | boolean | string[] | number[] | boolean[]>>;
 export type Metadatas = Array<Metadata>;
 
 export type Document = string;
@@ -23,7 +23,7 @@ export type PositiveInteger = number;
 type LiteralValue = string | number;
 type LiteralNumber = number;
 type LogicalOperator = "$and" | "$or";
-type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
+type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq" | "$contains";
 
 type OperatorExpression = {
   [key in WhereOperator | LogicalOperator]?: LiteralValue | LiteralNumber;

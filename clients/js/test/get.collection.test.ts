@@ -18,6 +18,12 @@ test("it should get a collection", async () => {
   expect(results2).toBeInstanceOf(Object);
   expect(results2.ids.length).toBe(1);
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
+
+  const results3 = await collection.get({ where: { list: { $contains: 1 } } });
+  expect(results3).toBeDefined();
+  expect(results3).toBeInstanceOf(Object);
+  expect(results3.ids.length).toBe(1);
+  expect(["test1"]).toEqual(expect.arrayContaining(results3.ids));
 });
 
 
