@@ -278,22 +278,21 @@ export class Collection {
         ids,
         where,
         whereDocument,
-    }:{
+    }: {
         ids?: ID | IDs,
         where?: Where,
         whereDocument?: WhereDocument
     } = {}): Promise<number> {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
-        const response = await this.api.count(
-            this.id,
-            {
+        return await this.api
+            .count(this.id, {
                 ids: idsArray,
-                where,
+                where: where,
                 where_document: whereDocument,
-            },
-            this.api.options);
-        return handleSuccess(response);
+            }, this.api.options)
+            .then(handleSuccess)
+            .catch(handleError);
     }
 
     /**

@@ -1,6 +1,6 @@
 import { expect, test } from "@jest/globals";
 import chroma from "./initClient";
-import { EMBEDDINGS, IDS, METADATAS } from "./data";
+import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 
 test("it should return number of embeddings in a collection", async () => {
   await chroma.reset();
@@ -24,7 +24,7 @@ test("test gt, lt, in a simple small way", async () => {
 test("simple test of count with where_document", async () => {
     await chroma.reset();
     const collection = await chroma.createCollection({ name: "test" });
-    await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS });
+    await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
     const items = await collection.count({whereDocument: { $contains: "test"} } )
     expect(items).toBe(3)
 })
