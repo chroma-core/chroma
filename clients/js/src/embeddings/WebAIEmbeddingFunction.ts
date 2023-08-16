@@ -158,14 +158,12 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
   ) {
     this.proxy = proxy ? proxy : true;
     try {
-      // @ts-ignore
       const webAI = await dynamicImportModule("@visheratin/web-ai");
       if (wasmPath) {
         webAI.SessionParams.wasmRoot = wasmPath;
       }
       switch (modality) {
         case "text": {
-          // @ts-ignore
           const webAIText = await dynamicImportModule(
             "@visheratin/web-ai/text"
           );
@@ -185,7 +183,6 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
           );
         }
         case "image": {
-          // @ts-ignore
           const webAIImage = await dynamicImportModule(
             "@visheratin/web-ai/image"
           );
@@ -205,7 +202,6 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
           );
         }
         case "multimodal": {
-          // @ts-ignore
           const webAIImage = await dynamicImportModule(
             "@visheratin/web-ai/multimodal"
           );
