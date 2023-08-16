@@ -48,7 +48,7 @@
     "release": "run-s build test:run && npm publish"
   },
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=14.0.0"
   },
   "dependencies": {
     "isomorphic-fetch": "^3.0.0"
