@@ -1,4 +1,4 @@
-import { dynamicImportModule } from "../utils";
+import { importOptionalModule } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 /**
@@ -158,13 +158,13 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
   ) {
     this.proxy = proxy ? proxy : true;
     try {
-      const webAI = await dynamicImportModule("@visheratin/web-ai");
+      const webAI = await importOptionalModule("@visheratin/web-ai");
       if (wasmPath) {
         webAI.SessionParams.wasmRoot = wasmPath;
       }
       switch (modality) {
         case "text": {
-          const webAIText = await dynamicImportModule(
+          const webAIText = await importOptionalModule(
             "@visheratin/web-ai/text"
           );
           let id = "mini-lm-v2-quant"; //default text model
@@ -183,7 +183,7 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
           );
         }
         case "image": {
-          const webAIImage = await dynamicImportModule(
+          const webAIImage = await importOptionalModule(
             "@visheratin/web-ai/image"
           );
           let id = "efficientformer-l1-feature-quant"; //default image model
@@ -202,7 +202,7 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
           );
         }
         case "multimodal": {
-          const webAIImage = await dynamicImportModule(
+          const webAIImage = await importOptionalModule(
             "@visheratin/web-ai/multimodal"
           );
           let id = "clip-base-quant"; //default multimodal model
