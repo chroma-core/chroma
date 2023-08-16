@@ -19,7 +19,11 @@
     "typescript": "^5.0.4"
   },
   "main": "dist/main/index.js",
-  "module": "dist/module/index.js",
+  "module": "dist/module/index.js",  
+  "exports": {
+    "require": "./dist/main/index.js",
+    "import": "./dist/module/index.js"
+  },
   "files": [
     "src",
     "dist"
