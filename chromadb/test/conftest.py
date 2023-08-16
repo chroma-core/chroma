@@ -17,6 +17,9 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    Union,
+    Dict,
+    Any,
 )
 from typing_extensions import Protocol
 import shutil
@@ -28,7 +31,6 @@ from chromadb.types import SeqId, SubmitEmbeddingRecord
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
-
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,11 @@ def find_free_port() -> int:
 
 
 def _run_server(
-    port: int, is_persistent: bool = False, persist_directory: Optional[str] = None
+    port: int,
+    is_persistent: bool = False,
+    persist_directory: Optional[str] = None,
+    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -65,6 +71,8 @@ def _run_server(
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
+            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_auth_provider_config=chroma_server_auth_provider_config,
         )
     else:
         settings = Settings(
@@ -75,6 +83,8 @@ def _run_server(
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             is_persistent=False,
             allow_reset=True,
+            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_auth_provider_config=chroma_server_auth_provider_config,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -93,18 +103,36 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, None]:
+def _fastapi_fixture(
+    is_persistent: bool = False,
+    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None,
+    chroma_client_auth_provider: Optional[str] = None,
+    chroma_client_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None,
+) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
     port = find_free_port()
     logger.info(f"Running test FastAPI server on port {port}")
     ctx = multiprocessing.get_context("spawn")
-    args: Tuple[int, bool, Optional[str]] = (port, False, None)
+    args: Tuple[int, bool, Optional[str], str, Union[str, Dict[str, Any], None]] = (
+        port,
+        False,
+        None,
+        chroma_server_auth_provider,
+        chroma_server_auth_provider_config,
+    )
     persist_directory = None
     if is_persistent:
         persist_directory = tempfile.mkdtemp()
-        args = (port, is_persistent, persist_directory)
+        args = (
+            port,
+            is_persistent,
+            persist_directory,
+            chroma_server_auth_provider,
+            chroma_server_auth_provider_config,
+        )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
@@ -112,6 +140,8 @@ def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, Non
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
+        chroma_client_auth_provider=chroma_client_auth_provider,
+        chroma_client_auth_provider_config=chroma_client_auth_provider_config,
     )
     system = System(settings)
     api = system.instance(API)
@@ -131,6 +161,67 @@ def fastapi() -> Generator[System, None, None]:
 
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
+
+
+def fastapi_server_auth() -> Generator[System, None, None]:
+    return _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.config.BasicAuthServerProvider",
+        chroma_server_auth_provider_config={"username": "admin", "password": "admin"},
+        chroma_client_auth_provider="chromadb.config.BasicAuthClientProvider",
+        chroma_client_auth_provider_config={"username": "admin", "password": "admin"},
+    )
+
+
+def fastapi_server_auth_param() -> Generator[System, None, None]:
+    yield _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.config.BasicAuthServerProvider",
+        chroma_server_auth_provider_config={"username": "admin", "password": "admin"},
+        chroma_client_auth_provider="chromadb.config.BasicAuthClientProvider",
+        chroma_client_auth_provider_config={"username": "admin", "password": "admin"},
+    )
+
+
+def fastapi_server_auth_file() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server-auth"))
+    client_auth_file = os.path.abspath(os.path.join(".", "client-auth"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:admin")
+    with open(client_auth_file, "w") as f:
+        f.write("admin:admin")
+    yield _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.config.BasicAuthServerProvider",
+        chroma_server_auth_provider_config=server_auth_file,
+        chroma_client_auth_provider="chromadb.config.BasicAuthClientProvider",
+        chroma_client_auth_provider_config=client_auth_file,
+    )
+    os.remove(server_auth_file)
+    os.remove(client_auth_file)
+
+
+def fastapi_server_auth_env() -> Generator[System, None, None]:
+    os.environ["CHROMA_SERVER_AUTH_BASIC_USERNAME"] = "admin"
+    os.environ["CHROMA_SERVER_AUTH_BASIC_PASSWORD"] = "admin"
+    os.environ["CHROMA_CLIENT_AUTH_BASIC_USERNAME"] = "admin"
+    os.environ["CHROMA_CLIENT_AUTH_BASIC_PASSWORD"] = "admin"
+    yield _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.config.BasicAuthServerProvider",
+        chroma_client_auth_provider="chromadb.config.BasicAuthClientProvider",
+    )
+
+
+@pytest.fixture(scope="function")
+def fastapi_server_auth_invalid_cred() -> Generator[System, None, None]:
+    return _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.config.BasicAuthServerProvider",
+        chroma_server_auth_provider_config={"username": "admin", "password": "admin"},
+        chroma_client_auth_provider="chromadb.config.BasicAuthClientProvider",
+        chroma_client_auth_provider_config={"username": "admin", "password": "wrong"},
+    )
 
 
 def integration() -> Generator[System, None, None]:
@@ -183,11 +274,26 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [
+        fastapi,
+        fastapi_persistent,
+        sqlite,
+        sqlite_persistent,
+        fastapi_server_auth,
+    ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         fixtures = [integration]
+    return fixtures
+
+
+def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [
+        fastapi_server_auth_param,
+        fastapi_server_auth_file,
+        fastapi_server_auth_env,
+    ]
     return fixtures
 
 
@@ -196,10 +302,31 @@ def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
     yield next(request.param())
 
 
+@pytest.fixture(scope="module", params=system_fixtures_auth())
+def system_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+    yield next(request.param())
+
+
 @pytest.fixture(scope="function")
 def api(system: System) -> Generator[API, None, None]:
     system.reset_state()
     api = system.instance(API)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def api_wrong_cred(fastapi_server_auth_invalid_cred) -> Generator[API, None, None]:
+    api = next(fastapi_server_auth_invalid_cred).instance(API)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def api_with_server_auth(
+    system_auth: Generator[System, None, None]
+) -> Generator[API, None, None]:
+    _sys = next(system_auth)
+    _sys.reset_state()
+    api = _sys.instance(API)
     yield api
 
 

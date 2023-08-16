@@ -109,7 +109,6 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
-
         if settings.chroma_server_auth_provider is not None:
             self._app.add_middleware(
                 chromadb.config.ChromaAuthMiddleware, settings=settings
