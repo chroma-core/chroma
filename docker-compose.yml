@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 networks:
   net:
@@ -13,6 +13,8 @@ services:
     volumes:
       - ./:/chroma
       - index_data:/index_data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
     environment:
       - IS_PERSISTENT=TRUE
