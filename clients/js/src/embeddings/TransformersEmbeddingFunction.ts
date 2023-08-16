@@ -28,7 +28,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   } = {}) {
     try {
       // Use dynamic import to support browser environments because we do not have a bundler that handles browser support.
-      // The util dynamicImportModule is used to prevent issues when bundlers try to locate the dependency even when it's optional
+      // The util importOptionalModule is used to prevent issues when bundlers try to locate the dependency even when it's optional.
       TransformersApi = importOptionalModule("@xenova/transformers");
     } catch (e) {
       throw new Error(
