@@ -77,7 +77,7 @@ export async function handleSuccess(response: Response | string | Count200Respon
  * @returns {Promise<any>} Returns a Promise that resolves to the imported module.
  */
 export async function importOptionalModule(moduleName: string) {
-  return Function(`return import("${moduleName}}")`)();
+  return Function(`return import("${moduleName}")`)();
 }
 
 /**
