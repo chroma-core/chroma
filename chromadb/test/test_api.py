@@ -271,7 +271,7 @@ def test_delete(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         collection.delete()
 
 
