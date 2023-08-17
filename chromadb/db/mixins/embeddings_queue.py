@@ -68,9 +68,13 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             self.callback = callback
 
     _subscriptions: Dict[str, Set[Subscription]]
+    _max_batch_size: Optional[int]
+    # How many variables are in the insert statement for a single record
+    VARIABLES_PER_RECORD = 6
 
     def __init__(self, system: System):
         self._subscriptions = defaultdict(set)
+        self._max_batch_size = None
         super().__init__(system)
 
     @override
@@ -114,6 +118,15 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         if len(embeddings) == 0:
             return []
+
+        if len(embeddings) > self.max_batch_size:
+            raise ValueError(
+                f"""
+                Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                Please submit your embeddings in batches of size
+                {self.max_batch_size:,} or less.
+                """
+            )
 
         t = Table("embeddings_queue")
         insert = (
@@ -207,6 +220,28 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @override
     def max_seqid(self) -> SeqId:
         return 2**63 - 1
+
+    @property
+    @override
+    def max_batch_size(self) -> int:
+        if self._max_batch_size is None:
+            with self.tx() as cur:
+                cur.execute("PRAGMA compile_options;")
+                compile_options = cur.fetchall()
+
+                for option in compile_options:
+                    if "MAX_VARIABLE_NUMBER" in option[0]:
+                        # The pragma returns a string like 'MAX_VARIABLE_NUMBER=999'
+                        self._max_batch_size = int(option[0].split("=")[1]) // (
+                            self.VARIABLES_PER_RECORD
+                        )
+
+                if self._max_batch_size is None:
+                    # This value is the default for sqlite3 versions < 3.32.0
+                    # It is the safest value to use if we can't find the pragma for some
+                    # reason
+                    self._max_batch_size = 999 // self.VARIABLES_PER_RECORD
+        return self._max_batch_size
 
     def _prepare_vector_encoding_metadata(
         self, embedding: SubmitEmbeddingRecord
