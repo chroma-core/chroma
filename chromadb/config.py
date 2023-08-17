@@ -201,7 +201,10 @@ class System(Component):
                     "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
             see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
                 )
-        if settings.chroma_client_auth_provider is not None:
+        if (
+            settings.chroma_client_auth_provider is not None
+            and settings.chroma_client_auth_provider.strip() != ""
+        ):
             logger.debug(
                 f"Client Auth Provider: {settings.chroma_client_auth_provider}"
             )
@@ -339,7 +342,7 @@ def _create_token(username: str, password: str) -> SecretStr:
 
 class BasicAuthServerProvider(ServerAuthProvider):
     _basic_auth_token: SecretStr
-    _ignore_auth_paths: List[str] = ["/api/v1", "/api/v1/heartbeat"]
+    _ignore_auth_paths: List[str] = ["/api/v1", "/api/v1/heartbeat", "/api/v1/version"]
 
     def __init__(self, settings: "Settings") -> None:
         super().__init__(settings)
