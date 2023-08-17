@@ -7,7 +7,9 @@ from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
 from chromadb.errors import (
-    InvalidDimensionException, InvalidCollectionException, CollectionAlreadyExistsError
+    InvalidDimensionException,
+    CollectionAlreadyExistsError,
+    CollectionNotFoundError,
 )
 import chromadb.utils.embedding_functions as ef
 
@@ -178,7 +180,7 @@ class SegmentAPI(API):
                 embedding_function=embedding_function,
             )
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise CollectionNotFoundError(f"Collection {name} does not exist.")
 
     @override
     def list_collections(self) -> Sequence[Collection]:
@@ -230,7 +232,7 @@ class SegmentAPI(API):
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise CollectionNotFoundError(f"Collection {name} does not exist.")
 
     @override
     def _add(
@@ -543,7 +545,7 @@ class SegmentAPI(API):
         if collection_id not in self._collection_cache:
             collections = self._sysdb.get_collections(id=collection_id)
             if not collections:
-                raise InvalidCollectionException(
+                raise CollectionNotFoundError(
                     f"Collection {collection_id} does not exist."
                 )
             self._collection_cache[collection_id] = collections[0]

@@ -33,10 +33,25 @@ class InvalidCollectionException(ChromaError):
 
 
 class CollectionAlreadyExistsError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409  # Collection already exists
+
     @classmethod
     @overrides
     def name(cls) -> str:
         return "CollectionAlreadyExists"
+
+
+class CollectionNotFoundError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409  # Collection not found
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "CollectionNotFound"
 
 
 class IDAlreadyExistsError(ChromaError):
@@ -67,6 +82,7 @@ class InvalidUUIDError(ChromaError):
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
+    "CollectionNotFound": CollectionNotFoundError,
     "CollectionAlreadyExists": CollectionAlreadyExistsError,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
