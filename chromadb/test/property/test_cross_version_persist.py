@@ -42,6 +42,13 @@ def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return metadata
 
 
+def _list_to_str(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata.update(
+        (k, v.__str__()) for k, v in metadata.items() if isinstance(v, list)
+    )
+    return metadata
+
+
 def _patch_boolean_metadata(
     collection: strategies.Collection, embeddings: strategies.RecordSet
 ) -> None:
@@ -49,7 +56,7 @@ def _patch_boolean_metadata(
     # boolean value metadata to int
     collection_metadata = collection.metadata
     if collection_metadata is not None:
-        _bool_to_int(collection_metadata)
+        _bool_to_int(collection_metadata)  # type: ignore
 
     if embeddings["metadatas"] is not None:
         if isinstance(embeddings["metadatas"], list):
@@ -61,10 +68,27 @@ def _patch_boolean_metadata(
             _bool_to_int(metadata)
 
 
+def _patch_list_metadata(
+    collection: strategies.Collection, embeddings: strategies.RecordSet
+) -> None:
+    # Since the old version does not support list value metadata, convert to strings
+
+    if embeddings["metadatas"] is not None:
+        if isinstance(embeddings["metadatas"], list):
+            for metadata in embeddings["metadatas"]:
+                if metadata is not None and isinstance(metadata, dict):
+                    _list_to_str(metadata)
+
+        elif isinstance(embeddings["metadatas"], dict):
+            metadata = embeddings["metadatas"]
+            _list_to_str(metadata)
+
+
 version_patches: List[
     Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
 ] = [
     ("0.4.3", _patch_boolean_metadata),
+    ("0.4.6", _patch_list_metadata),
 ]
 
 
@@ -197,7 +221,7 @@ def persist_generated_data_with_old_version(
         api.reset()
         coll = api.create_collection(
             name=collection_strategy.name,
-            metadata=collection_strategy.metadata,
+            metadata=collection_strategy.metadata,  # type: ignore
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
