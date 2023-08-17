@@ -368,20 +368,31 @@ def test_escape_chars_in_ids(api: API) -> None:
 def test_delete_empty_fails(api: API):
     api.reset()
     coll = api.create_collection(name="foo")
-    with pytest.raises(ValueError):
+
+    error_valid = (
+        lambda e: "You must provide either ids, where, or where_document to delete."
+        in e
+    )
+
+    with pytest.raises(Exception) as e:
         coll.delete()
+    assert error_valid(str(e))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         coll.delete(ids=[])
+    assert error_valid(str(e))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         coll.delete(where={})
+    assert error_valid(str(e))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         coll.delete(where_document={})
+    assert error_valid(str(e))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         coll.delete(where_document={}, where={})
+    assert error_valid(str(e))
 
     # Should not raise
     coll.delete(where_document={"$contains": "bar"})

@@ -328,24 +328,6 @@ class Collection(BaseModel):
             validate_where_document(where_document) if where_document else None
         )
 
-        # You must have at least one of non-empty ids, where, or where_document.
-        if (
-            (ids is None or (ids is not None and len(ids) == 0))
-            and (where is None or (where is not None and len(where) == 0))
-            and (
-                where_document is None
-                or (where_document is not None and len(where_document) == 0)
-            )
-        ):
-            raise ValueError(
-                """
-                You must provide either ids, where, or where_document to delete. If
-                you want to delete all data in a collection you can delete the
-                collection itself using the delete_collection method. Or alternatively,
-                you can get() all the relevant ids and then delete them.
-                """
-            )
-
         self._client._delete(self.id, ids, where, where_document)
 
     def _validate_embedding_set(
