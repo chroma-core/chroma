@@ -368,11 +368,27 @@ class SegmentAPI(API):
             else None
         )
 
+        # You must have at least one of non-empty ids, where, or where_document.
+        if (
+            (ids is None or (ids is not None and len(ids) == 0))
+            and (where is None or (where is not None and len(where) == 0))
+            and (
+                where_document is None
+                or (where_document is not None and len(where_document) == 0)
+            )
+        ):
+            raise ValueError(
+                """
+                You must provide either ids, where, or where_document to delete. If
+                you want to delete all data in a collection you can delete the
+                collection itself using the delete_collection method. Or alternatively,
+                you can get() all the relevant ids and then delete them.
+                """
+            )
+
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
-        # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
-        # time a bad idea?
         if (where or where_document) or not ids:
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
@@ -381,6 +397,9 @@ class SegmentAPI(API):
             ids_to_delete = [r["id"] for r in records]
         else:
             ids_to_delete = ids
+
+        if len(ids_to_delete) == 0:
+            return []
 
         records_to_submit = []
         for r in _records(t.Operation.DELETE, ids_to_delete):

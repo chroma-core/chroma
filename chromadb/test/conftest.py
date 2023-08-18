@@ -25,6 +25,7 @@ import socket
 import multiprocessing
 
 from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.db.mixins import embeddings_queue
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -257,3 +258,7 @@ def produce_fns(
     request: pytest.FixtureRequest,
 ) -> Generator[ProducerFn, None, None]:
     yield request.param
+
+
+def pytest_configure(config):
+    embeddings_queue._called_from_test = True

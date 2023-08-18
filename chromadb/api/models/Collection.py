@@ -318,12 +318,16 @@ class Collection(BaseModel):
 
         Returns:
             None
+
+        Raises:
+            ValueError: If you don't provide either ids, where, or where_document
         """
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = (
             validate_where_document(where_document) if where_document else None
         )
+
         self._client._delete(self.id, ids, where, where_document)
 
     def _validate_embedding_set(
