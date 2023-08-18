@@ -1,0 +1,64 @@
+name: Chroma Release Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+    branches:
+      - main
+      - add-pre-release-workflow
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: "ghcr.io/${{ github.actor }}/chroma"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions: write-all
+#      id-token: write
+#      contents: read
+#      deployments: write
+#      packages: write
+#      pull-requests: read
+#      statuses: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - name: Install Client Dev Dependencies
+      run: python -m pip install -r requirements_dev.txt
+    - name: Build Client
+      run: python -m build
+    - name: Test Client Package
+      run: bin/test-package.sh dist/*.tar.gz
+    - name: Log in to the Container registry
+      uses: docker/login-action@v2.1.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install setuptools_scm
+      run: python -m pip install setuptools_scm
+    - name: Get Docker Tag
+      id: tag
+      run: echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
+    - name: Build and push prerelease Docker image
+      if: "!startsWith(github.ref, 'refs/tags/')"
+      uses: docker/build-push-action@v3.2.0
+      with:
+        context: .
+        push: true
+        tags: "${{ steps.tag.outputs.tag_name }}-rc"
+    - name: Get Release Version
+      id: version
+      run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+    - name: Get current date
+      id: builddate
+      run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
