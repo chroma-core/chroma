@@ -186,6 +186,11 @@ def fastapi_server_auth_param() -> Generator[System, None, None]:
         yield item
 
 
+def auth_provider_config() -> Generator[Dict[str, str], None, None]:
+    ...
+
+
+# TODO we need a generator for auth providers
 def fastapi_server_auth_file() -> Generator[System, None, None]:
     server_auth_file = os.path.abspath(os.path.join(".", "server-auth"))
     client_auth_file = os.path.abspath(os.path.join(".", "client-auth"))

@@ -11,7 +11,7 @@ from typing import Type, TypeVar, cast
 import requests
 from overrides import override
 from overrides import overrides, EnforceOverrides
-from pydantic import BaseSettings, SecretStr
+from pydantic import BaseSettings, SecretStr, validator
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
@@ -67,24 +67,6 @@ _abstract_type_keys: Dict[str, str] = {
 }
 
 
-class ClientAuthProvider(ABC, EnforceOverrides):
-    def __init__(self, settings: "Settings") -> None:
-        self._settings = settings
-
-    @abstractmethod
-    def authenticate(self, session: requests.Session) -> None:
-        pass
-
-
-class ServerAuthProvider(ABC, EnforceOverrides):
-    def __init__(self, settings: "Settings") -> None:
-        self._settings = settings
-
-    @abstractmethod
-    def authenticate(self, request: Request) -> Union[Response, None]:
-        pass
-
-
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
@@ -114,13 +96,24 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_grpc_port: Optional[str] = None
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
-    # eg ["chromadb.api.fastapi.middlewares.auth.AuthMiddleware"]
-    chroma_server_middlewares: List[str] = []
 
     chroma_server_auth_provider: Optional[str] = None
+
+    @validator("chroma_server_auth_provider", pre=True, always=True)
+    def chroma_server_auth_provider_non_empty(self, v) -> Optional[str]:
+        if not v or not v.strip():
+            raise ValueError("String cannot be empty or just whitespace")
+        return v
+
     chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
     chroma_client_auth_provider: Optional[str] = None
+    chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
+        "/api/v1": ["GET"],
+        "/api/v1/heartbeat": ["GET"],
+        "/api/v1/version": ["GET"],
+    }
     chroma_client_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
+
     anonymized_telemetry: bool = True
 
     allow_reset: bool = False
@@ -190,7 +183,6 @@ class Component(ABC, EnforceOverrides):
 
 class System(Component):
     settings: Settings
-    auth_provider: Optional["ClientAuthProvider"]
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
@@ -201,18 +193,6 @@ class System(Component):
                     "Chroma is running in http-only client mode, and can only be run with 'chromadb.api.fastapi.FastAPI' as the chroma_api_impl. \
             see https://docs.trychroma.com/usage-guide?lang=py#using-the-python-http-only-client for more information."
                 )
-        if (
-            settings.chroma_client_auth_provider is not None
-            and settings.chroma_client_auth_provider.strip() != ""
-        ):
-            logger.debug(
-                f"Client Auth Provider: {settings.chroma_client_auth_provider}"
-            )
-            self.auth_provider = get_class(
-                settings.chroma_client_auth_provider, ClientAuthProvider
-            )(settings)
-        else:
-            self.auth_provider = None
         # Validate settings don't contain any legacy config values
         for key in _legacy_config_keys:
             if settings[key] is not None:
@@ -273,134 +253,6 @@ class System(Component):
             )
         for component in reversed(list(self.components())):
             component.reset_state()
-
-
-class BasicAuthClientProvider(ClientAuthProvider):
-    _basic_auth_token: SecretStr
-
-    def __init__(self, settings: "Settings") -> None:
-        super().__init__(settings)
-        self._settings = settings
-        if os.environ.get("CHROMA_CLIENT_AUTH_BASIC_USERNAME") and os.environ.get(
-            "CHROMA_CLIENT_AUTH_BASIC_PASSWORD"
-        ):
-            self._basic_auth_token = _create_token(
-                os.environ.get("CHROMA_CLIENT_AUTH_BASIC_USERNAME", ""),
-                os.environ.get("CHROMA_CLIENT_AUTH_BASIC_PASSWORD", ""),
-            )
-        elif isinstance(
-            self._settings.chroma_client_auth_provider_config, str
-        ) and os.path.exists(self._settings.chroma_client_auth_provider_config):
-            with open(self._settings.chroma_client_auth_provider_config) as f:
-                # read first line of file which should be user:password
-                _auth_data = f.readline().strip().split(":")
-                # validate auth data
-                if len(_auth_data) != 2:
-                    raise ValueError("Invalid auth data")
-                self._basic_auth_token = _create_token(_auth_data[0], _auth_data[1])
-        elif self._settings.chroma_client_auth_provider_config and isinstance(
-            self._settings.chroma_client_auth_provider_config, dict
-        ):
-            self._basic_auth_token = _create_token(
-                self._settings.chroma_client_auth_provider_config["username"],
-                self._settings.chroma_client_auth_provider_config["password"],
-            )
-        else:
-            raise ValueError("Basic auth credentials not found")
-
-    @overrides
-    def authenticate(self, session: requests.Session) -> None:
-        session.headers.update(
-            {"Authorization": f"Basic {self._basic_auth_token.get_secret_value()}"}
-        )
-
-
-class ChromaAuthMiddleware(BaseHTTPMiddleware):  # type: ignore
-    def __init__(self, app: ASGIApp, settings: "Settings") -> None:
-        super().__init__(app)
-        self._settings = settings
-        self._settings.require("chroma_server_auth_provider")
-        if settings.chroma_server_auth_provider:
-            _cls = get_class(settings.chroma_server_auth_provider, ServerAuthProvider)
-            logger.debug(f"Server Auth Provider: {_cls}")
-            self._auth_provider = _cls(settings)
-
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        response = self._auth_provider.authenticate(request)
-        if response is not None:
-            return response
-        return await call_next(request)
-
-
-def _create_token(username: str, password: str) -> SecretStr:
-    return SecretStr(
-        base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("utf-8")
-    )
-
-
-class BasicAuthServerProvider(ServerAuthProvider):
-    _basic_auth_token: SecretStr
-    _ignore_auth_paths: List[str] = ["/api/v1", "/api/v1/heartbeat", "/api/v1/version"]
-
-    def __init__(self, settings: "Settings") -> None:
-        super().__init__(settings)
-        self._settings = settings
-        self._basic_auth_token = SecretStr("")
-        if os.environ.get("CHROMA_SERVER_AUTH_BASIC_USERNAME") and os.environ.get(
-            "CHROMA_SERVER_AUTH_BASIC_PASSWORD"
-        ):
-            self._basic_auth_token = _create_token(
-                os.environ.get("CHROMA_SERVER_AUTH_BASIC_USERNAME", ""),
-                os.environ.get("CHROMA_SERVER_AUTH_BASIC_PASSWORD", ""),
-            )
-            self._ignore_auth_paths = os.environ.get(
-                "CHROMA_SERVER_AUTH_IGNORE_PATHS", ",".join(self._ignore_auth_paths)
-            ).split(",")
-        elif isinstance(
-            self._settings.chroma_server_auth_provider_config, str
-        ) and os.path.exists(self._settings.chroma_server_auth_provider_config):
-            with open(self._settings.chroma_server_auth_provider_config) as f:
-                # read first line of file which should be user:password
-                _auth_data = f.readline().strip().split(":")
-                # validate auth data
-                if len(_auth_data) != 2:
-                    raise ValueError("Invalid auth data")
-                self._basic_auth_token = _create_token(_auth_data[0], _auth_data[1])
-            self._ignore_auth_paths = os.environ.get(
-                "CHROMA_SERVER_AUTH_IGNORE_PATHS", ",".join(self._ignore_auth_paths)
-            ).split(",")
-        elif self._settings.chroma_server_auth_provider_config and isinstance(
-            self._settings.chroma_server_auth_provider_config, dict
-        ):
-            # encode the username and password base64
-            self._basic_auth_token = _create_token(
-                self._settings.chroma_server_auth_provider_config["username"],
-                self._settings.chroma_server_auth_provider_config["password"],
-            )
-            if "ignore_auth_paths" in self._settings.chroma_server_auth_provider_config:
-                self._ignore_auth_paths = (
-                    self._settings.chroma_server_auth_provider_config[
-                        "ignore_auth_paths"
-                    ]
-                )
-        else:
-            raise ValueError("Basic auth credentials not found")
-
-    @overrides
-    def authenticate(self, request: Request) -> Union[Response, None]:
-        auth_header = request.headers.get("Authorization", "").split()
-        # Check if the header exists and the token is correct
-        if request.url.path in self._ignore_auth_paths:
-            logger.debug(f"Skipping auth for path {request.url.path}")
-            return None
-        if (
-            len(auth_header) != 2
-            or auth_header[1] != self._basic_auth_token.get_secret_value()
-        ):
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return None
 
 
 C = TypeVar("C")

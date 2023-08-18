@@ -11,6 +11,10 @@ from uuid import UUID
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
+from chromadb.auth.fastapi import (
+    FastAPIChromaAuthMiddleware,
+    FastAPIChromaAuthMiddlewareWrapper,
+)
 from chromadb.config import Settings
 import chromadb.server
 import chromadb.api
@@ -109,12 +113,11 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
-        if (
-            settings.chroma_server_auth_provider is not None
-            and settings.chroma_server_auth_provider.strip() != ""
-        ):
+        if settings.chroma_server_auth_provider:
+            self._auth_middleware = self._api.require(FastAPIChromaAuthMiddleware)
             self._app.add_middleware(
-                chromadb.config.ChromaAuthMiddleware, settings=settings
+                FastAPIChromaAuthMiddlewareWrapper,
+                auth_middleware=self._auth_middleware,
             )
 
         self.router = ChromaAPIRouter()
