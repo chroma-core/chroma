@@ -102,7 +102,17 @@ class Settings(BaseSettings):  # type: ignore
     @validator("chroma_server_auth_provider", pre=True, always=True)
     def chroma_server_auth_provider_non_empty(self, v) -> Optional[str]:
         if not v or not v.strip():
-            raise ValueError("String cannot be empty or just whitespace")
+            raise ValueError("chroma_server_auth_provider cannot be empty or just whitespace")
+        return v
+
+    chroma_server_auth_credentials_file: Optional[str] = None
+
+    @validator("chroma_server_auth_credentials_file", pre=True, always=True)
+    def chroma_server_auth_credentials_file_non_empty_file_exists(self, v) -> Optional[str]:
+        if not v or not v.strip():
+            raise ValueError("chroma_server_auth_credentials_file cannot be empty or just whitespace")
+        if not os.path.isfile(v):
+            raise ValueError(f"chroma_server_auth_credentials_file [{v}] does not exist")
         return v
 
     chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
