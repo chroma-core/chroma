@@ -100,22 +100,24 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True)
-    def chroma_server_auth_provider_non_empty(self, v) -> Optional[str]:
-        if not v or not v.strip():
+    def chroma_server_auth_provider_non_empty(cls, v) -> Optional[str]:
+        if v and not v.strip():
             raise ValueError("chroma_server_auth_provider cannot be empty or just whitespace")
         return v
 
+    chroma_server_auth_configuration_provider: Optional[str] = None
+    chroma_server_auth_configuration_file: Optional[str] = None
+    chroma_server_auth_credentials_provider: Optional[str] = None
     chroma_server_auth_credentials_file: Optional[str] = None
 
     @validator("chroma_server_auth_credentials_file", pre=True, always=True)
-    def chroma_server_auth_credentials_file_non_empty_file_exists(self, v) -> Optional[str]:
-        if not v or not v.strip():
+    def chroma_server_auth_credentials_file_non_empty_file_exists(cls, v) -> Optional[str]:
+        if v and not v.strip():
             raise ValueError("chroma_server_auth_credentials_file cannot be empty or just whitespace")
-        if not os.path.isfile(v):
+        if v and not os.path.isfile(os.path.join(v)):
             raise ValueError(f"chroma_server_auth_credentials_file [{v}] does not exist")
         return v
 
-    chroma_server_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
     chroma_client_auth_provider: Optional[str] = None
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],

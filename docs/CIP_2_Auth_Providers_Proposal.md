@@ -23,9 +23,11 @@ control server and client-side auth providers.
 
 ## **Proposed Changes**
 
-We propose two abstractions, one for the server-side and another for the [client-side.](http://client-side.In) In
+We propose two abstraction groups, one for the server-side and another for the client-side. In
 addition we also introduce a FastAPI/startlette middleware adapter which will allow using the server-side abstractions
-in the context of FastAPI.
+in the context of FastAPI. For client-side we rely on `requests`
+
+### Architecture Overview
 
 Architecture Overview:
 
@@ -34,6 +36,60 @@ Architecture Overview:
 Request Sequence:
 
 ![cip-2-seq.png](assets/cip-2-seq.png)
+
+### Constraints
+
+This section provides teh architectural constraints for the authentication framework. The constraints are set of
+restrictions we impose to make the design simpler and more robust.
+
+- There must be at most one active client-side auth provider
+- There must be at most one active client-side credentials provider
+- There must be at most one active server-side auth provider
+- There must be at most one active server-side auth configuration provider
+- There must be at most one active server-side auth credentials provider
+
+### Core Concepts
+
+- Auth Provider - an abstraction that provides authentication functionality for either client or server-side. The
+  provider is responsible for validating client credentials using (if available) configuration and credentials
+  providers. The auth provider is also responsible for carrying the Croma-leg of any authentication flow.
+- Auth Configuration Provider - an abstraction that provides configuration for auth providers. The configuration can be
+  loaded from a file, env vars or programmatically. The configuration is used for validating and/or accessing user
+  credentials. Examples: secret key for JWT token based auth, DB URL for DB based auth, etc. Depending on sensitivity of
+  the information stored in the configuration, the provider should implement the necessary interfaces to access such
+  information in a secure way.
+- Auth Credentials Provider - an abstraction that provides credentials for auth providers. The credentials can be
+  loaded from a file, env vars or programmatically. The credentials are used for validating client-side credentials (for
+  sever-side auth) and retrieving or generating client-side credentials (for client-side auth).
+
+#### Abstractions
+
+##### Server-Side
+
+We suggest multiple abstractions on the server-side to allow for easy integration with different auth providers.
+We suggest the following abstractions:
+
+> Note: All abstractions are defined under `chromadb.auth` package
+
+- `ServerAuthProvider` - this is the base server auth provider abstraction that allows any server implementation of
+  Chroma to support variety of auth providers. The main responsibility of the auth provider is to orchestrate the auth
+  flow by gluing together the auth configuration and credentials providers.
+- `ChromaAuthMiddleware` - The auth middleware is responsible for providing server specific
+  implementation of the auth middleware. This includes three general types of operations - forwarding authentication to
+  the auth provider, instrumenting the server if needed to support a specific auth flow, ignore certain
+  actions/operations (e.g. in REST this would be verb+path) that should not be authenticated.
+- `ServerAuthenticationRequest` - An abstraction for querying for authentication data from server specific
+  implementation.
+- `ServerAuthenticationResponse` - An abstraction for returning authentication data to server specific implementation.
+- `ServerAuthConfigurationProvider` - this is the base abstraction for auth configuration providers. The provider is
+  responsible for loading auth configuration from a file, env vars or programmatically.
+- `ServerAuthConfigurationProviderFactory` !!!!
+- `AbstractCredentials`
+- `ServerAuthCredentialsProvider` - this is the base abstraction for auth credentials providers. The provider is
+  responsible for verifying client credentials.
+- `ServerAuthCredentialsProviderFactory` !!!!
+
+##### Client-Side
 
 ### Abstractions
 
