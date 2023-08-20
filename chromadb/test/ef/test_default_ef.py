@@ -1,4 +1,3 @@
-from enum import Enum, auto
 from typing import List
 
 import hypothesis.strategies as st
@@ -7,10 +6,6 @@ import pytest
 from hypothesis import given
 
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
-
-
-class PossibleProviders(Enum):
-    test = auto()
 
 
 @given(
