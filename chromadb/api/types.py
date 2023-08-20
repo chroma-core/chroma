@@ -197,6 +197,9 @@ class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
 
+    def max_input_length(self) -> int:
+        ...
+
 
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],

@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import Any, Dict, List, Mapping, Union, cast
+from typing import Any, Dict, List, Mapping, Union,Callable, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -29,6 +29,39 @@ except ImportError:
     is_thin_client = False
 
 logger = logging.getLogger(__name__)
+
+
+#TODO - this needs to be either remove or generalized (e.g. heuristics for max input length)
+def _dummy_token_counter(text: str) -> str:
+    return text
+
+
+def _check_large_texts(
+    embedding_function: EmbeddingFunction,
+    texts: Documents,
+    warn_only: Optional[bool] = True,
+    token_count_function: Callable[..., Any] = _dummy_token_counter,
+) -> None:
+    _large_texts = [
+        i
+        for i, t in enumerate(texts)
+        if len(token_count_function(t)) > embedding_function.max_input_length()
+    ]
+    _t_tokens = [{len(token_count_function(t)): t} for t in texts]
+    print(_t_tokens)
+    if len(_large_texts) > 0:
+        if (
+            not warn_only
+            or os.environ.get("CHROMA_STRICT_MODE", "false").lower() == "true"
+        ):
+            raise ValueError(
+                f"The following documents exceed the maximum input size of {embedding_function.max_input_length()}: {_large_texts}"
+            )
+        else:
+            logger.warning(
+                f"WARNING: The following documents exceed the maximum input size of {embedding_function.max_input_length()}: {_large_texts}"
+            )
+
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -54,9 +87,15 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
+    def max_input_length(self) -> int:
+        return cast(int, self._model._first_module().max_seq_length)
+
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(  # type: ignore
-            list(input),
+        _check_large_texts(
+            self, texts, token_count_function=self._model.tokenizer.tokenize
+        )
+        return self._model.encode(
+            list(texts),
             convert_to_numpy=True,
             normalize_embeddings=self._normalize_embeddings,
         ).tolist()
@@ -72,7 +111,14 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self._model = SentenceModel(model_name_or_path=model_name)
 
+    def max_input_length(self) -> int:
+        # ref: https://huggingface.co/shibing624/text2vec-base-chinese/blob/main/config.json
+        return 512
+
     def __call__(self, input: Documents) -> Embeddings:
+        _check_large_texts(
+            self, input, token_count_function=self._model.tokenizer.tokenize
+        )
         return self._model.encode(list(input), convert_to_numpy=True).tolist()  # type: ignore # noqa E501
 
 
@@ -157,9 +203,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
         self._deployment_id = deployment_id
 
+    def max_input_length(self) -> int:
+        return 2048
+
     def __call__(self, input: Documents) -> Embeddings:
         # replace newlines, which can negatively affect performance.
         input = [t.replace("\n", " ") for t in input]
+        _check_large_texts(self, input)
 
         # Call the OpenAI Embedding API
         if self._v1:
@@ -205,8 +255,22 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         self._client = cohere.Client(api_key)
         self._model_name = model_name
 
+    def max_input_length(self) -> int:
+        # Ref: https://docs.cohere.com/changelog/model-names-are-changing
+        # Ref: https://docs.cohere.com/docs/models#representation
+        if self._model_name in ["small", "embed-english-light-v2.0"]:
+            return 512
+        elif self._model_name in ["large", "embed-english-v2.0"]:
+            return 512
+        elif self._model_name in ["multilingual-22-12", "embed-multilingual-v2.0"]:
+            return 256
+        else:
+            raise ValueError(
+                "The model name is not valid. Please check the model name at https://docs.cohere.com/docs/models#representation"
+            )
     def __call__(self, input: Documents) -> Embeddings:
         # Call Cohere Embedding API for each document.
+        _check_large_texts(self, input)
         return [
             embeddings
             for embeddings in self._client.embed(texts=input, model=self._model_name, input_type="search_document")
@@ -233,6 +297,19 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
+    def max_input_length(self) -> int:
+        try:
+            _model_config = requests.get(
+                f"https://huggingface.co/sentence-transformers/{self._model_name}/blob/main/config.json"
+            )
+            if _model_config.status_code == 200:
+                _json = _model_config.json()
+                if "max_position_embeddings" in _json:
+                    return cast(int, _json["max_position_embeddings"])
+        except Exception:
+            # ignore failure and return default 512 (valid for most models) - maybe we can issue a warning here
+            pass
+        return 512
     def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
@@ -249,6 +326,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding API for each document
+        _check_large_texts(self, input)
         return self._session.post(  # type: ignore
             self._api_url, json={"inputs": input, "options": {"wait_for_model": True}}
         ).json()
@@ -324,7 +402,11 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = INSTRUCTOR(model_name, device=device)
         self._instruction = instruction
 
+    def max_input_length(self) -> int:
+        # Ref: https://huggingface.co/hkunlp/instructor-xl/discussions/5
+        return 512
     def __call__(self, input: Documents) -> Embeddings:
+        _check_large_texts(self, input)
         if self._instruction is None:
             return self._model.encode(input).tolist()  # type: ignore
 
@@ -355,6 +437,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
         # convert the list to set for unique values
+        self._max_input_length = 256
         if preferred_providers and not all(
             [isinstance(i, str) for i in preferred_providers]
         ):
@@ -442,7 +525,15 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             all_embeddings.append(embeddings)
         return np.concatenate(all_embeddings)
 
+    def _get_tokenizer(self) -> Any:
+        return self.Tokenizer.from_file(
+            os.path.join(
+                self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+            )
+        )
+
     def _init_model_and_tokenizer(self) -> None:
+        self.tokenizer = self._get_tokenizer()
         if self.model is None and self.tokenizer is None:
             self.tokenizer = self.Tokenizer.from_file(
                 os.path.join(
@@ -451,8 +542,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             )
             # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
-            self.tokenizer.enable_truncation(max_length=256)
-            self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+            self.tokenizer.enable_truncation(max_length=self._max_input_length)
+            self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self._max_input_length)
 
             if self._preferred_providers is None or len(self._preferred_providers) == 0:
                 if len(self.ort.get_available_providers()) > 0:
@@ -475,11 +566,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
                 providers=self._preferred_providers,
             )
+    def max_input_length(self) -> int:
+        return self._max_input_length
 
     def __call__(self, input: Documents) -> Embeddings:
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
         self._init_model_and_tokenizer()
+        # token_count_function=self.tokenizer.tokenize
+        _token_counter = self._get_tokenizer()
+        # This is a hack to get the token count high-enough
+        _token_counter.enable_truncation(max_length=999999)
+        _check_large_texts(self, input, token_count_function=_token_counter.encode)
         res = cast(Embeddings, self._forward(input).tolist())
         return res
 
@@ -568,7 +666,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
+    def max_input_length(self) -> int:
+        return 3072
+
     def __call__(self, input: Documents) -> Embeddings:
+        _check_large_texts(self, input)
         embeddings = []
         for text in input:
             response = self._session.post(
