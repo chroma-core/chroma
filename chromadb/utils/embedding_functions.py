@@ -251,7 +251,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
     def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
-        self._preferred_providers = preferred_providers
+        # convert the list to set for unique values
+        self._preferred_providers = (
+            list(set(preferred_providers)) if preferred_providers is not None else None
+        )
         try:
             # Equivalent to import onnxruntime
             self.ort = importlib.import_module("onnxruntime")
@@ -339,12 +342,20 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+
             if self._preferred_providers is None or len(self._preferred_providers) == 0:
-                logger.info(
-                    f"No ONNYX providers specified, defaulting to available providers: "
-                    f"{self.ort.get_available_providers()}"
-                )
+                if len(self.ort.get_available_providers()) > 0:
+                    logger.warning(
+                        f"WARNING: No ONNX providers provided, defaulting to available providers: "
+                        f"{self.ort.get_available_providers()}"
+                    )
                 self._preferred_providers = self.ort.get_available_providers()
+            elif not set(self._preferred_providers).issubset(
+                set(self.ort.get_available_providers())
+            ):
+                raise ValueError(
+                    "Preferred providers must be subset of available providers"
+                )
             self.model = self.ort.InferenceSession(
                 os.path.join(
                     self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
