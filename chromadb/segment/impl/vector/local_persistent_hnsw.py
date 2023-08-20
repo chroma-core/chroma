@@ -399,6 +399,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if os.path.exists(data_path):
             shutil.rmtree(data_path, ignore_errors=True)
 
+    @override
+    def delete(self) -> None:
+        data_path = self._get_storage_folder()
+        if os.path.exists(data_path):
+            shutil.rmtree(data_path, ignore_errors=True)
+
     @staticmethod
     def get_file_handle_count() -> int:
         """Return how many file handles are used by the index"""

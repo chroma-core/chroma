@@ -114,7 +114,7 @@ class LocalSegmentManager(SegmentManager):
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
                     instance = self.get_segment(collection_id, VectorReader)
-                    instance.reset_state()
+                    instance.delete()
                 del self._instances[segment["id"]]
             if collection_id in self._segment_cache:
                 if segment["scope"] in self._segment_cache[collection_id]:
