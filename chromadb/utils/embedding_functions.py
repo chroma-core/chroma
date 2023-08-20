@@ -1,3 +1,5 @@
+import logging
+
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from pathlib import Path
 import os
@@ -13,6 +15,8 @@ try:
     from chromadb.is_thin_client import is_thin_client
 except ImportError:
     is_thin_client = False
+
+logger = logging.getLogger(__name__)
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
@@ -244,9 +248,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
 
     # https://github.com/python/mypy/issues/7291 mypy makes you type the constructor if
     # no args
-    def __init__(self) -> None:
+    def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
+        self._preferred_providers = preferred_providers
         try:
             # Equivalent to import onnxruntime
             self.ort = importlib.import_module("onnxruntime")
@@ -334,13 +339,19 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+            if self._preferred_providers is None or len(self._preferred_providers) == 0:
+                logger.info(
+                    f"No ONNYX providers specified, defaulting to available providers: "
+                    f"{self.ort.get_available_providers()}"
+                )
+                self._preferred_providers = self.ort.get_available_providers()
             self.model = self.ort.InferenceSession(
                 os.path.join(
                     self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
                 ),
                 # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
                 # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
-                providers=self.ort.get_available_providers(),
+                providers=self._preferred_providers,
             )
 
     def __call__(self, texts: Documents) -> Embeddings:
