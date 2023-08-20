@@ -54,3 +54,13 @@ local_scheme="no-local-version"
 
 [tool.setuptools]
 packages = ["chromadb"]
+
+[project.optional-dependencies]
+ef_openai = ["openai"]
+ef_cohere = ["cohere"]
+ef_huggingface = ["requests"]
+ef_instructor = ["InstructorEmbedding"]
+ef_default = ["onnxruntime", "tokenizers", "tqdm"]
+ef_google_palm = ["google-generativeai"]
+ef_sentence_transformers = ["sentence-transformers"]
+ef_text2vec = ["text2vec"]
