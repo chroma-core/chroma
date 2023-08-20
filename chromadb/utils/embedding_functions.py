@@ -337,7 +337,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
             self.model = self.ort.InferenceSession(
                 os.path.join(
                     self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
-                )
+                ),
+                # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
+                # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
+                providers=self.ort.get_available_providers(),
             )
 
     def __call__(self, texts: Documents) -> Embeddings:
