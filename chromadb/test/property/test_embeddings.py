@@ -1,9 +1,13 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Dict, Set, cast, Union, DefaultDict
+from typing import Dict, Set, cast, Union, DefaultDict, Type, Any
 from dataclasses import dataclass
-from chromadb.api.types import ID, Include, IDs
+
+from hypothesis import given
+
+from chromadb.api.types import ID, Include, IDs, validate_embeddings
+import numpy as np
 import chromadb.errors as errors
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -23,7 +27,6 @@ from hypothesis.stateful import (
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
 import numpy as np
-
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
@@ -403,3 +406,22 @@ def test_delete_success(api: ServerAPI, kwargs: dict):
     coll = api.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
+
+
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64]))
+def test_autocasting_validate_embeddings_for_compatible_types(
+    supported_types: list[Type[Any]], caplog: pytest.LogCaptureFixture, api: API
+) -> None:
+    embds = strategies.create_embeddings(10, 10, supported_types)
+    validate_embeddings(embds)
+
+
+@given(unsupported_types=st.sampled_from([str]))
+def test_autocasting_validate_embeddings_incompatible_types(
+    unsupported_types: list[Type[Any]], api: API
+) -> None:
+    embds = strategies.create_embeddings(10, 10, unsupported_types)
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(embds)
+
+    assert "Expected each value in the embedding to be a int or float" in str(e)

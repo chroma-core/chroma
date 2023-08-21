@@ -476,12 +476,24 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
+    _new_embeddings: Embeddings = list()
     for embedding in embeddings:
         if not all([isinstance(value, (int, float)) for value in embedding]):
-            raise ValueError(
-                f"Expected each value in the embedding to be a int or float, got {embeddings}"
-            )
-    return embeddings
+            try:
+                _new_embeddings.append(
+                    [
+                        float(value) if isinstance(value, float) else int(value)
+                        for value in embedding
+                    ]
+                )
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Expected each value in the embedding to be a int or float, got { set(type(v).__name__ for v in embedding) } types: "
+                    f"{embedding}"
+                )
+        else:
+            _new_embeddings.append(embedding)
+    return _new_embeddings
 
 
 def validate_batch(
