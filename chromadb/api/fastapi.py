@@ -59,7 +59,9 @@ class FastAPI(API):
         return int(resp.json()["nanosecond heartbeat"])
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self, offset: Optional[int] = None, limit: Optional[int] = None
+    ) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = self._session.get(self._api_url + "/collections")
         raise_chroma_error(resp)

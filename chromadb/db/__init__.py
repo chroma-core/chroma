@@ -28,7 +28,9 @@ class DB(Component):
         pass
 
     @abstractmethod
-    def list_collections(self) -> Sequence:  # type: ignore
+    def list_collections(
+        self, offset: Optional[int] = None, limit: Optional[int] = None
+    ) -> Sequence:  # type: ignore
         pass
 
     @abstractmethod

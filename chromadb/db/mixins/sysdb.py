@@ -2,7 +2,7 @@ from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
 from pypika import Table, Column
-from itertools import groupby
+from itertools import groupby, islice
 
 from chromadb.config import System
 from chromadb.db.base import (
@@ -180,6 +180,8 @@ class SqlSysDB(SqlDB, SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
         collections_t = Table("collections")
@@ -229,6 +231,9 @@ class SqlSysDB(SqlDB, SysDB):
                         dimension=dimension,
                     )
                 )
+
+            if offset is not None and limit is not None:
+                return list(islice(collections, offset, offset + limit))
 
             return collections
 

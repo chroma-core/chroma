@@ -67,6 +67,8 @@ class SysDB(Component):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Find collections by id, topic or name"""
         pass

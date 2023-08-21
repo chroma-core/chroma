@@ -36,7 +36,9 @@ class API(Component, ABC):
     #
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self, offset: Optional[int] = None, limit: Optional[int] = None
+    ) -> Sequence[Collection]:
         """List all collections.
         Returns:
             Sequence[Collection]: A list of collections

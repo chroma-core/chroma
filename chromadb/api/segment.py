@@ -179,9 +179,12 @@ class SegmentAPI(API):
             raise ValueError(f"Collection {name} does not exist.")
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self, offset: Optional[int] = None, limit: Optional[int] = None
+    ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections()
+
+        db_collections = self._sysdb.get_collections(limit=limit, offset=offset)
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -191,6 +194,7 @@ class SegmentAPI(API):
                     metadata=db_collection["metadata"],  # type: ignore
                 )
             )
+
         return collections
 
     @override
