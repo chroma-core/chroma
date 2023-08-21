@@ -10,12 +10,18 @@ from typing import Optional, Any, Dict, List, Union, Type, Callable, TypeVar
 
 import requests
 from overrides import EnforceOverrides, overrides, override
+from pydantic import SecretStr
 
-from chromadb.config import Component, System, Settings, get_fqn  # TODO remove this circular dependency
+from chromadb.config import (
+    Component,
+    System,
+    Settings,
+    get_fqn,
+)  # TODO remove this circular dependency
 from chromadb.errors import ChromaError
 from chromadb.utils import get_class
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 # Re-export types from chromadb
@@ -64,7 +70,7 @@ class AuthInfoType(Enum):
 class ServerAuthenticationRequest(EnforceOverrides, ABC):
     @abstractmethod
     def get_auth_info(
-            self, auth_info_type: AuthInfoType, auth_info_id: Optional[str] = None
+        self, auth_info_type: AuthInfoType, auth_info_id: Optional[str] = None
     ) -> T:
         """
         This method should return the necessary auth info based on the type of authentication (e.g. header, cookie, url)
@@ -88,7 +94,7 @@ class ServerAuthProvider(Component):
 
     @abstractmethod
     def authenticate(
-            self, request: ServerAuthenticationRequest
+        self, request: ServerAuthenticationRequest
     ) -> ServerAuthenticationResponse:
         pass
 
@@ -99,7 +105,7 @@ class ChromaAuthMiddleware(Component):
 
     @abstractmethod
     def authenticate(
-            self, request: ServerAuthenticationRequest
+        self, request: ServerAuthenticationRequest
     ) -> Optional[ServerAuthenticationResponse]:
         ...
 
@@ -132,24 +138,35 @@ class ServerAuthConfigurationProviderFactory:
     _counter = 0
 
     @classmethod
-    def register_provider(cls, env_vars: List[str], provider_class: ServerAuthConfigurationProvider,
-                          precedence: Optional[int] = None):
+    def register_provider(
+        cls,
+        env_vars: List[str],
+        provider_class: ServerAuthConfigurationProvider,
+        precedence: Optional[int] = None,
+    ):
         if precedence is None:
             cls._counter += 1
             precedence = cls._counter
 
-        cls.providers[provider_class.get_type()][tuple(env_vars)] = (provider_class, precedence)
+        cls.providers[provider_class.get_type()][tuple(env_vars)] = (
+            provider_class,
+            precedence,
+        )
 
     @classmethod
     def set_default_provider(cls, provider_class):
         cls.default_provider = provider_class
 
     @classmethod
-    def get_provider(cls, system: System, provider_class: Optional[Union[str, Type]] = None) \
-            -> Optional[ServerAuthConfigurationProvider]:
+    def get_provider(
+        cls, system: System, provider_class: Optional[Union[str, Type]] = None
+    ) -> Optional[ServerAuthConfigurationProvider]:
         if provider_class:
-            _provider_class = get_class(provider_class, ServerAuthConfigurationProvider) \
-                if isinstance(provider_class, str) else provider_class
+            _provider_class = (
+                get_class(provider_class, ServerAuthConfigurationProvider)
+                if isinstance(provider_class, str)
+                else provider_class
+            )
             _provider_by_cls = [
                 provider[0]
                 for type_key, type_providers in cls.providers.items()
@@ -164,9 +181,12 @@ class ServerAuthConfigurationProviderFactory:
             (type_key, env_vars, provider)
             for type_key, type_providers in cls.providers.items()
             for env_vars, provider in type_providers.items()
-            if all(os.environ.get(env_var) for env_var in env_vars) or
-               all(getattr(system.settings, env_var) for env_var in env_vars
-                   if hasattr(system.settings, env_var))
+            if all(os.environ.get(env_var) for env_var in env_vars)
+            or all(
+                getattr(system.settings, env_var)
+                for env_var in env_vars
+                if hasattr(system.settings, env_var)
+            )
         ]
 
         if not available_providers:
@@ -176,10 +196,7 @@ class ServerAuthConfigurationProviderFactory:
                 raise ValueError("No suitable provider found!")
 
         # Sort first by type, then by precedence within each type
-        sorted_providers = sorted(
-            available_providers,
-            key=lambda x: (x[0], x[2][1])
-        )
+        sorted_providers = sorted(available_providers, key=lambda x: (x[0], x[2][1]))
 
         _, _, (provider_class, _) = sorted_providers[0]
         return system.require(provider_class)
@@ -187,7 +204,9 @@ class ServerAuthConfigurationProviderFactory:
 
 def register_configuration_provider(*env_vars, precedence=None) -> Any:
     def decorator(cls) -> Any:
-        ServerAuthConfigurationProviderFactory.register_provider(env_vars, cls, precedence)
+        ServerAuthConfigurationProviderFactory.register_provider(
+            env_vars, cls, precedence
+        )
         return cls
 
     return decorator
@@ -201,7 +220,9 @@ class NoopServerAuthConfigurationProvider(ServerAuthConfigurationProvider):
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
-        ServerAuthConfigurationProviderFactory.set_default_provider(NoopServerAuthConfigurationProvider)
+        ServerAuthConfigurationProviderFactory.set_default_provider(
+            NoopServerAuthConfigurationProvider
+        )
 
     @override
     def get_configuration(self) -> Optional[str]:
@@ -214,7 +235,6 @@ class NoopServerAuthConfigurationProvider(ServerAuthConfigurationProvider):
 
 
 class AuthenticationError(ChromaError):
-
     @overrides
     def code(self) -> int:
         return 401
@@ -226,9 +246,13 @@ class AuthenticationError(ChromaError):
 
 
 class AbstractCredentials(EnforceOverrides, ABC):
+    """
+    The class is used by Auth Providers to encapsulate credentials received from the server
+    and pass them to a ServerAuthCredentialsProvider.
+    """
 
     @abstractmethod
-    def get_credentials(self) -> Dict[str, str]:
+    def get_credentials(self) -> Dict[str, Union[str, int, float, bool, SecretStr]]:
         """
         Returns the data encapsulated by the credentials object.
         """
@@ -236,17 +260,13 @@ class AbstractCredentials(EnforceOverrides, ABC):
 
 
 class BasicAuthCredentials(AbstractCredentials):
-
     def __init__(self, username, password) -> None:
         self.username = username
         self.password = password
 
     @override
-    def get_credentials(self) -> Dict[str, str]:
-        return {
-            "username": self.username,
-            "password": self.password
-        }
+    def get_credentials(self) -> Dict[str, Union[str, int, float, bool, SecretStr]]:
+        return {"username": self.username, "password": self.password}
 
     @staticmethod
     def from_header(header: str) -> "BasicAuthCredentials":
@@ -272,21 +292,29 @@ class ServerAuthCredentialsProviderFactory:
     _counter = 0
 
     @classmethod
-    def register_provider(cls, env_vars: List[str], provider_class: ServerAuthCredentialsProvider,
-                          precedence: Optional[int] = None) -> None:
+    def register_provider(
+        cls,
+        env_vars: List[str],
+        provider_class: ServerAuthCredentialsProvider,
+        precedence: Optional[int] = None,
+    ) -> None:
         if precedence is None:
             cls._counter += 1
             precedence = cls._counter
 
-        cls.providers[provider_class.get_type()][tuple(env_vars)] = (provider_class, precedence)
+        cls.providers[provider_class.get_type()][tuple(env_vars)] = (
+            provider_class,
+            precedence,
+        )
 
     @classmethod
     def set_default_provider(cls, provider_class: ServerAuthCredentialsProvider):
         cls.default_provider = provider_class
 
     @classmethod
-    def get_provider(cls, system: System, provider_class: Optional[Union[str, Type]] = None) \
-            -> Optional[ServerAuthCredentialsProvider]:
+    def get_provider(
+        cls, system: System, provider_class: Optional[Union[str, Type]] = None
+    ) -> Optional[ServerAuthCredentialsProvider]:
         if provider_class:
             _provider_by_cls = [
                 provider[0]
@@ -302,9 +330,12 @@ class ServerAuthCredentialsProviderFactory:
             (type_key, env_vars, provider)
             for type_key, type_providers in cls.providers.items()
             for env_vars, provider in type_providers.items()
-            if all(os.environ.get(env_var) for env_var in env_vars) or
-               all(getattr(system.settings, env_var) for env_var in env_vars
-                   if hasattr(system.settings, env_var))
+            if all(os.environ.get(env_var) for env_var in env_vars)
+            or all(
+                getattr(system.settings, env_var)
+                for env_var in env_vars
+                if hasattr(system.settings, env_var)
+            )
         ]
 
         if not available_providers:
@@ -314,10 +345,7 @@ class ServerAuthCredentialsProviderFactory:
                 raise ValueError("No suitable provider found!")
 
         # Sort first by type, then by precedence within each type
-        sorted_providers = sorted(
-            available_providers,
-            key=lambda x: (x[0], x[2][1])
-        )
+        sorted_providers = sorted(available_providers, key=lambda x: (x[0], x[2][1]))
 
         _, _, (provider_class, _) = sorted_providers[0]
         return system.require(provider_class)
@@ -325,7 +353,9 @@ class ServerAuthCredentialsProviderFactory:
 
 def register_credentials_provider(*env_vars, precedence=None) -> Callable:
     def decorator(cls) -> ServerAuthCredentialsProvider:
-        ServerAuthConfigurationProviderFactory.register_provider(env_vars, cls, precedence)
+        ServerAuthConfigurationProviderFactory.register_provider(
+            env_vars, cls, precedence
+        )
         return cls
 
     return decorator
