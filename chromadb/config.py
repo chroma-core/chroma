@@ -100,9 +100,11 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True)
-    def chroma_server_auth_provider_non_empty(cls, v) -> Optional[str]:
+    def chroma_server_auth_provider_non_empty(cls: Type, v: str) -> Optional[str]:
         if v and not v.strip():
-            raise ValueError("chroma_server_auth_provider cannot be empty or just whitespace")
+            raise ValueError(
+                "chroma_server_auth_provider cannot be empty or just whitespace"
+            )
         return v
 
     chroma_server_auth_configuration_provider: Optional[str] = None
@@ -111,11 +113,17 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_credentials_file: Optional[str] = None
 
     @validator("chroma_server_auth_credentials_file", pre=True, always=True)
-    def chroma_server_auth_credentials_file_non_empty_file_exists(cls, v) -> Optional[str]:
+    def chroma_server_auth_credentials_file_non_empty_file_exists(
+        cls: Type, v: str
+    ) -> Optional[str]:
         if v and not v.strip():
-            raise ValueError("chroma_server_auth_credentials_file cannot be empty or just whitespace")
+            raise ValueError(
+                "chroma_server_auth_credentials_file cannot be empty or just whitespace"
+            )
         if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(f"chroma_server_auth_credentials_file [{v}] does not exist")
+            raise ValueError(
+                f"chroma_server_auth_credentials_file [{v}] does not exist"
+            )
         return v
 
     chroma_client_auth_provider: Optional[str] = None
@@ -124,7 +132,15 @@ class Settings(BaseSettings):  # type: ignore
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
-    chroma_client_auth_provider_config: Optional[Union[str, Dict[str, Any]]] = None
+
+    chroma_client_auth_credentials_provider: Optional[
+        str
+    ] = "chromadb.auth.ConfigurationClientAuthCredentialsProvider"
+    chroma_client_auth_protocol_adapter: Optional[
+        str
+    ] = "chromadb.auth.RequestsClientAuthProtocolAdapter"
+    chroma_client_auth_credentials_file: Optional[str] = None
+    chroma_client_auth_credentials: Optional[str] = None
 
     anonymized_telemetry: bool = True
 

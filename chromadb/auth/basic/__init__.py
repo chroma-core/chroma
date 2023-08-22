@@ -1,11 +1,28 @@
 import base64
+import logging
 import os
+from typing import Tuple
 
 import requests
-from overrides import overrides
+from overrides import override
 from pydantic import SecretStr
 
-from chromadb.auth import ServerAuthProvider
+from chromadb.config import System, Settings
+from chromadb.auth import (
+    ServerAuthProvider,
+    ClientAuthProvider,
+    ServerAuthenticationRequest,
+    ServerAuthCredentialsProvider,
+    AuthInfoType,
+    BasicAuthCredentials,
+    AuthenticationError,
+    ClientAuthCredentialsProvider,
+    ClientAuthProtocolAdapter,
+    ClientAuthResponse,
+)
+from chromadb.utils import get_class
+
+logger = logging.getLogger(__name__)
 
 
 def _encode_credentials(username: str, password: str) -> SecretStr:
@@ -14,105 +31,69 @@ def _encode_credentials(username: str, password: str) -> SecretStr:
     )
 
 
+class BasicAuthClientAuthResponse(ClientAuthResponse):
+    def __init__(self, credentials: SecretStr) -> None:
+        self._credentials = credentials
+
+    @override
+    def get_auth_info_type(self) -> AuthInfoType:
+        return AuthInfoType.HEADER
+
+    @override
+    def get_auth_info(self) -> Tuple[str, SecretStr]:
+        return "Authorization", f"Basic {self._credentials.get_secret_value()}"
+
+
 class BasicAuthClientProvider(ClientAuthProvider):
-    _basic_auth_token: SecretStr
+    _credentials_provider: ClientAuthCredentialsProvider
+    _protocol_adapter: ClientAuthProtocolAdapter
 
-    def __init__(self, settings: "Settings") -> None:
-        super().__init__(settings)
-        self._settings = settings
-        if os.environ.get("CHROMA_CLIENT_AUTH_BASIC_USERNAME") and os.environ.get(
-            "CHROMA_CLIENT_AUTH_BASIC_PASSWORD"
-        ):
-            self._basic_auth_token = _encode_credentials(
-                os.environ.get("CHROMA_CLIENT_AUTH_BASIC_USERNAME", ""),
-                os.environ.get("CHROMA_CLIENT_AUTH_BASIC_PASSWORD", ""),
+    def __init__(self, system: System) -> None:
+        super().__init__(system)
+        self._settings = system.settings
+        system.settings.require("chroma_client_auth_credentials_provider")
+        self._credentials_provider = system.require(
+            get_class(
+                system.settings.chroma_client_auth_credentials_provider,
+                ClientAuthCredentialsProvider,
             )
-        elif isinstance(
-            self._settings.chroma_client_auth_provider_config, str
-        ) and os.path.exists(self._settings.chroma_client_auth_provider_config):
-            with open(self._settings.chroma_client_auth_provider_config) as f:
-                # read first line of file which should be user:password
-                _auth_data = f.readline().strip().split(":")
-                # validate auth data
-                if len(_auth_data) != 2:
-                    raise ValueError("Invalid auth data")
-                self._basic_auth_token = _encode_credentials(
-                    _auth_data[0], _auth_data[1]
+        )
+
+    @override
+    def authenticate(self) -> ClientAuthResponse:
+        _creds = self._credentials_provider.get_credentials()
+        return BasicAuthClientAuthResponse(
+            SecretStr(
+                base64.b64encode(f"{_creds.get_secret_value()}".encode("utf-8")).decode(
+                    "utf-8"
                 )
-        elif self._settings.chroma_client_auth_provider_config and isinstance(
-            self._settings.chroma_client_auth_provider_config, dict
-        ):
-            self._basic_auth_token = _encode_credentials(
-                self._settings.chroma_client_auth_provider_config["username"],
-                self._settings.chroma_client_auth_provider_config["password"],
             )
-        else:
-            raise ValueError("Basic auth credentials not found")
-
-    @overrides
-    def authenticate(self, session: requests.Session) -> None:
-        session.headers.update(
-            {"Authorization": f"Basic {self._basic_auth_token.get_secret_value()}"}
         )
 
 
 class BasicAuthServerProvider(ServerAuthProvider):
-    _basic_auth_token: SecretStr
+    _credentials_provider: ServerAuthCredentialsProvider
 
-    def __init__(self, settings: "Settings") -> None:
-        super().__init__(settings)
-        self._settings = settings
-        self._basic_auth_token = SecretStr("")
-        if os.environ.get("CHROMA_SERVER_AUTH_BASIC_USERNAME") and os.environ.get(
-            "CHROMA_SERVER_AUTH_BASIC_PASSWORD"
-        ):
-            self._basic_auth_token = _encode_credentials(
-                os.environ.get("CHROMA_SERVER_AUTH_BASIC_USERNAME", ""),
-                os.environ.get("CHROMA_SERVER_AUTH_BASIC_PASSWORD", ""),
+    def __init__(self, system: System) -> None:
+        super().__init__(system)
+        self._settings = system.settings
+        system.settings.require("chroma_server_auth_credentials_provider")
+        self._credentials_provider = system.require(
+            get_class(
+                system.settings.chroma_server_auth_credentials_provider,
+                ServerAuthCredentialsProvider,
             )
-            self._ignore_auth_paths = os.environ.get(
-                "CHROMA_SERVER_AUTH_IGNORE_PATHS", ",".join(self._ignore_auth_paths)
-            ).split(",")
-        elif isinstance(
-            self._settings.chroma_server_auth_provider_config, str
-        ) and os.path.exists(self._settings.chroma_server_auth_provider_config):
-            with open(self._settings.chroma_server_auth_provider_config) as f:
-                # read first line of file which should be user:password
-                _auth_data = f.readline().strip().split(":")
-                # validate auth data
-                if len(_auth_data) != 2:
-                    raise ValueError("Invalid auth data")
-                self._basic_auth_token = _create_token(_auth_data[0], _auth_data[1])
-            self._ignore_auth_paths = os.environ.get(
-                "CHROMA_SERVER_AUTH_IGNORE_PATHS", ",".join(self._ignore_auth_paths)
-            ).split(",")
-        elif self._settings.chroma_server_auth_provider_config and isinstance(
-            self._settings.chroma_server_auth_provider_config, dict
-        ):
-            # encode the username and password base64
-            self._basic_auth_token = _create_token(
-                self._settings.chroma_server_auth_provider_config["username"],
-                self._settings.chroma_server_auth_provider_config["password"],
-            )
-            if "ignore_auth_paths" in self._settings.chroma_server_auth_provider_config:
-                self._ignore_auth_paths = (
-                    self._settings.chroma_server_auth_provider_config[
-                        "ignore_auth_paths"
-                    ]
-                )
-        else:
-            raise ValueError("Basic auth credentials not found")
+        )
 
-    @overrides
-    def authenticate(self, request: Request) -> Union[Response, None]:
-        auth_header = request.headers.get("Authorization", "").split()
-        # Check if the header exists and the token is correct
-        if request.url.path in self._ignore_auth_paths:
-            logger.debug(f"Skipping auth for path {request.url.path}")
-            return None
-        if (
-            len(auth_header) != 2
-            or auth_header[1] != self._basic_auth_token.get_secret_value()
-        ):
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return None
+    @override
+    def authenticate(self, request: ServerAuthenticationRequest) -> bool:
+        try:
+            # print(f"BasicAuthServerProvider.authenticate: {}")
+            _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
+            return self._credentials_provider.validate_credentials(
+                BasicAuthCredentials.from_header(_auth_header)
+            )
+        except Exception as e:
+            logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
+            return False
+            # raise AuthenticationError()

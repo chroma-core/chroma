@@ -52,7 +52,7 @@ restrictions we impose to make the design simpler and more robust.
 
 - Auth Provider - an abstraction that provides authentication functionality for either client or server-side. The
   provider is responsible for validating client credentials using (if available) configuration and credentials
-  providers. The auth provider is also responsible for carrying the Croma-leg of any authentication flow.
+  providers. The auth provider is also responsible for carrying the Chroma-leg of any authentication flow.
 - Auth Configuration Provider - an abstraction that provides configuration for auth providers. The configuration can be
   loaded from a file, env vars or programmatically. The configuration is used for validating and/or accessing user
   credentials. Examples: secret key for JWT token based auth, DB URL for DB based auth, etc. Depending on sensitivity of
@@ -83,15 +83,9 @@ We suggest the following abstractions:
 - `ServerAuthenticationResponse` - An abstraction for returning authentication data to server specific implementation.
 - `ServerAuthConfigurationProvider` - this is the base abstraction for auth configuration providers. The provider is
   responsible for loading auth configuration from a file, env vars or programmatically.
-- `ServerAuthConfigurationProviderFactory` - a factory and a register for server auth configuration providers. The basic
-  idea is that providers will be pluggable as such they need to register with this class in order to be eligible for
-  instantiation through Settings and env vars.
 - `AbstractCredentials` - base abstraction for credentials encapsulation from server to Auth Credentials Provider.
 - `ServerAuthCredentialsProvider` - this is the base abstraction for auth credentials providers. The provider is
   responsible for verifying client credentials.
-- `ServerAuthCredentialsProviderFactory` - a factory and a register for server auth credentials providers. The basic
-  idea is that providers will be pluggable as such they need to register with this class in order to be eligible for
-  instantiation through Settings and env vars.
 
 ##### Client-Side
 
@@ -102,14 +96,8 @@ We suggest multiple abstractions on the client-side to allow for easy integratio
   flow by gluing together the auth configuration and credentials providers, and any possible auth workflows (e.g. OAuth)
 - `ClientAuthConfigurationProvider` - this is the base abstraction for auth configuration providers. The provider is
   responsible for loading auth configuration from a file, env vars or programmatically.
-- `ClientAuthConfigurationProviderFactory` - a factory and a register for client auth configuration providers. The basic
-  idea is that providers will be pluggable as such they need to register with this class in order to be eligible for
-  instantiation through Settings and env vars.
 - `ClientAuthCredentialsProvider` - this is the base abstraction for auth credentials providers. The provider is
   responsible for verifying client credentials.
-- `ClientAuthCredentialsProviderFactory` - a factory and a register for client auth credentials providers. The basic
-  idea is that providers will be pluggable as such they need to register with this class in order to be eligible for
-  instantiation through Settings and env vars.
 - `AbstractCredentials` - base abstraction for credentials encapsulation from client to Auth Credentials Provider.
 - `ClientAuthProtocolAdapter` - this is an abstraction that allows for client-side auth providers to communicate with
   backends using variety of protocols and libraries (e.g. `requests`, `gRPC` etc). The adapter is responsible for
@@ -134,87 +122,8 @@ TBD
 #### Client-side
 
 
-### Abstractions
 
-#### Server-side Auth Provider
-
-The server-side authentication provider is responsible for authenticating client requests reaching server endpoints. The
-abstraction serves as a way for any server implementation to validate client credentials.
-
-Interface:
-
-- `authenticate(request: AuthRequest) -> bool`
-
-Configuration:
-
-- `CHROMA_SERVER_AUTH_PROVIDER` - a shortname of the provider (configured in a mapping in `__init__.py` of `auth`
-  package) - default: `None`. When no provider is specified client request will not be authenticated.
-
-Exposed to the user: Yes
-
-#### Client-side Auth Provider
-
-Exposed to the user: Yes
-
-#### Auth Middleware Adapter
-
-Configuration:
-
-- `CHROMA_SERVER_AUTH_IGNORE_PATHS` - a list of paths that should be ignored by the auth provider -
-  default: `['/api/v1', '/api/v1/version', '/api/v1/heartbeat']`. **WARNING**: Usually the defaults are safe but users
-  should be careful when overriding this setting as it can lead to security issues.
-
-Exposed to the user: No
-
-#### Client-side Auth Configuration Provider
-
-Exposed to the user: Yes, via settings
-
-#### Server-side Auth Configuration Provider
-
-This is an abstraction layer for auth providers to acquire their configuration. The abstraction is needed as we want to
-support a variety of auth providers and each of them might have different configuration requirements.
-
-It is important to note that configuration providers are not explicitly instantiated or configured by the user but
-rather are configured by the auth provider itself (using factory pattern).
-
-Configuration:
-
-> Note about provider precedence: The provider precedence is as follows: `env` -> `file` -> `programmatic`. This means
-> that if a provider is configured via env var, it will take precedence over the file-based provider. Similarly, if
-> both env and file-based providers are configured, the env provider will take precedence over the file-based provider.
-
-
-File-based configuration:
-
-Use this provider to load configuration from a file:
-
-- `CHROMA_SERVER_AUTH_PROVIDER_CONFIG_FILE_TYPE` - `htpasswd` or `plaintext` - default: `htpasswd`
-- `CHROMA_SERVER_AUTH_PROVIDER_CONFIG_FILE` - a path to a file containing the auth provider configuration - default:
-  `None`
-
-Env-based configuration provider:
-
-Use this provider to load configuration from environment variables:
-
-- `CHROMA_SERVER_AUTH_PROVIDER_CONFIG_ENV` - an environment variable to use for auth provider configuration - default:
-  `None`
-- `CHROMA_SERVER_AUTH_PROVIDER_CONFIG_ENV_TYPE` - `plaintext`, `json` or `yaml` - default: `plaintext`
-
-> Note: Additional settings will be added as more config providers are supplied.
-
-
-Exposed to the user: Yes, via settings
-
-### Client-side Auth Credentials Provider
-
-Exposed to the user: Yes, via settings
-
-#### Server-side Auth Credentials Provider
-
-Exposed to the user: Yes, via settings
-
-Reasoning:
+### Reasoning
 
 - Server-side abstraction - it is very useful as the intention is to support a variety of auth providers.
 - Client-side abstraction - similar reasoning but from client's perspective. It will allow for both standard and

@@ -1,6 +1,10 @@
 from typing import Optional, cast
 from chromadb.api import API
-from chromadb.auth import ClientAuthProvider
+from chromadb.auth import (
+    ClientAuthProvider,
+    ClientAuthProtocolAdapter,
+    RequestsClientAuthProtocolAdapter,
+)
 from chromadb.config import Settings, System, get_class
 from chromadb.api.types import (
     Documents,
@@ -55,11 +59,21 @@ class FastAPI(API):
             )
 
         self._header = system.settings.chroma_server_headers
-        self._session = requests.Session()
+        if (
+            system.settings.chroma_client_auth_provider
+            and system.settings.chroma_client_auth_protocol_adapter
+        ):
+            self._adapter = system.require(
+                get_class(
+                    system.settings.chroma_client_auth_protocol_adapter,
+                    RequestsClientAuthProtocolAdapter,
+                )
+            )
+            self._session = self._adapter.session
+        else:
+            self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
-        # if system.auth_provider is not None:
-        #     system.auth_provider.authenticate(self._session)
 
     @override
     def heartbeat(self) -> int:
