@@ -584,7 +584,6 @@ def test_delete_with_local_segment_storage(
     assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
 
     # Delete is idempotent
-    print(type(segment))
     if isinstance(segment, PersistentLocalHnswSegment):
         assert os.path.exists(segment._get_storage_folder())
         segment.delete()
