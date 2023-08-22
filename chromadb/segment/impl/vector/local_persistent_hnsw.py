@@ -79,6 +79,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _sync_threshold: int
     _persist_data: PersistentData
     _persist_directory: str
+    _allow_reset: bool
 
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
@@ -86,7 +87,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._params = PersistentHnswParams(segment["metadata"] or {})
         self._batch_size = self._params.batch_size
         self._sync_threshold = self._params.sync_threshold
-
+        self._allow_reset = system.settings.allow_reset
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
         self._brute_force_index = None
@@ -395,9 +396,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     @override
     def reset_state(self) -> None:
-        data_path = self._get_storage_folder()
-        if os.path.exists(data_path):
-            shutil.rmtree(data_path, ignore_errors=True)
+        if self._allow_reset:
+            data_path = self._get_storage_folder()
+            if os.path.exists(data_path):
+                shutil.rmtree(data_path, ignore_errors=True)
 
     @override
     def delete(self) -> None:
