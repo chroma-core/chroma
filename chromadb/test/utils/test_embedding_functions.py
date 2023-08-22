@@ -36,9 +36,10 @@ from chromadb.utils.embedding_functions import (
 # related tests will be ignored.
 #
 # Those tests are mainly Unit tests. From this perspective, our tests should not depend on external components
-# and network access. So all the calls to the most of those libraries are mocked. This also makes the tests run fast.
+# and network access. So all the calls to the models of the most of those libraries are mocked.
+# This also makes the tests run fast.
 # Exception made for `onnxruntime` which is supported by `chroma`. `TestONNXMiniLM_L6_V2` relies on `onnxruntime`
-# being installed and do make real calls to the "all-MiniLM-L6-v2" model.
+# and do make real calls to the "all-MiniLM-L6-v2" model.
 class _TestEmbeddingFunction:
     required_package: str
     good_model_name: str
