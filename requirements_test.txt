@@ -3,4 +3,5 @@ google-generativeai==0.1.0; python_version >= '3.9'
 InstructorEmbedding==1.0.1
 openai==0.27.8
 sentence-transformers==2.2.2
-text2vec==1.2.1
+text2vec==1.2.1; python_version == '3.10'
+text2vec==1.2.1; python_version == '3.7'
