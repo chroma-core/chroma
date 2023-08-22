@@ -2,44 +2,30 @@
 Contains only Auth abstractions, no implementations.
 """
 import base64
-import os
+import logging
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from enum import Enum
 from typing import (
     Optional,
-    Any,
     Dict,
-    List,
-    Union,
-    Type,
-    Callable,
     TypeVar,
     Tuple,
     Generic,
-    Mapping,
 )
 
-import bcrypt
-import requests
-from overrides import EnforceOverrides, overrides, override
+from overrides import EnforceOverrides, override
 from pydantic import SecretStr
 
 from chromadb.config import (
     Component,
     System,
-    Settings,
-    get_fqn,
-)  # TODO remove this circular dependency
+)
 from chromadb.errors import ChromaError
-from chromadb.utils import get_class
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 S = TypeVar("S")
-
-
-# Re-export types from chromadb
-# __all__ = ["BasicAuthClientProvider", "BasicAuthServerProvider"]
 
 
 class AuthInfoType(Enum):
@@ -86,7 +72,7 @@ class ClientAuthCredentialsProvider(Component, Generic[T]):
         pass
 
 
-class ClientAuthProtocolAdapter(Component):
+class ClientAuthProtocolAdapter(Component, Generic[T]):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
@@ -95,82 +81,7 @@ class ClientAuthProtocolAdapter(Component):
         pass
 
 
-class RequestsClientAuthProtocolAdapter(ClientAuthProtocolAdapter):
-    class _Session(requests.Session):
-        _protocol_adapter: ClientAuthProtocolAdapter
-
-        def __init__(self, protocol_adapter: ClientAuthProtocolAdapter) -> None:
-            super().__init__()
-            self._protocol_adapter = protocol_adapter
-
-        @override
-        def send(
-            self, request: requests.PreparedRequest, **kwargs: Any
-        ) -> requests.Response:
-            self._protocol_adapter.inject_credentials(request)
-            return super().send(request, **kwargs)
-
-    _session: _Session
-    _auth_provider: ClientAuthProvider
-
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_client_auth_provider")
-        self._auth_provider = system.require(
-            get_class(system.settings.chroma_client_auth_provider, ClientAuthProvider)
-        )
-        self._session = self._Session(self)
-        self._auth_header = self._auth_provider.authenticate()
-
-    @property
-    def session(self) -> requests.Session:
-        return self._session
-
-    @override
-    def inject_credentials(self, injection_context: requests.PreparedRequest) -> None:
-        if self._auth_header.get_auth_info_type() == AuthInfoType.HEADER:
-            _header_info = self._auth_header.get_auth_info()
-            injection_context.headers[_header_info[0]] = _header_info[1]
-        else:
-            raise ValueError(
-                f"Unsupported auth type: {self._auth_header.get_auth_info_type()}"
-            )
-
-
-class ConfigurationClientAuthCredentialsProvider(ClientAuthCredentialsProvider):
-    _creds: SecretStr
-
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_client_auth_credentials")
-        self._creds = SecretStr(system.settings.chroma_client_auth_credentials)
-
-    @override
-    def get_credentials(self) -> SecretStr:
-        return self._creds
-
-
-_provider_registry = {
-    # TODO we need a better way to store, update and validate this registry with new providers being added
-    (
-        "basic",
-        "chromadb.auth.basic.BasicAuthClientProvider",
-    ): "chromadb.auth.basic.BasicAuthClientProvider",
-}
-
-
-def resolve_client_auth_provider(classOrName) -> "ClientAuthProvider":
-    _cls = [
-        cls
-        for short_hand_list, cls in _provider_registry.items()
-        if classOrName in short_hand_list
-    ]
-    if len(_cls) == 0:
-        raise ValueError(f"Unknown client auth provider: {classOrName}")
-    return get_class(_cls[0], ClientAuthProvider)
-
-
-### SERVER-SIDE Abstractions
+# SERVER-SIDE Abstractions
 
 
 class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
@@ -199,7 +110,7 @@ class ServerAuthProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(self, request: ServerAuthenticationRequest) -> bool:
+    def authenticate(self, request: ServerAuthenticationRequest[T]) -> bool:
         pass
 
 
@@ -209,7 +120,7 @@ class ChromaAuthMiddleware(Component):
 
     @abstractmethod
     def authenticate(
-        self, request: ServerAuthenticationRequest
+        self, request: ServerAuthenticationRequest[T]
     ) -> Optional[ServerAuthenticationResponse]:
         ...
 
@@ -232,37 +143,47 @@ class ServerAuthConfigurationProvider(Component):
 
 
 class AuthenticationError(ChromaError):
-    @overrides
+    @override
     def code(self) -> int:
         return 401
 
     @classmethod
-    @overrides
+    @override
     def name(cls) -> str:
         return "AuthenticationError"
 
 
-class AbstractCredentials(EnforceOverrides, ABC):
+class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
     """
     The class is used by Auth Providers to encapsulate credentials received from the server
     and pass them to a ServerAuthCredentialsProvider.
     """
 
     @abstractmethod
-    def get_credentials(self) -> Dict[str, Union[str, int, float, bool, SecretStr]]:
+    def get_credentials(self) -> Dict[str, T]:
         """
         Returns the data encapsulated by the credentials object.
         """
         pass
 
 
-class BasicAuthCredentials(AbstractCredentials):
-    def __init__(self, username, password) -> None:
+class SecretStrAbstractCredentials(AbstractCredentials[SecretStr]):
+    @abstractmethod
+    @override
+    def get_credentials(self) -> Dict[str, SecretStr]:
+        """
+        Returns the data encapsulated by the credentials object.
+        """
+        pass
+
+
+class BasicAuthCredentials(SecretStrAbstractCredentials):
+    def __init__(self, username: SecretStr, password: SecretStr) -> None:
         self.username = username
         self.password = password
 
     @override
-    def get_credentials(self) -> Dict[str, Union[str, int, float, bool, SecretStr]]:
+    def get_credentials(self) -> Dict[str, SecretStr]:
         return {"username": self.username, "password": self.password}
 
     @staticmethod
@@ -282,30 +203,5 @@ class ServerAuthCredentialsProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def validate_credentials(self, credentials: AbstractCredentials) -> bool:
+    def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         pass
-
-
-class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
-    _creds: List[SecretStr]
-
-    def __init__(self, system: System) -> None:
-        super().__init__(system)
-        system.settings.require("chroma_server_auth_credentials_file")
-        _file = system.settings.chroma_server_auth_credentials_file
-        with open(_file) as f:
-            self._creds = [SecretStr(v) for v in f.readline().strip().split(":")]
-            if len(self._creds) != 2:
-                raise ValueError(
-                    f"Invalid Htpasswd credentials file [{_file}]. Must be <username>:<bcrypt passwd>."
-                )
-
-    @override
-    def validate_credentials(self, credentials: AbstractCredentials) -> bool:
-        _creds = credentials.get_credentials()
-        return _creds["username"].get_secret_value() == self._creds[
-            0
-        ].get_secret_value() and bcrypt.checkpw(
-            _creds["password"].get_secret_value().encode("utf-8"),
-            self._creds[1].get_secret_value().encode("utf-8"),
-        )

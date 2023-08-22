@@ -1,13 +1,10 @@
 import base64
 import logging
-import os
-from typing import Tuple
+from typing import Tuple, Any, cast
 
-import requests
 from overrides import override
 from pydantic import SecretStr
 
-from chromadb.config import System, Settings
 from chromadb.auth import (
     ServerAuthProvider,
     ClientAuthProvider,
@@ -15,14 +12,17 @@ from chromadb.auth import (
     ServerAuthCredentialsProvider,
     AuthInfoType,
     BasicAuthCredentials,
-    AuthenticationError,
     ClientAuthCredentialsProvider,
     ClientAuthProtocolAdapter,
     ClientAuthResponse,
 )
+from chromadb.auth.registry import register_provider, resolve_provider
+from chromadb.config import System
 from chromadb.utils import get_class
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
 
 
 def _encode_credentials(username: str, password: str) -> SecretStr:
@@ -41,12 +41,15 @@ class BasicAuthClientAuthResponse(ClientAuthResponse):
 
     @override
     def get_auth_info(self) -> Tuple[str, SecretStr]:
-        return "Authorization", f"Basic {self._credentials.get_secret_value()}"
+        return "Authorization", SecretStr(
+            f"Basic {self._credentials.get_secret_value()}"
+        )
 
 
+@register_provider("basic")
 class BasicAuthClientProvider(ClientAuthProvider):
-    _credentials_provider: ClientAuthCredentialsProvider
-    _protocol_adapter: ClientAuthProtocolAdapter
+    _credentials_provider: ClientAuthCredentialsProvider[Any]
+    _protocol_adapter: ClientAuthProtocolAdapter[Any]
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
@@ -54,7 +57,7 @@ class BasicAuthClientProvider(ClientAuthProvider):
         system.settings.require("chroma_client_auth_credentials_provider")
         self._credentials_provider = system.require(
             get_class(
-                system.settings.chroma_client_auth_credentials_provider,
+                str(system.settings.chroma_client_auth_credentials_provider),
                 ClientAuthCredentialsProvider,
             )
         )
@@ -71,6 +74,7 @@ class BasicAuthClientProvider(ClientAuthProvider):
         )
 
 
+@register_provider("basic")
 class BasicAuthServerProvider(ServerAuthProvider):
     _credentials_provider: ServerAuthCredentialsProvider
 
@@ -78,15 +82,18 @@ class BasicAuthServerProvider(ServerAuthProvider):
         super().__init__(system)
         self._settings = system.settings
         system.settings.require("chroma_server_auth_credentials_provider")
-        self._credentials_provider = system.require(
-            get_class(
-                system.settings.chroma_server_auth_credentials_provider,
-                ServerAuthCredentialsProvider,
-            )
+        self._credentials_provider = cast(
+            ServerAuthCredentialsProvider,
+            system.require(
+                resolve_provider(
+                    str(system.settings.chroma_server_auth_credentials_provider),
+                    ServerAuthCredentialsProvider,
+                )
+            ),
         )
 
     @override
-    def authenticate(self, request: ServerAuthenticationRequest) -> bool:
+    def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
         try:
             # print(f"BasicAuthServerProvider.authenticate: {}")
             _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")

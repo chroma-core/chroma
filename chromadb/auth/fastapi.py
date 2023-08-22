@@ -1,6 +1,6 @@
-## FAST API code
+# FAST API code
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, cast, Any
 
 from overrides import override
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -8,7 +8,7 @@ from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 from starlette.types import ASGIApp
 
-from chromadb import System
+from chromadb.config import System
 from chromadb.auth import (
     ServerAuthenticationRequest,
     AuthInfoType,
@@ -16,25 +16,25 @@ from chromadb.auth import (
     ServerAuthProvider,
     ChromaAuthMiddleware,
 )
-from chromadb.utils import get_class
+from chromadb.auth.registry import resolve_provider
 
 logger = logging.getLogger(__name__)
 
 
-class FastAPIServerAuthenticationRequest(ServerAuthenticationRequest[str]):
+class FastAPIServerAuthenticationRequest(ServerAuthenticationRequest[Optional[str]]):
     def __init__(self, request: Request) -> None:
         self._request = request
 
     @override
     def get_auth_info(
         self, auth_info_type: AuthInfoType, auth_info_id: Optional[str] = None
-    ) -> str:
+    ) -> Optional[str]:
         if auth_info_type == AuthInfoType.HEADER:
-            return self._request.headers[auth_info_id]
+            return str(self._request.headers[auth_info_id])
         elif auth_info_type == AuthInfoType.COOKIE:
-            return self._request.cookies[auth_info_id]
+            return str(self._request.cookies[auth_info_id])
         elif auth_info_type == AuthInfoType.URL:
-            return self._request.query_params[auth_info_id]
+            return str(self._request.query_params[auth_info_id])
         elif auth_info_type == AuthInfoType.METADATA:
             raise ValueError("Metadata not supported for FastAPI")
         else:
@@ -44,7 +44,7 @@ class FastAPIServerAuthenticationRequest(ServerAuthenticationRequest[str]):
 class FastAPIServerAuthenticationResponse(ServerAuthenticationResponse):
     _auth_success: bool
 
-    def __init__(self, auth_success) -> None:
+    def __init__(self, auth_success: bool) -> None:
         self._auth_success = auth_success
 
     @override
@@ -67,14 +67,14 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
             logger.debug(
                 f"Server Auth Provider: {self._settings.chroma_server_auth_provider}"
             )
-            _cls = get_class(
+            _cls = resolve_provider(
                 self._settings.chroma_server_auth_provider, ServerAuthProvider
             )
-            self._auth_provider = self.require(_cls)
+            self._auth_provider = cast(ServerAuthProvider, self.require(_cls))
 
     @override
     def authenticate(
-        self, request: ServerAuthenticationRequest
+        self, request: ServerAuthenticationRequest[Any]
     ) -> Optional[ServerAuthenticationResponse]:
         return FastAPIServerAuthenticationResponse(
             self._auth_provider.authenticate(request)
@@ -96,7 +96,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         return
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:

@@ -1,11 +1,15 @@
+import json
 from typing import Optional, cast
+from typing import Sequence
+from uuid import UUID
+
+import requests
+from overrides import override
+
+import chromadb.errors as errors
+import chromadb.utils.embedding_functions as ef
 from chromadb.api import API
-from chromadb.auth import (
-    ClientAuthProvider,
-    ClientAuthProtocolAdapter,
-    RequestsClientAuthProtocolAdapter,
-)
-from chromadb.config import Settings, System, get_class
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -19,15 +23,13 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
 )
-import chromadb.utils.embedding_functions as ef
-import requests
-import json
-from typing import Sequence
-from chromadb.api.models.Collection import Collection
-import chromadb.errors as errors
-from uuid import UUID
+from chromadb.auth import (
+    ClientAuthProvider,
+)
+from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
+from chromadb.auth.registry import resolve_provider
+from chromadb.config import Settings, System
 from chromadb.telemetry import Telemetry
-from overrides import override
 
 
 class FastAPI(API):
@@ -51,23 +53,24 @@ class FastAPI(API):
             f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
         )
 
-        if system.settings.chroma_client_auth_provider:
-            self._auth_provider = self.require(
-                get_class(
-                    system.settings.chroma_client_auth_provider, ClientAuthProvider
-                )
-            )
-
         self._header = system.settings.chroma_server_headers
         if (
             system.settings.chroma_client_auth_provider
             and system.settings.chroma_client_auth_protocol_adapter
         ):
-            self._adapter = system.require(
-                get_class(
-                    system.settings.chroma_client_auth_protocol_adapter,
-                    RequestsClientAuthProtocolAdapter,
+            self._auth_provider = self.require(
+                resolve_provider(
+                    system.settings.chroma_client_auth_provider, ClientAuthProvider
                 )
+            )
+            self._adapter = cast(
+                RequestsClientAuthProtocolAdapter,
+                system.require(
+                    resolve_provider(
+                        system.settings.chroma_client_auth_protocol_adapter,
+                        RequestsClientAuthProtocolAdapter,
+                    )
+                ),
             )
             self._session = self._adapter.session
         else:

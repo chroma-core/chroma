@@ -1,21 +1,15 @@
-import base64
 import importlib
 import inspect
 import logging
 import os
-from abc import ABC, abstractmethod
+from abc import ABC
 from graphlib import TopologicalSorter
-from typing import Optional, List, Any, Dict, Set, Iterable, Union
+from typing import Optional, List, Any, Dict, Set, Iterable
 from typing import Type, TypeVar, cast
 
-import requests
+from overrides import EnforceOverrides
 from overrides import override
-from overrides import overrides, EnforceOverrides
-from pydantic import BaseSettings, SecretStr, validator
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response, JSONResponse
-from starlette.types import ASGIApp
+from pydantic import BaseSettings, validator
 from typing_extensions import Literal
 
 # The thin client will have a flag to control which implementations to use
@@ -100,7 +94,9 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True)
-    def chroma_server_auth_provider_non_empty(cls: Type, v: str) -> Optional[str]:
+    def chroma_server_auth_provider_non_empty(
+        cls: Type["Settings"], v: str
+    ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
                 "chroma_server_auth_provider cannot be empty or just whitespace"
@@ -111,10 +107,11 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_configuration_file: Optional[str] = None
     chroma_server_auth_credentials_provider: Optional[str] = None
     chroma_server_auth_credentials_file: Optional[str] = None
+    chroma_server_auth_credentials: Optional[str] = None
 
     @validator("chroma_server_auth_credentials_file", pre=True, always=True)
     def chroma_server_auth_credentials_file_non_empty_file_exists(
-        cls: Type, v: str
+        cls: Type["Settings"], v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
@@ -135,10 +132,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_client_auth_credentials_provider: Optional[
         str
-    ] = "chromadb.auth.ConfigurationClientAuthCredentialsProvider"
+    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
     chroma_client_auth_protocol_adapter: Optional[
         str
-    ] = "chromadb.auth.RequestsClientAuthProtocolAdapter"
+    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
     chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
 
