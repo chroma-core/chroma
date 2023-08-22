@@ -16,7 +16,7 @@ jobs:
       matrix:
         python: ['3.7']
         platform: [ubuntu-latest, windows-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/utils/test_embedding_functions.py'",
+        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore 'chromadb/test/utils/test_embedding_functions.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
