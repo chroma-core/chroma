@@ -1,6 +1,7 @@
 import pytest
 from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
+from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     SubmitEmbeddingRecord,
     VectorQuery,
@@ -24,6 +25,7 @@ from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
 
+from chromadb.test.property.strategies import test_hnsw_config
 from pytest import FixtureRequest
 from itertools import count
 import tempfile
@@ -111,7 +113,7 @@ def create_random_segment_definition() -> Segment:
         scope=SegmentScope.VECTOR,
         topic="persistent://test/test/test_topic_1",
         collection=None,
-        metadata=None,
+        metadata=test_hnsw_config,
     )
 
 
@@ -129,6 +131,7 @@ def test_insert_and_count(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
 
@@ -136,9 +139,9 @@ def test_insert_and_count(
     segment_definition = create_random_segment_definition()
     topic = str(segment_definition["topic"])
 
-    max_id = 0
-    for i in range(3):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+    max_id = produce_fns(
+        producer=producer, topic=topic, n=3, embeddings=sample_embeddings
+    )[1][-1]
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -146,8 +149,10 @@ def test_insert_and_count(
     sync(segment, max_id)
 
     assert segment.count() == 3
-    for i in range(3):
-        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+
+    max_id = produce_fns(
+        producer=producer, topic=topic, n=3, embeddings=sample_embeddings
+    )[1][-1]
 
     sync(segment, max_id)
     assert segment.count() == 6
@@ -165,6 +170,7 @@ def test_get_vectors(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -174,11 +180,9 @@ def test_get_vectors(
     segment = vector_reader(system, segment_definition)
     segment.start()
 
-    embeddings = [next(sample_embeddings) for i in range(10)]
-
-    seq_ids: List[SeqId] = []
-    for e in embeddings:
-        seq_ids.append(producer.submit_embedding(topic, e))
+    embeddings, seq_ids = produce_fns(
+        producer=producer, topic=topic, embeddings=sample_embeddings, n=10
+    )
 
     sync(segment, seq_ids[-1])
 
@@ -210,6 +214,7 @@ def test_ann_query(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -219,11 +224,9 @@ def test_ann_query(
     segment = vector_reader(system, segment_definition)
     segment.start()
 
-    embeddings = [next(sample_embeddings) for i in range(100)]
-
-    seq_ids: List[SeqId] = []
-    for e in embeddings:
-        seq_ids.append(producer.submit_embedding(topic, e))
+    embeddings, seq_ids = produce_fns(
+        producer=producer, topic=topic, embeddings=sample_embeddings, n=100
+    )
 
     sync(segment, seq_ids[-1])
 
@@ -275,6 +278,7 @@ def test_delete(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -284,26 +288,28 @@ def test_delete(
     segment = vector_reader(system, segment_definition)
     segment.start()
 
-    embeddings = [next(sample_embeddings) for i in range(5)]
-
-    seq_ids: List[SeqId] = []
-    for e in embeddings:
-        seq_ids.append(producer.submit_embedding(topic, e))
+    embeddings, seq_ids = produce_fns(
+        producer=producer, topic=topic, embeddings=sample_embeddings, n=5
+    )
 
     sync(segment, seq_ids[-1])
     assert segment.count() == 5
 
+    delete_record = SubmitEmbeddingRecord(
+        id=embeddings[0]["id"],
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+    assert isinstance(seq_ids, List)
     seq_ids.append(
-        producer.submit_embedding(
-            topic,
-            SubmitEmbeddingRecord(
-                id=embeddings[0]["id"],
-                embedding=None,
-                encoding=None,
-                metadata=None,
-                operation=Operation.DELETE,
-            ),
-        )
+        produce_fns(
+            producer=producer,
+            topic=topic,
+            n=1,
+            embeddings=(delete_record for _ in range(1)),
+        )[1][0]
     )
 
     sync(segment, seq_ids[-1])
@@ -334,16 +340,12 @@ def test_delete(
 
     # Delete is idempotent
     seq_ids.append(
-        producer.submit_embedding(
-            topic,
-            SubmitEmbeddingRecord(
-                id=embeddings[0]["id"],
-                embedding=None,
-                encoding=None,
-                metadata=None,
-                operation=Operation.DELETE,
-            ),
-        )
+        produce_fns(
+            producer=producer,
+            topic=topic,
+            n=1,
+            embeddings=(delete_record for _ in range(1)),
+        )[1][0]
     )
 
     sync(segment, seq_ids[-1])
@@ -416,6 +418,7 @@ def test_update(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -428,16 +431,19 @@ def test_update(
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPDATE)
 
     # test updating a nonexistent record
-    seq_id = producer.submit_embedding(
-        topic,
-        SubmitEmbeddingRecord(
-            id="no_such_record",
-            embedding=[10.0, 10.0],
-            encoding=ScalarEncoding.FLOAT32,
-            metadata=None,
-            operation=Operation.UPDATE,
-        ),
+    update_record = SubmitEmbeddingRecord(
+        id="no_such_record",
+        embedding=[10.0, 10.0],
+        encoding=ScalarEncoding.FLOAT32,
+        metadata=None,
+        operation=Operation.UPDATE,
     )
+    seq_id = produce_fns(
+        producer=producer,
+        topic=topic,
+        n=1,
+        embeddings=(update_record for _ in range(1)),
+    )[1][0]
 
     sync(segment, seq_id)
 
@@ -449,6 +455,7 @@ def test_upsert(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
     vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
@@ -461,16 +468,19 @@ def test_upsert(
     _test_update(producer, topic, segment, sample_embeddings, Operation.UPSERT)
 
     # test updating a nonexistent record
-    seq_id = producer.submit_embedding(
-        topic,
-        SubmitEmbeddingRecord(
-            id="no_such_record",
-            embedding=[42, 42],
-            encoding=ScalarEncoding.FLOAT32,
-            metadata=None,
-            operation=Operation.UPSERT,
-        ),
+    upsert_record = SubmitEmbeddingRecord(
+        id="no_such_record",
+        embedding=[42, 42],
+        encoding=ScalarEncoding.FLOAT32,
+        metadata=None,
+        operation=Operation.UPSERT,
     )
+    seq_id = produce_fns(
+        producer=producer,
+        topic=topic,
+        n=1,
+        embeddings=(upsert_record for _ in range(1)),
+    )[1][0]
 
     sync(segment, seq_id)
 
@@ -478,3 +488,31 @@ def test_upsert(
     result = segment.get_vectors(ids=["no_such_record"])
     assert len(result) == 1
     assert approx_equal_vector(result[0]["embedding"], [42, 42])
+
+
+def test_delete_without_add(
+    system: System,
+    vector_reader: Type[VectorReader],
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
+    topic = str(segment_definition["topic"])
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    assert segment.count() == 0
+
+    delete_record = SubmitEmbeddingRecord(
+        id="not_in_db",
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+
+    try:
+        producer.submit_embedding(topic, delete_record)
+    except BaseException:
+        pytest.fail("Unexpected error. Deleting on an empty segment should not raise.")

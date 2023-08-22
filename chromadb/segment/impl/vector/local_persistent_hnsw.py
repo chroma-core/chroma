@@ -1,4 +1,5 @@
 import os
+import shutil
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
@@ -72,6 +73,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # via brute force search.
     _batch_size: int
     _brute_force_index: Optional[BruteForceIndex]
+    _index_initialized: bool = False
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
     _sync_threshold: int
@@ -167,6 +169,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         self._index = index
         self._dimensionality = dimensionality
+        self._index_initialized = True
 
     def _persist(self) -> None:
         """Persist the index and data to disk"""
@@ -208,6 +211,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             for record in records:
                 if record["embedding"] is not None:
                     self._ensure_index(len(records), len(record["embedding"]))
+                if not self._index_initialized:
+                    # If the index is not initialized here, it means that we have
+                    # not yet added any records to the index. So we can just
+                    # ignore the record since it was a delete.
+                    continue
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
                 self._max_seq_id = max(self._max_seq_id, record["seq_id"])
@@ -261,8 +269,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        """Get the embeddings from the HNSW index and layered brute force batch index"""
-        results = []
+        """Get the embeddings from the HNSW index and layered brute force
+        batch index."""
+
         ids_hnsw: Set[str] = set()
         ids_bf: Set[str] = set()
 
@@ -275,11 +284,17 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
         hnsw_labels = []
 
-        for id in target_ids:
+        results: List[Optional[VectorEmbeddingRecord]] = []
+        id_to_index: Dict[str, int] = {}
+        for i, id in enumerate(target_ids):
             if id in ids_bf:
                 results.append(self._brute_force_index.get_vectors([id])[0])
             elif id in ids_hnsw and id not in self._curr_batch._deleted_ids:
                 hnsw_labels.append(self._id_to_label[id])
+                # Placeholder for hnsw results to be filled in down below so we
+                # can batch the hnsw get() call
+                results.append(None)
+            id_to_index[id] = i
 
         if len(hnsw_labels) > 0 and self._index is not None:
             vectors = cast(Sequence[Vector], self._index.get_items(hnsw_labels))
@@ -287,11 +302,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]
                 seq_id = self._id_to_seq_id[id]
-                results.append(
-                    VectorEmbeddingRecord(id=id, seq_id=seq_id, embedding=vector)
+                results[id_to_index[id]] = VectorEmbeddingRecord(
+                    id=id, seq_id=seq_id, embedding=vector
                 )
 
-        return results
+        return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
 
     @override
     def query_vectors(
@@ -378,13 +393,19 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     results.append(curr_results)
             return results
 
+    @override
+    def reset_state(self) -> None:
+        data_path = self._get_storage_folder()
+        if os.path.exists(data_path):
+            shutil.rmtree(data_path, ignore_errors=True)
+
     @staticmethod
     def get_file_handle_count() -> int:
         """Return how many file handles are used by the index"""
         hnswlib_count = hnswlib.Index.file_handle_count
         hnswlib_count = cast(int, hnswlib_count)
         # One extra for the metadata file
-        return hnswlib_count + 1
+        return hnswlib_count + 1  # type: ignore
 
     def open_persistent_index(self) -> None:
         """Open the persistent index"""

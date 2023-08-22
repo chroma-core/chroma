@@ -72,7 +72,6 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
-        increment_index: bool = True,
     ) -> None:
         """Add embeddings to the data store.
         Args:
@@ -97,9 +96,7 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents
         )
 
-        self._client._add(
-            ids, self.id, embeddings, metadatas, documents, increment_index
-        )
+        self._client._add(ids, self.id, embeddings, metadatas, documents)
 
     def get(
         self,
@@ -115,7 +112,7 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
@@ -168,7 +165,7 @@ class Collection(BaseModel):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
@@ -281,7 +278,6 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
-        increment_index: bool = True,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -305,7 +301,6 @@ class Collection(BaseModel):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
-            increment_index=increment_index,
         )
 
     def delete(
@@ -318,21 +313,22 @@ class Collection(BaseModel):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"color" : "red", "price": 4.20}`. Optional.
+            where: A Where type dict used to filter the delection by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
 
         Returns:
             None
+
+        Raises:
+            ValueError: If you don't provide either ids, where, or where_document
         """
         ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        self._client._delete(self.id, ids, where, where_document)
 
-    def create_index(self) -> None:
-        self._client.create_index(self.name)
+        self._client._delete(self.id, ids, where, where_document)
 
     def _validate_embedding_set(
         self,

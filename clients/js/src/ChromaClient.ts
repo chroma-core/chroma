@@ -42,7 +42,7 @@ export class ChromaClient {
     /**
      * Resets the state of the object by making an API call to the reset endpoint.
      *
-     * @returns {Promise<Api.Reset200Response>} A promise that resolves when the reset operation is complete.
+     * @returns {Promise<boolean>} A promise that resolves when the reset operation is complete.
      * @throws {Error} If there is an issue resetting the state.
      *
      * @example
@@ -50,7 +50,7 @@ export class ChromaClient {
      * await client.reset();
      * ```
      */
-    public async reset(): Promise<Api.Reset200Response> {
+    public async reset(): Promise<boolean> {
         return await this.api.reset(this.api.options);
     }
 

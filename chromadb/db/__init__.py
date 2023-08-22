@@ -60,12 +60,6 @@ class DB(Component):
         pass
 
     @abstractmethod
-    def add_incremental(
-        self, collection_uuid: UUID, ids: List[UUID], embeddings: Embeddings
-    ) -> None:
-        pass
-
-    @abstractmethod
     def get(
         self,
         where: Where = {},
@@ -120,8 +114,4 @@ class DB(Component):
     def get_by_ids(
         self, uuids: List[UUID], columns: Optional[List[str]] = None
     ) -> Sequence:  # type: ignore
-        pass
-
-    @abstractmethod
-    def create_index(self, collection_uuid: UUID):  # type: ignore
         pass

@@ -238,14 +238,15 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
+        records_to_submit = []
         for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
@@ -262,9 +263,11 @@ class SegmentAPI(API):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
+        records_to_submit = []
         for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -276,14 +279,15 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
 
+        records_to_submit = []
         for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -325,7 +329,7 @@ class SegmentAPI(API):
             offset=offset,
         )
 
-        vectors = None
+        vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
@@ -342,7 +346,9 @@ class SegmentAPI(API):
 
         return GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors] if vectors else None,
+            embeddings=[r["embedding"] for r in vectors]
+            if "embeddings" in include
+            else None,
             metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
@@ -362,11 +368,27 @@ class SegmentAPI(API):
             else None
         )
 
+        # You must have at least one of non-empty ids, where, or where_document.
+        if (
+            (ids is None or (ids is not None and len(ids) == 0))
+            and (where is None or (where is not None and len(where) == 0))
+            and (
+                where_document is None
+                or (where_document is not None and len(where_document) == 0)
+            )
+        ):
+            raise ValueError(
+                """
+                You must provide either ids, where, or where_document to delete. If
+                you want to delete all data in a collection you can delete the
+                collection itself using the delete_collection method. Or alternatively,
+                you can get() all the relevant ids and then delete them.
+                """
+            )
+
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
-        # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
-        # time a bad idea?
         if (where or where_document) or not ids:
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
@@ -376,9 +398,14 @@ class SegmentAPI(API):
         else:
             ids_to_delete = ids
 
+        if len(ids_to_delete) == 0:
+            return []
+
+        records_to_submit = []
         for r in _records(t.Operation.DELETE, ids_to_delete):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(
             CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
@@ -491,13 +518,6 @@ class SegmentAPI(API):
     @override
     def reset(self) -> bool:
         self._system.reset_state()
-        return True
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        logger.warning(
-            "Calling create_index is unnecessary, data is now automatically indexed"
-        )
         return True
 
     @override

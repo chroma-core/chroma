@@ -230,13 +230,10 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
-        - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
-        -   and then manually create the index yourself with collection.create_index()
         """
         resp = self._session.post(
             self._api_url + "/collections/" + str(collection_id) + "/add",
@@ -246,7 +243,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )
@@ -290,7 +286,6 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
@@ -304,7 +299,6 @@ class FastAPI(API):
                     "embeddings": embeddings,
                     "metadatas": metadatas,
                     "documents": documents,
-                    "increment_index": increment_index,
                 }
             ),
         )
@@ -351,15 +345,6 @@ class FastAPI(API):
     def reset(self) -> bool:
         """Resets the database"""
         resp = self._session.post(self._api_url + "/reset")
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        """Soon deprecated"""
-        resp = self._session.post(
-            self._api_url + "/collections/" + collection_name + "/create_index"
-        )
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 

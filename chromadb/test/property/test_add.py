@@ -86,3 +86,23 @@ def test_out_of_order_ids(api: API) -> None:
     coll.add(ids=ooo_ids, embeddings=embeddings)
     get_ids = coll.get(ids=ooo_ids)["ids"]
     assert get_ids == ooo_ids
+
+
+def test_add_partial(api: API) -> None:
+    """Tests adding a record set with some of the fields set to None."""
+
+    api.reset()
+
+    coll = api.create_collection("test")
+    # TODO: We need to clean up the api types to support this typing
+    coll.add(
+        ids=["1", "2", "3"],
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],
+        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
+        documents=["a", "b", None],  # type: ignore
+    )
+
+    results = coll.get()
+    assert results["ids"] == ["1", "2", "3"]
+    assert results["metadatas"] == [{"a": 1}, None, {"a": 3}]
+    assert results["documents"] == ["a", "b", None]

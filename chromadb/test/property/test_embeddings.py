@@ -210,6 +210,13 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
             embedding_function=self.embedding_function,
         )
 
+    @invariant()
+    def fields_match(self) -> None:
+        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)
+        invariants.embeddings_match(self.collection, self.record_set_state)
+        invariants.metadatas_match(self.collection, self.record_set_state)
+        invariants.documents_match(self.collection, self.record_set_state)
+
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -336,6 +343,16 @@ def test_query_without_add(api: API) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
+def test_get_non_existent(api: API) -> None:
+    api.reset()
+    coll = api.create_collection(name="foo")
+    result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
+    assert len(result["ids"]) == 0
+    assert len(result["metadatas"]) == 0
+    assert len(result["documents"]) == 0
+    assert len(result["embeddings"]) == 0
+
+
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(api: API) -> None:
@@ -346,3 +363,41 @@ def test_escape_chars_in_ids(api: API) -> None:
     assert coll.count() == 1
     coll.delete(ids=[id])
     assert coll.count() == 0
+
+
+def test_delete_empty_fails(api: API):
+    api.reset()
+    coll = api.create_collection(name="foo")
+
+    error_valid = (
+        lambda e: "You must provide either ids, where, or where_document to delete."
+        in e
+    )
+
+    with pytest.raises(Exception) as e:
+        coll.delete()
+    assert error_valid(str(e))
+
+    with pytest.raises(Exception):
+        coll.delete(ids=[])
+    assert error_valid(str(e))
+
+    with pytest.raises(Exception):
+        coll.delete(where={})
+    assert error_valid(str(e))
+
+    with pytest.raises(Exception):
+        coll.delete(where_document={})
+    assert error_valid(str(e))
+
+    with pytest.raises(Exception):
+        coll.delete(where_document={}, where={})
+    assert error_valid(str(e))
+
+    # Should not raise
+    coll.delete(where_document={"$contains": "bar"})
+    coll.delete(where={"foo": "bar"})
+    coll.delete(ids=["foo"])
+    coll.delete(ids=["foo"], where={"foo": "bar"})
+    coll.delete(ids=["foo"], where_document={"$contains": "bar"})
+    coll.delete(ids=["foo"], where_document={"$contains": "bar"}, where={"foo": "bar"})
