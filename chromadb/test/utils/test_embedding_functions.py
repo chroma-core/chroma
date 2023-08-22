@@ -23,6 +23,22 @@ from chromadb.utils.embedding_functions import (
 )
 
 
+# This file tests the `EmbeddingFunction` classes.
+# There are some common functionalities, embodied by the `_TestEmbeddingFunction` class,
+# and somme specific tests that deal with the uncommon features.
+#
+# The `_TestEmbeddingFunction` class has two main methods :
+#   > `_test__init__requires_package` : checks if the `ValueError` is raised when the required
+#       package is not installed and verifies the integrity of the error message
+#   > `_test_callable_instances` : checks for the embeddings being encoded
+#
+# All the tests run by checking first if some needed packages are installed. If those packages are not found the test
+# related tests will be ignored.
+#
+# Those tests are mainly Unit tests. From this perspective, our tests should not depend on external components
+# and network access. So all the calls to the most of those libraries are mocked. This also makes the tests run fast.
+# Exception made for `onnxruntime` which is supported by `chroma`. `TestONNXMiniLM_L6_V2` relies on `onnxruntime`
+# being installed and do make real calls to the "all-MiniLM-L6-v2" model.
 class _TestEmbeddingFunction:
     required_package: str
     good_model_name: str
