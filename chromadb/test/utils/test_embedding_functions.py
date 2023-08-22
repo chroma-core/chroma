@@ -282,12 +282,6 @@ class TestCohereEmbeddingFunction(_TestEmbeddingFunction):
     def test__init__requires_cohere(self) -> None:
         self._test__init__requires_package()
 
-    # TODO: getting cohore embeddings can be achieved by :
-    #  `self._client.embed(texts=texts, model=self._model_name).embeddings` without adding a new loop.
-    #   I am using cohere 4.11.2.
-    #   May be embedding_functions.py needs some refactoring.
-    #   It will be very useful if someone can add a requirements file concerning :
-    #   openai, cohere, sentence_transformers, etc.
     def test_embeddings(self) -> None:
         self._test_callable_instances()
 
