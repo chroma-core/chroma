@@ -30,7 +30,8 @@ dependencies = [
   'tqdm >= 4.65.0',
   'overrides >= 7.3.1',
   'importlib-resources',
-  'graphlib_backport >= 1.0.3; python_version < "3.9"'
+  'graphlib_backport >= 1.0.3; python_version < "3.9"',
+  'bcrypt >= 4.0.1'
 ]
 
 [tool.black]

@@ -1,4 +1,5 @@
 # type: ignore
+
 import chromadb
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
