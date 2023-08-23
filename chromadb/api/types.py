@@ -207,6 +207,8 @@ def validate_where(where: Where) -> Where:
         if (
             key != "$and"
             and key != "$or"
+            and key != "$in"
+            and key != "$nin"
             and not isinstance(value, (str, int, float, dict))
         ):
             raise ValueError(
@@ -238,13 +240,26 @@ def validate_where(where: Where) -> Where:
                         raise ValueError(
                             f"Expected operand value to be an int or a float for operator {operator}, got {operand}"
                         )
-
-                if operator not in ["$gt", "$gte", "$lt", "$lte", "$ne", "$eq"]:
+                if operator in ["$in", "$nin"]:
+                    if not isinstance(operand, list):
+                        raise ValueError(
+                            f"Expected operand value to be an list for operator {operator}, got {operand}"
+                        )
+                if operator not in [
+                    "$gt",
+                    "$gte",
+                    "$lt",
+                    "$lte",
+                    "$ne",
+                    "$eq",
+                    "$in",
+                    "$nin",
+                ]:
                     raise ValueError(
-                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, got {operator}"
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, got {operator}"
                     )
 
-                if not isinstance(operand, (str, int, float)):
+                if not isinstance(operand, (str, int, float, list)):
                     raise ValueError(
                         f"Expected where operand value to be a str, int, or float, got {operand}"
                     )
