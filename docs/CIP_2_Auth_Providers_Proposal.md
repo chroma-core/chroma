@@ -2,7 +2,7 @@
 
 ## Status
 
-Current Status: `Under Discussion`
+Current Status: `Accepted`
 
 ## **Motivation**
 
