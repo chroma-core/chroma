@@ -42,6 +42,9 @@ target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
+[project.scripts]
+chroma = "chromadb.cli:app"
+
 [project.urls]
 "Homepage" = "https://github.com/chroma-core/chroma"
 "Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
