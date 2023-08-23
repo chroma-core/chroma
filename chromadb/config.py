@@ -128,8 +128,6 @@ class Settings(BaseSettings):  # type: ignore
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
-        "/docs": ["GET"],
-        "/openapi.json": ["GET"],
     }
 
     chroma_client_auth_credentials_provider: Optional[
