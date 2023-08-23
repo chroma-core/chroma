@@ -428,6 +428,12 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
     ):
+        try:
+            import requests
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
