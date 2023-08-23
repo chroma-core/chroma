@@ -252,9 +252,16 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
         # convert the list to set for unique values
-        self._preferred_providers = (
-            list(set(preferred_providers)) if preferred_providers is not None else None
-        )
+        if preferred_providers and not all(
+            [isinstance(i, str) for i in preferred_providers]
+        ):
+            raise ValueError("Preferred providers must be a list of strings")
+        # check for duplicate providers
+        if preferred_providers and len(preferred_providers) != len(
+            set(preferred_providers)
+        ):
+            raise ValueError("Preferred providers must be unique")
+        self._preferred_providers = preferred_providers
         try:
             # Equivalent to import onnxruntime
             self.ort = importlib.import_module("onnxruntime")
@@ -345,7 +352,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
 
             if self._preferred_providers is None or len(self._preferred_providers) == 0:
                 if len(self.ort.get_available_providers()) > 0:
-                    logger.warning(
+                    logger.debug(
                         f"WARNING: No ONNX providers provided, defaulting to available providers: "
                         f"{self.ort.get_available_providers()}"
                     )
@@ -354,7 +361,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
                 set(self.ort.get_available_providers())
             ):
                 raise ValueError(
-                    "Preferred providers must be subset of available providers"
+                    f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
                 )
             self.model = self.ort.InferenceSession(
                 os.path.join(
