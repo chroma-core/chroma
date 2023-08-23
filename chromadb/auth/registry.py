@@ -1,7 +1,7 @@
 import importlib
 import logging
 import pkgutil
-from typing import Union, Dict, Type, Callable
+from typing import Union, Dict, Type, Callable  # noqa: F401
 
 from chromadb.auth import (
     ClientAuthConfigurationProvider,
@@ -47,7 +47,7 @@ def register_provider(
     short_hand: str,
 ) -> Callable[[Type[ProviderTypes]], Type[ProviderTypes]]:
     def decorator(cls: Type[ProviderTypes]) -> Type[ProviderTypes]:
-        logger.error("Registering provider: %s", short_hand)
+        logger.debug("Registering provider: %s", short_hand)
         global _provider_registry
         if issubclass(cls, ClientAuthProvider):
             _provider_registry["client_auth_providers"][short_hand] = cls
