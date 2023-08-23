@@ -32,7 +32,7 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
             self.bc = importlib.import_module("bcrypt")
         except ImportError:
             raise ValueError(
-                "The onnxruntime python package is not installed. Please install it with `pip install bcrypt`"
+                "The bcrypt python package is not installed. Please install it with `pip install bcrypt`"
             )
 
     @override
@@ -69,9 +69,9 @@ class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsPro
                 "password": SecretStr(_raw_creds[1]),
             }
         if (
-                len(self._creds) != 2
-                or "username" not in self._creds
-                or "password" not in self._creds
+            len(self._creds) != 2
+            or "username" not in self._creds
+            or "password" not in self._creds
         ):
             raise ValueError(
                 "Invalid Htpasswd credentials found in [chroma_server_auth_credentials]. "
@@ -93,9 +93,9 @@ class HtpasswdConfigurationServerAuthCredentialsProvider(
             "password": SecretStr(_raw_creds[1]),
         }
         if (
-                len(self._creds) != 2
-                or "username" not in self._creds
-                or "password" not in self._creds
+            len(self._creds) != 2
+            or "username" not in self._creds
+            or "password" not in self._creds
         ):
             raise ValueError(
                 "Invalid Htpasswd credentials found in [chroma_server_auth_credentials]. "
@@ -110,14 +110,14 @@ class RequestsClientAuthProtocolAdapter(
         _protocol_adapter: ClientAuthProtocolAdapter[requests.PreparedRequest]
 
         def __init__(
-                self, protocol_adapter: ClientAuthProtocolAdapter[requests.PreparedRequest]
+            self, protocol_adapter: ClientAuthProtocolAdapter[requests.PreparedRequest]
         ) -> None:
             super().__init__()
             self._protocol_adapter = protocol_adapter
 
         @override
         def send(
-                self, request: requests.PreparedRequest, **kwargs: Any
+            self, request: requests.PreparedRequest, **kwargs: Any
         ) -> requests.Response:
             self._protocol_adapter.inject_credentials(request)
             return super().send(request, **kwargs)

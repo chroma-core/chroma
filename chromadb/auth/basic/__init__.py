@@ -13,7 +13,6 @@ from chromadb.auth import (
     AuthInfoType,
     BasicAuthCredentials,
     ClientAuthCredentialsProvider,
-    ClientAuthProtocolAdapter,
     ClientAuthResponse,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
@@ -23,12 +22,6 @@ from chromadb.utils import get_class
 logger = logging.getLogger(__name__)
 
 __all__ = ["BasicAuthServerProvider", "BasicAuthClientProvider"]
-
-
-def _encode_credentials(username: str, password: str) -> SecretStr:
-    return SecretStr(
-        base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("utf-8")
-    )
 
 
 class BasicAuthClientAuthResponse(ClientAuthResponse):
@@ -49,7 +42,6 @@ class BasicAuthClientAuthResponse(ClientAuthResponse):
 @register_provider("basic")
 class BasicAuthClientProvider(ClientAuthProvider):
     _credentials_provider: ClientAuthCredentialsProvider[Any]
-    _protocol_adapter: ClientAuthProtocolAdapter[Any]
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
@@ -95,7 +87,6 @@ class BasicAuthServerProvider(ServerAuthProvider):
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
         try:
-            # print(f"BasicAuthServerProvider.authenticate: {}")
             _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
             return self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
@@ -103,4 +94,3 @@ class BasicAuthServerProvider(ServerAuthProvider):
         except Exception as e:
             logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
             return False
-            # raise AuthenticationError()
