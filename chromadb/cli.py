@@ -35,9 +35,15 @@ def run(
     print("\033[1m")  # Bold
     print("Running Chroma")
     print("\033[0m")  # Reset
+    "\033[32mThis is green text!\033[0m"
 
-    typer.echo(f"Saving data to: {path}")
-    typer.echo(f"Connect to chroma at: http://localhost:{port}\n\n")
+    typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
+    typer.echo(
+        f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://localhost:{port}\033[0m"
+    )
+    typer.echo(
+        "\033[1mGetting started guide\033[0m: https://docs.trychroma.com/getting-started\n\n"
+    )
 
     # set ENV variable for PERSIST_DIRECTORY to path
     os.environ["IS_PERSISTENT"] = "True"
