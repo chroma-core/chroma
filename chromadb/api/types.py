@@ -256,7 +256,8 @@ def validate_where(where: Where) -> Where:
                     "$nin",
                 ]:
                     raise ValueError(
-                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, got {operator}"
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
+                        f"got {operator}"
                     )
 
                 if not isinstance(operand, (str, int, float, list)):

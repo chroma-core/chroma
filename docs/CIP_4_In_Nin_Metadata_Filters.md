@@ -8,8 +8,6 @@ Current Status: `Under Discussion`
 
 Currently, Chroma does not provide a way to filter metadata through `in` and `not in`. This appears to be
 
-> Observation: We consider the Auth to be applicable to client-server mode.
-
 ## **Public Interfaces**
 
 The changes will affect the following public interfaces:
@@ -51,4 +49,3 @@ TBD (property testing with hypothesis)
 ## **Rejected Alternatives**
 
 TBD
-
