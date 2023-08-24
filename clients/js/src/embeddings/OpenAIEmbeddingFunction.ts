@@ -15,13 +15,25 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
         openai_model?: string,
         openai_organization_id?: string
     }) {
+        let openAiVersion = null;
+        let openAiMajorVersion = null;
         try {
             // eslint-disable-next-line global-require,import/no-extraneous-dependencies
             OpenAIApi = require("openai");
-        } catch {
-            throw new Error(
-                "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`"
-            );
+            const fs = require('fs');
+            const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const version = packageJson.dependencies.openai || packageJson.devDependencies.openai;
+            openAiVersion = version.replace(/[^0-9.]/g, '');
+            openAiMajorVersion = openAiVersion.split('.')[0];
+        }
+        catch (_a) {
+            if (_a.code === 'MODULE_NOT_FOUND') {
+                throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai@3`");
+            }
+            throw _a; // Re-throw other errors
+        }
+        if (openAiMajorVersion > 3){
+            throw new Error(`Your version of openai package [${openAiVersion}] is not supported. Run \`npm install -S openai@3\``);
         }
         this.api_key = openai_api_key;
         this.org_id = openai_organization_id || "";
