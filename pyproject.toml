@@ -58,3 +58,6 @@ local_scheme="no-local-version"
 
 [tool.setuptools]
 packages = ["chromadb"]
+
+[tool.setuptools.package-data]
+chromadb = ["*.yml"]

@@ -51,7 +51,7 @@ def run(
         "host": "0.0.0.0",
         "port": port,
         "workers": 1,
-        "log_config": f"{chromadb_path}/../log_config.yml",
+        "log_config": f"{chromadb_path}/log_config.yml",
     }
 
     if test:
