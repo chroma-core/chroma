@@ -31,7 +31,8 @@ dependencies = [
   'overrides >= 7.3.1',
   'importlib-resources',
   'graphlib_backport >= 1.0.3; python_version < "3.9"',
-  'bcrypt >= 4.0.1'
+  'bcrypt >= 4.0.1',
+  'typer >= 0.9.0',
 ]
 
 [tool.black]
