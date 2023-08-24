@@ -405,7 +405,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     def delete(self) -> None:
         data_path = self._get_storage_folder()
         if os.path.exists(data_path):
-            shutil.rmtree(data_path, ignore_errors=True)
+            shutil.rmtree(data_path, ignore_errors=False)
 
     @staticmethod
     def get_file_handle_count() -> int:
