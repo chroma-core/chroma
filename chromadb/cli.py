@@ -26,7 +26,7 @@ def run(
         "./chroma_data", help="The path to the file or directory."
     ),
     port: int = typer.Option(8000, help="The port to run the server on."),
-    test: bool = typer.Option(False, help="Test mode."),
+    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
 
