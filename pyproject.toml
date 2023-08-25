@@ -44,7 +44,7 @@ target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 pythonpath = ["."]
 
 [project.scripts]
-chroma = "chromadb.cli:app"
+chroma = "chromadb.cli.cli:app"
 
 [project.urls]
 "Homepage" = "https://github.com/chroma-core/chroma"

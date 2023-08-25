@@ -1,6 +1,7 @@
 import typer
 import uvicorn
 import os
+import webbrowser
 
 app = typer.Typer()
 
@@ -35,7 +36,6 @@ def run(
     print("\033[1m")  # Bold
     print("Running Chroma")
     print("\033[0m")  # Reset
-    "\033[32mThis is green text!\033[0m"
 
     typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
     typer.echo(
@@ -51,6 +51,9 @@ def run(
 
     # get the path where chromadb is installed
     chromadb_path = os.path.dirname(os.path.realpath(__file__))
+
+    # this is the path of the CLI, we want to move up one directory
+    chromadb_path = os.path.dirname(chromadb_path)
 
     config = {
         "app": "chromadb.app:app",
@@ -69,7 +72,6 @@ def run(
 @app.command()  # type: ignore
 def help() -> None:
     """Opens help url in your browser"""
-    import webbrowser
 
     webbrowser.open("https://discord.gg/MMeYNTmh3x")
 
@@ -77,7 +79,6 @@ def help() -> None:
 @app.command()  # type: ignore
 def docs() -> None:
     """Opens docs url in your browser"""
-    import webbrowser
 
     webbrowser.open("https://docs.trychroma.com")
 
