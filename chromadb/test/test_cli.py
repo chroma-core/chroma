@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from chromadb.cli import app
+from chromadb.cli.cli import app
 
 runner = CliRunner()
 
