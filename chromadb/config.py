@@ -12,7 +12,7 @@ from overrides import override
 try:
     from pydantic.v1 import BaseSettings, validator
 except ImportError:
-    from pydantic import BaseSettings, validator
+    from pydantic import BaseSettings, validator  # type: ignore
 from typing_extensions import Literal
 
 # The thin client will have a flag to control which implementations to use
@@ -96,7 +96,7 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_auth_provider: Optional[str] = None
 
-    @validator("chroma_server_auth_provider", pre=True, always=True)
+    @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
     def chroma_server_auth_provider_non_empty(
         cls: Type["Settings"], v: str
     ) -> Optional[str]:
