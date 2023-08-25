@@ -28,3 +28,9 @@ variable "registry" {
   type        = string
   description = "Registry name inside Artifact Registry"
 }
+
+
+variable "service_account" {
+  type        = string
+  description = "Service account email with permission to Artifact Registry"
+}

@@ -30,7 +30,7 @@ resource "google_compute_instance" "chroma-db-server-instance-dev" {
 
 
   service_account {
-    email = "<service_account_with_access_to_artifact_registry>"
+    email = var.service_account
     scopes = [
       "https://www.googleapis.com/auth/cloud-platform",
     ]
