@@ -8,7 +8,7 @@ onnxruntime==1.14.1
 overrides==7.3.1
 posthog==2.4.0
 pulsar-client==3.1.0
-pydantic>=1.9,<2.0
+pydantic>=1.9
 pypika==0.48.9
 requests==2.28.1
 tokenizers==0.13.2
