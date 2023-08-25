@@ -1,7 +1,7 @@
 try:
     from pydantic.v1 import BaseModel
 except ImportError:
-    from pydantic import BaseModel
+    from pydantic import BaseModel  # type: ignore
 from typing import Any, Dict, List, Optional
 from chromadb.api.types import (
     CollectionMetadata,
