@@ -1,0 +1,49 @@
+name: Build and Push Docker Image to Artifact Registry on GCP
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: gcp-project
+  REGION: google-artifact-registry-region
+  CONTAINER_REGISTRY: container-registry
+  IMAGE: image-name
+
+jobs:
+  deploy:
+    permissions:
+      contents: "read"
+      id-token: "write"
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Google Auth
+        id: auth
+        uses: "google-github-actions/auth@v0"
+        with:
+          credentials_json: "${{ secrets.GOOGLE_CREDENTIALS }}"
+
+      - name: "Set up Cloud SDK"
+        uses: "google-github-actions/setup-gcloud@v1"
+        with:
+          version: ">= 363.0.0"
+
+      - name: "Use gcloud CLI"
+        run: "gcloud info"
+
+      # Authenticate Docker to Google Cloud Artifact Registry
+      - name: Docker Auth
+        id: docker-auth
+        uses: "docker/login-action@v1"
+        with:
+          username: "_json_key"
+          password: "${{ secrets.GOOGLE_CREDENTIALS }}"
+          registry: "${{ env.REGION }}-docker.pkg.dev"
+
+      - name: Build and Push Container
+        run: |-
+          docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" ./
+          docker push "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest"
