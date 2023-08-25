@@ -14,7 +14,10 @@ from typing import (
 )
 
 from overrides import EnforceOverrides, override
-from pydantic import SecretStr
+try:
+    from pydantic.v1 import SecretStr
+except ImportError:
+    from pydantic import SecretStr
 
 from chromadb.config import (
     Component,

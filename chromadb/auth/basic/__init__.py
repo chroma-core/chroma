@@ -3,8 +3,10 @@ import logging
 from typing import Tuple, Any, cast
 
 from overrides import override
-from pydantic import SecretStr
-
+try:
+    from pydantic.v1 import SecretStr
+except ImportError:
+    from pydantic import SecretStr
 from chromadb.auth import (
     ServerAuthProvider,
     ClientAuthProvider,

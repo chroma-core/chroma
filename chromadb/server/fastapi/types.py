@@ -1,4 +1,7 @@
-from pydantic import BaseModel
+try:
+    from pydantic.v1 import BaseModel
+except ImportError:
+    from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from chromadb.api.types import (
     CollectionMetadata,

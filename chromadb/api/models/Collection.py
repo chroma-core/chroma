@@ -1,5 +1,8 @@
 from typing import TYPE_CHECKING, Optional, Tuple, cast, List
-from pydantic import BaseModel, PrivateAttr
+try:
+    from pydantic.v1 import BaseModel, PrivateAttr
+except ImportError:
+    from pydantic import BaseModel, PrivateAttr
 from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
