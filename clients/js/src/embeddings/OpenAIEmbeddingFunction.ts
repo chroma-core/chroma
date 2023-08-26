@@ -4,19 +4,12 @@ let OpenAIApi: any;
 let openAiVersion = null;
 let openAiMajorVersion = null;
 
-// interface EmbeddingResponse {
-//     object: string;
-//     data: { embedding: number[] }[];
-//     model: string;
-//     usage: { prompt_tokens: number; total_tokens: number };
-// }
-
 interface OpenAIAPI {
     createEmbedding: (params: {
         model: string;
         input: string[];
         user?: string;
-    }) => Promise<object>;
+    }) => Promise<number[][]>;
 }
 
 class OpenAIAPIv3 implements OpenAIAPI {
@@ -35,12 +28,20 @@ class OpenAIAPIv3 implements OpenAIAPI {
         model: string,
         input: string[],
         user?: string
-    }): Promise<object> {
+    }): Promise<number[][]> {
+        const embeddings: number[][] = [];
         const response = await this.openai.createEmbedding({
             model: params.model,
             input: params.input,
+        }).catch((error: any) => {
+            throw error;
         });
-        return response.data;
+        // @ts-ignore
+        const data = response.data["data"];
+        for (let i = 0; i < data.length; i += 1) {
+            embeddings.push(data[i]["embedding"]);
+        }
+        return embeddings
     }
 }
 
@@ -59,8 +60,14 @@ class OpenAIAPIv4 implements OpenAIAPI {
         model: string,
         input: string[],
         user?: string
-    }): Promise<object> {
-        return await this.openai.embeddings.create(params);
+    }): Promise<number[][]> {
+        const embeddings: number[][] = [];
+        const response = await this.openai.embeddings.create(params);
+        const data = response["data"];
+        for (let i = 0; i < data.length; i += 1) {
+            embeddings.push(data[i]["embedding"]);
+        }
+        return embeddings
     }
 }
 
@@ -70,11 +77,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     private model: string;
     private openaiApi: OpenAIAPI;
 
-    constructor({
-                    openai_api_key,
-                    openai_model,
-                    openai_organization_id,
-                }: {
+    constructor({openai_api_key, openai_model, openai_organization_id}: {
         openai_api_key: string,
         openai_model?: string,
         openai_organization_id?: string
@@ -82,15 +85,19 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
         try {
             // eslint-disable-next-line global-require,import/no-extraneous-dependencies
             OpenAIApi = require("openai");
-            const fs = require('fs');
-            const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            const version = packageJson.dependencies.openai || packageJson.devDependencies.openai;
+            let version = null;
+            try {
+                const {VERSION} = require('openai/version');
+                version = VERSION;
+            } catch (e) {
+                version = "3.x";
+            }
             openAiVersion = version.replace(/[^0-9.]/g, '');
             openAiMajorVersion = openAiVersion.split('.')[0];
         } catch (_a) {
             // @ts-ignore
             if (_a.code === 'MODULE_NOT_FOUND') {
-                throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai@3`");
+                throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
             }
             throw _a; // Re-throw other errors
         }
@@ -108,19 +115,11 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     }
 
     public async generate(texts: string[]): Promise<number[][]> {
-        const embeddings: number[][] = [];
-        const response = await this.openaiApi.createEmbedding({
+        return await this.openaiApi.createEmbedding({
             model: this.model,
             input: texts,
         }).catch((error: any) => {
-            console.log(error);
             throw error;
         });
-        // @ts-ignore
-        const data = response["data"];
-        for (let i = 0; i < data.length; i += 1) {
-            embeddings.push(data[i]["embedding"]);
-        }
-        return embeddings;
     }
 }
