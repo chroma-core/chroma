@@ -120,6 +120,5 @@ flowchart TD
     C[Terraform init]   -->
     D[Terraform plan]   --> E{Is the branch main?}
     E -->|Yes| F[Terraform apply]
-    D --> B
     E ---->|No| G[End]
 ```
