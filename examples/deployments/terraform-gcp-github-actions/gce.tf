@@ -3,7 +3,7 @@ resource "google_compute_instance" "chroma-db-server-instance-dev" {
   project = var.project
   zone    = "europe-north1-c"
 
-  machine_type = "e2-micro"
+  machine_type = "e2-small"
 
   allow_stopping_for_update = true
 
@@ -13,8 +13,16 @@ resource "google_compute_instance" "chroma-db-server-instance-dev" {
     }
   }
 
+  attached_disk {
+    source      = google_compute_disk.pd.self_link
+    device_name = "data-disk-0"
+    mode        = "READ_WRITE"
+  }
+
   metadata = {
-    gce-container-declaration = module.gce-container.metadata_value
+    gce-container-declaration    = module.gce-container.metadata_value
+    google-logging-enabled       = true
+    google-logging-use-fluentbit = true
   }
 
 
@@ -38,3 +46,10 @@ resource "google_compute_instance" "chroma-db-server-instance-dev" {
 
 }
 
+resource "google_compute_disk" "pd" {
+  project = var.project
+  name    = "${var.instance}-disk"
+  type    = "pd-ssd"
+  zone    = var.zone
+  size    = 10
+}
