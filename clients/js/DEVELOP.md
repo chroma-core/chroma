@@ -21,7 +21,7 @@ environment:
 
 ### Running test
 
-`yarn test` will launch a test docker backend.
+`yarn test` will launch a test docker backend, run a db cleanup and run tests.
 `yarn test:run` will run against the docker backend you have running. But CAUTION, it will delete data. This is the easiest and fastest way to run tests.
 
 ### Pushing to npm
