@@ -54,7 +54,24 @@ After the credentials have been created go to your repositories settings.
 
 ### 6. Create a standard artifact registry and change values in artifact.yml
 
-Follow these instructions to create a standard repository: https://cloud.google.com/artifact-registry/docs/repositories/create-repos
+1. Enable the artifact registry api
+
+```
+gcloud services enable artifactregistry.googleapis.com
+```
+
+2. Create an artifact repository for docker images
+
+```
+gcloud artifacts repositories create CONTAINER_REGISTRY \
+    --repository-format=docker \
+    --location=REGION \
+    --description="DESCRIPTION" \
+    --immutable-tags \
+    --async
+```
+
+(For full instructions, or how to do so manually. Look at these instructions to create a standard repository: https://cloud.google.com/artifact-registry/docs/repositories/create-repos)
 
 Then change the env values in `.github/workflows/artifact.yml` to what you picked.
 Example below
@@ -67,6 +84,27 @@ env:
   IMAGE: chroma-db-server
 ```
 
+If you do not wish to utilize the artifact pipeline in this repository, you can instead do so manually like this:
+
+1. Authenticate docker
+
+```
+gcloud auth configure-docker ${REGION}-docker.pkg.dev
+```
+
+2. Build & Tag image
+
+```
+docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" .
+
+```
+
+3. Push tagged image
+
+```
+docker push "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest"
+```
+
 ### 7. Deploy your application
 
 Any changes to main will now be deployed directly to a Google Compute Engine running ChromaDB
@@ -75,6 +113,7 @@ Any changes to main will now be deployed directly to a Google Compute Engine run
 
 ```mermaid
 flowchart TD
+    0[Manually push image] -->A
     1[Manually run artifact.yml] -->
     A[Push to branch]   -->
     B[Setup Terraform]  -->
