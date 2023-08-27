@@ -3,6 +3,7 @@ import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
 import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
+import {ClientAuthProtocolAdapter, IsomorphicFetchClientAuthProtocolAdapter} from "./auth";
 
 
 export class ChromaClient {
@@ -10,6 +11,7 @@ export class ChromaClient {
      * @ignore
      */
     private api: DefaultApi & ConfigOptions;
+    private apiAdapter: ClientAuthProtocolAdapter<any>;
 
     /**
      * Creates a new ChromaClient instance.
@@ -26,16 +28,22 @@ export class ChromaClient {
      */
     constructor({
         path,
-        fetchOptions
+        fetchOptions,
+        authProvider,
+        credentials
     }: {
         path?: string,
-        fetchOptions?: RequestInit
+        fetchOptions?: RequestInit,
+        authProvider?: string,
+        credentials?: string
     } = {}) {
         if (path === undefined) path = "http://localhost:8000";
         const apiConfig: Configuration = new Configuration({
             basePath: path,
         });
-        this.api = new DefaultApi(apiConfig);
+        this.apiAdapter= new IsomorphicFetchClientAuthProtocolAdapter(new DefaultApi(apiConfig),authProvider,credentials);
+        this.api = this.apiAdapter.getApi();
+
         this.api.options = fetchOptions ?? {};
     }
 
