@@ -1,7 +1,9 @@
 {
   "extends": "./tsconfig",
   "compilerOptions": {
-    "module": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "NodeNext",
     "outDir": "dist/module"
   }
 }

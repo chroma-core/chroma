@@ -1,6 +1,9 @@
 {
-  "include": [
-    "src"
+  
+  "files": [
+    "src/index.ts",
+    "src/generated/index.ts",
+    "src/embeddings/**/*.ts",
   ],
   "compilerOptions": {
     "declaration": true,
@@ -13,6 +16,7 @@
     "esModuleInterop": true,
     "moduleResolution": "Node",
     "forceConsistentCasingInFileNames": true,
-    "stripInternal": true
+    "stripInternal": true,
+    "isolatedModules": true,
   }
 }

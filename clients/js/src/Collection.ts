@@ -1,4 +1,4 @@
-import {
+import type {
     IncludeEnum,
     Metadata,
     Metadatas,
@@ -18,10 +18,10 @@ import {
     ConfigOptions
 } from "./types";
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
-import { ApiApi as DefaultApi } from "./generated";
+import { ApiApi } from "./generated";
 import { handleError, handleSuccess } from "./utils";
 import { toArray, toArrayOfArrays } from "./utils";
-
+type DefaultApi = ApiApi;
 
 export class Collection {
     public name: string;

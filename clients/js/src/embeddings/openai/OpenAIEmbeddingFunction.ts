@@ -1,5 +1,4 @@
-import {IEmbeddingFunction} from "./IEmbeddingFunction";
-
+import { IEmbeddingFunction } from "../IEmbeddingFunction";
 let OpenAIApi: any;
 let openAiVersion = null;
 let openAiMajorVersion = null;

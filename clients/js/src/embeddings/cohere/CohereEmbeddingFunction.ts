@@ -1,4 +1,4 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
+import { IEmbeddingFunction } from "../IEmbeddingFunction";
 
 let CohereAiApi: any;
 

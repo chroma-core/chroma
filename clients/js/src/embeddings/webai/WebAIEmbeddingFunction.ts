@@ -1,4 +1,4 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
+import { IEmbeddingFunction } from "../IEmbeddingFunction";
 
 /**
  * WebAIEmbeddingFunction is a function that uses the Web AI package to generate embeddings.

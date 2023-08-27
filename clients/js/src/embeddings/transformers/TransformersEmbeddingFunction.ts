@@ -1,4 +1,4 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
+import { IEmbeddingFunction } from "../IEmbeddingFunction";
 
 // Dynamically import module
 let TransformersApi: Promise<any>;

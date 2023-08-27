@@ -6,3 +6,4 @@ node_modules
 # parcel related
 .parcel-cache
 dist
+lib
