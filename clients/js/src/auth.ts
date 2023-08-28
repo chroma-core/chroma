@@ -1,14 +1,24 @@
 import {ApiApi as DefaultApi} from "./generated";
 
 export interface ClientAuthProvider {
+    /**
+     * Abstract method for authenticating a client.
+     */
     authenticate(): ClientAuthResponse;
 }
 
 export interface ClientAuthConfigurationProvider<T> {
+    /**
+     * Abstract method for getting the configuration for the client.
+     */
     getConfig(): T;
 }
 
 export interface ClientAuthCredentialsProvider<T> {
+    /**
+     * Abstract method for getting the credentials for the client.
+     * @param user
+     */
     getCredentials(user?: string): T;
 }
 
@@ -79,7 +89,13 @@ class BasicAuthClientAuthResponse implements ClientAuthResponse {
 }
 
 export class BasicAuthCredentialsProvider implements ClientAuthCredentialsProvider<BasicAuthCredentials> {
-    private readonly credentials: BasicAuthCredentials
+    private readonly credentials: BasicAuthCredentials;
+
+    /**
+     * Creates a new BasicAuthCredentialsProvider. This provider loads credentials from provided text credentials or from the environment variable CHROMA_CLIENT_AUTH_CREDENTIALS.
+     * @param _creds - The credentials
+     * @throws {Error} If neither credentials provider or text credentials are supplied.
+     */
 
     constructor(_creds: string | undefined) {
         if (_creds === undefined && !process.env.CHROMA_CLIENT_AUTH_CREDENTIALS) throw new Error("Credentials must be supplied via environment variable (CHROMA_CLIENT_AUTH_CREDENTIALS) or passed in as configuration.");
@@ -92,7 +108,21 @@ export class BasicAuthCredentialsProvider implements ClientAuthCredentialsProvid
 }
 
 class BasicAuthClientAuthProvider implements ClientAuthProvider {
-    constructor(private readonly credentialsProvider: BasicAuthCredentialsProvider) {
+    private readonly credentialsProvider: ClientAuthCredentialsProvider<any>;
+
+    /**
+     * Creates a new BasicAuthClientAuthProvider.
+     * @param options - The options for the authentication provider.
+     * @param options.textCredentials - The credentials for the authentication provider.
+     * @param options.credentialsProvider - The credentials provider for the authentication provider.
+     * @throws {Error} If neither credentials provider or text credentials are supplied.
+     */
+
+    constructor(options: { textCredentials: any; credentialsProvider: ClientAuthCredentialsProvider<any> | undefined }) {
+        if (!options.credentialsProvider && !options.textCredentials) {
+            throw new Error("Either credentials provider or text credentials must be supplied.");
+        }
+        this.credentialsProvider = options.credentialsProvider || new BasicAuthCredentialsProvider(options.textCredentials);//new BasicAuthCredentialsProvider(options.textCredentials || options.credentialsProvider);
     }
 
     authenticate(): ClientAuthResponse {
@@ -104,18 +134,24 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
     authProvider: ClientAuthProvider | undefined;
     wrapperApi: DefaultApi | undefined;
 
-    constructor(private api: DefaultApi, authProvider: string | undefined, creds: string | undefined) {
-        switch (authProvider) {
-            case "basic":
+    /**
+     * Creates a new adapter of IsomorphicFetchClientAuthProtocolAdapter.
+     * @param api - The API to wrap.
+     * @param authConfiguration - The configuration for the authentication provider.
+     */
 
-                this.authProvider = new BasicAuthClientAuthProvider(new BasicAuthCredentialsProvider(creds));
+    constructor(private api: DefaultApi, authConfiguration: AuthOptions) {
+
+        switch (authConfiguration.provider) {
+            case "basic":
+                this.authProvider = new BasicAuthClientAuthProvider({textCredentials: authConfiguration.credentials, credentialsProvider: authConfiguration.credentialsProvider});
                 break;
             default:
                 this.authProvider = undefined;
                 break;
         }
         if (this.authProvider !== undefined) {
-            this.wrapperApi = this.wrapApi();
+            this.wrapperApi = this.wrapMethods(this.api);
         }
     }
 
@@ -160,8 +196,6 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
                             } else {
                                 modifiedArgs[modifiedArgs.length - 1] = self.injectCredentials(modifiedArgs[modifiedArgs.length - 1] as RequestInit);
                             }
-                            // thisArg.configuration.authorization = "Basic YWRtaW46YWRtaW4K"
-                            console.log(`Called ${prop} with args:`, modifiedArgs);
                             return fn.apply(thisArg, modifiedArgs);
                         }
                     });
@@ -169,10 +203,6 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
                 return target[prop];
             }
         });
-    }
-
-    wrapApi() {
-        return this.wrapMethods(this.api);
     }
 
     injectCredentials(injectionContext: RequestInit): RequestInit {
@@ -188,4 +218,12 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
         }
         return injectionContext;
     }
+}
+
+
+export type AuthOptions = {
+    provider: ClientAuthProvider | string | undefined,
+    credentialsProvider?: ClientAuthCredentialsProvider<any> | undefined,
+    configProvider?: ClientAuthConfigurationProvider<any> | undefined,
+    credentials?: any | undefined,
 }
