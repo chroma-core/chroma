@@ -19,7 +19,6 @@ jobs:
         platform: [ubuntu-latest, windows-latest]
         testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*'",
                    "chromadb/test/property/test_add.py",
-                   "--ignore-glob 'chromadb/test/auth/*'",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
