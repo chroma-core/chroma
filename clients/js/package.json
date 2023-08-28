@@ -31,7 +31,8 @@
   "scripts": {
     "test": "run-s db:clean db:run test:runfull db:clean db:run-auth test:runfull-authonly db:clean",
     "test:set-port": "cross-env URL=localhost:8001",
-    "test:run": "jest --runInBand",
+    "test:run": "jest --runInBand --testPathIgnorePatterns=test/auth.basic.test.ts",
+    "test:run-auth": "jest --runInBand --testPathPattern=test/auth.basic.test.ts",
     "test:runfull": "PORT=8001 jest --runInBand --testPathIgnorePatterns=test/auth.basic.test.ts",
     "test:runfull-authonly": "PORT=8001 jest --runInBand --testPathPattern=test/auth.basic.test.ts",
     "test:update": "run-s db:clean db:run && jest --runInBand --updateSnapshot && run-s db:clean",
