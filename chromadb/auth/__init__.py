@@ -68,7 +68,7 @@ class ClientAuthCredentialsProvider(Component, Generic[T]):
         super().__init__(system)
 
     @abstractmethod
-    def get_credentials(self, user_id: Optional[str] = None) -> T:
+    def get_credentials(self) -> T:
         pass
 
 

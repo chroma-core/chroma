@@ -24,9 +24,9 @@ from typing_extensions import Protocol
 import chromadb.server.fastapi
 from chromadb.api import API
 from chromadb.config import Settings, System
+from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, SubmitEmbeddingRecord
-from chromadb.db.mixins import embeddings_queue
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -60,6 +60,7 @@ def _run_server(
     chroma_server_auth_credentials_provider: Optional[str] = None,
     chroma_server_auth_credentials_file: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
+    chroma_server_auth_token_transport_header: Optional[str] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -76,6 +77,7 @@ def _run_server(
             chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
         )
     else:
         settings = Settings(
@@ -90,6 +92,7 @@ def _run_server(
             chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -116,6 +119,8 @@ def _fastapi_fixture(
     chroma_server_auth_credentials_file: Optional[str] = None,
     chroma_client_auth_credentials: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
+    chroma_client_auth_token_transport_header: Optional[str] = None,
+    chroma_server_auth_token_transport_header: Optional[str] = None,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
@@ -131,6 +136,7 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
+        Optional[str],
     ] = (
         port,
         False,
@@ -139,6 +145,7 @@ def _fastapi_fixture(
         chroma_server_auth_credentials_provider,
         chroma_server_auth_credentials_file,
         chroma_server_auth_credentials,
+        chroma_server_auth_token_transport_header,
     )
     persist_directory = None
     if is_persistent:
@@ -151,6 +158,7 @@ def _fastapi_fixture(
             chroma_server_auth_credentials_provider,
             chroma_server_auth_credentials_file,
             chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
@@ -161,6 +169,7 @@ def _fastapi_fixture(
         allow_reset=True,
         chroma_client_auth_provider=chroma_client_auth_provider,
         chroma_client_auth_credentials=chroma_client_auth_credentials,
+        chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
     )
     system = System(settings)
     api = system.instance(API)
@@ -196,42 +205,6 @@ def fastapi_server_basic_auth() -> Generator[System, None, None]:
     ):
         yield item
     os.remove(server_auth_file)
-
-
-def fastapi_server_token_auth() -> Generator[System, None, None]:
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_auth_provider="chromadb.auth.token.TokenAuthServerProvider",
-        chroma_server_auth_credentials_provider="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider",
-        chroma_server_auth_credentials="test-token",
-        chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
-        chroma_client_auth_credentials="test-token",
-    ):
-        yield item
-
-
-def fastapi_server_token_auth_shorthand() -> Generator[System, None, None]:
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_auth_provider="token",
-        chroma_server_auth_credentials_provider="token_config",
-        chroma_server_auth_credentials="test-token",
-        chroma_client_auth_provider="token",
-        chroma_client_auth_credentials="test-token",
-    ):
-        yield item
-
-
-def fastapi_server_token_auth_wrong_token() -> Generator[System, None, None]:
-    for item in _fastapi_fixture(
-        is_persistent=False,
-        chroma_server_auth_provider="token",
-        chroma_server_auth_credentials_provider="token_config",
-        chroma_server_auth_credentials="test-token",
-        chroma_client_auth_provider="token",
-        chroma_client_auth_credentials="test-token1",
-    ):
-        yield item
 
 
 def fastapi_server_basic_auth_param() -> Generator[System, None, None]:
@@ -362,17 +335,12 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
         fastapi_server_basic_auth_param,
         fastapi_server_basic_auth_file,
         fastapi_server_basic_auth_shorthand,
-        fastapi_server_token_auth,
-        fastapi_server_token_auth_shorthand,
     ]
     return fixtures
 
 
 def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [
-        fastapi_server_basic_auth_invalid_cred,
-        fastapi_server_token_auth_wrong_token,
-    ]
+    fixtures = [fastapi_server_basic_auth_invalid_cred]
     return fixtures
 
 

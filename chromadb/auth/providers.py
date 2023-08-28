@@ -167,5 +167,5 @@ class ConfigurationClientAuthCredentialsProvider(
         self._creds = SecretStr(str(system.settings.chroma_client_auth_credentials))
 
     @override
-    def get_credentials(self, user_id: Optional[str] = None) -> SecretStr:
+    def get_credentials(self) -> SecretStr:
         return self._creds

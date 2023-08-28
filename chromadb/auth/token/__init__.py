@@ -1,4 +1,5 @@
 import logging
+import string
 from enum import Enum
 from typing import Tuple, Any, cast, Dict, TypeVar
 
@@ -29,7 +30,6 @@ __all__ = ["TokenAuthServerProvider", "TokenAuthClientProvider"]
 _token_transport_headers = ["Authorization", "X-Chroma-Token"]
 
 
-# add new enum for token transport headerts
 class TokenTransportHeader(Enum):
     AUTHORIZATION = "Authorization"
     X_CHROMA_TOKEN = "X-Chroma-Token"
@@ -66,6 +66,12 @@ class TokenAuthClientAuthResponse(ClientAuthResponse):
             )
 
 
+def check_token(token: str) -> None:
+    token_str = str(token)
+    if not all(c in string.ascii_letters + string.digits for c in token_str):
+        raise ValueError("Invalid token. Must contain only ASCII letters and digits.")
+
+
 @register_provider("token_config")
 class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     _token: SecretStr
@@ -73,7 +79,9 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
         system.settings.require("chroma_server_auth_credentials")
-        self._token = SecretStr(str(system.settings.chroma_server_auth_credentials))
+        token_str = str(system.settings.chroma_server_auth_credentials)
+        check_token(token_str)
+        self._token = SecretStr(token_str)
 
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
@@ -135,9 +143,9 @@ class TokenAuthServerProvider(ServerAuthProvider):
             ),
         )
         if system.settings.chroma_server_auth_token_transport_header:
-            self._token_transport_header = TokenTransportHeader(
-                system.settings.chroma_server_auth_token_transport_header
-            )
+            self._token_transport_header = TokenTransportHeader[
+                str(system.settings.chroma_server_auth_token_transport_header)
+            ]
 
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
@@ -171,13 +179,15 @@ class TokenAuthClientProvider(ClientAuthProvider):
                 ClientAuthCredentialsProvider,
             )
         )
+        _token = self._credentials_provider.get_credentials()
+        check_token(_token.get_secret_value())
         if system.settings.chroma_client_auth_token_transport_header:
-            self._token_transport_header = TokenTransportHeader(
-                system.settings.chroma_client_auth_token_transport_header
-            )
+            self._token_transport_header = TokenTransportHeader[
+                str(system.settings.chroma_client_auth_token_transport_header)
+            ]
 
     @override
     def authenticate(self) -> ClientAuthResponse:
-        _creds = self._credentials_provider.get_credentials()
+        _token = self._credentials_provider.get_credentials()
 
-        return TokenAuthClientAuthResponse(_creds, self._token_transport_header)
+        return TokenAuthClientAuthResponse(_token, self._token_transport_header)
