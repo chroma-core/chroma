@@ -81,24 +81,26 @@ def invalid_token(draw: st.DrawFn) -> str:
     return token
 
 
-# @settings(max_examples=10)
-# @given(tconf=token_config(), inval_tok=invalid_token())
-# def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
-#     api = _fastapi_fixture(
-#         is_persistent=tconf["is_persistent"],
-#         chroma_server_auth_provider=tconf["chroma_server_auth_provider"],
-#         chroma_server_auth_credentials_provider=tconf["chroma_server_auth_credentials_provider"],
-#         chroma_server_auth_credentials=tconf["chroma_server_auth_credentials"],
-#         chroma_server_auth_token_transport_header=tconf["token_transport_header"],
-#         chroma_client_auth_provider=tconf["chroma_client_auth_provider"],
-#         chroma_client_auth_token_transport_header=tconf["token_transport_header"],
-#         chroma_client_auth_credentials=inval_tok,
-#     )
-#     with pytest.raises(Exception) as e:
-#         _sys: System = next(api)
-#         _sys.reset_state()
-#         api = _sys.instance(API)
-#         api.heartbeat()
+@settings(max_examples=10)
+@given(tconf=token_config(), inval_tok=invalid_token())
+def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
+    api = _fastapi_fixture(
+        is_persistent=tconf["is_persistent"],
+        chroma_server_auth_provider=tconf["chroma_server_auth_provider"],
+        chroma_server_auth_credentials_provider=tconf[
+            "chroma_server_auth_credentials_provider"
+        ],
+        chroma_server_auth_credentials=tconf["chroma_server_auth_credentials"],
+        chroma_server_auth_token_transport_header=tconf["token_transport_header"],
+        chroma_client_auth_provider=tconf["chroma_client_auth_provider"],
+        chroma_client_auth_token_transport_header=tconf["token_transport_header"],
+        chroma_client_auth_credentials=inval_tok,
+    )
+    with pytest.raises(Exception) as e:
+        _sys: System = next(api)
+        _sys.reset_state()
+        _sys.instance(API)
+    assert "Invalid token" in str(e)
 
 
 @settings(max_examples=10)
