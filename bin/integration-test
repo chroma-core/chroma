@@ -23,4 +23,7 @@ python -m pytest "$@"
 cd clients/js
 yarn
 yarn test:run
+docker compose down
+docker compose -f ../../docker-compose.test-auth.yml up --build -d
+yarn test:run-auth
 cd ../..
