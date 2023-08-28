@@ -1,6 +1,6 @@
 import importlib
 import logging
-from typing import cast, Dict, TypeVar, Any
+from typing import cast, Dict, TypeVar, Any, Optional
 
 import requests
 from overrides import override
@@ -167,5 +167,5 @@ class ConfigurationClientAuthCredentialsProvider(
         self._creds = SecretStr(str(system.settings.chroma_client_auth_credentials))
 
     @override
-    def get_credentials(self) -> SecretStr:
+    def get_credentials(self, user_id: Optional[str] = None) -> SecretStr:
         return self._creds

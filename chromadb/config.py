@@ -138,6 +138,8 @@ class Settings(BaseSettings):  # type: ignore
     ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
     chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
+    chroma_server_auth_token_transport_header: Optional[str] = None
 
     anonymized_telemetry: bool = True
 
