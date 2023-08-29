@@ -122,7 +122,7 @@ class BasicAuthClientAuthProvider implements ClientAuthProvider {
         if (!options.credentialsProvider && !options.textCredentials) {
             throw new Error("Either credentials provider or text credentials must be supplied.");
         }
-        this.credentialsProvider = options.credentialsProvider || new BasicAuthCredentialsProvider(options.textCredentials);//new BasicAuthCredentialsProvider(options.textCredentials || options.credentialsProvider);
+        this.credentialsProvider = options.credentialsProvider || new BasicAuthCredentialsProvider(options.textCredentials);
     }
 
     authenticate(): ClientAuthResponse {
@@ -191,7 +191,6 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
                                 return arg;
                             });
                             if (Object.keys(modifiedArgs[modifiedArgs.length - 1]).length === 0) {
-                                // modifiedArgs.push({} as RequestInit);
                                 modifiedArgs[modifiedArgs.length - 1] = self.injectCredentials({} as RequestInit);
                             } else {
                                 modifiedArgs[modifiedArgs.length - 1] = self.injectCredentials(modifiedArgs[modifiedArgs.length - 1] as RequestInit);
