@@ -10,6 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: "ghcr.io/chroma-core/chroma"
+  PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
 
 jobs:
   build-and-release:
@@ -26,6 +27,13 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
+    # https://github.com/docker/setup-qemu-action - for multiplatform builds
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
+    # https://github.com/docker/setup-buildx-action - for multiplatform builds
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v2
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -52,6 +60,7 @@ jobs:
       uses: docker/build-push-action@v3.2.0
       with:
         context: .
+        platforms: ${{ env.PLATFORMS }}
         push: true
         tags: ${{ steps.tag.outputs.tag_name}}
     - name: Build and push release Docker image
@@ -59,6 +68,7 @@ jobs:
       uses: docker/build-push-action@v3.2.0
       with:
         context: .
+        platforms: ${{ env.PLATFORMS }}
         push: true
         tags: "${{ steps.tag.outputs.tag_name }},${{ env.IMAGE_NAME }}:latest"
     - name: Get Release Version
