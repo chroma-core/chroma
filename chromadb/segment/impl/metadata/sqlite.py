@@ -466,6 +466,10 @@ class SqliteMetadataSegment(MetadataReader):
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
 
+    @override
+    def delete(self) -> None:
+        raise NotImplementedError()
+
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
     """Encode a SeqID into a byte array"""
