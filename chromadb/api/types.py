@@ -111,14 +111,33 @@ def validate_ids(ids: IDs) -> IDs:
         raise ValueError(f"Expected IDs to be a list, got {ids}")
     if len(ids) == 0:
         raise ValueError(f"Expected IDs to be a non-empty list, got {ids}")
-    for id in ids:
-        if not isinstance(id, str):
-            raise ValueError(f"Expected ID to be a str, got {id}")
-    if len(ids) != len(set(ids)):
-        dups = set([x for x in ids if ids.count(x) > 1])
-        raise errors.DuplicateIDError(
-            f"Expected IDs to be unique, found duplicates for: {dups}"
-        )
+    seen = set()
+    dups = set()
+    for id_ in ids:
+        if not isinstance(id_, str):
+            raise ValueError(f"Expected ID to be a str, got {id_}")
+        if id_ in seen:
+            dups.add(id_)
+        else:
+            seen.add(id_)
+    if dups:
+        n_dups = len(dups)
+        if n_dups < 10:
+            example_string = ", ".join(dups)
+            message = (
+                f"Expected IDs to be unique, found duplicates of: {example_string}"
+            )
+        else:
+            examples = []
+            for idx, dup in enumerate(dups):
+                examples.append(dup)
+                if idx == 10:
+                    break
+            example_string = (
+                f"{', '.join(examples[:5])}, ..., {', '.join(examples[-5:])}"
+            )
+            message = f"Expected IDs to be unique, found {n_dups} duplicated IDs: {example_string}"
+        raise errors.DuplicateIDError(message)
     return ids
 
 
@@ -265,6 +284,10 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
         elif not isinstance(operand, str):
             raise ValueError(
                 f"Expected where document operand value for operator $contains to be a str, got {operand}"
+            )
+        elif len(operand) == 0:
+            raise ValueError(
+                "Expected where document operand value for operator $contains to be a non-empty str"
             )
     return where_document
 

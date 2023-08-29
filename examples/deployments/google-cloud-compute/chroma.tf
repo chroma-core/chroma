@@ -21,7 +21,7 @@ resource "google_compute_instance" "chroma1" {
     }
   }
 
-  metadata_startup_script = file("${path.module}/startup.sh")
+  metadata_startup_script = templatefile("${path.module}/startup.sh", { chroma_release = var.chroma_release })
 }
 
 resource "google_compute_firewall" "default" {
@@ -41,4 +41,10 @@ resource "google_compute_firewall" "default" {
   source_ranges = ["0.0.0.0/0"]
 
   target_tags = ["chroma"]
+}
+
+
+output "instance_public_ip" {
+  description = "The public IP address of the instance."
+  value       = google_compute_instance.chroma1.network_interface[0].access_config[0].nat_ip
 }

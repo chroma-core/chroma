@@ -271,7 +271,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
-    def _download(self, url: str, fname: Path, chunk_size: int = 1024) -> None:
+    def _download(self, url: str, fname: str, chunk_size: int = 1024) -> None:
         resp = requests.get(url, stream=True)
         total = int(resp.headers.get("content-length", 0))
         with open(fname, "wb") as file, self.tqdm(
@@ -326,14 +326,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
     def _init_model_and_tokenizer(self) -> None:
         if self.model is None and self.tokenizer is None:
             self.tokenizer = self.Tokenizer.from_file(
-                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "tokenizer.json")
+                os.path.join(
+                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+                )
             )
             # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
             self.model = self.ort.InferenceSession(
-                str(self.DOWNLOAD_PATH / self.EXTRACTED_FOLDER_NAME / "model.onnx")
+                os.path.join(
+                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
+                )
             )
 
     def __call__(self, texts: Documents) -> Embeddings:
@@ -344,16 +348,35 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
         return res
 
     def _download_model_if_not_exists(self) -> None:
+        onnx_files = [
+            "config.json",
+            "model.onnx",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+            "tokenizer.json",
+            "vocab.txt",
+        ]
+        extracted_folder = os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME)
+        onnx_files_exist = True
+        for f in onnx_files:
+            if not os.path.exists(os.path.join(extracted_folder, f)):
+                onnx_files_exist = False
+                break
         # Model is not downloaded yet
-        if not os.path.exists(self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME):
+        if not onnx_files_exist:
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
-            self._download(
-                self.MODEL_DOWNLOAD_URL, self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME
-            )
+            if not os.path.exists(
+                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+            ):
+                self._download(
+                    url=self.MODEL_DOWNLOAD_URL,
+                    fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                )
             with tarfile.open(
-                self.DOWNLOAD_PATH / self.ARCHIVE_FILENAME, "r:gz"
+                name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                mode="r:gz",
             ) as tar:
-                tar.extractall(self.DOWNLOAD_PATH)
+                tar.extractall(path=self.DOWNLOAD_PATH)
 
 
 def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction]:
@@ -410,7 +433,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def __call__(self, texts: Documents) -> Embeddings:
-
         embeddings = []
         for text in texts:
             response = self._session.post(

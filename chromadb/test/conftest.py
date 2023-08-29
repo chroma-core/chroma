@@ -1,22 +1,35 @@
-from chromadb.config import Settings, System
-from chromadb.api import API
-import chromadb.server.fastapi
-from requests.exceptions import ConnectionError
-import hypothesis
-import tempfile
-import os
-import uvicorn
-import time
-import pytest
-from typing import Generator, List, Callable, Optional, Tuple
-import shutil
 import logging
-import socket
 import multiprocessing
+import os
+import shutil
+import socket
+import tempfile
+import time
+from typing import (
+    Generator,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Callable,
+)
+
+import hypothesis
+import pytest
+import uvicorn
+from requests.exceptions import ConnectionError
+from typing_extensions import Protocol
+
+import chromadb.server.fastapi
+from chromadb.api import API
+from chromadb.config import Settings, System
+from chromadb.db.mixins import embeddings_queue
+from chromadb.ingest import Producer
+from chromadb.types import SeqId, SubmitEmbeddingRecord
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +53,14 @@ def find_free_port() -> int:
 
 
 def _run_server(
-    port: int, is_persistent: bool = False, persist_directory: Optional[str] = None
+    port: int,
+    is_persistent: bool = False,
+    persist_directory: Optional[str] = None,
+    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_auth_credentials_provider: Optional[str] = None,
+    chroma_server_auth_credentials_file: Optional[str] = None,
+    chroma_server_auth_credentials: Optional[str] = None,
+    chroma_server_auth_token_transport_header: Optional[str] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -53,6 +73,11 @@ def _run_server(
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
+            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
+            chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
+            chroma_server_auth_credentials=chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
         )
     else:
         settings = Settings(
@@ -63,6 +88,11 @@ def _run_server(
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             is_persistent=False,
             allow_reset=True,
+            chroma_server_auth_provider=chroma_server_auth_provider,
+            chroma_server_auth_credentials_provider=chroma_server_auth_credentials_provider,
+            chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
+            chroma_server_auth_credentials=chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -81,18 +111,55 @@ def _await_server(api: API, attempts: int = 0) -> None:
             _await_server(api, attempts + 1)
 
 
-def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, None]:
+def _fastapi_fixture(
+    is_persistent: bool = False,
+    chroma_server_auth_provider: Optional[str] = None,
+    chroma_server_auth_credentials_provider: Optional[str] = None,
+    chroma_client_auth_provider: Optional[str] = None,
+    chroma_server_auth_credentials_file: Optional[str] = None,
+    chroma_client_auth_credentials: Optional[str] = None,
+    chroma_server_auth_credentials: Optional[str] = None,
+    chroma_client_auth_token_transport_header: Optional[str] = None,
+    chroma_server_auth_token_transport_header: Optional[str] = None,
+) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
 
     port = find_free_port()
     logger.info(f"Running test FastAPI server on port {port}")
     ctx = multiprocessing.get_context("spawn")
-    args: Tuple[int, bool, Optional[str]] = (port, False, None)
+    args: Tuple[
+        int,
+        bool,
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+    ] = (
+        port,
+        False,
+        None,
+        chroma_server_auth_provider,
+        chroma_server_auth_credentials_provider,
+        chroma_server_auth_credentials_file,
+        chroma_server_auth_credentials,
+        chroma_server_auth_token_transport_header,
+    )
     persist_directory = None
     if is_persistent:
         persist_directory = tempfile.mkdtemp()
-        args = (port, is_persistent, persist_directory)
+        args = (
+            port,
+            is_persistent,
+            persist_directory,
+            chroma_server_auth_provider,
+            chroma_server_auth_credentials_provider,
+            chroma_server_auth_credentials_file,
+            chroma_server_auth_credentials,
+            chroma_server_auth_token_transport_header,
+        )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
     settings = Settings(
@@ -100,6 +167,9 @@ def _fastapi_fixture(is_persistent: bool = False) -> Generator[System, None, Non
         chroma_server_host="localhost",
         chroma_server_http_port=str(port),
         allow_reset=True,
+        chroma_client_auth_provider=chroma_client_auth_provider,
+        chroma_client_auth_credentials=chroma_client_auth_credentials,
+        chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
     )
     system = System(settings)
     api = system.instance(API)
@@ -119,6 +189,87 @@ def fastapi() -> Generator[System, None, None]:
 
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
+
+
+def fastapi_server_basic_auth() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
+        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_credentials="admin:admin",
+    ):
+        yield item
+    os.remove(server_auth_file)
+
+
+def fastapi_server_basic_auth_param() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
+        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_credentials="admin:admin",
+    ):
+        yield item
+    os.remove(server_auth_file)
+
+
+# TODO we need a generator for auth providers
+def fastapi_server_basic_auth_file() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
+        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_credentials="admin:admin",
+    ):
+        yield item
+    os.remove(server_auth_file)
+
+
+def fastapi_server_basic_auth_shorthand() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="basic",
+        chroma_server_auth_credentials_provider="htpasswd_file",
+        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_client_auth_provider="basic",
+        chroma_client_auth_credentials="admin:admin",
+    ):
+        yield item
+    os.remove(server_auth_file)
+
+
+def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
+    server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
+    with open(server_auth_file, "w") as f:
+        f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
+    for item in _fastapi_fixture(
+        is_persistent=False,
+        chroma_server_auth_provider="chromadb.auth.basic.BasicAuthServerProvider",
+        chroma_server_auth_credentials_provider="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider",
+        chroma_server_auth_credentials_file="./server.htpasswd",
+        chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
+        chroma_client_auth_credentials="admin:admin1",
+    ):
+        yield item
+    os.remove(server_auth_file)
 
 
 def integration() -> Generator[System, None, None]:
@@ -179,8 +330,32 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
+def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [
+        fastapi_server_basic_auth_param,
+        fastapi_server_basic_auth_file,
+        fastapi_server_basic_auth_shorthand,
+    ]
+    return fixtures
+
+
+def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [fastapi_server_basic_auth_invalid_cred]
+    return fixtures
+
+
+@pytest.fixture(scope="module", params=system_fixtures_wrong_auth())
+def system_wrong_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+    yield next(request.param())
+
+
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+    yield next(request.param())
+
+
+@pytest.fixture(scope="module", params=system_fixtures_auth())
+def system_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
     yield next(request.param())
 
 
@@ -189,3 +364,80 @@ def api(system: System) -> Generator[API, None, None]:
     system.reset_state()
     api = system.instance(API)
     yield api
+
+
+@pytest.fixture(scope="function")
+def api_wrong_cred(
+    system_wrong_auth: System,
+) -> Generator[API, None, None]:
+    system_wrong_auth.reset_state()
+    api = system_wrong_auth.instance(API)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def api_with_server_auth(system_auth: System) -> Generator[API, None, None]:
+    _sys = system_auth
+    _sys.reset_state()
+    api = _sys.instance(API)
+    yield api
+
+
+# Producer / Consumer fixtures #
+
+
+class ProducerFn(Protocol):
+    def __call__(
+        self,
+        producer: Producer,
+        topic: str,
+        embeddings: Iterator[SubmitEmbeddingRecord],
+        n: int,
+    ) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+        ...
+
+
+def produce_n_single(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids = []
+    for _ in range(n):
+        e = next(embeddings)
+        seq_id = producer.submit_embedding(topic, e)
+        submitted_embeddings.append(e)
+        seq_ids.append(seq_id)
+    return submitted_embeddings, seq_ids
+
+
+def produce_n_batch(
+    producer: Producer,
+    topic: str,
+    embeddings: Iterator[SubmitEmbeddingRecord],
+    n: int,
+) -> Tuple[Sequence[SubmitEmbeddingRecord], Sequence[SeqId]]:
+    submitted_embeddings = []
+    seq_ids: Sequence[SeqId] = []
+    for _ in range(n):
+        e = next(embeddings)
+        submitted_embeddings.append(e)
+    seq_ids = producer.submit_embeddings(topic, submitted_embeddings)
+    return submitted_embeddings, seq_ids
+
+
+def produce_fn_fixtures() -> List[ProducerFn]:
+    return [produce_n_single, produce_n_batch]
+
+
+@pytest.fixture(scope="module", params=produce_fn_fixtures())
+def produce_fns(
+    request: pytest.FixtureRequest,
+) -> Generator[ProducerFn, None, None]:
+    yield request.param
+
+
+def pytest_configure(config):
+    embeddings_queue._called_from_test = True
