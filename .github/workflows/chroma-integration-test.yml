@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.7']
-        platform: [windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         testfile: ["--ignore-glob 'chromadb/test/property/*'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
