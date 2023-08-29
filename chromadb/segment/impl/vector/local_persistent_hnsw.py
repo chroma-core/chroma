@@ -399,12 +399,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if self._allow_reset:
             data_path = self._get_storage_folder()
             if os.path.exists(data_path):
+                self.close_persistent_index()
                 shutil.rmtree(data_path, ignore_errors=True)
 
     @override
     def delete(self) -> None:
         data_path = self._get_storage_folder()
         if os.path.exists(data_path):
+            self.close_persistent_index()
             shutil.rmtree(data_path, ignore_errors=False)
 
     @staticmethod
