@@ -32,6 +32,12 @@
   </a>
 </p>
 
+## Run Container
+```
+docker-compose --env-file ./.chroma_env up -d --build
+```
+
+
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
@@ -39,6 +45,8 @@ pip install chromadb # python client
 ```
 
 The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
+
+
 
 ```python
 import chromadb
