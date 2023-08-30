@@ -146,7 +146,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         limit = limit or 2**63 - 1
         offset = offset or 0
-
         with self._db.tx() as cur:
             return list(islice(self._records(cur, q), offset, offset + limit))
 
@@ -405,7 +404,6 @@ class SqliteMetadataSegment(MetadataReader):
         self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
     ) -> Criterion:
         clause: list[Criterion] = []
-
         for k, v in where.items():
             if k == "$and":
                 criteria = [
@@ -442,7 +440,7 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(metadata_t.key.notin(ParameterValue(k)))
                     .where(_where_clause(expr, metadata_t))
                 )
-                clause.append(embeddings_t.id.isin(sq))
+                clause.append(embeddings_t.id.notin(sq))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)  # type: ignore
                 sq = (
@@ -537,7 +535,6 @@ def _value_criterion(
 ) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
-
     if isinstance(value, str):
         cols = [table.string_value]
     # isinstance(True, int) evaluates to True, so we need to check for bools separately
@@ -547,26 +544,37 @@ def _value_criterion(
         cols = [table.int_value]
     elif isinstance(value, float) and op in ("$eq", "$ne"):
         cols = [table.float_value]
-    elif (
-        isinstance(value, list) and op in ("$in", "$nin") and isinstance(value[0], str)
-    ):
-        col_exprs = [table.string_value.isin(value)]
-    elif (
-        isinstance(value, list) and op in ("$in", "$nin") and isinstance(value[0], bool)
-    ):
-        col_exprs = [table.bool_value.isin(value)]
-    elif (
-        isinstance(value, list) and op in ("$in", "$nin") and isinstance(value[0], int)
-    ):
-        col_exprs = [table.int_value.isin(value)]
-    elif (
-        isinstance(value, list)
-        and op in ("$in", "$nin")
-        and isinstance(value[0], float)
-    ):
-        col_exprs = [table.float_value.isin(value)]
     elif isinstance(value, list) and op in ("$in", "$nin"):
-        col_exprs = [table.int_value.isin(value), table.float_value.isin(value)]
+        _v = value
+        if len(_v) == 0:
+            raise ValueError(f"Empty list for {op} operator")
+        if isinstance(value[0], str):
+            col_exprs = [
+                table.string_value.isin(_v)
+                if op == "$in"
+                else table.str_value.notin(_v)
+            ]
+        elif isinstance(value[0], bool):
+            col_exprs = [
+                table.bool_value.isin(_v) if op == "$in" else table.bool_value.notin(_v)
+            ]
+        elif isinstance(value[0], int):
+            col_exprs = [
+                table.int_value.isin(_v) if op == "$in" else table.int_value.notin(_v)
+            ]
+        elif isinstance(value[0], float):
+            col_exprs = [
+                table.float_value.isin(_v)
+                if op == "$in"
+                else table.float_value.notin(_v)
+            ]
+    elif isinstance(value, list) and op in ("$in", "$nin"):
+        col_exprs = [
+            table.int_value.isin(value),
+            table.float_value.isin(value)
+            if op == "$in"
+            else table.float_value.notin(value),
+        ]
     else:
         cols = [table.int_value, table.float_value]
 

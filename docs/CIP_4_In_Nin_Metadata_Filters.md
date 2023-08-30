@@ -6,7 +6,8 @@ Current Status: `Under Discussion`
 
 ## **Motivation**
 
-Currently, Chroma does not provide a way to filter metadata through `in` and `not in`. This appears to be
+Currently, Chroma does not provide a way to filter metadata through `in` and `not in`. This appears to be a frequent ask
+from community members.
 
 ## **Public Interfaces**
 
@@ -28,7 +29,7 @@ We suggest the following new operator definition:
 InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
 ```
 
-Additionally we suggest that those operators are added to `OperatorExpression` for seamless integration with
+Additionally, we suggest that those operators are added to `OperatorExpression` for seamless integration with
 existing `Where` semantics:
 
 ```python
@@ -38,14 +39,23 @@ OperatorExpression = Union[
 ]
 ```
 
+An example of a query using the new operators would be:
+
+```python
+collection.query(query_texts=query,
+                 where={"$and": [{"author": {'$in': ['john', 'jill']}}, {"article_type": {"$eq": "blog"}}]},
+                 n_results=3)
+```
+
 ## **Compatibility, Deprecation, and Migration Plan**
 
-TBD
+The change is compatible with existing release 0.4.x.
 
 ## **Test Plan**
 
-TBD (property testing with hypothesis)
+Property tests will be updated to ensure boundary conditions are covered as well as interoperability with existing `Where`
+operators.
 
 ## **Rejected Alternatives**
 
-TBD
+N/A
