@@ -59,7 +59,15 @@ class Producer(Component):
         """Add a batch of embedding records to the given topic. Returns the SeqIDs of
         the records. The returned SeqIDs will be in the same order as the given
         SubmitEmbeddingRecords. However, it is not guaranteed that the SeqIDs will be
-        processed in the same order as the given SubmitEmbeddingRecords."""
+        processed in the same order as the given SubmitEmbeddingRecords. If the number
+        of records exceeds the maximum batch size, an exception will be thrown."""
+        pass
+
+    @property
+    @abstractmethod
+    def max_batch_size(self) -> int:
+        """Return the maximum number of records that can be submitted in a single call
+        to submit_embeddings."""
         pass
 
 

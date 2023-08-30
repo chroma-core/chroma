@@ -98,7 +98,7 @@ class CapturingConsumeFn:
             if len(self.embeddings) >= n:
                 event.set()
 
-    async def get(self, n: int) -> Sequence[EmbeddingRecord]:
+    async def get(self, n: int, timeout_secs: int = 10) -> Sequence[EmbeddingRecord]:
         "Wait until at least N embeddings are available, then return all embeddings"
         if len(self.embeddings) >= n:
             return self.embeddings[:n]
@@ -106,7 +106,7 @@ class CapturingConsumeFn:
             event = Event()
             self.waiters.append((n, event))
             # timeout so we don't hang forever on failure
-            await wait_for(event.wait(), 10)
+            await wait_for(event.wait(), timeout_secs)
             return self.embeddings[:n]
 
 
@@ -322,3 +322,28 @@ async def test_multiple_topics_batch(
             recieved = await consume_fns[i].get(total_produced + PRODUCE_BATCH_SIZE)
             assert_records_match(embeddings_n[i], recieved)
         total_produced += PRODUCE_BATCH_SIZE
+
+
+@pytest.mark.asyncio
+async def test_max_batch_size(
+    producer_consumer: Tuple[Producer, Consumer],
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+) -> None:
+    producer, consumer = producer_consumer
+    producer.reset_state()
+    max_batch_size = producer_consumer[0].max_batch_size
+    assert max_batch_size > 0
+
+    # Make sure that we can produce a batch of size max_batch_size
+    embeddings = [next(sample_embeddings) for _ in range(max_batch_size)]
+    consume_fn = CapturingConsumeFn()
+    consumer.subscribe("test_topic", consume_fn, start=consumer.min_seqid())
+    producer.submit_embeddings("test_topic", embeddings=embeddings)
+    received = await consume_fn.get(max_batch_size, timeout_secs=120)
+    assert_records_match(embeddings, received)
+
+    embeddings = [next(sample_embeddings) for _ in range(max_batch_size + 1)]
+    # Make sure that we can't produce a batch of size > max_batch_size
+    with pytest.raises(ValueError) as e:
+        producer.submit_embeddings("test_topic", embeddings=embeddings)
+    assert "Cannot submit more than" in str(e.value)
