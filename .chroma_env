@@ -1,0 +1,3 @@
+CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider'
+CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.basic.BasicAuthServerProvider'
