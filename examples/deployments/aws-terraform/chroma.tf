@@ -63,7 +63,7 @@ resource "aws_security_group" "chroma_sg" {
 
 resource "aws_key_pair" "chroma-keypair" {
   key_name   = "chroma-keypair"  # Replace with your desired key pair name
-  public_key = file("~/.ssh/chroma-aws.pub")  # Replace with the path to your public key file
+  public_key = file(var.ssh_public_key)  # Replace with the path to your public key file
 }
 
 data "aws_ami" "ubuntu" {
@@ -89,7 +89,11 @@ resource "aws_instance" "cluster_nodes" {
   key_name        = "chroma-keypair"
   security_groups = [aws_security_group.chroma_sg.name]
 
-  user_data = templatefile("${path.module}/startup.sh", { chroma_release = var.chroma_release })
+  user_data = templatefile("${path.module}/startup.sh", {
+    chroma_release = var.chroma_release,
+    enable_auth = var.enable_auth,
+    basic_auth_credentials = var.basic_auth_credentials,
+  })
 
   tags = {
     Name = "chroma-cluster-node-${count.index}"

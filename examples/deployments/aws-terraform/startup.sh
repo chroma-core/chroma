@@ -3,7 +3,8 @@
 # Note: This is run as root
 
 cd ~
-
+export enable_auth="${enable_auth}"
+export basic_auth_credentials="${basic_auth_credentials}"
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg lsb-release
 mkdir -m 0755 -p /etc/apt/keyrings
@@ -19,5 +20,16 @@ usermod -aG docker ubuntu
 git clone https://github.com/chroma-core/chroma.git && cd chroma
 git fetch --tags
 git checkout tags/${chroma_release}
+
+if [ "$${enable_auth}" = "true" ] && [ ! -z "$${basic_auth_credentials}" ]; then
+  username=$(echo $basic_auth_credentials | cut -d: -f1)
+  password=$(echo $basic_auth_credentials | cut -d: -f2)
+  docker run --rm --entrypoint htpasswd httpd:2 -Bbn $username $password > server.htpasswd
+  cat <<EOF > .env
+CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider'
+CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.basic.BasicAuthServerProvider'
+EOF
+fi
 
 COMPOSE_PROJECT_NAME=chroma docker compose up -d --build

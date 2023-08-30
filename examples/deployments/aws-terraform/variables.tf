@@ -22,3 +22,20 @@ variable "public_access" {
   type        = bool
   default     = false // or false depending on your needs
 }
+
+variable "enable_auth" {
+  description = "Enable authentication"
+  type        = bool
+  default     = false // or false depending on your needs
+}
+
+variable "basic_auth_credentials" {
+  description = "Basic Authentication Credentials"
+  type        = string
+}
+
+variable "ssh_public_key" {
+  description = "SSH Public Key"
+  type        = string
+  default = "./chroma-aws.pub"
+}
