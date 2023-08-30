@@ -24,7 +24,8 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         # TODO: appropriately parameterize this - it should be passed in from the segment manager
         # TODO: move to start() method
         # TODO: close channel in stop() method
-        channel = grpc.insecure_channel("segment-server:50051")
+        # TODO: .chroma is for k8s for now
+        channel = grpc.insecure_channel("segment-server.chroma:50051")
         self._vector_reader_stub = VectorReaderStub(channel)
         self._segment = segment
 

@@ -49,7 +49,7 @@ class DistributedSegmentManager(SegmentManager):
         self._lock = Lock()
 
         # TODO: this should be configurable based on segment info in sysdb metadata
-        channel = grpc.insecure_channel("segment-server:50051")
+        channel = grpc.insecure_channel("segment-server.chroma:50051")
         self._segment_server_stub = SegmentServerStub(channel)
 
     @override
