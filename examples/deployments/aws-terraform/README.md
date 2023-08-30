@@ -16,7 +16,7 @@ To find AWS EC2 AMIs you can use:
 # 099720109477 is Canonical
 aws ec2 describe-images \
     --owners 099720109477 \
-    --filters 'Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal*' \
+    --filters 'Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy*' \
     --query 'sort_by(Images,&CreationDate)[-1].ImageId'
 ```
 
@@ -58,14 +58,14 @@ Get the public IP of your instance
 terraform output instance_public_ip
 ```
 
-Check that chroma is running
+Check that chroma is running (It should take up several minutes for the instance to be ready)
 
 ```bash
 export instance_public_ip=$(terraform output instance_public_ip | sed 's/"//g')
 curl -v http://$instance_public_ip:8000/api/v1/heartbeat
 ```
 
-When auth is enabled you will need to pass the basic auth credentials
+When auth is enabled you will need to pass the basic auth credentials (`-u`):
 
 ```bash
 curl -v http://$instance_public_ip:8000/api/v1/collections -u "admin:Chr0m4%!"
