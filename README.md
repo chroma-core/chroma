@@ -1,3 +1,10 @@
+# custom - Chroma Docker
+## Run Container
+```
+docker-compose --env-file ./.chroma_env up -d --build
+```
+
+# Chroma Readme
 <p align="center">
   <a href="https://trychroma.com"><img src="https://user-images.githubusercontent.com/891664/227103090-6624bf7d-9524-4e05-9d2c-c28d5d451481.png" alt="Chroma logo"></a>
 </p>
@@ -32,10 +39,6 @@
   </a>
 </p>
 
-## Run Container
-```
-docker-compose --env-file ./.chroma_env up -d --build
-```
 
 
 ```bash
