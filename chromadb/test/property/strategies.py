@@ -14,6 +14,7 @@ from hypothesis.stateful import RuleBasedStateMachine
 from dataclasses import dataclass
 
 from chromadb.api.types import Documents, Embeddings, Metadata
+from chromadb.types import LiteralValue
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -448,6 +449,29 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
         return True
 
 
+def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
+    """
+    Strategy for generating opposite values of the given value - testing of $nin
+    """
+    if isinstance(value, float):
+        return st.floats(allow_nan=False, allow_infinity=False).filter(
+            lambda x: x != value
+        )
+    elif isinstance(value, str):
+        # allow only printable ascii characters
+        return st.text(
+            st.characters(min_codepoint=32, max_codepoint=126), min_size=1
+        ).filter(lambda x: x != value)
+    elif isinstance(value, bool):
+        return st.booleans().filter(lambda x: x != value)
+    elif isinstance(value, int):
+        return st.integers(min_value=-(2**31), max_value=2**31 - 1).filter(
+            lambda x: x != value
+        )
+    else:
+        return st.from_type(type(value)).filter(lambda x: x != value)
+
+
 @st.composite
 def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
@@ -457,7 +481,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
+    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
@@ -468,6 +492,15 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 
     if op is None:
         return {key: value}
+    elif op == "$in":
+        if isinstance(value, str) and not value:
+            return {}
+        # *st.lists(st.from_type(type(value)).filter(lambda x: x != value), min_size=1, max_size=5).example()
+        return {key: {op: [value]}}
+    elif op == "$nin":
+        if isinstance(value, str) and not value:
+            return {}
+        return {key: {op: [draw(opposite_value(value))]}}
     else:
         return {key: {op: value}}
 
