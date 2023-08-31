@@ -1,10 +1,23 @@
+/**
+ * This file contains the necessary scripts and tasks for generating type definition files (.d.ts) and supporting
+ * all environments for the chromadb package. It utilizes Gulp task runner to compile TypeScript code,
+ * generate root .js files for each folder, update package.json, copy .d.ts files, and perform cleanup tasks.
+ *
+ * The main tasks provided by this file are:
+ * - compile: Compiles the TypeScript code using different build targets (node and esm).
+ * - watch: Watches for changes in the TypeScript code and recompiles the code.
+ * - generateRootJS: Generates root .js files for each folder in src/embeddings to support sub-packages.
+ * - updatePackageJSON: Updates the package.json file with package.exports entries and file list dynamically.
+ * - dts: Generates type definition files and copies them to the appropriate locations.
+ * - cleanup: Performs cleanup tasks like deleting temporary files and folders.
+ */
 const babel = require("gulp-babel");
 const gulp = require("gulp");
 const path = require("path");
 const watch = require("gulp-watch");
 const rimraf = require("rimraf").rimraf;
 const fs = require("fs");
-const { exec } = require('child_process');
+const { exec } = require("child_process");
 
 const BUILD = process.env.BUILD_TARGET || "node";
 
@@ -42,7 +55,7 @@ function compileTask(stream, outputDir) {
     .pipe(gulp.dest(path.join(outputDir, BUILD)));
 }
 
-function readFoldersAndFiles(dir, fileExtension = '.js') {
+function readFoldersAndFiles(dir, fileExtension = ".js") {
   return fs.readdirSync(dir).reduce(
     (acc, item) => {
       const fullPath = path.join(dir, item);
@@ -61,11 +74,7 @@ function readFoldersAndFiles(dir, fileExtension = '.js') {
 }
 
 gulp.task("compile", function () {
-  return compileTask(
-    gulp.src(["src/**/*.ts", "!src/**/*.d.ts"]),
-    "lib",
-    "esm"
-  );
+  return compileTask(gulp.src(["src/**/*.ts", "!src/**/*.d.ts"]), "lib", "esm");
 });
 
 gulp.task("compile:cjs", function () {
@@ -133,7 +142,7 @@ gulp.task("updatePackageJSON", function (cb) {
       import: "./lib/esm/index.js",
     },
     "./lib/*": {
-      "default": "./lib/*"
+      default: "./lib/*",
     },
   };
 
@@ -176,30 +185,41 @@ gulp.task("updatePackageJSON", function (cb) {
 
 // Copy index.d.ts to appropriate locations
 gulp.task("dts:copy-root", function (cb) {
-  const rootDir = 'src';
-    const { folders } = readFoldersAndFiles(`${rootDir}/embeddings`);
-    folders.forEach((folder) => {
-      const { files } = readFoldersAndFiles(`${rootDir}/embeddings/${folder}`, '.d.ts');
-      files.forEach((dtsFile) => {
-        const dtsContent = fs.readFileSync(path.join(`${rootDir}/embeddings/${folder}`, `${dtsFile}.ts`), 'utf8');
-        fs.writeFileSync(`${folder}.d.ts`, dtsContent);
-      });
+  const rootDir = "src";
+  const { folders } = readFoldersAndFiles(`${rootDir}/embeddings`);
+  folders.forEach((folder) => {
+    const { files } = readFoldersAndFiles(
+      `${rootDir}/embeddings/${folder}`,
+      ".d.ts"
+    );
+    files.forEach((dtsFile) => {
+      const dtsContent = fs.readFileSync(
+        path.join(`${rootDir}/embeddings/${folder}`, `${dtsFile}.ts`),
+        "utf8"
+      );
+      fs.writeFileSync(`${folder}.d.ts`, dtsContent);
     });
+  });
 
   cb();
 });
 
 gulp.task("dts:generate", function (cb) {
   let tsFiles = [];
-  const rootDir = 'src';
+  const rootDir = "src";
 
   const { folders } = readFoldersAndFiles(`${rootDir}/embeddings`);
   folders.forEach((folder) => {
-    const { files } = readFoldersAndFiles(`src/embeddings/${folder}`, 'ts');
-    tsFiles = [...tsFiles, ...files.map(filename => `src/embeddings/${folder}/${filename}.ts`)];
+    const { files } = readFoldersAndFiles(`src/embeddings/${folder}`, "ts");
+    tsFiles = [
+      ...tsFiles,
+      ...files.map((filename) => `src/embeddings/${folder}/${filename}.ts`),
+    ];
   });
 
-  const cmd = `yarn dts-bundle-generator --export-referenced-types --project tsconfig.json src/index.ts ${tsFiles.join(' ')}`;
+  const cmd = `yarn dts-bundle-generator --export-referenced-types --project tsconfig.json src/index.ts ${tsFiles.join(
+    " "
+  )}`;
 
   exec(cmd, (error, stdout, stderr) => {
     if (error) {
@@ -227,16 +247,19 @@ gulp.task("dts:cleanup", async function (cb) {
 // We dynamically create files for embedding functions, after npm publish we want to delete them
 gulp.task("build:cleanup", async function (cb) {
   await rimraf("./*.d.ts", { glob: true });
-  const { folders: embeddingFunctionFolders } = readFoldersAndFiles(`./src/embeddings`);
+  const { folders: embeddingFunctionFolders } =
+    readFoldersAndFiles(`./src/embeddings`);
   await Promise.all(
-    embeddingFunctionFolders.map(folder => rimraf(`${folder}.js`, { glob: true }))
-  )
+    embeddingFunctionFolders.map((folder) =>
+      rimraf(`${folder}.js`, { glob: true })
+    )
+  );
   cb();
 });
 
-gulp.task('check-package-json-files', function (cb) {
-  const pkg = require('./package.json');
-  
+gulp.task("check-package-json-files", function (cb) {
+  const pkg = require("./package.json");
+
   if (!pkg.files) {
     console.error('No "files" field in package.json');
     cb(new Error('No "files" field in package.json'));
@@ -255,7 +278,11 @@ gulp.task('check-package-json-files', function (cb) {
   }
 
   if (!allExist) {
-    cb(new Error('One or more files or directories listed in the "files" field of package.json do not exist.'));
+    cb(
+      new Error(
+        'One or more files or directories listed in the "files" field of package.json do not exist.'
+      )
+    );
     return;
   }
 
@@ -265,11 +292,11 @@ gulp.task('check-package-json-files', function (cb) {
 
 gulp.task(
   "build",
-  gulp.series(
-    gulp.parallel("compile:cjs", "compile:esm"),
-    "generateRootJS"
-  )
+  gulp.series(gulp.parallel("compile:cjs", "compile:esm"), "generateRootJS")
 );
-gulp.task("dts", gulp.series("dts:generate", "dts:copy", "dts:copy-root", "dts:cleanup"));
+gulp.task(
+  "dts",
+  gulp.series("dts:generate", "dts:copy", "dts:copy-root", "dts:cleanup")
+);
 gulp.task("cleanup", gulp.parallel("dts:cleanup", "build:cleanup"));
 gulp.task("default", gulp.series("build"));

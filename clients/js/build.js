@@ -1,22 +1,38 @@
-const pkg = require('./package.json');
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
+/**
+ * build.js
+ *
+ * This file contains the build script for the chromadb package. It is responsible for building the CommonJS (cjs)
+ * and ECMAScript Module (esm) builds, as well as running various scripts to generate root files for the npm module
+ * and update the package.json configuration.
+ *
+ * The main tasks performed by this script are:
+ * - Clean up old builds and generated files.
+ * - Generate type definitions and compile code for different targets (node and esm).
+ * - Copy .d.ts files to the appropriate locations.
+ * - Update package.json with dynamically generated package.exports entries and file list.
+ */
+
+const pkg = require("./package.json");
+const fs = require("fs");
+const path = require("path");
+const { exec } = require("child_process");
 
 // Remove a directory and its contents
-const rmDir = dirPath => {
+const rmDir = (dirPath) => {
   if (fs.existsSync(dirPath)) {
     const files = fs.readdirSync(dirPath);
     for (const file of files) {
       const curPath = path.join(dirPath, file);
-      fs.lstatSync(curPath).isDirectory() ? rmDir(curPath) : fs.unlinkSync(curPath);
+      fs.lstatSync(curPath).isDirectory()
+        ? rmDir(curPath)
+        : fs.unlinkSync(curPath);
     }
     fs.rmdirSync(dirPath);
   }
 };
 
 // Execute a shell command and return it as a Promise
-const execCommand = cmd => {
+const execCommand = (cmd) => {
   return new Promise((resolve, reject) => {
     exec(cmd, (error, stdout) => {
       if (error) {
@@ -31,15 +47,15 @@ const execCommand = cmd => {
 
 // Initial logs
 console.log(`Building JavaScript client v${pkg.version}...\n`);
-console.log('Cleaning up old builds...\n');
 
 // Commands to be used
-const crossEnv = 'yarn cross-env';
-const gulp = 'yarn gulp';
+const crossEnv = "yarn cross-env";
+const gulp = "yarn gulp";
 
 // Clean old builds
-rmDir(path.join(__dirname, 'dist'));
-rmDir(path.join(__dirname, 'lib'));
+console.log("Cleaning up old builds...\n");
+rmDir(path.join(__dirname, "dist"));
+rmDir(path.join(__dirname, "lib"));
 execCommand(`${gulp} cleanup`);
 
 // Main build function
@@ -52,10 +68,10 @@ execCommand(`${gulp} cleanup`);
   ]);
 
   // Copy d.ts files
-  console.log('Copy d.ts files:');
+  console.log("Copy d.ts files:");
   await execCommand(`${gulp} dts`);
-  
+
   // Update package json
-  console.log('Update package json:');
+  console.log("Update package json:");
   await execCommand(`${gulp} updatePackageJSON`);
-}());
+})();
