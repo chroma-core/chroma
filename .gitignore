@@ -24,3 +24,4 @@ terraform.tfstate
 .idea
 
 chroma/ # to not commit data from the db to github
+/chroma/
