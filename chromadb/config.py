@@ -112,7 +112,12 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_credentials_file: Optional[str] = None
     chroma_server_auth_credentials: Optional[str] = None
 
-    @validator("chroma_server_auth_credentials_file", pre=True, always=True)
+    @validator(
+        "chroma_server_auth_credentials_file",
+        pre=True,
+        always=True,
+        allow_reuse=True,
+    )
     def chroma_server_auth_credentials_file_non_empty_file_exists(
         cls: Type["Settings"], v: str
     ) -> Optional[str]:
