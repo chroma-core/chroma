@@ -3,7 +3,7 @@ import chroma from './initClient'
 import { DOCUMENTS, EMBEDDINGS, IDS } from './data';
 import { METADATAS } from './data';
 import { IncludeEnum } from "../src/types";
-
+import {OpenAIEmbeddingFunction} from "../src/embeddings/OpenAIEmbeddingFunction";
 test("it should add single embeddings to a collection", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
@@ -34,6 +34,28 @@ test("it should add batch embeddings to a collection", async () => {
   });
   expect(res.embeddings).toEqual(EMBEDDINGS); // reverse because of the order of the ids
 });
+
+
+if (!process.env.OPENAI_API_KEY) {
+  test.skip("it should add OpenAI embeddings", async () => {
+  });
+} else {
+  test("it should add OpenAI embeddings", async () => {
+    await chroma.reset();
+    const embedder = new OpenAIEmbeddingFunction({ openai_api_key: process.env.OPENAI_API_KEY || "" })
+    const collection = await chroma.createCollection({ name: "test" ,embeddingFunction: embedder});
+    const embeddings = await embedder.generate(DOCUMENTS);
+    await collection.add({ ids: IDS, embeddings: embeddings });
+    const count = await collection.count();
+    expect(count).toBe(3);
+    var res = await collection.get({
+      ids: IDS, include: [
+        IncludeEnum.Embeddings,
+      ]
+    });
+    expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+  });
+}
 
 test("add documents", async () => {
   await chroma.reset();

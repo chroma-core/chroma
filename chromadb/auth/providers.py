@@ -1,6 +1,6 @@
 import importlib
 import logging
-from typing import cast, Dict, TypeVar, Any
+from typing import cast, Dict, TypeVar, Any, Optional
 
 import requests
 from overrides import override

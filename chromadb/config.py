@@ -113,10 +113,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_auth_credentials: Optional[str] = None
 
     @validator(
-        "chroma_server_auth_credentials_file",
-        pre=True,
-        always=True,
-        allow_reuse=True,
+        "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
     )
     def chroma_server_auth_credentials_file_non_empty_file_exists(
         cls: Type["Settings"], v: str
@@ -146,6 +143,8 @@ class Settings(BaseSettings):  # type: ignore
     ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
     chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
+    chroma_server_auth_token_transport_header: Optional[str] = None
 
     anonymized_telemetry: bool = True
 
