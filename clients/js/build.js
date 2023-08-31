@@ -1,6 +1,4 @@
 /**
- * build.js
- *
  * This file contains the build script for the chromadb package. It is responsible for building the CommonJS (cjs)
  * and ECMAScript Module (esm) builds, as well as running various scripts to generate root files for the npm module
  * and update the package.json configuration.
