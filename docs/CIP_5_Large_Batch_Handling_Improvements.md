@@ -1,0 +1,56 @@
+# CIP-5: Large Batch Handling Improvements Proposal
+
+## Status
+
+Current Status: `Under Discussion`
+
+## **Motivation**
+
+As users start putting Chroma in its paces and storing ever-increasing datasets, we must ensure that errors
+related to significant and potentially expensive batches are handled gracefully. This CIP proposes to add a new
+setting, `max_batch_size` API, on the local segment API and use it to split large batches into smaller ones.
+
+## **Public Interfaces**
+
+The following interfaces are impacted:
+
+- New Server API endpoint - `/pre-flight-checks`
+- New `max_batch_size` property on the `API` interface
+- Updated `_add` method on `chromadb.api.segment.SegmentAPI`
+- Updated `_add` method on `chromadb.api.fastapi.FastAPI`
+
+## **Proposed Changes**
+
+We propose the following changes:
+
+- The new `max_batch_size` property is now available in the `API` interface. The property relies on the
+  underlying `Producer` class
+  to fetch the actual value. The property will be implemented by both `chromadb.api.segment.SegmentAPI`
+  and `chromadb.api.fastapi.FastAPI`
+- `chromadb.api.segment.SegmentAPI` will implement the `max_batch_size` property by fetching the value from the
+  `Producer` class.
+- `chromadb.api.fastapi.FastAPI` will implement the `max_batch_size` by fetching it from a new `/pre-flight-checks`
+  endpoint on the Server.
+- New `/pre-flight checks endpoint on the Server will return a dictionary with pre-flight checks the client must
+  fulfil to integrate with the server side. For now, we propose using this only for `max_batch_size`, but we can
+  add more checks in the future.
+- Updated `_add` method on `chromadb.api.segment.SegmentAPI` to split large batches into smaller ones.
+- Updated `_add` method on `chromadb.api.fastapi.FastAPI` to split large batches into smaller ones.
+
+## **Compatibility, Deprecation, and Migration Plan**
+
+The change will be fully compatible with existing implementations.
+
+## **Test Plan**
+
+New tests:
+
+- Batch splitting tests for `chromadb.api.segment.SegmentAPI`
+- Batch splitting tests for `chromadb.api.fastapi.FastAPI`
+- Tests for `/pre-flight-checks` endpoint
+
+## **Rejected Alternatives**
+
+Exposing `max_batch_size` and throwing an exception - We decided against this because submitting
+batches (especially large ones) comes with monetary or, at the very least, compute cost. Instead, we want the API to
+gracefully handle large batches by splitting them up.
