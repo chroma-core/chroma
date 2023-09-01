@@ -1,4 +1,5 @@
 import json
+from typing import Optional, cast, Tuple
 import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
@@ -35,6 +36,7 @@ from chromadb.telemetry import Telemetry
 from urllib.parse import urlparse, urlunparse, quote
 
 logger = logging.getLogger(__name__)
+from chromadb.utils.batch_utils import create_batches
 
 
 class FastAPI(API):
