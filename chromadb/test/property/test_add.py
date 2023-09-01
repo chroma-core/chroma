@@ -1,3 +1,6 @@
+import random
+import uuid
+from random import randint
 from typing import cast
 import pytest
 import hypothesis.strategies as st
@@ -42,6 +45,47 @@ def test_add(
         n_results=n_results,
         embedding_function=collection.embedding_function,
     )
+
+
+def create_large_recordset(
+    min_size: int = 45000,
+    max_size: int = 50000,
+) -> strategies.RecordSet:
+    size = randint(min_size, max_size)
+
+    ids = [str(uuid.uuid4()) for _ in range(size)]
+    metadatas = [{"some_key": f"{i}"} for i in range(size)]
+    documents = [f"Document {i}" for i in range(size)]
+    embeddings = [[1, 2, 3] for _ in range(size)]
+    return {
+        "ids": ids,
+        "embeddings": embeddings,
+        "metadatas": metadatas,
+        "documents": documents,
+    }
+
+
+@given(collection=collection_st)
+@settings(deadline=None, max_examples=1)
+def test_add_large(api: API, collection: strategies.Collection) -> None:
+    api.reset()
+    record_set = create_large_recordset(
+        min_size=api.max_batch_size,
+        max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
+    )
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,
+        embedding_function=collection.embedding_function,
+    )
+    normalized_record_set = invariants.wrap_all(record_set)
+
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            coll.add(**normalized_record_set)
+        return
+    coll.add(**record_set)
+    invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order

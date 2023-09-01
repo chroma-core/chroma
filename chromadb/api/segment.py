@@ -38,6 +38,8 @@ import time
 import logging
 import re
 
+from chromadb.utils.batch_utils import create_batches
+
 logger = logging.getLogger(__name__)
 
 
@@ -241,12 +243,15 @@ class SegmentAPI(API):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
-
-        records_to_submit = []
-        for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        _batches = create_batches(
+            self.max_batch_size, ids, embeddings, metadatas, documents
+        )
+        for batch in _batches:
+            records_to_submit = []
+            for r in _records(t.Operation.ADD, *batch):
+                self._validate_embedding_record(coll, r)
+                records_to_submit.append(r)
+            self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
@@ -262,12 +267,15 @@ class SegmentAPI(API):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
-
-        records_to_submit = []
-        for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        _batches = create_batches(
+            self.max_batch_size, ids, embeddings, metadatas, documents
+        )
+        for batch in _batches:
+            records_to_submit = []
+            for r in _records(t.Operation.UPDATE, *batch):
+                self._validate_embedding_record(coll, r)
+                records_to_submit.append(r)
+            self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -282,12 +290,15 @@ class SegmentAPI(API):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
-
-        records_to_submit = []
-        for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        _batches = create_batches(
+            self.max_batch_size, ids, embeddings, metadatas, documents
+        )
+        for batch in _batches:
+            records_to_submit = []
+            for r in _records(t.Operation.UPSERT, *batch):
+                self._validate_embedding_record(coll, r)
+                records_to_submit.append(r)
+            self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -523,6 +534,11 @@ class SegmentAPI(API):
     @override
     def get_settings(self) -> Settings:
         return self._settings
+
+    @property
+    @override
+    def max_batch_size(self) -> int:
+        return self._producer.max_batch_size
 
     def _topic(self, collection_id: UUID) -> str:
         return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"

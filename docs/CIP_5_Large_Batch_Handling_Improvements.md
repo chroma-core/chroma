@@ -16,8 +16,8 @@ The following interfaces are impacted:
 
 - New Server API endpoint - `/pre-flight-checks`
 - New `max_batch_size` property on the `API` interface
-- Updated `_add` method on `chromadb.api.segment.SegmentAPI`
-- Updated `_add` method on `chromadb.api.fastapi.FastAPI`
+- Updated `_add`, `_update` and `_upsert` methods on `chromadb.api.segment.SegmentAPI`
+- Updated `_add`, `_update` and `_upsert` methods on `chromadb.api.fastapi.FastAPI`
 
 ## **Proposed Changes**
 
@@ -31,15 +31,16 @@ We propose the following changes:
   `Producer` class.
 - `chromadb.api.fastapi.FastAPI` will implement the `max_batch_size` by fetching it from a new `/pre-flight-checks`
   endpoint on the Server.
-- New `/pre-flight checks endpoint on the Server will return a dictionary with pre-flight checks the client must
+- New `/pre-flight-checks` endpoint on the Server will return a dictionary with pre-flight checks the client must
   fulfil to integrate with the server side. For now, we propose using this only for `max_batch_size`, but we can
-  add more checks in the future.
-- Updated `_add` method on `chromadb.api.segment.SegmentAPI` to split large batches into smaller ones.
-- Updated `_add` method on `chromadb.api.fastapi.FastAPI` to split large batches into smaller ones.
+  add more checks in the future. The pre-flight checks will be only fetched once per client and cached for the duration
+  of the client's lifetime.
+- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.segment.SegmentAPI` to split large batches into smaller ones.
+- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.fastapi.FastAPI` to split large batches into smaller ones.
 
 ## **Compatibility, Deprecation, and Migration Plan**
 
-The change will be fully compatible with existing implementations.
+The change will be fully compatible with existing implementations. The changes will be transparent to the user.
 
 ## **Test Plan**
 
