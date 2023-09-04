@@ -492,11 +492,11 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     elif op == "$in":
         if isinstance(value, str) and not value:
             return {}
-        return {key: {op: [value]}}
+        return {key: {op: [value, *[draw(opposite_value(value)) for _ in range(3)]]}}
     elif op == "$nin":
         if isinstance(value, str) and not value:
             return {}
-        return {key: {op: [draw(opposite_value(value))]}}
+        return {key: {op: [draw(opposite_value(value)) for _ in range(3)]}}
     else:
         return {key: {op: value}}
 
