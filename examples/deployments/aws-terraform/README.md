@@ -93,7 +93,7 @@ chroma:VuA8I}QyNrm0@QLq
 You can then export these credentials:
 
 ```bash
-export CHROMA_AUTH=$(terraform output chroma_auth_basic)
+export CHROMA_AUTH=$(terraform output chroma_auth_basic | sed 's/"//g')
 ```
 
 Using the credentials:
@@ -121,7 +121,7 @@ PVcQ4qUUnmahXwUgAf3UuYZoMlos6MnF
 You can then export these credentials:
 
 ```bash
-export CHROMA_AUTH=$(terraform output chroma_auth_token)
+export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
 ```
 
 Using the credentials:
