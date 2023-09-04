@@ -262,7 +262,7 @@ def validate_where(where: Where) -> Where:
 
                 if not isinstance(operand, (str, int, float, list)):
                     raise ValueError(
-                        f"Expected where operand value to be a str, int, or float, got {operand}"
+                        f"Expected where operand value to be a str, int, float, or list of those type, got {operand}"
                     )
     return where
 
