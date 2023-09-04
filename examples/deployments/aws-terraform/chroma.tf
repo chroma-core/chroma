@@ -38,13 +38,6 @@ resource "aws_security_group" "chroma_sg" {
       cidr_blocks = ["0.0.0.0/0"]
     }
   }
-  #
-  #  ingress {
-  #    from_port        = 0
-  #    to_port          = 0
-  #    protocol         = "-1"
-  #    self             = true
-  #  }
 
   egress {
     from_port        = 0
@@ -104,7 +97,7 @@ resource "aws_instance" "chroma_instance" {
 
   ebs_block_device {
     device_name = "/dev/sda1"
-    volume_size = var.chroma_instance_volume_size  # size in GBs, set as you need
+    volume_size = var.chroma_instance_volume_size  # size in GBs
   }
 }
 
@@ -117,9 +110,9 @@ resource "aws_ebs_volume" "chroma-volume" {
     Name = "chroma"
   }
 
-#  lifecycle {
-#    prevent_destroy = true
-#  }
+  lifecycle {
+    prevent_destroy = var.prevent_chroma_data_volume_delete # size in GBs
+  }
 }
 
 locals {
