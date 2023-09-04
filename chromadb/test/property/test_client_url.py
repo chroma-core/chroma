@@ -8,7 +8,7 @@ from chromadb.api.fastapi import FastAPI
 
 def hostname_strategy() -> st.SearchStrategy[str]:
     label = st.text(
-        alphabet=st.characters(min_codepoint=97, max_codepoint=122),  # a-z
+        alphabet=st.characters(min_codepoint=97, max_codepoint=122),
         min_size=1,
         max_size=63,
     )
@@ -20,7 +20,7 @@ tld_list = ["com", "org", "net", "edu"]
 
 def domain_strategy() -> st.SearchStrategy[str]:
     label = st.text(
-        alphabet=st.characters(min_codepoint=97, max_codepoint=122),  # a-z
+        alphabet=st.characters(min_codepoint=97, max_codepoint=122),
         min_size=1,
         max_size=63,
     )
@@ -55,11 +55,6 @@ def is_valid_url(url: str) -> bool:
 
 
 def generate_valid_domain_url() -> st.SearchStrategy[str]:
-    # hostname = draw(domain_strategy())
-    # url_scheme = st.sampled_from(["http", "https"])
-    # url_path = draw(url_path_strategy())
-    #
-    # return f"{url_scheme}://{hostname}{url_path}"
     return st.builds(
         lambda url_scheme, hostname, url_path: f"{url_scheme}://{hostname}{url_path}",
         url_scheme=st.sampled_from(["http", "https"]),
@@ -77,7 +72,6 @@ host_or_domain_strategy = st.one_of(
     hostname=host_or_domain_strategy,
     port=port_strategy,
     ssl_enabled=ssl_enabled_strategy,
-    # url_path=st.one_of(url_path_strategy(), st.sampled_from(["/api/v1", None])),
     default_api_path=st.sampled_from(["/api/v1", "/api/v2", None]),
 )
 def test_url_resolve(
@@ -86,11 +80,6 @@ def test_url_resolve(
     ssl_enabled: bool,
     default_api_path: Optional[str],
 ) -> None:
-    # if re.match(r"^[a-z0-9-]{1,63}\.[a-z0-9-]{1,63}\.[a-z0-9-]{1,63}$", hostname):
-    #     print("Domain")
-    #     _host = f"{url_scheme + '://' if url_scheme else ''}{hostname}{url_path if url_path else ''}"
-    # else:
-    #     _host = hostname
     _url = FastAPI.resolve_url(
         chroma_server_host=hostname,
         chroma_server_http_port=port,
