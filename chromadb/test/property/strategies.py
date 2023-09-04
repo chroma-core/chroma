@@ -458,7 +458,6 @@ def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
             lambda x: x != value
         )
     elif isinstance(value, str):
-        # allow only printable ascii characters
         return safe_text.filter(lambda x: x != value)
     elif isinstance(value, bool):
         return st.booleans().filter(lambda x: x != value)
