@@ -1,7 +1,6 @@
 import pytest
 from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
-from chromadb.segment.impl.metadata.sqlite import SqliteMetadataSegment
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     SubmitEmbeddingRecord,
