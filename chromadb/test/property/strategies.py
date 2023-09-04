@@ -451,7 +451,7 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
 
 def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
     """
-    Strategy for generating opposite values of the given value - testing of $nin
+    Returns a strategy that will generate all valid values except the input value - testing of $nin
     """
     if isinstance(value, float):
         return st.floats(allow_nan=False, allow_infinity=False).filter(
@@ -459,9 +459,7 @@ def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
         )
     elif isinstance(value, str):
         # allow only printable ascii characters
-        return st.text(
-            st.characters(min_codepoint=32, max_codepoint=126), min_size=1
-        ).filter(lambda x: x != value)
+        return safe_text.filter(lambda x: x != value)
     elif isinstance(value, bool):
         return st.booleans().filter(lambda x: x != value)
     elif isinstance(value, int):
@@ -495,7 +493,6 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     elif op == "$in":
         if isinstance(value, str) and not value:
             return {}
-        # *st.lists(st.from_type(type(value)).filter(lambda x: x != value), min_size=1, max_size=5).example()
         return {key: {op: [value]}}
     elif op == "$nin":
         if isinstance(value, str) and not value:

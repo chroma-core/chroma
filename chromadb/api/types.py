@@ -264,6 +264,14 @@ def validate_where(where: Where) -> Where:
                     raise ValueError(
                         f"Expected where operand value to be a str, int, float, or list of those type, got {operand}"
                     )
+                if isinstance(operand, list) and (
+                    len(operand) == 0
+                    or not all(isinstance(x, type(operand[0])) for x in operand)
+                ):
+                    raise ValueError(
+                        f"Expected where operand value to be a non-empty list, and all values to obe of the same type "
+                        f"got {operand}"
+                    )
     return where
 
 
