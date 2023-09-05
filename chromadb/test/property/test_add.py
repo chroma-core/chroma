@@ -9,6 +9,7 @@ from chromadb.api import API
 from chromadb.api.types import Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
+from chromadb.utils.batch_utils import create_batches
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
@@ -84,8 +85,33 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
         with pytest.raises(Exception):
             coll.add(**normalized_record_set)
         return
-    coll.add(**record_set)
+    for batch in create_batches(api.max_batch_size, **record_set):
+        coll.add(*batch)
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+
+
+@given(collection=collection_st)
+@settings(deadline=None, max_examples=1)
+def test_add_large_exceeding(api: API, collection: strategies.Collection) -> None:
+    api.reset()
+    record_set = create_large_recordset(
+        min_size=api.max_batch_size,
+        max_size=api.max_batch_size + int(api.max_batch_size * random.random()),
+    )
+    coll = api.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,
+        embedding_function=collection.embedding_function,
+    )
+    normalized_record_set = invariants.wrap_all(record_set)
+
+    if not invariants.is_metadata_valid(normalized_record_set):
+        with pytest.raises(Exception):
+            coll.add(**normalized_record_set)
+        return
+    with pytest.raises(Exception) as e:
+        coll.add(**record_set)
+    assert "exceeds maximum batch size" in str(e.value)
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order

@@ -22,6 +22,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
+    validate_batch,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -30,7 +31,6 @@ from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import Settings, System
 from chromadb.telemetry import Telemetry
-from chromadb.utils.batch_utils import create_batches
 
 
 class FastAPI(API):
@@ -253,7 +253,9 @@ class FastAPI(API):
 
     def _submit_batch(
         self,
-        batch: Tuple[IDs, Embeddings, Optional[Metadatas], Optional[Documents]],
+        batch: Tuple[
+            IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]
+        ],
         url: str,
     ) -> requests.Response:
         """
@@ -285,14 +287,10 @@ class FastAPI(API):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        _batches = _batches = create_batches(
-            self.max_batch_size, ids, embeddings, metadatas, documents
-        )
-        for batch in _batches:
-            resp = self._submit_batch(
-                batch, "/collections/" + str(collection_id) + "/add"
-            )
-            raise_chroma_error(resp)
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
+        raise_chroma_error(resp)
         return True
 
     @override
@@ -308,14 +306,12 @@ class FastAPI(API):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        _batches = _batches = create_batches(
-            self.max_batch_size, ids, embeddings, metadatas, documents
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/update"
         )
-        for batch in _batches:
-            resp = self._submit_batch(
-                batch, "/collections/" + str(collection_id) + "/update"
-            )
-            resp.raise_for_status()
+        resp.raise_for_status()
         return True
 
     @override
@@ -331,14 +327,12 @@ class FastAPI(API):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        _batches = _batches = create_batches(
-            self.max_batch_size, ids, embeddings, metadatas, documents
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/upsert"
         )
-        for batch in _batches:
-            resp = self._submit_batch(
-                batch, "/collections/" + str(collection_id) + "/upsert"
-            )
-            resp.raise_for_status()
+        resp.raise_for_status()
         return True
 
     @override

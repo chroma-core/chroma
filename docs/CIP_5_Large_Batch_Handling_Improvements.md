@@ -18,6 +18,8 @@ The following interfaces are impacted:
 - New `max_batch_size` property on the `API` interface
 - Updated `_add`, `_update` and `_upsert` methods on `chromadb.api.segment.SegmentAPI`
 - Updated `_add`, `_update` and `_upsert` methods on `chromadb.api.fastapi.FastAPI`
+- New utility library `batch_utils.py`
+- New exception raised when batch size exceeds `max_batch_size`
 
 ## **Proposed Changes**
 
@@ -35,8 +37,10 @@ We propose the following changes:
   fulfil to integrate with the server side. For now, we propose using this only for `max_batch_size`, but we can
   add more checks in the future. The pre-flight checks will be only fetched once per client and cached for the duration
   of the client's lifetime.
-- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.segment.SegmentAPI` to split large batches into smaller ones.
-- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.fastapi.FastAPI` to split large batches into smaller ones.
+- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.segment.SegmentAPI` to validate batch size.
+- Updated `_add`, `_update` and `_upsert` method on `chromadb.api.fastapi.FastAPI`  to validate batch size (client-side
+  validation)
+- New utility library `batch_utils.py` will contain the logic for splitting batches into smaller ones.
 
 ## **Compatibility, Deprecation, and Migration Plan**
 
@@ -52,6 +56,4 @@ New tests:
 
 ## **Rejected Alternatives**
 
-Exposing `max_batch_size` and throwing an exception - We decided against this because submitting
-batches (especially large ones) comes with monetary or, at the very least, compute cost. Instead, we want the API to
-gracefully handle large batches by splitting them up.
+N/A
