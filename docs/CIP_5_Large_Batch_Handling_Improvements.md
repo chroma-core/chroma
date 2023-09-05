@@ -56,6 +56,4 @@ New tests:
 
 ## **Rejected Alternatives**
 
-Exposing `max_batch_size` and throwing an exception - We decided against this because submitting
-batches (especially large ones) comes with monetary or, at the very least, compute cost. Instead, we want the API to
-gracefully handle large batches by splitting them up.
+N/A
