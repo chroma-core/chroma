@@ -23,7 +23,7 @@ This readme is helpful for local dev.
 #### Automatically
 
 ##### Increase the version number
-1. Create a new PR for the release that upgrades the version in code. Name it `js_release/A.B.C` for production releases and js_release_alpha/A.B.C for alpha releases. In the package.json update the version number to the new version
+1. Create a new PR for the release that upgrades the version in code. Name it `js_release/A.B.C` for production releases and `js_release_alpha/A.B.C` for alpha releases. In the package.json update the version number to the new version
 2. Add the "release" label to this PR
 3. Once the PR is merged, tag your commit SHA with the release version
 
