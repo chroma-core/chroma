@@ -5,7 +5,7 @@ This readme is helpful for local dev.
 ### Prereqs:
 
 - Make sure you have Java installed (for the generator). You can download it from [java.com](https://java.com)
-- Make sure you set ALLOW_REST=True for your Docker Container. If you don't do this, tests won't pass.
+- Make sure you set ALLOW_RESET=True for your Docker Container. If you don't do this, tests won't pass.
 ```
 environment:
       - IS_PERSISTENT=TRUE
