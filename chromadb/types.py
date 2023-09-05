@@ -122,7 +122,11 @@ WhereOperator = Union[
     Literal["$ne"],
     Literal["$eq"],
 ]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
+InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
+OperatorExpression = Union[
+    Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
+    Dict[InclusionExclusionOperator, List[LiteralValue]],
+]
 
 Where = Dict[
     Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
