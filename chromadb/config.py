@@ -88,6 +88,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
     chroma_server_ssl_enabled: Optional[bool] = False
+    chroma_server_api_default_path: Optional[str] = "/api/v1"
     chroma_server_grpc_port: Optional[str] = None
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
@@ -140,6 +141,8 @@ class Settings(BaseSettings):  # type: ignore
     ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
     chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
+    chroma_server_auth_token_transport_header: Optional[str] = None
 
     anonymized_telemetry: bool = True
 

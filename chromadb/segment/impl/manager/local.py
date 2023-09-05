@@ -112,6 +112,9 @@ class LocalSegmentManager(SegmentManager):
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
             if segment["id"] in self._instances:
+                if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                    instance = self.get_segment(collection_id, VectorReader)
+                    instance.delete()
                 del self._instances[segment["id"]]
             if collection_id in self._segment_cache:
                 if segment["scope"] in self._segment_cache[collection_id]:

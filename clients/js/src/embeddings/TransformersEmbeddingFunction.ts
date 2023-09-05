@@ -1,3 +1,4 @@
+import { importOptionalModule } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 // Dynamically import module
@@ -26,11 +27,9 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
     progress_callback?: Function | null;
   } = {}) {
     try {
-      // Since Transformers.js is an ESM package, we use the dynamic `import` syntax instead of `require`.
-      // Also, since we use `"module": "commonjs"` in tsconfig.json, we use the following workaround to ensure
-      // the dynamic import is not transpiled to a `require` statement.
-      // For more information, see https://github.com/microsoft/TypeScript/issues/43329#issuecomment-1008361973
-      TransformersApi = Function('return import("@xenova/transformers")')();
+      // Use dynamic import to support browser environments because we do not have a bundler that handles browser support.
+      // The util importOptionalModule is used to prevent issues when bundlers try to locate the dependency even when it's optional.
+      TransformersApi = importOptionalModule("@xenova/transformers");
     } catch (e) {
       throw new Error(
         "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`."
