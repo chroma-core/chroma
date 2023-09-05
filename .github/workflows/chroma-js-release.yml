@@ -39,4 +39,4 @@ jobs:
       run: npm run db:run && PORT=8001 npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
-        GITHUB_TOKEN: ${{ secrets.NPM_TOKEN }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
