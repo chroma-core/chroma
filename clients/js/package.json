@@ -45,7 +45,8 @@
     "build:module": "tsc -p tsconfig.module.json",
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
-    "release": "run-s build test:run && npm publish"
+    "release": "run-s build test:run && npm publish",
+    "release_alpha": "run-s build test:run && npm publish --tag alpha"
   },
   "engines": {
     "node": ">=14.17.0"
