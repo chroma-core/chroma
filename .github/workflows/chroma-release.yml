@@ -3,7 +3,7 @@ name: Chroma Release
 on:
   push:
     tags:
-      - '*'
+      - '*.*.*'  # Match tags in the form X.Y.Z
     branches:
       - main
 
