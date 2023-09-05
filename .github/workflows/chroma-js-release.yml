@@ -34,5 +34,6 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
     - name: npm Test & Publish
       run: npm run $NPM_SCRIPT
+      working-directory: ./clients/js/
       env:
         GITHUB_TOKEN: ${{ secrets.NPM_TOKEN }}
