@@ -6,7 +6,7 @@ from hypothesis.strategies import SearchStrategy
 
 from chromadb import Where
 from chromadb.types import WhereOperator, InclusionExclusionOperator
-from chromadb.utils.query_helper import Filter
+from chromadb.utils.query_helper import WhereFilter
 
 
 def join_to_str(terms: Any) -> str:
@@ -104,5 +104,5 @@ def validate_where_expression(expr: Where) -> bool:
 
 @given(expr=final_expr_strategy)
 def test_expr(expr: str) -> None:
-    v = validate_where_expression(Filter.where(expr))
+    v = validate_where_expression(WhereFilter(expr))  # type: ignore
     assert v is True, f"Failed for {expr}"

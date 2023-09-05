@@ -7,6 +7,7 @@ from chromadb.telemetry import Telemetry
 from chromadb.config import Settings, System
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
+from chromadb.utils.query_helper import WhereFilter
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -37,6 +38,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "WhereFilter",
 ]
 
 
