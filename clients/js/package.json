@@ -29,7 +29,9 @@
     "dist"
   ],
   "scripts": {
-    "test": "run-s db:clean db:run test:runfull db:clean db:run-auth test:runfull-authonly db:clean",
+    "test": "run-s db:clean db:cleanauth db:run test:runfull db:clean db:run-auth test:runfull-authonly db:cleanauth",
+    "testnoauth": "run-s db:clean db:run test:runfull db:clean",
+    "testauth": "run-s db:cleanauth db:run-auth test:runfull-authonly db:cleanauth",
     "test:set-port": "cross-env URL=localhost:8001",
     "test:run": "jest --runInBand --testPathIgnorePatterns=test/auth.basic.test.ts",
     "test:run-auth": "jest --runInBand --testPathPattern=test/auth.basic.test.ts",
@@ -37,6 +39,7 @@
     "test:runfull-authonly": "PORT=8001 jest --runInBand --testPathPattern=test/auth.basic.test.ts",
     "test:update": "run-s db:clean db:run && jest --runInBand --updateSnapshot && run-s db:clean",
     "db:clean": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml down --volumes",
+    "db:cleanauth": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test-auth.yml down --volumes",
     "db:run": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test.yml up --detach && sleep 5",
     "db:run-auth": "cd ../.. && CHROMA_PORT=8001 docker-compose -f docker-compose.test-auth.yml up --detach && sleep 5",
     "clean": "rimraf dist",
