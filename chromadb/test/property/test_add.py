@@ -85,7 +85,7 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
         with pytest.raises(Exception):
             coll.add(**normalized_record_set)
         return
-    for batch in create_batches(api.max_batch_size, **record_set):
+    for batch in create_batches(api, **record_set):
         coll.add(*batch)
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
