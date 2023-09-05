@@ -36,7 +36,7 @@ jobs:
       run: npm install
       working-directory: ./clients/js/
     - name: npm Test & Publish
-      run: npm run db:run & npm run $NPM_SCRIPT
+      run: npm run db:run && npm run $NPM_SCRIPT
       working-directory: ./clients/js/
       env:
         GITHUB_TOKEN: ${{ secrets.NPM_TOKEN }}
