@@ -32,6 +32,9 @@ jobs:
       with:
         node-version: '16.x'
         registry-url: 'https://registry.npmjs.org'
+    - name: Install Client Dev Dependencies
+      run: npm install
+      working-directory: ./clients/js/
     - name: npm Test & Publish
       run: npm run $NPM_SCRIPT
       working-directory: ./clients/js/
