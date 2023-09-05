@@ -20,9 +20,40 @@ This readme is helpful for local dev.
 
 ### Pushing to npm
 
-The goal of the design is that this will be added to our github action releases so that the JS API is always up to date and pinned against the python backend API.
+#### Automatically
 
+##### Increase the version number
+1. Create a new PR for the release that upgrades the version in code. Name it `js_release/A.B.C` for production releases and js_release_alpha/A.B.C for alpha releases. In the package.json update the version number to the new version
+2. Add the "release" label to this PR
+3. Once the PR is merged, tag your commit SHA with the release version
+
+```bash
+git tag js_release_A.B.C <SHA>
+
+# or for alpha releases:
+
+git tag js_release_alpha_A.B.C <SHA>
+```
+
+4. You need to then wait for the github action for main for `chroma js release` to complete on main.
+
+##### Perform the release
+1. Push your tag to origin to create the release
+
+```bash
+
+git push origin js_release_A.B.C
+
+# or for alpha releases:
+
+git push origin js_release_alpha_A.B.C
+```
+2. This will trigger a Github action which performs the release
+
+#### Manually
 `npm run release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
+
+
 
 ### Useful links
 
