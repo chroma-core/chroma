@@ -3,7 +3,7 @@ name: Chroma Release Python Client
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'  # Match tags in the form X.Y.Z
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Match tags in the form X.Y.Z
     branches:
       - main
       - hammad/thin_client
