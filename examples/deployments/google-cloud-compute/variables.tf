@@ -1,15 +1,28 @@
 variable "project_id" {
-  type = string
+  type        = string
+  description = "The project id to deploy to"
 }
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.5"
+  default     = "0.4.9"
 }
 
 variable "zone" {
   type    = string
   default = "us-central1-a"
+}
+
+variable "image" {
+  default     = "debian-cloud/debian-11"
+  description = "The image to use for the instance"
+  type        = string
+}
+
+variable "vm_user" {
+  default     = "debian"
+  description = "The user to use for connecting to the instance. This is usually the default image user"
+  type        = string
 }
 
 variable "machine_type" {
@@ -62,6 +75,10 @@ locals {
   token_auth_credentials = {
     token = random_password.chroma_token.result
   }
+  tags = [
+    "chroma",
+    "release-${replace(var.chroma_release, ".", "")}",
+  ]
 }
 
 variable "ssh_public_key" {
@@ -87,8 +104,39 @@ variable "chroma_data_volume_size" {
   default     = 20
 }
 
+variable "chroma_data_volume_device_name" {
+  default     = "chroma-disk-0"
+  description = "The device name of the chroma data volume"
+  type        = string
+}
+
 variable "prevent_chroma_data_volume_delete" {
   description = "Prevent the chroma data volume from being deleted when the instance is terminated"
   type        = bool
   default     = false
+}
+
+variable "disk_type" {
+  default     = "pd-ssd"
+  description = "The type of disk to use for the instance. Can be either pd-standard or pd-ssd"
+}
+
+variable "labels" {
+  default = {
+    environment = "dev"
+  }
+  description = "Labels to apply to all resources in this example"
+  type        = map(string)
+}
+
+variable "chroma_port" {
+  default     = "8000"
+  description = "The port that chroma listens on"
+  type        = string
+}
+
+variable "source_ranges" {
+  default     = ["0.0.0.0/0"]
+  type        = list(string)
+  description = "List of CIDR ranges to allow through the firewall"
 }
