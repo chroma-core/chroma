@@ -4,7 +4,7 @@
 
 Current Status: `Under Discussion`
 
-**Motivation**
+## Motivation
 
 The top-line motivation behind this CIP is to provide a generic system for preprocessing data before
 it is indexed by Chroma. This system should be flexible enough to allow users to
@@ -96,15 +96,15 @@ alternative vector segments with different parameters,
 
 In the future, we may want to support the full RAG loop within Chroma. This means that we would want to support being able to take the output of retrieval and use it as input to a language model. This would require us to be able to compose the embedding function with a language model. This is not possible today, as the embedding function is not a first class citizen in Chroma.
 
-**Proposal**
+## Proposal
 
 We introduce three concepts in order to solve these problems - Pipelines, The Registry, and Storage
 
-# Pipelines
+### Pipelines
 
 A pipeline is a set of steps that are applied to the inputs to a chroma insert call. Broadly, everything including the segments written to are a part of the pipeline. The pipeline is responsible for loading the document, preprocessing the document, and writing the document to the segments. Pipeline steps are composable functions that can be chained together to form a pipeline. Each pipeline step is registered with a name, and can be referenced by that name. This registration can be thought of as similar to SQL functions.
 
-## Pipeline Step Registration - The Registry
+#### Pipeline Step Registration - The Registry
 
 For example, if you wanted to create a pipeline that chunked a document, you could do something like this:
 
@@ -127,7 +127,7 @@ Calling Chunk() does not actually execute the pipeline step, instead it returns 
 
 The assumption then, is that you provide the server with the relevant pipeline steps to execute. The exact mechanism for this is later defined. For local execution, the pipeline steps are executed on the client-side.
 
-## Pipeline Step Composition
+#### Pipeline Step Composition
 
 Pipeline steps can be composed, and return a reference to the composed pipeline step. For example, if you wanted to create a pipeline that chunked a document and then embedded the chunks, you could do something like this:
 
@@ -143,7 +143,7 @@ to_add = Quantize(Embed(Chunk(data)))
 
 NOTE: This syntax could be confusing as the order of operations is reversed. We could consider alternative designs.
 
-## Default Pipeline and Pipeline Persistence
+#### Default Pipeline and Pipeline Persistence
 
 It is important to preserve the existing behavior of our API where users can simply pass text to the add step and have it be embedded. To do this, we will create a default pipeline that is used when no pipeline is provided. This default pipeline will simply embed the text. This default pipeline will be persisted with the collection, and will be used when no pipeline is provided. This means that users can create a collection with a default pipeline, and then query the collection without having to provide the pipeline. This is a significant improvement over the current system, where users must remember which embedding function they used when they created the collection.
 
@@ -159,7 +159,7 @@ collection = client.create_collection("my_collection", pipeline=DefaultEmbedding
 collection = client.get_collection("my_collection") # The default pipeline is automatically loaded
 ```
 
-## Query Pipelines
+#### Query Pipelines
 
 In order to support embedding the data automatically for the user on query, we propose the introduction of the query_pipeline, which is the default pipeline run on the query data. This pipeline is persisted with the collection, and is used when no pipeline is provided. This means that users can create a collection with a default query pipeline, and then query the collection without having to provide the query pipeline.
 
@@ -177,7 +177,7 @@ This allows for the pipelines at insert time, and the pipelines at query time to
 collection = client.create_collection("my_collection", pipeline=Embed(Chunk()), query_pipeline=Embed())
 ```
 
-## The I/0 of a pipeline stage
+#### The I/0 of a pipeline stage
 The input to a pipeline step is the set of parameters provided to an insert call in Chroma - ids, documents, metadata and embeddings. The size of each of these fields must match or be empty. This way, pipeline stages can both pass through data to subsequent stages, or they can populate them themselves. The output of the final stage of a pipeline must be a valid input to the insert call in Chroma, i.e it must contain ids, documents, metadata and embeddings. For example, imagine a pipeline that consumes documents, chunks them, and then embeds them.
 
 ```python
@@ -192,7 +192,7 @@ collection.add(data=data, ids=[0, 1])
 ```
 
 
-## Pipeline overrides
+#### Pipeline overrides
 While defined at the collection level, pipelines can also be overridden at the time of an insert or query call. This allows for flexibility in the pipeline that is used for a specific insert or query call. For example, if you wanted to chunk the data initially, but later insert a custom chunk, you could do something like this:
 
 ```python
@@ -228,11 +228,11 @@ data = pipeline.run()
 collection.add(data=data, ids=[2, 3])
 ```
 
-## Server-side registration of pipeline steps
+#### Server-side registration of pipeline steps
 In order to register pipeline steps on the server, you will have to provide a python file that contains the pipeline steps, registered with the
 @pipeline_step decorator. For now, these are defined statically with each deploy of the server. In the future, we could allow for dynamic registration of pipeline steps.
 
-## Future work: Output pipelines
+#### Future work: Output pipelines
 While not explicitly a part of this CIP, in the future, we could also add Output pipelines that are run on the output
 of a query. This would allow things like re-ranking, or filtering of the results. For example, if you wanted to re-rank the results of a query, you could do something like this:
 
@@ -254,10 +254,10 @@ collection.query(data=["query"], n_results=100, output_pipeline=Generate(Composi
 
 This pipeline first runs a partially initialized composite step on the results of the query, and then runs the generate step on the output of the composite step. This allows for the full RAG loop to be implemented in Chroma. The composite step combines the prompt and the retrieved documents, and the generate step generates the response.
 
-## Future work: Parallel pipeline execution
+#### Future work: Parallel pipeline execution
 Not all pipeline stages need to executed sequentially. In the future, we can add support for parallel pipeline execution by changing how the pipeline is defined.
 
-# Storage Pipelines
+## Storage Pipelines
 Chroma right now implicitly stores your documents, however we also want to support multimodal embeddings and part of this CIP is to propose we deprecate documents= in favor of data=. The contract then becomes that the data you input (or that is generated by your pipeline) is stored by default and can be retrieved by the user in some form. We also want to support storing mixed modalities in a collection. For example, a CLIP based collection should be able
 to store both text and images.
 
@@ -286,7 +286,7 @@ collection.add(data=[image], ids=[0]) # image is a PIL image, or numpy array etc
 collection.query(data=[image], n_results=100) # LoadFromStorage will run before the results are returned and will load the data from the storage layer and return it to the user in memory
 ```
 
-## Future work: More Storage Pipelines
+#### Future work: More Storage Pipelines
 We can in the future add more storage pipelines
 
 ## Commentary: Mental Models
