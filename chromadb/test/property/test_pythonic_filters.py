@@ -1,6 +1,6 @@
 import string
-from typing import get_args, Any
-
+from typing import Any
+from typing_extensions import get_args
 from hypothesis import strategies as st, given
 from hypothesis.strategies import SearchStrategy
 

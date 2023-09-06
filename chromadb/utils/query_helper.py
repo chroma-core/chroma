@@ -2,8 +2,8 @@ import ast
 import inspect
 import linecache
 from types import FrameType
-from typing import Any, Dict, cast, get_args, Union, Optional
-
+from typing import Any, Dict, cast, Union, Optional
+from typing_extensions import get_args
 from chromadb.types import (
     WhereOperator,
     InclusionExclusionOperator,
