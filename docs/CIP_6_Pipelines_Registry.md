@@ -293,6 +293,7 @@ We can in the future add more storage pipelines
 Two mental models to share that led to the development of this CIP are:
 
 1. Collections are just a description input pipelines, query pipelines and output pipelines. Today, the pipeline runs an EF and stores it in two segments.
+Everything that runs before writing to log is the input pipeline, everything that runs after vector search is the output pipeline, and the query pipeline merely transforms the query.
 2. We were heavily influenced by SQL semantics. For example, the pipeline steps are similar to SQL functions, output pipelines can be seen as performing joins, etc.
 
 Note that this CIP does not address problem #5 - we will address that separately in a future CIP. However, all the other problems can be solved with the abstractions proposed here.
