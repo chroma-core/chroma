@@ -292,8 +292,10 @@ We can in the future add more storage pipelines
 ## Commentary: Mental Models
 Two mental models to share that led to the development of this CIP are:
 
-1. Collections are just a description input pipelines, query pipelines and output pipelines.
+1. Collections are just a description input pipelines, query pipelines and output pipelines. Today, the pipeline runs an EF and stores it in two segments.
 2. We were heavily influenced by SQL semantics. For example, the pipeline steps are similar to SQL functions, output pipelines can be seen as performing joins, etc.
+
+Note that this CIP does not address problem #5 - we will address that separately in a future CIP. However, all the other problems can be solved with the abstractions proposed here.
 
 ## **Compatibility, Deprecation, and Migration Plan**
 We will deprecate the documents= parameter in the api over several releases in favor of data=. This will allow us to support other modalities of data, such as images, audio, etc.
