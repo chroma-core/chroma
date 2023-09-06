@@ -16,7 +16,7 @@ jobs:
   check_tag:
     runs-on: ubuntu-latest
     outputs:
-      tag_matches: ${{ steps.check-tag.outputs.match }}
+      tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
     steps:
       - name: Check Tag
         id: check-tag
