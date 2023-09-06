@@ -191,5 +191,5 @@ test('wrong code returns an error', async () => {
     // @ts-ignore - supposed to fail
     const results = await collection.get({ where: { "test": { "$contains": "hello" } } });
     expect(results.error).toBeDefined()
-    expect(results.error).toBe("ValueError('Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, got $contains')")
+    expect(results.error).toContain("ValueError('Expected where operator")
 })

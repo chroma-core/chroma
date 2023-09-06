@@ -73,11 +73,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     # via brute force search.
     _batch_size: int
     _brute_force_index: Optional[BruteForceIndex]
+    _index_initialized: bool = False
     _curr_batch: Batch
     # How many records to add to index before syncing to disk
     _sync_threshold: int
     _persist_data: PersistentData
     _persist_directory: str
+    _allow_reset: bool
 
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
@@ -85,7 +87,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._params = PersistentHnswParams(segment["metadata"] or {})
         self._batch_size = self._params.batch_size
         self._sync_threshold = self._params.sync_threshold
-
+        self._allow_reset = system.settings.allow_reset
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
         self._brute_force_index = None
@@ -168,6 +170,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         self._index = index
         self._dimensionality = dimensionality
+        self._index_initialized = True
 
     def _persist(self) -> None:
         """Persist the index and data to disk"""
@@ -209,6 +212,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             for record in records:
                 if record["embedding"] is not None:
                     self._ensure_index(len(records), len(record["embedding"]))
+                if not self._index_initialized:
+                    # If the index is not initialized here, it means that we have
+                    # not yet added any records to the index. So we can just
+                    # ignore the record since it was a delete.
+                    continue
                 self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
 
                 self._max_seq_id = max(self._max_seq_id, record["seq_id"])
@@ -388,9 +396,18 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
     @override
     def reset_state(self) -> None:
+        if self._allow_reset:
+            data_path = self._get_storage_folder()
+            if os.path.exists(data_path):
+                self.close_persistent_index()
+                shutil.rmtree(data_path, ignore_errors=True)
+
+    @override
+    def delete(self) -> None:
         data_path = self._get_storage_folder()
         if os.path.exists(data_path):
-            shutil.rmtree(data_path, ignore_errors=True)
+            self.close_persistent_index()
+            shutil.rmtree(data_path, ignore_errors=False)
 
     @staticmethod
     def get_file_handle_count() -> int:

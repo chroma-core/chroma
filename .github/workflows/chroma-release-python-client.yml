@@ -3,14 +3,27 @@ name: Chroma Release Python Client
 on:
   push:
     tags:
-      - '*'
+      - '[0-9]+.[0-9]+.[0-9]+'  # Match tags in the form X.Y.Z
     branches:
       - main
       - hammad/thin_client
 
 jobs:
+  check_tag:
+      runs-on: ubuntu-latest
+      outputs:
+        tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
+      steps:
+        - name: Check Tag
+          id: check-tag
+          run: |
+            if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "tag_matches=true" >> $GITHUB_OUTPUT
+            fi
   build-and-release:
     runs-on: ubuntu-latest
+    needs: check_tag
+    if: needs.check_tag.outputs.tag_matches == 'true'
     permissions: write-all
     steps:
     - name: Checkout

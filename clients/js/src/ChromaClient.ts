@@ -1,8 +1,13 @@
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
-import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
+import { Configuration, ApiApi as DefaultApi } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
 import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
+import {
+    AuthOptions,
+    ClientAuthProtocolAdapter,
+    IsomorphicFetchClientAuthProtocolAdapter
+} from "./auth";
 
 
 export class ChromaClient {
@@ -10,6 +15,7 @@ export class ChromaClient {
      * @ignore
      */
     private api: DefaultApi & ConfigOptions;
+    private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
 
     /**
      * Creates a new ChromaClient instance.
@@ -26,16 +32,24 @@ export class ChromaClient {
      */
     constructor({
         path,
-        fetchOptions
+        fetchOptions,
+        auth,
     }: {
         path?: string,
-        fetchOptions?: RequestInit
+        fetchOptions?: RequestInit,
+        auth?: AuthOptions,
     } = {}) {
         if (path === undefined) path = "http://localhost:8000";
         const apiConfig: Configuration = new Configuration({
             basePath: path,
         });
-        this.api = new DefaultApi(apiConfig);
+        if (auth !== undefined) {
+            this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(new DefaultApi(apiConfig), auth);
+            this.api = this.apiAdapter.getApi();
+        } else {
+            this.api = new DefaultApi(apiConfig);
+        }
+
         this.api.options = fetchOptions ?? {};
     }
 

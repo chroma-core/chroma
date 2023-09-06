@@ -488,3 +488,181 @@ def test_upsert(
     result = segment.get_vectors(ids=["no_such_record"])
     assert len(result) == 1
     assert approx_equal_vector(result[0]["embedding"], [42, 42])
+
+
+def test_delete_without_add(
+    system: System,
+    vector_reader: Type[VectorReader],
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
+    topic = str(segment_definition["topic"])
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    assert segment.count() == 0
+
+    delete_record = SubmitEmbeddingRecord(
+        id="not_in_db",
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+
+    try:
+        producer.submit_embedding(topic, delete_record)
+    except BaseException:
+        pytest.fail("Unexpected error. Deleting on an empty segment should not raise.")
+
+
+def test_delete_with_local_segment_storage(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
+    topic = str(segment_definition["topic"])
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(
+        producer=producer, topic=topic, embeddings=sample_embeddings, n=5
+    )
+
+    sync(segment, seq_ids[-1])
+    assert segment.count() == 5
+
+    delete_record = SubmitEmbeddingRecord(
+        id=embeddings[0]["id"],
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+    assert isinstance(seq_ids, List)
+    seq_ids.append(
+        produce_fns(
+            producer=producer,
+            topic=topic,
+            n=1,
+            embeddings=(delete_record for _ in range(1)),
+        )[1][0]
+    )
+
+    sync(segment, seq_ids[-1])
+
+    # Assert that the record is gone using `count`
+    assert segment.count() == 4
+
+    # Assert that the record is gone using `get`
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
+    assert len(results) == 4
+    # get_vectors returns results in arbitrary order
+    results = sorted(results, key=lambda v: v["id"])
+    for actual, expected in zip(results, embeddings[1:]):
+        assert actual["id"] == expected["id"]
+        assert approx_equal_vector(
+            actual["embedding"], cast(Vector, expected["embedding"])
+        )
+
+    # Assert that the record is gone from KNN search
+    vector = cast(Vector, embeddings[0]["embedding"])
+    query = VectorQuery(
+        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+    )
+    knn_results = segment.query_vectors(query)
+    assert len(results) == 4
+    assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
+
+    # Delete is idempotent
+    if isinstance(segment, PersistentLocalHnswSegment):
+        assert os.path.exists(segment._get_storage_folder())
+        segment.delete()
+        assert not os.path.exists(segment._get_storage_folder())
+        segment.delete()  # should not raise
+    elif isinstance(segment, LocalHnswSegment):
+        with pytest.raises(NotImplementedError):
+            segment.delete()
+
+
+def test_reset_state_ignored_for_allow_reset_false(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    vector_reader: Type[VectorReader],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    segment_definition = create_random_segment_definition()
+    topic = str(segment_definition["topic"])
+
+    segment = vector_reader(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(
+        producer=producer, topic=topic, embeddings=sample_embeddings, n=5
+    )
+
+    sync(segment, seq_ids[-1])
+    assert segment.count() == 5
+
+    delete_record = SubmitEmbeddingRecord(
+        id=embeddings[0]["id"],
+        embedding=None,
+        encoding=None,
+        metadata=None,
+        operation=Operation.DELETE,
+    )
+    assert isinstance(seq_ids, List)
+    seq_ids.append(
+        produce_fns(
+            producer=producer,
+            topic=topic,
+            n=1,
+            embeddings=(delete_record for _ in range(1)),
+        )[1][0]
+    )
+
+    sync(segment, seq_ids[-1])
+
+    # Assert that the record is gone using `count`
+    assert segment.count() == 4
+
+    # Assert that the record is gone using `get`
+    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
+    results = segment.get_vectors()
+    assert len(results) == 4
+    # get_vectors returns results in arbitrary order
+    results = sorted(results, key=lambda v: v["id"])
+    for actual, expected in zip(results, embeddings[1:]):
+        assert actual["id"] == expected["id"]
+        assert approx_equal_vector(
+            actual["embedding"], cast(Vector, expected["embedding"])
+        )
+
+    # Assert that the record is gone from KNN search
+    vector = cast(Vector, embeddings[0]["embedding"])
+    query = VectorQuery(
+        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+    )
+    knn_results = segment.query_vectors(query)
+    assert len(results) == 4
+    assert set(r["id"] for r in knn_results[0]) == set(e["id"] for e in embeddings[1:])
+
+    if isinstance(segment, PersistentLocalHnswSegment):
+        if segment._allow_reset:
+            assert os.path.exists(segment._get_storage_folder())
+            segment.reset_state()
+            assert not os.path.exists(segment._get_storage_folder())
+        else:
+            assert os.path.exists(segment._get_storage_folder())
+            segment.reset_state()
+            assert os.path.exists(segment._get_storage_folder())

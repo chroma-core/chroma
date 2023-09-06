@@ -6,6 +6,18 @@ export CHROMA_PORT=8000
 
 function cleanup {
   docker compose -f docker-compose.test.yml down --rmi local --volumes
+  rm server.htpasswd .chroma_env
+}
+
+function setup_basic_auth {
+  # Generate htpasswd file
+  docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
+  # Create .chroma_env file
+  cat <<EOF > .chroma_env
+CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider'
+CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.basic.BasicAuthServerProvider'
+EOF
 }
 
 trap cleanup EXIT
@@ -23,4 +35,12 @@ python -m pytest "$@"
 cd clients/js
 yarn
 yarn test:run
+docker compose down
+cd ../..
+echo "Testing auth"
+setup_basic_auth #this is specific to the auth type, later on we'll have other auth types
+cd clients/js
+# Start docker compose - this should be auth agnostic
+docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
+yarn test:run-auth
 cd ../..
