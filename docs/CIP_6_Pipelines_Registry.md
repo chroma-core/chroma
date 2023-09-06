@@ -298,10 +298,10 @@ Two mental models to share that led to the development of this CIP are:
 Note that this CIP does not address problem #5 - we will address that separately in a future CIP. However, all the other problems can be solved with the abstractions proposed here.
 
 ## **Compatibility, Deprecation, and Migration Plan**
-We will deprecate the documents= parameter in the api over several releases in favor of data=. This will allow us to support other modalities of data, such as images, audio, etc.
-We will wrap all embedding functions into a pipeline step.
-We will add a default pipeline to the collection.
-We will add a default query pipeline to the collection.
+1. We will deprecate the documents= parameter in the api over several releases in favor of data=. This will allow us to support other modalities of data, such as images, audio, etc.
+2. We will wrap all embedding functions into a pipeline step.
+3. We will add a default pipeline to the collection.
+4. We will add a default query pipeline to the collection.
 
 ## **Test Plan**
 
