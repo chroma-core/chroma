@@ -2,7 +2,8 @@ import ast
 import inspect
 import linecache
 from types import FrameType
-from typing import Any, Dict, cast, get_args, Union, Optional
+from typing import Any, Dict, cast, Union, Optional, List
+from typing_extensions import get_args
 
 from chromadb.types import (
     WhereOperator,
@@ -37,6 +38,23 @@ def _map_ast_operator_to_where_operator(
         raise ValueError(f"Unsupported operator: {operator}")
 
 
+def process_ast_value(node: Union[ast.AST, ast.expr]) -> LiteralValue:
+    if isinstance(node, ast.Str):
+        return node.s
+    elif isinstance(node, ast.Num) and isinstance(node.n, (int, float)):
+        return node.n
+    elif isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    elif isinstance(node, ast.NameConstant) and isinstance(node.value, bool):
+        return node.value
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Num):
+            return f"-{node.operand.n}"
+    raise ValueError(
+        f"Unsupported value type: {type(node)}. Must be {get_args(LiteralValue)}."
+    )
+
+
 def process_ast_compare(node: ast.Compare) -> Dict[str, Any]:
     if isinstance(node.left, ast.Name):
         left = node.left.id
@@ -46,29 +64,34 @@ def process_ast_compare(node: ast.Compare) -> Dict[str, Any]:
         left = node.left.s
     else:
         raise ValueError(
-            f"Unsupported left hand side type: {type(node.left)}. Must be a string."
+            f'Unsupported metadata attribute type: {type(node.left)}. Must be a string ("attr") or ID (attr).'
         )
     operator = node.ops[0]
     right = node.comparators[0]
+    right_value: Union[LiteralValue, List[LiteralValue]] = []
     if not isinstance(
         operator,
         (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Gt, ast.GtE, ast.Lt, ast.LtE),
     ):
         raise ValueError(f"Unsupported operator: {operator}")
-    if isinstance(right, (ast.Str, ast.Num, ast.Constant)):
-        right_value = right.value
+    if isinstance(
+        right,
+        (
+            ast.Str,
+            ast.Num,
+            ast.Name,
+            ast.Attribute,
+            ast.Constant,
+            ast.NameConstant,
+            ast.UnaryOp,
+        ),
+    ):
+        right_value = process_ast_value(right)
     elif isinstance(right, ast.List):
-        right_value = [_process_ast(value) for value in right.elts]
-    elif isinstance(right, ast.UnaryOp):
-        if isinstance(right.op, ast.USub) and isinstance(right.operand, ast.Num):
-            right_value = f"-{right.operand.n}"
-        else:
-            raise ValueError(
-                f"Unsupported right hand side type: {type(right)}. Must be a string or a list of strings."
-            )
+        right_value = [process_ast_value(value) for value in right.elts]
     else:
         raise ValueError(
-            f"Unsupported right hand side type: {type(right)}. Must be a string or a list of strings."
+            f"Unsupported value type: {type(right)}. Must be {get_args(LiteralValue)} or List."
         )
     if isinstance(
         operator,
@@ -79,7 +102,8 @@ def process_ast_compare(node: ast.Compare) -> Dict[str, Any]:
         }
     else:
         raise ValueError(
-            f"Unsupported right hand side type: {type(right)}. Must be a string or a list of strings."
+            f"Unsupported operator: {type(operator)}. "
+            f"Must be a {(ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Gt, ast.GtE, ast.Lt, ast.LtE)}"
         )
 
 
