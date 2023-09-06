@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
   'requests >= 2.28',
   'pydantic>=1.9,<2.0',
-  'chroma-hnswlib==0.7.3a7',
+  'chroma-hnswlib==0.7.3a8',
   'fastapi>=0.95.2, <0.100.0',
   'uvicorn[standard] >= 0.18.3',
   'numpy == 1.21.6; python_version < "3.8"',
