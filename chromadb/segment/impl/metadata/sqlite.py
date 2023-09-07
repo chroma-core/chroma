@@ -105,7 +105,6 @@ class SqliteMetadataSegment(MetadataReader):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
-
         embeddings_t, metadata_t, fulltext_t = Tables(
             "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
@@ -135,7 +134,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         if where:
             q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
-
         if where_document:
             q = q.where(
                 self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
@@ -417,32 +415,8 @@ class SqliteMetadataSegment(MetadataReader):
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
-            elif k == "$in":
-                expr = cast(
-                    Dict[InclusionExclusionOperator, List[LiteralValue]], {k: v}
-                )
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key.isin(ParameterValue(k)))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(embeddings_t.id.isin(sq))
-            elif k == "$nin":
-                expr = cast(
-                    Dict[InclusionExclusionOperator, List[LiteralValue]], {k: v}
-                )
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key.notin(ParameterValue(k)))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(embeddings_t.id.notin(sq))
             else:
-                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)  # type: ignore
+                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
                 sq = (
                     self._db.querybuilder()
                     .from_(metadata_t)
@@ -554,30 +528,36 @@ def _value_criterion(
             raise ValueError(f"Empty list for {op} operator")
         if isinstance(value[0], str):
             col_exprs = [
-                table.string_value.isin(_v)
+                table.string_value.isin(ParameterValue(_v))
                 if op == "$in"
-                else table.str_value.notin(_v)
+                else table.str_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], bool):
             col_exprs = [
-                table.bool_value.isin(_v) if op == "$in" else table.bool_value.notin(_v)
+                table.bool_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.bool_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], int):
             col_exprs = [
-                table.int_value.isin(_v) if op == "$in" else table.int_value.notin(_v)
+                table.int_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.int_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], float):
             col_exprs = [
-                table.float_value.isin(_v)
+                table.float_value.isin(ParameterValue(_v))
                 if op == "$in"
-                else table.float_value.notin(_v)
+                else table.float_value.notin(ParameterValue(_v))
             ]
     elif isinstance(value, list) and op in ("$in", "$nin"):
         col_exprs = [
-            table.int_value.isin(value),
-            table.float_value.isin(value)
+            table.int_value.isin(ParameterValue(value))
             if op == "$in"
-            else table.float_value.notin(value),
+            else table.int_value.notin(ParameterValue(value)),
+            table.float_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.float_value.notin(ParameterValue(value)),
         ]
     else:
         cols = [table.int_value, table.float_value]
