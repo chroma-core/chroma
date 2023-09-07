@@ -46,6 +46,14 @@ variable "service_account" {
   description = "Service account email with permission to Artifact Registry"
 }
 
+variable "disk_size" {
+  type        = string
+  description = "Attached disk size"
+  default      = 10
+}
 
-  CONTAINER_REGISTRY: chroma-db-server-registry
-  IMAGE: chroma-db-server
+variable "disk_type" {
+  type        = string
+  description = "Attached disk type"
+  default      = "pd-ssd"
+}
