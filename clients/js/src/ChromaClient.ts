@@ -1,4 +1,4 @@
-import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
+import { BaseEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { Configuration, ApiApi as DefaultApi } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
@@ -103,7 +103,7 @@ export class ChromaClient {
      * @param {Object} params - The parameters for creating a new collection.
      * @param {string} params.name - The name of the collection.
      * @param {CollectionMetadata} [params.metadata] - Optional metadata associated with the collection.
-     * @param {IEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+     * @param {BaseEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
      *
      * @returns {Promise<Collection>} A promise that resolves to the created collection.
      * @throws {Error} If there is an issue creating the collection.
@@ -125,7 +125,7 @@ export class ChromaClient {
     }: {
         name: string,
         metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
+        embeddingFunction?: BaseEmbeddingFunction<any, any>
     }): Promise<Collection> {
         const newCollection = await this.api
             .createCollection({
@@ -148,7 +148,7 @@ export class ChromaClient {
      * @param {Object} params - The parameters for creating a new collection.
      * @param {string} params.name - The name of the collection.
      * @param {CollectionMetadata} [params.metadata] - Optional metadata associated with the collection.
-     * @param {IEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+     * @param {BaseEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
      *
      * @returns {Promise<Collection>} A promise that resolves to the got or created collection.
      * @throws {Error} If there is an issue getting or creating the collection.
@@ -170,7 +170,7 @@ export class ChromaClient {
     }: {
         name: string,
         metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
+        embeddingFunction?: BaseEmbeddingFunction<any, any>
     }): Promise<Collection> {
         const newCollection = await this.api
             .createCollection({
@@ -214,7 +214,7 @@ export class ChromaClient {
      * Gets a collection with the specified name.
      * @param {Object} params - The parameters for getting a collection.
      * @param {string} params.name - The name of the collection.
-     * @param {IEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
+     * @param {BaseEmbeddingFunction} [params.embeddingFunction] - Optional custom embedding function for the collection.
      * @returns {Promise<Collection>} A promise that resolves to the collection.
      * @throws {Error} If there is an issue getting the collection.
      *
@@ -230,7 +230,7 @@ export class ChromaClient {
         embeddingFunction
     }: {
         name: string;
-        embeddingFunction?: IEmbeddingFunction
+        embeddingFunction?: BaseEmbeddingFunction<any, any>
     }): Promise<Collection> {
         const response = await this.api
             .getCollection(name, this.api.options)

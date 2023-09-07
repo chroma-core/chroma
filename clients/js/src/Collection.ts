@@ -17,7 +17,7 @@ import type {
     CollectionMetadata,
     ConfigOptions
 } from "./types";
-import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
+import { BaseEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { ApiApi } from "./generated";
 import { handleError, handleSuccess } from "./utils";
 import { toArray, toArrayOfArrays } from "./utils";
@@ -34,7 +34,7 @@ export class Collection {
     /**
      * @ignore
      */
-    public embeddingFunction: IEmbeddingFunction | undefined;
+    public embeddingFunction: BaseEmbeddingFunction<any, any> | undefined;
 
     /**
      * @ignore
@@ -44,7 +44,7 @@ export class Collection {
         id: string,
         api: DefaultApi,
         metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
+        embeddingFunction?: BaseEmbeddingFunction<any, any>
     ) {
         this.name = name;
         this.id = id;

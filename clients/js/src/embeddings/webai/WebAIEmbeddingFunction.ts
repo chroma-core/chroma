@@ -1,17 +1,55 @@
-import { IEmbeddingFunction } from "../IEmbeddingFunction";
+import { BaseEmbeddingFunction } from "../IEmbeddingFunction";
+
+export type WebAIEmbeddingFunctionOptions = {
+  modality: "text" | "image" | "multimodal";
+  target: 'node' | 'browser';
+  proxy?: boolean;
+  wasmPath?: string;
+  modelID?: string;
+}
+
+export type WebAIEmbeddingMethods = { webAI: any, webAIText?: any, webAIImage?: any, webAIMultimodal?: any }
 
 /**
- * WebAIEmbeddingFunction is a function that uses the Web AI package to generate embeddings.
+ * `WebAIEmbeddingFunction` uses the Web AI package to generate embeddings.
+ * This embedding function can work in both NodeJS and browser environments.
+ * 
+ * @example
+ * ```typescript
+ * import { WebAIEmbeddingFunction } from "chromadb/webai";
+ * 
+ * const options = {
+ *   modality: "text",
+ *   target: "node",
+ * };
+ * 
+ * const webAI = require('@visheratin/web-ai-node');
+ * const webAIText = require('@visheratin/web-ai-node/text');
+ * const webAIInstance = new WebAIEmbeddingFunction(options, { webAI, webAIText });
+ * 
+ * const embeddings = await webAIInstance.generate(["Hello World", "Another Text"]);
+ * ```
+ * @example Let the embedding function load the webai libraries on runtime using .init():
+ * ```typescript
+ * import { WebAIEmbeddingFunction } from "chromadb/webai";
+ * 
+ * const options = {
+ *   modality: "text",
+ *   target: "node",
+ * };
+ * 
+ * const embeddingFunction = new WebAIEmbeddingFunction(options);
+ * await embeddingFunction.init()
+ * 
+ * const embeddings = await embeddingFunction.generate(["Hello World", "Another Text"]);
+ * ```
+ * 
  * @remarks
- * This embedding function can be used in both NodeJS and browser environments.
  * Browser version of Web AI (@visheratin/web-ai) is an ESM module.
  * NodeJS version of Web AI (@visheratin/web-ai-node) is a CommonJS module.
  */
-export class WebAIEmbeddingFunction implements IEmbeddingFunction {
-  private model: any;
-  private proxy?: boolean;
-  private initPromise: Promise<any> | null;
-  private modality: "text" | "image" | "multimodal";
+export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbeddingFunctionOptions, WebAIEmbeddingMethods> {
+  private model: any | undefined = undefined;
 
   /**
    * WebAIEmbeddingFunction constructor.
@@ -21,20 +59,132 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
    * @param wasmPath - the path/URL to the directory with ONNX runtime WebAssembly files.
    * @param modelID - the ID of the model to use, if not specified, the default model will be used.
    */
-  constructor(
-    modality: "text" | "image" | "multimodal",
-    node: boolean,
-    proxy?: boolean,
-    wasmPath?: string,
-    modelID?: string
-  ) {
-    this.initPromise = null;
-    this.model = null;
-    this.modality = modality;
-    if (node) {
-      this.initNode(modality, proxy, modelID);
-    } else {
-      this.initPromise = this.initBrowser(modality, proxy, wasmPath, modelID);
+  constructor(options: WebAIEmbeddingFunctionOptions, { webAI, webAIText, webAIImage, webAIMultimodal }: WebAIEmbeddingMethods) {
+    super(options, { webAI, webAIText, webAIImage, webAIMultimodal })
+
+    if ((webAIText || webAIImage || webAIMultimodal) && !webAI) {
+      throw new Error("[WebAIEmbeddingFunction] You have to pass the webAI too when you want to use webAIText, webAIImage, or webAIMultimodal!")
+    }
+
+    if (!this.options) {
+      throw new Error("[WebAIEmbeddingFunction] You initialized the embedding function without passing options.")
+    }
+
+    switch (options.modality) {
+      case 'text':
+        if (!this.modules?.webAIImage) {
+          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'text' but did not pass webAIText.")
+        }
+        break;
+      case 'image':
+        if (!this.modules?.webAIImage) {
+          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'image' but did not pass webAIImage.")
+        }
+        break;
+      case 'multimodal':
+        if (!this.modules?.webAIImage) {
+          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'multimodal' but did not pass webAIMultimodal.")
+        }
+        break;
+      default:
+        if (!this.modules?.webAI) {
+          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function without passing a valid value in options.modality.")
+        }
+    }
+
+    if (!this.options?.target) {
+      throw new Error("[WebAIEmbeddingFunction] You initialized the embedding function without passing options.target.")
+    }
+
+  }
+
+  public async init(): Promise<void> {
+    if (!this.options) {
+      throw new Error("[WebAIEmbeddingFunction] You have to pass options to the WebAIEmbeddingFunction constructor!")
+    }
+
+    this.modules = {
+      webAI: await import(this.options?.target === 'node' ? '@visheratin/web-ai-node' : '@visheratin/web-ai')
+    }
+
+    switch (this.options?.modality) {
+      case "text": {
+        this.modules.webAIText = await import(this.getPackageName());
+
+        if (!this.modules?.webAIText) {
+          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIText. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+        }
+
+        let id = "mini-lm-v2-quant"; //default text model
+        if (this.options.modelID) {
+          id = this.options.modelID;
+        }
+
+        const models = this.modules.webAIText.ListTextModels();
+        for (const modelMetadata of models) {
+          if (modelMetadata.id === id) {
+            this.model = new this.modules.webAIText.FeatureExtractionModel(modelMetadata);
+            return;
+          }
+        }
+        throw new Error(
+          `[WebAIEmbeddingFunction] Could not find text model with id ${this.options.modelID} in the Web AI package`
+        );
+      }
+      case "image": {
+        this.modules.webAIImage = await import(this.getPackageName());
+
+        if (!this.modules?.webAIImage) {
+          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIImage. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+        }
+
+        let id = "efficientformer-l1-feature-quant"; //default image model
+
+        if (this.options.modelID) {
+          id = this.options.modelID;
+        }
+
+        const imageModels = this.modules.webAIImage.ListImageModels();
+
+        for (const modelMetadata of imageModels) {
+          if (modelMetadata.id === id) {
+            this.model = new this.modules.webAIImage.FeatureExtractionModel(modelMetadata);
+            return;
+          }
+        }
+
+        throw new Error(
+          `[WebAIEmbeddingFunction] Could not find image model with id ${this.options.modelID} in the Web AI package`
+        );
+      }
+      case "multimodal": {
+        this.modules.webAIMultimodal = await import(this.getPackageName());
+
+        if (!this.modules?.webAIMultimodal) {
+          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIMultimodal. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+        }
+
+        let id = "clip-base-quant"; //default multimodal model
+
+        if (this.options.modelID) {
+          id = this.options.modelID;
+        }
+
+        const multimodalModels = this.modules.webAIMultimodal.ListMultimodalModels();
+
+        for (const modelMetadata of multimodalModels) {
+          if (modelMetadata.id === id) {
+            this.model = new this.modules.webAIMultimodal.ZeroShotClassificationModel(
+              modelMetadata
+            );
+            return;
+          }
+        }
+
+        throw new Error(
+          `[WebAIEmbeddingFunction] Could not find multimodal model with id ${this.options.modelID} in the Web AI package`
+        );
+      }
     }
   }
 
@@ -45,19 +195,20 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
    * @returns the embeddings.
    */
   public async generate(values: string[]): Promise<number[][]> {
-    if (this.initPromise) {
-      await this.initPromise;
+    if (!this.model) {
+      throw new Error("[WebAIEmbeddingFunction] You have to initialize the WebAIEmbeddingFunction before using init!")
     }
+
     if (!this.model.initialized) {
-      await this.model.init(this.proxy);
+      await this.model.init(this.options?.proxy);
     }
     let embeddings = [];
-    if (this.modality === "text" || this.modality === "image") {
+    if (this.options?.modality === "text" || this.options?.modality === "image") {
       const output = await this.model.process(values);
       embeddings = output.result;
     } else {
-      const urlValues = [];
-      const textValues = [];
+      const urlValues: string[] = [];
+      const textValues: string[] = [];
       for (const value of values) {
         try {
           new URL(value);
@@ -77,153 +228,17 @@ export class WebAIEmbeddingFunction implements IEmbeddingFunction {
     }
   }
 
-  private initNode(
-    modality: "text" | "image" | "multimodal",
-    proxy?: boolean,
-    modelID?: string
-  ): void {
-    this.proxy = proxy ? proxy : false;
-    try {
-      const webAI = require("@visheratin/web-ai-node");
-      webAI.SessionParams.executionProviders = ["cpu"];
-      switch (modality) {
-        case "text": {
-          const webAIText = require("@visheratin/web-ai-node/text");
-          let id = "mini-lm-v2-quant"; //default text model
-          if (modelID) {
-            id = modelID;
-          }
-          const models = webAIText.ListTextModels();
-          for (const modelMetadata of models) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIText.FeatureExtractionModel(modelMetadata);
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find text model with id ${modelID} in the Web AI package`
-          );
-        }
-        case "image": {
-          const webAIImage = require("@visheratin/web-ai-node/image");
-          let id = "efficientformer-l1-feature-quant"; //default image model
-          if (modelID) {
-            id = modelID;
-          }
-          const imageModels = webAIImage.ListImageModels();
-          for (const modelMetadata of imageModels) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIImage.FeatureExtractionModel(modelMetadata);
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find image model with id ${modelID} in the Web AI package`
-          );
-        }
-        case "multimodal": {
-          const webAIMultimodal = require("@visheratin/web-ai-node/multimodal");
-          let id = "clip-base-quant"; //default multimodal model
-          if (modelID) {
-            id = modelID;
-          }
-          const multimodalModels = webAIMultimodal.ListMultimodalModels();
-          for (const modelMetadata of multimodalModels) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIMultimodal.ZeroShotClassificationModel(
-                modelMetadata
-              );
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find multimodal model with id ${modelID} in the Web AI package`
-          );
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      throw new Error(
-        "Please install the @visheratin/web-ai-node package to use the WebAIEmbeddingFunction, `npm install -S @visheratin/web-ai-node`"
-      );
+  private getPackageName(): string {
+    switch (this.options?.modality) {
+      case 'text':
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/text' : '@visheratin/web-ai/text';
+      case 'image':
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai-node/image';
+      case 'multimodal':
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai-node/image';
+      default:
+        throw new Error('[WebAIEmbeddingFunction] options.target or options.modality is undefined.')
     }
   }
 
-  private async initBrowser(
-    modality: "text" | "image" | "multimodal",
-    proxy?: boolean,
-    modelID?: string,
-    wasmPath?: string
-  ) {
-    this.proxy = proxy ? proxy : true;
-    try {
-      // @ts-ignore
-      const webAI = await import("@visheratin/web-ai");
-      if (wasmPath) {
-        webAI.SessionParams.wasmRoot = wasmPath;
-      }
-      switch (modality) {
-        case "text": {
-          // @ts-ignore
-          const webAIText = await import("@visheratin/web-ai/text");
-          let id = "mini-lm-v2-quant"; //default text model
-          if (modelID) {
-            id = modelID;
-          }
-          const models = webAIText.ListTextModels();
-          for (const modelMetadata of models) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIText.FeatureExtractionModel(modelMetadata);
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find text model with id ${modelID} in the Web AI package`
-          );
-        }
-        case "image": {
-          // @ts-ignore
-          const webAIImage = await import("@visheratin/web-ai/image");
-          let id = "efficientformer-l1-feature-quant"; //default image model
-          if (modelID) {
-            id = modelID;
-          }
-          const imageModels = webAIImage.ListImageModels();
-          for (const modelMetadata of imageModels) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIImage.FeatureExtractionModel(modelMetadata);
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find image model with id ${modelID} in the Web AI package`
-          );
-        }
-        case "multimodal": {
-          // @ts-ignore
-          const webAIImage = await import("@visheratin/web-ai/multimodal");
-          let id = "clip-base-quant"; //default multimodal model
-          if (modelID) {
-            id = modelID;
-          }
-          const imageModels = webAIImage.ListMultimodalModels();
-          for (const modelMetadata of imageModels) {
-            if (modelMetadata.id === id) {
-              this.model = new webAIImage.ZeroShotClassificationModel(
-                modelMetadata
-              );
-              return;
-            }
-          }
-          throw new Error(
-            `Could not find multimodal model with id ${modelID} in the Web AI package`
-          );
-        }
-      }
-    } catch (e) {
-      throw new Error(
-        "Please install the @visheratin/web-ai package to use the WebAIEmbeddingFunction, `npm install -S @visheratin/web-ai`"
-      );
-    }
-  }
 }

@@ -1,7 +1,4 @@
-import { IEmbeddingFunction } from "../IEmbeddingFunction";
-let OpenAIApi: any;
-let openAiVersion = null;
-let openAiMajorVersion = null;
+import { BaseEmbeddingFunction } from "../IEmbeddingFunction";
 
 interface OpenAIAPI {
     createEmbedding: (params: {
@@ -15,10 +12,11 @@ class OpenAIAPIv3 implements OpenAIAPI {
     private readonly configuration: any;
     private openai: any;
 
-    constructor(configuration: { organization: string, apiKey: string }) {
+    constructor(configuration: { organization: string, apiKey: string }, OpenAIApi: any) {
         this.configuration = new OpenAIApi.Configuration({
             organization: configuration.organization,
             apiKey: configuration.apiKey,
+
         });
         this.openai = new OpenAIApi.OpenAIApi(this.configuration);
     }
@@ -48,10 +46,23 @@ class OpenAIAPIv4 implements OpenAIAPI {
     private readonly apiKey: any;
     private openai: any;
 
-    constructor(apiKey: any) {
+    /**
+     * Creates an instance of the OpenAIEmbeddingFunction.
+     * 
+     * @class
+     * @param {OpenAIEmbeddingFunctionOptions} [options] - Configuration options for the embedding function.
+     * @param {string} options.openai_api_key - The API key for accessing OpenAI services.
+     * @param {string} [options.openai_model='text-embedding-ada-002'] - The specific model to use for embeddings. Defaults to 'text-embedding-ada-002'.
+     * @param {string} [options.openai_organization_id] - Optional OpenAI organization ID.
+     * @param {'node' | 'browser'} [options.target] - Target environment where this will be used. Can be either 'node' for server-side or 'browser' for client-side.
+     * @param {any} [OpenAIApi] - An optional instance of the OpenAIApi if you already have one initialized.
+     */
+    constructor(apiKey: any, organization: string | undefined, target: 'node' | 'browser' | undefined, OpenAIApi: any) {
         this.apiKey = apiKey;
         this.openai = new OpenAIApi({
             apiKey: this.apiKey,
+            dangerouslyAllowBrowser: target === 'browser',
+            organization
         });
     }
 
@@ -70,52 +81,134 @@ class OpenAIAPIv4 implements OpenAIAPI {
     }
 }
 
-export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
-    private api_key: string;
-    private org_id: string;
-    private model: string;
-    private openaiApi: OpenAIAPI;
+export type OpenAIEmbeddingFunctionOptions = {
+    openai_api_key: string,
+    openai_model?: string,
+    openai_organization_id?: string
+    target?: 'node' | 'browser'
+}
 
-    constructor({openai_api_key, openai_model, openai_organization_id}: {
-        openai_api_key: string,
-        openai_model?: string,
-        openai_organization_id?: string
-    }) {
+/**
+ * The OpenAIEmbeddingFunction class provides an interface to obtain embeddings from OpenAI models.
+ * This class transforms textual data into numerical representations using the OpenAI API.
+ * 
+ * @example Using a pre-initialized OpenAI instance:
+ * ```typescript
+ * import { OpenAIEmbeddingFunction } from 'chromadb/openai';
+ * 
+ * const openai = new OpenAIApi({
+ *   apiKey: 'YOUR_OPENAI_API_KEY',
+ *   dangerouslyAllowBrowser: true, // if using in browser
+ *   organization: 'YOUR_OPENAI_ORGANIZATION_ID'
+ *  // add any settings here
+ * });
+ * 
+ * const embeddingFunction = new OpenAIEmbeddingFunction(undefined, openai);
+ * const texts = ["Hello World!", "How are you?"];
+ * embeddingFunction.generate(texts).then(embeddings => {
+ *     console.log(embeddings);
+ * });
+ * ```
+ *
+ * @example Using the init method:
+ * ```typescript
+ * import { OpenAIEmbeddingFunction } from 'chromadb/openai';
+ * 
+ * const options = {
+ *   openai_api_key: 'YOUR_OPENAI_API_KEY',
+ *   openai_model: 'text-embedding-ada-002', // Optional
+ *   target: 'node', // or 'browser'
+ *   openai_organization_id: 'YOUR_OPENAI_ORGANIZATION_ID', // Optional
+ * };
+ * 
+ * const embeddingFunction = new OpenAIEmbeddingFunction(options);
+ * embeddingFunction.init('node').then(() => {
+ *   const texts = ["Hello World!", "How are you?"];
+ *   embeddingFunction.generate(texts).then(embeddings => {
+ *     console.log(embeddings);
+ *   });
+ * });
+ * ```
+ */
+export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddingFunctionOptions, { openai: OpenAIAPI }>{
+    private openAiMajorVersion: number | undefined;
+    private openAiVersion: string | undefined;
+
+    constructor(options?: OpenAIEmbeddingFunctionOptions, OpenAIApi: any = undefined) {
+        // options are optional if an instance is passed, since openai would already be initialized.
+        super(OpenAIApi ? options : undefined, { openai: OpenAIApi });
+    }
+
+    public async init(target?: 'node' | 'browser'): Promise<void> {
+        if (!this.options) {
+            throw new Error('[OpenAIEmbeddingFunction] You need to initialize the embeddings function with options before you can call OpenAIEmbeddingFunction#init.')
+        }
+
+        if (!target && !this.options.target) {
+            throw new Error('[OpenAIEmbeddingFunction] You need to initialize the embeddings function with options.target or pass a target to OpenAIEmbeddingFunction#init.')
+        }
+
+        this.options.target = target;
+
         try {
-            // eslint-disable-next-line global-require,import/no-extraneous-dependencies
-            OpenAIApi = require("openai");
-            let version = null;
+            this.modules = {
+                openai: (await import("openai")) as unknown as OpenAIAPI
+            }
+            let version: string | null = null;
             try {
-                const {VERSION} = require('openai/version');
+                const { VERSION } = await import('openai/version');
                 version = VERSION;
             } catch (e) {
+                // openai/version is only defined in openai@4 so this is allowed to fail.
+            }
+
+            if (!version) {
                 version = "3.x";
             }
-            openAiVersion = version.replace(/[^0-9.]/g, '');
-            openAiMajorVersion = openAiVersion.split('.')[0];
+
+            this.openAiVersion = version.replace(/[^0-9.]/g, '');
+            this.openAiMajorVersion = parseInt(this.openAiVersion.split('.')[0]);
         } catch (_a) {
             // @ts-ignore
             if (_a.code === 'MODULE_NOT_FOUND') {
-                throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
+                throw new Error("[OpenAIEmbeddingFunction] Initialiozing the OpenAI Client failed. Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
             }
             throw _a; // Re-throw other errors
         }
-        this.api_key = openai_api_key;
-        this.org_id = openai_organization_id || "";
-        this.model = openai_model || "text-embedding-ada-002";
-        if (openAiMajorVersion > 3) {
-            this.openaiApi = new OpenAIAPIv4(this.api_key);
+
+        if (!this.options?.openai_api_key) {
+            throw "[OpenAIEmbeddingFunction] options.openai_api_key is undefined."
+        }
+
+        if (this.openAiMajorVersion > 3) {
+            this.modules = {
+                openai: new OpenAIAPIv4(this.options.openai_api_key, this.options.openai_organization_id || undefined, target, this.modules.openai)
+            }
         } else {
-            this.openaiApi = new OpenAIAPIv3({
-                organization: this.org_id,
-                apiKey: this.api_key,
-            });
+            this.modules = {
+                openai: new OpenAIAPIv3({
+                    organization: this.options.openai_organization_id || "",
+                    apiKey: this.options.openai_api_key,
+                }, this.modules.openai)
+            }
         }
     }
 
     public async generate(texts: string[]): Promise<number[][]> {
-        return await this.openaiApi.createEmbedding({
-            model: this.model,
+        // Initialize if user fotgot to initialize
+        if (!this.modules?.openai) {
+            await this.init(this.options?.target || 'node')
+            console.warn('[OpenAIEmbeddingFunction] You forgot to call OpenAIEmbeddingFunction#init. Will call it now to beable to generate. It is recommended to pass the initialized openai instance via constructor.')
+        }
+
+        if (!this.modules?.openai) {
+            throw new Error(
+                "[OpenAIEmbeddingFunction] Something went wrong. The OpenAI module is undefined."
+            );
+        }
+
+        return await this.modules?.openai.createEmbedding({
+            model: this.options?.openai_model || "text-embedding-ada-002",
             input: texts,
         }).catch((error: any) => {
             throw error;

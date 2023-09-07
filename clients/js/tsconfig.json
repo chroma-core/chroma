@@ -1,6 +1,5 @@
 {
-  
-  "files": [
+  "include": [
     "src/index.ts",
     "src/generated/index.ts",
     "src/embeddings/**/*.ts",
@@ -18,5 +17,6 @@
     "forceConsistentCasingInFileNames": true,
     "stripInternal": true,
     "isolatedModules": true,
-  }
+  },
+  "skipLibCheck": true
 }
