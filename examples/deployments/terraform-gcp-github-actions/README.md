@@ -122,3 +122,9 @@ flowchart TD
     E -->|Yes| F[Terraform apply]
     E ---->|No| G[End]
 ```
+
+## Manual clean up
+
+If you wish to clean up resources manually, make sure you do not loster the `.tfstate` file.
+
+Run the previous terraform apply command as terraform destroy to clean up the created resources.
