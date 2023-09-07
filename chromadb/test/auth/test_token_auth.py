@@ -25,7 +25,11 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
         )
     )
     token = draw(
-        st.text(alphabet=string.ascii_letters + string.digits, min_size=1, max_size=50)
+        st.text(
+            alphabet=string.digits + string.ascii_letters + string.punctuation,
+            min_size=1,
+            max_size=50,
+        )
     )
     persistence = draw(st.booleans())
     return {
@@ -75,7 +79,7 @@ def random_token(draw: st.DrawFn) -> str:
 @st.composite
 def invalid_token(draw: st.DrawFn) -> str:
     opposite_alphabet = set(string.printable) - set(
-        string.ascii_letters + string.digits
+        string.digits + string.ascii_letters + string.punctuation
     )
     token = draw(st.text(alphabet=list(opposite_alphabet), min_size=1, max_size=50))
     return token
