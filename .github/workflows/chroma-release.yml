@@ -8,8 +8,8 @@ on:
       - main
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: "ghcr.io/chroma-core/chroma"
+  GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
+  DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
   PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
 
 jobs:
@@ -57,17 +57,22 @@ jobs:
       run: python -m build
     - name: Test Client Package
       run: bin/test-package.sh dist/*.tar.gz
-    - name: Log in to the Container registry
+    - name: Log in to the Github Container registry
       uses: docker/login-action@v2.1.0
       with:
-        registry: ${{ env.REGISTRY }}
+        registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Login to DockerHub
+      uses: docker/login-action@v2.1.0
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
     - name: Install setuptools_scm
       run: python -m pip install setuptools_scm
-    - name: Get Docker Tag
-      id: tag
-      run: echo "tag_name=$IMAGE_NAME:$(bin/version)" >> $GITHUB_OUTPUT
+    - name: Get Release Version
+      id: version
+      run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
     - name: Build and push prerelease Docker image
       if: "!startsWith(github.ref, 'refs/tags/')"
       uses: docker/build-push-action@v3.2.0
@@ -75,7 +80,7 @@ jobs:
         context: .
         platforms: ${{ env.PLATFORMS }}
         push: true
-        tags: ${{ steps.tag.outputs.tag_name}}
+        tags: "${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }}"
     - name: Build and push release Docker image
       if: "startsWith(github.ref, 'refs/tags/')"
       uses: docker/build-push-action@v3.2.0
@@ -83,10 +88,7 @@ jobs:
         context: .
         platforms: ${{ env.PLATFORMS }}
         push: true
-        tags: "${{ steps.tag.outputs.tag_name }},${{ env.IMAGE_NAME }}:latest"
-    - name: Get Release Version
-      id: version
-      run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+        tags: "${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
     - name: Get current date
       id: builddate
       run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
@@ -118,7 +120,8 @@ jobs:
           Git ref: `${{github.ref}}`
           Build Date: `${{steps.builddate.outputs.builddate}}`
           PIP Package: `chroma-${{steps.version.outputs.version}}.tar.gz`
-          Docker Image: `${{steps.tag.outputs.tag_name}}`
+          Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }}`
+          DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }}`
         artifacts: "dist/chroma-${{steps.version.outputs.version}}.tar.gz"
         prerelease: true
         generateReleaseNotes: true
@@ -140,7 +143,8 @@ jobs:
           Git ref: `${{github.ref}}`
           Build Date: `${{steps.builddate.outputs.builddate}}`
           PIP Package: `chroma-${{steps.version.outputs.version}}.tar.gz`
-          Docker Image: `${{steps.tag.outputs.tag_name}}`
+          Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ steps.version.outputs.version }}`
+          DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ steps.version.outputs.version }}`
         artifacts: "dist/chroma-${{steps.version.outputs.version}}.tar.gz"
         allowUpdates: true
         prerelease: true
