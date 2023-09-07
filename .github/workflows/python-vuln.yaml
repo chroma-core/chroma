@@ -21,7 +21,7 @@ jobs:
           format: 'json'
           bandit-config: 'bandit.yaml'
           output-file: 'bandit-report.json'
-      - name: Upload Chart Artifact
+      - name: Upload Bandit Report
         uses: actions/upload-artifact@v3
         with:
           name: bandit-artifact
