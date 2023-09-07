@@ -41,7 +41,7 @@ def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
     return [system, user]
 
 
-def get_chatGPT_response(query: str, context: List[str]) -> str:
+def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str:
     """
     Queries the GPT API to get a response to the question.
 
@@ -52,9 +52,8 @@ def get_chatGPT_response(query: str, context: List[str]) -> str:
     Returns:
     A response to the question.
     """
-
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model=model_name,
         messages=build_prompt(query, context),
     )
 
@@ -64,11 +63,18 @@ def get_chatGPT_response(query: str, context: List[str]) -> str:
 def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
+    
     # Check if the OPENAI_API_KEY environment variable is set. Prompt the user to set it if not.
     if "OPENAI_API_KEY" not in os.environ:
         openai.api_key = input(
             "Please enter your OpenAI API Key. You can get it from https://platform.openai.com/account/api-keys\n"
         )
+
+    # Ask what model to use
+    model_name = "gpt-3.5-turbo"
+    answer = input(f"Do you want to use GPT-4? (y/n) (default is {model_name}): ")
+    if answer == "y":
+        model_name = "gpt-4"
 
     # Instantiate a persistent chroma client in the persist_directory.
     # This will automatically load any previously saved collections.
@@ -85,7 +91,7 @@ def main(
         if len(query) == 0:
             print("Please enter a question. Ctrl+C to Quit.\n")
             continue
-        print("\nThinking...\n")
+        print(f"\nThinking using {model_name}...\n")
 
         # Query the collection to get the 5 most relevant results
         results = collection.query(
@@ -100,7 +106,7 @@ def main(
         )
 
         # Get the response from GPT
-        response = get_chatGPT_response(query, results["documents"][0])  # type: ignore
+        response = get_chatGPT_response(query, results["documents"][0], model_name)  # type: ignore
 
         # Output, with sources
         print(response)
