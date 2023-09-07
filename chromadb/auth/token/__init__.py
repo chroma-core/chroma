@@ -68,7 +68,10 @@ class TokenAuthClientAuthResponse(ClientAuthResponse):
 
 def check_token(token: str) -> None:
     token_str = str(token)
-    if not all(c in string.ascii_letters + string.digits for c in token_str):
+    if not all(
+        c in string.digits + string.ascii_letters + string.punctuation
+        for c in token_str
+    ):
         raise ValueError("Invalid token. Must contain only ASCII letters and digits.")
 
 
