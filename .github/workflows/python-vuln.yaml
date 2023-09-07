@@ -7,8 +7,6 @@ on:
     paths:
       - chromadb/**
       - clients/python/**
-    paths-ignore:
-      - chromadb/test/**
   workflow_dispatch:
 jobs:
   bandit-scan:
