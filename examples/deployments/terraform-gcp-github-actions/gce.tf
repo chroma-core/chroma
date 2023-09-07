@@ -47,7 +47,7 @@ resource "google_compute_instance" "chroma-db-server-instance" {
 resource "google_compute_disk" "pd" {
   project = var.project
   name    = "${var.instance}-disk"
-  type    = "pd-ssd"
+  type    = var.disk_type
   zone    = var.zone
   size    = var.disk_size
 }
