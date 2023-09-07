@@ -8,6 +8,7 @@ env:
   REGION: google-artifact-registry-region
   CONTAINER_REGISTRY: container-registry
   IMAGE: image-name
+  CHROMA_VERSION: 0.4.9
 
 jobs:
   deploy:
@@ -45,5 +46,5 @@ jobs:
 
       - name: Build and Push Container
         run: |-
-          docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" ./
+          docker build --build-arg CHROMA_VERSION=${{ env.CHROMA_VERSION }} -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" ./
           docker push "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest"

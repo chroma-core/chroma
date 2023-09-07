@@ -95,7 +95,7 @@ gcloud auth configure-docker ${REGION}-docker.pkg.dev
 2. Build & Tag image
 
 ```
-docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" .
+docker build -t --build-arg CHROMA_VERSION =${{ env.CHROMA_VERSION }} "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE }}:latest" .
 
 ```
 

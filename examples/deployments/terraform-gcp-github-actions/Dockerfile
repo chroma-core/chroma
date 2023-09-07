@@ -1,1 +1,2 @@
-FROM ghcr.io/chroma-core/chroma:0.4.6
+ARG CHROMA_VERSION=0.4.9
+FROM ghcr.io/chroma-core/chroma:${CHROMA_VERSION} as base

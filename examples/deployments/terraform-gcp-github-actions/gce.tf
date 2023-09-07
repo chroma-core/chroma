@@ -1,9 +1,9 @@
 resource "google_compute_instance" "chroma-db-server-instance-dev" {
   name    = "chroma-db-server-instance-dev"
   project = var.project
-  zone    = "europe-north1-c"
+  zone    = var.zone
 
-  machine_type = "e2-small"
+  machine_type = var.machine_type
 
   boot_disk {
     initialize_params {
