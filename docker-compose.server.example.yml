@@ -16,7 +16,5 @@ services:
       - net
 
 volumes:
-  backups:
-    driver: local
   chroma_persistent_folder:
     driver: local

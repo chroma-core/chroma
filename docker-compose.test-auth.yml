@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./:/chroma
-      - test_index_data:/index_data
+      - test_index_data:/chroma/chroma
     command: uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --log-config log_config.yml
     environment:
       - ANONYMIZED_TELEMETRY=False
@@ -27,6 +27,4 @@ services:
 
 volumes:
   test_index_data:
-    driver: local
-  test_backups:
     driver: local
