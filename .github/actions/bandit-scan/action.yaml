@@ -1,4 +1,4 @@
-name: 'Banding Scan'
+name: 'Bandit Scan'
 description: 'This action performs a security vulnerability scan of python code using bandit library.'
 inputs:
   bandit-config:
