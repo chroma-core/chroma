@@ -52,6 +52,7 @@ class LocalSegmentManager(SegmentManager):
     ]  # Tracks which segments are loaded for a given collection
     _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
     _lock: Lock
+    _max_file_handles: int
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -63,30 +64,52 @@ class LocalSegmentManager(SegmentManager):
 
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
-            # This is a "reasonable" default for the number of file handles to use for vector segments.
-            # To inform this, https://www.mongodb.com/docs/manual/reference/ulimit/#recommended-ulimit-settings as well
-            # as our resource needs for the vector segment are considered.
-            hard_limit = 64000
             if platform.system() != "Windows":
-                # Increase the max number of file handles to the limit set by the OS
-                _, os_hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
-                hard_limit = min(hard_limit, os_hard_limit)
-                resource.setrlimit(resource.RLIMIT_NOFILE, (hard_limit, os_hard_limit))
+                self._max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
             else:
-                # On windows, there is no soft, hard limit. Instead, 2048 is the max number of file handles by default.
-                # Newer systems support 8192, but we'll use this safe default for now as a fallback maximum.
-                os_hard_limit = max(2048, ctypes.windll.msvcrt._getmaxstdio())  # type: ignore
-                hard_limit = min(hard_limit, os_hard_limit)
-                ctypes.windll.msvcrt._setmaxstdio(hard_limit)  # type: ignore
-            # Use a fixed percentage in LRU cache to manage file handles, this is not ideal but is a reasonable
-            # In the future, we can make this configurable.
-            max_file_handles = int(hard_limit * 0.75)
+                self._max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
             segment_limit = (
-                max_file_handles // PersistentLocalHnswSegment.get_file_handle_count()
+                self._max_file_handles
+                // PersistentLocalHnswSegment.get_file_handle_count()
             )
-            self._vector_instances_file_handle_cache = LRUCache[
-                UUID, PersistentLocalHnswSegment
-            ](segment_limit, callback=lambda _, v: v.close_persistent_index())
+            self._vector_instances_file_handle_cache = LRUCache(
+                segment_limit, callback=lambda _, v: v.close_persistent_index()
+            )
+
+    # def __init__(self, system: System):
+    #     super().__init__(system)
+    #     self._sysdb = self.require(SysDB)
+    #     self._system = system
+    #     self._instances = {}
+    #     self._segment_cache = defaultdict(dict)
+    #     self._lock = Lock()
+
+    #     if self._system.settings.require("is_persistent"):
+    #         self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
+    #         # This is a "reasonable" default for the number of file handles to use for vector segments.
+    #         # To inform this, https://www.mongodb.com/docs/manual/reference/ulimit/#recommended-ulimit-settings as well
+    #         # as our resource needs for the vector segment are considered.
+    #         hard_limit = 64000
+    #         if platform.system() != "Windows":
+    #             # Increase the max number of file handles to the limit set by the OS
+    #             _, os_hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    #             hard_limit = min(hard_limit, os_hard_limit)
+    #             resource.setrlimit(resource.RLIMIT_NOFILE, (hard_limit, os_hard_limit))
+    #         else:
+    #             # On windows, there is no soft, hard limit. Instead, 2048 is the max number of file handles by default.
+    #             # Newer systems support 8192, but we'll use this safe default for now as a fallback maximum.
+    #             os_hard_limit = max(2048, ctypes.windll.msvcrt._getmaxstdio())  # type: ignore
+    #             hard_limit = min(hard_limit, os_hard_limit)
+    #             ctypes.windll.msvcrt._setmaxstdio(hard_limit)  # type: ignore
+    #         # Use a fixed percentage in LRU cache to manage file handles, this is not ideal but is a reasonable
+    #         # In the future, we can make this configurable.
+    #         max_file_handles = int(hard_limit * 0.75)
+    #         segment_limit = (
+    #             max_file_handles // PersistentLocalHnswSegment.get_file_handle_count()
+    #         )
+    #         self._vector_instances_file_handle_cache = LRUCache[
+    #             UUID, PersistentLocalHnswSegment
+    #         ](segment_limit, callback=lambda _, v: v.close_persistent_index())
 
     @override
     def start(self) -> None:
