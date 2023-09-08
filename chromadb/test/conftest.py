@@ -95,7 +95,7 @@ def _run_server(
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
+    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="info")
 
 
 def _await_server(api: API, attempts: int = 0) -> None:
