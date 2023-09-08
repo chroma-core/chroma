@@ -3,8 +3,10 @@ import numpy as np
 
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
+import pytest
 
 
+@pytest.mark.parametrize("execution_number", range(10))
 def test_many_collections(api: API) -> None:
     """Test that we can create a large number of collections and that the system
     # remains responsive."""
