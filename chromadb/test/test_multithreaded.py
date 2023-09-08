@@ -209,7 +209,7 @@ def _test_interleaved_add_query(api: API, N: int, D: int, num_workers: int) -> N
 
 
 @pytest.mark.parametrize("execution_number", range(10))
-def test_multithreaded_add(api: API) -> None:
+def test_multithreaded_add(api: API, execution_number) -> None:
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()
@@ -217,7 +217,7 @@ def test_multithreaded_add(api: API) -> None:
 
 
 @pytest.mark.parametrize("execution_number", range(10))
-def test_interleaved_add_query(api: API) -> None:
+def test_interleaved_add_query(api: API, execution_number) -> None:
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()

@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.mark.parametrize("execution_number", range(10))
-def test_many_collections(api: API) -> None:
+def test_many_collections(api: API, execution_number) -> None:
     """Test that we can create a large number of collections and that the system
     # remains responsive."""
     api.reset()
