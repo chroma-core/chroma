@@ -76,6 +76,33 @@ We suggest the following interface:
 
 We propose that all indexes created by this extension must be prefixed with an appropriate prefix to avoid name clashes.
 
+### Pros and Cons
+
+Pros:
+
+1. **Flexibility**: Developers can optimize searches and performance.
+2. **Ease of Integration**: Simplifies complex operations for third-party users.
+3. **Customization**: Allows developers to tailor the database to their needs.
+4. **Runtime Configuration**: Indexes can be created dynamically at runtime (no additional configuration required)
+5. **Portability**: The solution can easily be ported to distributed version of Chroma (assuming SQL-backed metadata store)
+
+
+Cons:
+
+1. **Complexity**: Index management can introduce bugs or inefficiencies when done incorrectly
+    1. Mitigation: Introduce advanced documentation + examples how to do indexes right
+    2. Mitigation: Validate user input and provide good feedback
+    3. Mitigation: Debug logging so that users can get better support on issues from Team and Community
+2. **Security**: Potential vulnerabilities if not implemented securely.
+    1. Mitigation: Admin endpoint will be secured with Auth
+    2. Mitigation: RBAC will be added as part of authZ
+3. **Overhead**: More API endpoints and logic to maintain.
+    1. Mitigation: Good testing coverage with property tests/hypothesis
+    2. Mitigation: Logging
+    3. Mitigation: _admin can be reused further down the road for additional admin related functionality
+    4. Mitigation: Reduce the implementation to the bear minimum
+    5. Mitigation: For future versions this can redirect to a separate admin API backend
+
 ## Compatibility, Deprecation, and Migration Plan
 
 This change is backward compatible. It is possible to also create a separate backport module to allow slightly older
@@ -87,4 +114,11 @@ We plan to introduce a new set of property tests to validate the behaviour of th
 
 ## Rejected Alternatives
 
-TBD
+The following alternatives were considered:
+
+- Brute-force indexes on all columns - this solution may seam like a simple and straightforward but has the distinct
+  drawbacks of not being very flexible with user requirements e.g. composite indexes where column orders matters.
+- Allow users to define indices manually on the SQLite directly - this solution while being probably the simplest is not
+  very developer friendly, some users do not have indepth knowledge of SQLite and it's indexing capabilities.
+- Implement a mechanism to allow users to configure indices at startup - this solution is only a part of the suggested
+  approach above and can only be implemented server-side and is less flexible due to indices being defined at startup.
