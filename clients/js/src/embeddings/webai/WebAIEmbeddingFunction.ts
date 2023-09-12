@@ -103,8 +103,10 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
       throw new Error("[WebAIEmbeddingFunction] You have to pass options to the WebAIEmbeddingFunction constructor!")
     }
 
-    this.modules = {
-      webAI: await import(this.options?.target === 'node' ? '@visheratin/web-ai-node' : '@visheratin/web-ai')
+    if(!this.modules?.webAI){
+      this.modules = {
+        webAI: await import(this.options?.target === 'node' ? '@visheratin/web-ai-node' : '@visheratin/web-ai')
+      }
     }
 
     switch (this.options?.modality) {
@@ -235,7 +237,7 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
       case 'image':
         return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai/image';
       case 'multimodal':
-        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai/image';
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/multimodal' : '@visheratin/web-ai/multimodal';
       default:
         throw new Error('[WebAIEmbeddingFunction] options.target or options.modality is undefined.')
     }
