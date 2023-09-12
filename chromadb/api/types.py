@@ -464,21 +464,26 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
-def validate_embeddings(embeddings: Embeddings) -> Embeddings:
+def validate_embeddings(
+    embeddings: Union[Embeddings, np.ndarray[Any, Any]]
+) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
-    if not isinstance(embeddings, list):
+    if not isinstance(embeddings, (list, np.ndarray)):
         raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
     if len(embeddings) == 0:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {embeddings}"
         )
-    if not all([isinstance(e, list) for e in embeddings]):
+    if not all([isinstance(e, (list, np.ndarray)) for e in embeddings]):
         raise ValueError(
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
     _new_embeddings: Embeddings = list()
     for embedding in embeddings:
-        if not all([isinstance(value, (int, float)) for value in embedding]):
+        if (not isinstance(embedding, np.ndarray) and not (
+                np.issubdtype(embedding.dtype, np.integer)
+                or np.issubdtype(embedding.dtype, np.floating)
+        )) or not all([isinstance(value, (int, float)) for value in embedding]):
             try:
                 _new_embeddings.append(
                     [

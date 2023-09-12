@@ -183,6 +183,16 @@ def create_embeddings(
 
     return embeddings
 
+def create_embeddings_ndarray(
+        dim: int,
+        count: int,
+        dtype: npt.DTypeLike,
+) -> np.ndarray[Any, Any]:
+    return np.random.uniform(
+        low=-1.0,
+        high=1.0,
+        size=(count, dim),
+    ).astype(dtype)
 
 class hashing_embedding_function(types.EmbeddingFunction[Documents]):
     def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:

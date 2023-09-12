@@ -26,7 +26,6 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-import numpy as np
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
@@ -408,17 +407,24 @@ def test_delete_success(api: ServerAPI, kwargs: dict):
     coll.delete(**kwargs)
 
 
-@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64]))
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
 def test_autocasting_validate_embeddings_for_compatible_types(
-    supported_types: list[Type[Any]], caplog: pytest.LogCaptureFixture, api: API
+    supported_types: list[Type[Any]], caplog: pytest.LogCaptureFixture
 ) -> None:
     embds = strategies.create_embeddings(10, 10, supported_types)
     validate_embeddings(embds)
 
 
-@given(unsupported_types=st.sampled_from([str]))
+def test_autocasting_validate_embeddings_with_ndarray(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    embds = strategies.create_embeddings_ndarray(10, 10)
+    validate_embeddings(embds)
+
+
+@given(unsupported_types=st.sampled_from([str, bool]))
 def test_autocasting_validate_embeddings_incompatible_types(
-    unsupported_types: list[Type[Any]], api: API
+    unsupported_types: list[Type[Any]],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, unsupported_types)
     with pytest.raises(ValueError) as e:
