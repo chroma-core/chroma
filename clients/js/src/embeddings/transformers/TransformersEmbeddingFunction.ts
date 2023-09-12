@@ -67,7 +67,7 @@ export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<Transfo
       }
 
       if (!this.options) {
-        throw '[TransformersEmbeddingFunction] Initializing the TransformersApi pipline failed: this.options is undefined.';
+        throw '[TransformersEmbeddingFunction] Initializing the TransformersApi pipeline failed: this.options is undefined.';
       }
       
       this.modules.pipeline = await this.modules.TransformersApi.pipeline("feature-extraction", this.options.model, {
@@ -82,10 +82,10 @@ export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<Transfo
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
-    // Initialize if user fotgot to initialize
+    // Initialize if user forgot to initialize
     if (!this.modules?.pipeline) {
       await this.init()
-      console.warn('[TransformersEmbeddingFunction] You forgot to call TransformersEmbeddingFunction#init. Will call it now to be able to generate. It is recommended to pass the transformders module via constructor.')
+      console.warn('[TransformersEmbeddingFunction] You forgot to call TransformersEmbeddingFunction#init. Will call it now to be able to generate. It is recommended to pass the transformers module via constructor.')
     }
 
     if (!this.modules?.pipeline) {

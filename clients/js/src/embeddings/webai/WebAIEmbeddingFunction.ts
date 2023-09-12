@@ -72,7 +72,7 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
 
     switch (options.modality) {
       case 'text':
-        if (!this.modules?.webAIImage) {
+        if (!this.modules?.webAIText) {
           console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'text' but did not pass webAIText.")
         }
         break;
@@ -82,7 +82,7 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
         }
         break;
       case 'multimodal':
-        if (!this.modules?.webAIImage) {
+        if (!this.modules?.webAIMultimodal) {
           console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'multimodal' but did not pass webAIMultimodal.")
         }
         break;
@@ -233,9 +233,9 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
       case 'text':
         return this.options?.target === 'node' ? '@visheratin/web-ai-node/text' : '@visheratin/web-ai/text';
       case 'image':
-        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai-node/image';
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai/image';
       case 'multimodal':
-        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai-node/image';
+        return this.options?.target === 'node' ? '@visheratin/web-ai-node/image' : '@visheratin/web-ai/image';
       default:
         throw new Error('[WebAIEmbeddingFunction] options.target or options.modality is undefined.')
     }
