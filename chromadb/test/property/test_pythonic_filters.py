@@ -8,6 +8,7 @@ from hypothesis.strategies import SearchStrategy
 from chromadb import Where
 from chromadb.types import WhereOperator, InclusionExclusionOperator
 from chromadb.utils.query_helper import WhereFilter
+from chromadb.utils.query_helper import attr  # noqa: F401
 
 
 def join_to_str(terms: Any) -> str:
@@ -57,9 +58,18 @@ variables = st.text(alphabet=valid_chars, min_size=1, max_size=5).filter(
     not in ["==", "!=", ">", ">=", "<", "<=", "and", "or", "in", "not in"]
 )
 
-basic_expr_equal = st.tuples(variables, equal_operators, values).map(join_to_str)
-basic_expr_comp = st.tuples(variables, comp_operators, st.integers()).map(join_to_str)
-basic_expr_set = st.tuples(variables, set_operators, set_values).map(
+attr_getattr_variables = variables.map(lambda x: "attr." + x)
+attr_getitem_variables = variables.map(lambda x: f"attr['{x}']")
+
+combined_strategy = st.one_of(variables, attr_getattr_variables, attr_getitem_variables)
+
+basic_expr_equal = st.tuples(combined_strategy, equal_operators, values).map(
+    join_to_str
+)
+basic_expr_comp = st.tuples(combined_strategy, comp_operators, st.integers()).map(
+    join_to_str
+)
+basic_expr_set = st.tuples(combined_strategy, set_operators, set_values).map(
     lambda x: f'"{x[0]}" {x[1]} {x[2]}'
 )
 

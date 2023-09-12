@@ -60,6 +60,11 @@ def process_ast_compare(node: ast.Compare) -> Dict[str, Any]:
         left = node.left.id
     elif isinstance(node.left, ast.Attribute):
         left = node.left.attr
+    elif isinstance(node.left, ast.Subscript) and isinstance(node.left.value, ast.Name):
+        if isinstance(node.left.slice, ast.Index):  # python < 3.8
+            left = node.left.slice.value.s  # type: ignore
+        if isinstance(node.left.slice, ast.Constant):  # python >= 3.8
+            left = node.left.slice.value
     elif isinstance(node.left, ast.Str):
         left = node.left.s
     else:
@@ -187,3 +192,42 @@ class WhereFilter(object):
             )
             _filter_expr = _process_ast(ast.parse(_expr))
         return cast(Where, _filter_expr)
+
+
+NumericValue = Union[int, float, List[int], List[float]]
+Value = Union[str, bool, List[str], List[bool], NumericValue]
+ListValues = Union[List[str], List[bool], List[int], List[float]]
+
+
+class Attr(object):
+    def __init__(self, key: str) -> None:
+        self.key = key
+
+    def __eq__(self, other: Any) -> bool:
+        return True
+
+    def __ne__(self, other: Any) -> bool:
+        return True
+
+    def __lt__(self, other: Any) -> bool:
+        return True
+
+    def __le__(self, other: Any) -> bool:
+        return True
+
+    def __gt__(self, other: Any) -> bool:
+        return True
+
+    def __ge__(self, other: Any) -> bool:
+        return True
+
+
+class AttrBuilder(object):
+    def __getattr__(self, name: Any) -> Attr:
+        return Attr(key=name)
+
+    def __getitem__(self, name: Any) -> Attr:
+        return Attr(key=name)
+
+
+attr = AttrBuilder()
