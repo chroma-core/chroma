@@ -130,7 +130,7 @@ export type OpenAIEmbeddingFunctionOptions = {
  * });
  * ```
  */
-export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddingFunctionOptions, { openai: OpenAIAPI }>{
+export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddingFunctionOptions, { openai: any }>{
     private openAiMajorVersion: number | undefined;
     private openAiVersion: string | undefined;
 
@@ -149,11 +149,18 @@ export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddi
         }
 
         this.options.target = target;
+        if (this.modules?.openai?.generate) {
+            // An instance of openai has been passed, no need to initialize it
+            return;
+        }
+
+        let OpenAIModule;
 
         try {
-            this.modules = {
-                openai: (await import("openai")) as unknown as OpenAIAPI
+            if (!this.modules?.openai) {
+                OpenAIModule = await import("openai")
             }
+
             let version: string | null = null;
             try {
                 const { VERSION } = await import('openai/version');
@@ -171,7 +178,7 @@ export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddi
         } catch (_a) {
             // @ts-ignore
             if (_a.code === 'MODULE_NOT_FOUND') {
-                throw new Error("[OpenAIEmbeddingFunction] Initialiozing the OpenAI Client failed. Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
+                throw new Error("[OpenAIEmbeddingFunction] Initializing the OpenAI Client failed. Please provide the initialized OpenAI instance through the constructor, or install the package with `npm install --save openai`");
             }
             throw _a; // Re-throw other errors
         }
@@ -182,23 +189,23 @@ export class OpenAIEmbeddingFunction extends BaseEmbeddingFunction<OpenAIEmbeddi
 
         if (this.openAiMajorVersion > 3) {
             this.modules = {
-                openai: new OpenAIAPIv4(this.options.openai_api_key, this.options.openai_organization_id || undefined, target, this.modules.openai)
+                openai: new OpenAIAPIv4(this.options.openai_api_key, this.options.openai_organization_id || undefined, target, OpenAIModule)
             }
         } else {
             this.modules = {
                 openai: new OpenAIAPIv3({
                     organization: this.options.openai_organization_id || "",
                     apiKey: this.options.openai_api_key,
-                }, this.modules.openai)
+                }, OpenAIModule)
             }
         }
     }
 
     public async generate(texts: string[]): Promise<number[][]> {
         // Initialize if user fotgot to initialize
-        if (!this.modules?.openai) {
+        if (!this.modules?.openai?.generate) {
             await this.init(this.options?.target || 'node')
-            console.warn('[OpenAIEmbeddingFunction] You forgot to call OpenAIEmbeddingFunction#init. Will call it now to beable to generate. It is recommended to pass the initialized openai instance via constructor.')
+            console.warn('[OpenAIEmbeddingFunction] You forgot to call OpenAIEmbeddingFunction#init. Will call it now to beable to generate. It is recommended to pass the initialized OpenAI instance through the constructor.')
         }
 
         if (!this.modules?.openai) {

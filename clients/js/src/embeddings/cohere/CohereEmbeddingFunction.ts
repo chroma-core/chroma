@@ -39,9 +39,10 @@ export class CohereEmbeddingFunction extends BaseEmbeddingFunction<CohereEmbeddi
 
     public async init(): Promise<void> {
         try {
-            this.modules = {
-                // @ts-ignore
-                cohere: await import('cohere-ai')
+            if (!this.modules?.cohere) {
+                this.modules = {
+                    cohere: await import('cohere-ai')
+                }
             }
 
             if (!this.options?.cohere_api_key) {
@@ -51,7 +52,7 @@ export class CohereEmbeddingFunction extends BaseEmbeddingFunction<CohereEmbeddi
             this.modules.cohere.init(this.options.cohere_api_key);
         } catch {
             throw new Error(
-                "[CohereEmbeddingFunction] Failed to import the cohere-ai module. Please pass it via constructor."
+                "[CohereEmbeddingFunction] Failed to import the cohere-ai module. Please provide it through the constructor, or install the package with `npm install --save cohere-ai`."
             );
         }
     }
@@ -59,7 +60,7 @@ export class CohereEmbeddingFunction extends BaseEmbeddingFunction<CohereEmbeddi
     public async generate(texts: string[]) {
         if (!this.modules?.cohere) {
             await this.init()
-            console.warn('[CohereEmbeddingFunction] You forgot to call CohereEmbeddingFunction#init. Will call it now to be able to generate. It is recommended to pass the cohere module via constructor.')
+            console.warn('[CohereEmbeddingFunction] You forgot to call CohereEmbeddingFunction#init. Will call it now to be able to generate. It is recommended to pass the cohere module through the constructor.')
         }
 
         if (!this.options?.model) {

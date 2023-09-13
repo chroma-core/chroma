@@ -113,10 +113,13 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
 
     switch (this.options?.modality) {
       case "text": {
-        this.modules.webAIText = await import(this.getPackageName());
 
         if (!this.modules?.webAIText) {
-          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIText. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+          try {
+            this.modules.webAIText = await import(this.getPackageName());
+          } catch (err) {
+            throw new Error(`[WebAIEmbeddingFunction] Could not find webAIText. Please provide it through the constructor, or install the package with \`npm install --save ${this.getPackageName()}\`.`)
+          }
         }
 
         let id = "mini-lm-v2-quant"; //default text model
@@ -136,10 +139,13 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
         );
       }
       case "image": {
-        this.modules.webAIImage = await import(this.getPackageName());
 
-        if (!this.modules?.webAIImage) {
-          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIImage. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+        if (!this.modules.webAIImage) {
+          try {
+            this.modules.webAIImage = await import(this.getPackageName());
+          } catch (err) {
+            throw new Error(`[WebAIEmbeddingFunction] Importing webAIImage failed. Please provide it through the constructor, or install the package with \`npm install --save ${this.getPackageName()}\`.`)
+          }
         }
 
         let id = "efficientformer-l1-feature-quant"; //default image model
@@ -162,10 +168,13 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
         );
       }
       case "multimodal": {
-        this.modules.webAIMultimodal = await import(this.getPackageName());
 
         if (!this.modules?.webAIMultimodal) {
-          throw new Error(`[WebAIEmbeddingFunction] Could not find webAIMultimodal. Please pass it using the constructor or install the package via npm i -S ${this.getPackageName()}.`)
+          try {
+            this.modules.webAIMultimodal = await import(this.getPackageName());
+          } catch (err) {
+            throw new Error(`[WebAIEmbeddingFunction] Importing webAIMultimodal failed. Please provide it through the constructor, or install the package with \`npm install --save ${this.getPackageName()}\`.`)
+          }
         }
 
         let id = "clip-base-quant"; //default multimodal model

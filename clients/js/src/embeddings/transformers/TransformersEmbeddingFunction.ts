@@ -39,7 +39,7 @@ type TransformersEmbeddingFunctionOptions = {
  * const embeddings = await transformers.generate(["text1", "text2"]);
  * ```
  */
-export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<TransformersEmbeddingFunctionOptions, { TransformersApi: any, pipeline?: any }> {
+export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<TransformersEmbeddingFunctionOptions, { transformersApi: any, pipeline?: any }> {
   /**
    * @param options The configuration options.
    * @param options.model The model to use to calculate embeddings. Defaults to 'Xenova/all-MiniLM-L6-v2', which is an ONNX port of `sentence-transformers/all-MiniLM-L6-v2`.
@@ -50,9 +50,9 @@ export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<Transfo
    *                        You may import { pipeline } from '@xenova/transformers' and pass the pipeline instead of the whole module if you want to make use of treeshaking.
    */
   constructor(options: TransformersEmbeddingFunctionOptions = {}, transformersApi: any = undefined) {
-    super(options, { TransformersApi: transformersApi });
+    super(options, { transformersApi });
 
-    if(transformersApi && !transformersApi.pipeline && this.modules){
+    if (transformersApi && !transformersApi.pipeline && this.modules) {
       // We assume, that an initialized transformersApi.pipeline has been passed instead of the module.
       this.modules.pipeline = transformersApi.pipeline;
     }
@@ -62,21 +62,23 @@ export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<Transfo
     // Define package name here because import('@xenova/transformers') throws typescript compilation errors because @xenova/transformers@2.5.3 exports broken type definitions.
     const packageName = '@xenova/transformers';
     try {
-      this.modules = {
-        TransformersApi: await import(packageName),
+      if (!this.modules?.transformersApi) {
+        this.modules = {
+          transformersApi: await import(packageName),
+        }
       }
 
       if (!this.options) {
-        throw '[TransformersEmbeddingFunction] Initializing the TransformersApi pipeline failed: this.options is undefined.';
+        throw '[TransformersEmbeddingFunction] Initializing the transformersApi pipeline failed: this.options is undefined.';
       }
-      
-      this.modules.pipeline = await this.modules.TransformersApi.pipeline("feature-extraction", this.options.model, {
+
+      this.modules.pipeline = await this.modules.transformersApi.pipeline("feature-extraction", this.options.model, {
         quantized: this.options.quantized,
         revision: this.options.revision,
         progress_callback: this.options.progress_callback,
       })
     } catch (err) {
-      console.warn('[TransformersEmbeddingFunction] Initializing the TransformersApi pipline failed. Please install the transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`', err)
+      console.warn('[TransformersEmbeddingFunction] Initializing the transformersApi pipline failed. Please provide it through the constructor, or install the package with `npm install --save @xenova/transformers`', err)
       throw err;
     }
   }
@@ -89,7 +91,7 @@ export class TransformersEmbeddingFunction extends BaseEmbeddingFunction<Transfo
     }
 
     if (!this.modules?.pipeline) {
-      console.warn('[TransformersEmbeddingFunction] Something went wrong. The TransformersApi pipline is undefined.')
+      console.warn('[TransformersEmbeddingFunction] Something went wrong. The transformersApi pipline is undefined.')
     }
 
     let output = await this.modules?.pipeline(texts, { pooling: "mean", normalize: true });
