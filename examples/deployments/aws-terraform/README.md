@@ -15,9 +15,12 @@ This deployment will do the following:
 
 - [Terraform CLI v1.3.4+](https://developer.hashicorp.com/terraform/tutorials/gcp-get-started/install-cli)
 
+> Note: The instructions below assume execution on a Linux/MacOS shell (or Windows WSL).
+
 ## Deployment with terraform
 
-This deployment uses Ubuntu 22 as foundation, but you'd like to use a different AMI (non-Debian based image) you may have to adjust the startup script.
+This deployment uses Ubuntu 22 as foundation, but you'd like to use a different AMI (non-Debian based image) you may
+have to adjust the startup script.
 
 To find AWS EC2 AMIs you can use:
 
@@ -30,6 +33,7 @@ aws ec2 describe-images \
 ```
 
 ### 2. Init your terraform state
+
 ```bash
 terraform init
 ```
@@ -58,6 +62,7 @@ export TF_VAR_enable_auth="true" #enable basic auth for the chroma instance
 export TF_VAR_auth_type="token" #The auth type to use for the chroma instance (token or basic)
 terraform apply -auto-approve
 ```
+
 > Note: Basic Auth is supported by Chroma v0.4.7+
 
 ### 4. Check your public IP and that Chroma is running
@@ -77,7 +82,34 @@ curl -v http://$instance_public_ip:8000/api/v1/heartbeat
 
 #### 4.1 Checking Auth
 
+##### Token
+
+When token auth is enabled you can check the get the credentials from Terraform state by running:
+
+```bash
+terraform output chroma_auth_token
+```
+
+You should see something of the form:
+
+```bash
+PVcQ4qUUnmahXwUgAf3UuYZoMlos6MnF
+```
+
+You can then export these credentials:
+
+```bash
+export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
+```
+
+Using the credentials:
+
+```bash
+curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
+```
+
 ##### Basic
+
 When basic auth is enabled you can check the get the credentials from Terraform state by running:
 
 ```bash
@@ -104,34 +136,7 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 
 > Note: Without `-u` you should be getting 401 Unauthorized response
 
-
-##### Token
-When token auth is enabled you can check the get the credentials from Terraform state by running:
-
-```bash
-terraform output chroma_auth_token
-```
-
-You should see something of the form:
-
-```bash
-PVcQ4qUUnmahXwUgAf3UuYZoMlos6MnF
-```
-
-You can then export these credentials:
-
-```bash
-export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
-```
-
-Using the credentials:
-
-```bash
-curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
-```
-
 #### 4.2 SSH to your instance
-
 
 To SSH to your instance:
 
@@ -140,8 +145,32 @@ ssh -i ./chroma-aws ubuntu@$instance_public_ip
 ```
 
 ### 5. Destroy your Chroma instance
+
 ```bash
 terraform destroy -auto-approve
+```
+
+#### Delete with Lifecycle Hooks
+
+If you have configured `prevent_chroma_data_volume_delete=true` then Terraform will prevent you from destroying your
+Chroma deployment. To work around this you can remove the lifecycle hook from the data volume by commenting out
+lifecycle hook `main.tf`:
+
+```terraform
+resource "aws_ebs_volume" "chroma_volume_prevent_destroy" {
+  count = var.prevent_chroma_data_volume_delete ? 1 : 0
+
+  availability_zone = aws_instance.chroma_instance.availability_zone
+  size              = var.chroma_data_volume_size
+
+  tags = {
+    Name = "chroma"
+  }
+
+    lifecycle {
+      prevent_destroy = true
+    }
+}
 ```
 
 ## Extras
@@ -152,4 +181,4 @@ You can visualize your infrastructure with:
 terraform graph | dot -Tsvg > graph.svg
 ```
 
->Note: You will need graphviz installed for this to work
+> Note: You will need graphviz installed for this to work

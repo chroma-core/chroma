@@ -102,7 +102,20 @@ resource "aws_instance" "chroma_instance" {
 }
 
 
-resource "aws_ebs_volume" "chroma-volume" {
+resource "aws_ebs_volume" "chroma_volume" {
+  count = var.prevent_chroma_data_volume_delete ? 0 : 1
+
+  availability_zone = aws_instance.chroma_instance.availability_zone
+  size              = var.chroma_data_volume_size
+
+  tags = {
+    Name = "chroma"
+  }
+}
+
+resource "aws_ebs_volume" "chroma_volume_prevent_destroy" {
+  count = var.prevent_chroma_data_volume_delete ? 1 : 0
+
   availability_zone = aws_instance.chroma_instance.availability_zone
   size              = var.chroma_data_volume_size
 
@@ -110,18 +123,20 @@ resource "aws_ebs_volume" "chroma-volume" {
     Name = "chroma"
   }
 
-  lifecycle {
-    prevent_destroy = var.prevent_chroma_data_volume_delete # size in GBs
-  }
+#  lifecycle {
+#    prevent_destroy = true
+#  }
 }
 
+
 locals {
-  cleaned_volume_id = replace(aws_ebs_volume.chroma-volume.id, "-", "")
+  volume_id_to_use = var.prevent_chroma_data_volume_delete ? aws_ebs_volume.chroma_volume_prevent_destroy[0].id : aws_ebs_volume.chroma_volume[0].id
+  cleaned_volume_id = replace(local.volume_id_to_use, "-", "")
 }
 
 resource "aws_volume_attachment" "chroma_volume_attachment" {
   device_name = "/dev/sdh"
-  volume_id   = aws_ebs_volume.chroma-volume.id
+  volume_id   = local.volume_id_to_use
   instance_id = aws_instance.chroma_instance.id
   provisioner "remote-exec" {
     inline = [
@@ -137,7 +152,7 @@ resource "aws_volume_attachment" "chroma_volume_attachment" {
       private_key = file(var.ssh_private_key)
     }
   }
-    depends_on = [aws_instance.chroma_instance, aws_ebs_volume.chroma-volume]
+    depends_on = [aws_instance.chroma_instance, aws_ebs_volume.chroma_volume,aws_ebs_volume.chroma_volume_prevent_destroy]
 }
 
 
