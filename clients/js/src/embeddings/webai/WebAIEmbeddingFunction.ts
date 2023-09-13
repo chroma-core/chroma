@@ -70,26 +70,28 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
       throw new Error("[WebAIEmbeddingFunction] You initialized the embedding function without passing options.")
     }
 
-    switch (options.modality) {
-      case 'text':
-        if (!this.modules?.webAIText) {
-          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'text' but did not pass webAIText.")
-        }
-        break;
-      case 'image':
-        if (!this.modules?.webAIImage) {
-          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'image' but did not pass webAIImage.")
-        }
-        break;
-      case 'multimodal':
-        if (!this.modules?.webAIMultimodal) {
-          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'multimodal' but did not pass webAIMultimodal.")
-        }
-        break;
-      default:
-        if (!this.modules?.webAI) {
-          console.warn("[WebAIEmbeddingFunction] You initialized the embedding function without passing a valid value in options.modality.")
-        }
+    if (webAI) {
+      switch (options.modality) {
+        case 'text':
+          if (!this.modules?.webAIText) {
+            console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'text' but did not pass webAIText.")
+          }
+          break;
+        case 'image':
+          if (!this.modules?.webAIImage) {
+            console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'image' but did not pass webAIImage.")
+          }
+          break;
+        case 'multimodal':
+          if (!this.modules?.webAIMultimodal) {
+            console.warn("[WebAIEmbeddingFunction] You initialized the embedding function with modality 'multimodal' but did not pass webAIMultimodal.")
+          }
+          break;
+        default:
+          if (!this.modules?.webAI) {
+            console.warn("[WebAIEmbeddingFunction] You initialized the embedding function without passing a valid value in options.modality.")
+          }
+      }
     }
 
     if (!this.options?.target) {
@@ -103,7 +105,7 @@ export class WebAIEmbeddingFunction extends BaseEmbeddingFunction<WebAIEmbedding
       throw new Error("[WebAIEmbeddingFunction] You have to pass options to the WebAIEmbeddingFunction constructor!")
     }
 
-    if(!this.modules?.webAI){
+    if (!this.modules?.webAI) {
       this.modules = {
         webAI: await import(this.options?.target === 'node' ? '@visheratin/web-ai-node' : '@visheratin/web-ai')
       }
