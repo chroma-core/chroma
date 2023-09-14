@@ -249,7 +249,7 @@ class SegmentAPI(API):
         )
         records_to_submit = []
         for r in _records(
-            t.Operation.UPSERT,
+            t.Operation.ADD,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -279,7 +279,7 @@ class SegmentAPI(API):
         )
         records_to_submit = []
         for r in _records(
-            t.Operation.UPSERT,
+            t.Operation.UPDATE,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
