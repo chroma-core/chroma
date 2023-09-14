@@ -1,8 +1,10 @@
-chroma-hnswlib==0.7.2
+bcrypt==4.0.1
+chroma-hnswlib==0.7.3
 fastapi>=0.95.2, <0.100.0
 graphlib_backport==1.0.3; python_version < '3.9'
 importlib-resources
-numpy==1.21.6
+numpy==1.21.6; python_version < '3.8'
+numpy==1.22.4; python_version >= '3.8'
 onnxruntime==1.14.1
 overrides==7.3.1
 posthog==2.4.0
@@ -12,5 +14,6 @@ pypika==0.48.9
 requests==2.28.1
 tokenizers==0.13.2
 tqdm==4.65.0
+typer>=0.9.0
 typing_extensions==4.5.0
 uvicorn[standard]==0.18.3

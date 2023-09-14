@@ -43,7 +43,7 @@ print(api.heartbeat())
 
 3. With a persistent backend and a small frontend client
 
-Run `docker-compose up -d --build`
+Run `chroma run --path /chroma_db_path`
 ```python
 import chromadb
 api = chromadb.HttpClient(host="localhost", port="8000")

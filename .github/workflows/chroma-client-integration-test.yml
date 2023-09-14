@@ -8,7 +8,8 @@ on:
     branches:
       - main
       - '**'
-
+  workflow_dispatch:
+  
 jobs:
   test:
     timeout-minutes: 90
