@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
 from uuid import UUID
@@ -31,28 +32,74 @@ from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import Settings, System
 from chromadb.telemetry import Telemetry
+from urllib.parse import urlparse, urlunparse, quote
+
+logger = logging.getLogger(__name__)
 
 
 class FastAPI(API):
     _settings: Settings
     _max_batch_size: int = -1
 
+    @staticmethod
+    def _validate_host(host: str) -> None:
+        parsed = urlparse(host)
+        if "/" in host and parsed.scheme not in {"http", "https"}:
+            raise ValueError(
+                "Invalid URL. " f"Unrecognized protocol - {parsed.scheme}."
+            )
+        if "/" in host and (not host.startswith("http")):
+            raise ValueError(
+                "Invalid URL. "
+                "Seems that you are trying to pass URL as a host but without specifying the protocol. "
+                "Please add http:// or https:// to the host."
+            )
+
+    @staticmethod
+    def resolve_url(
+        chroma_server_host: str,
+        chroma_server_ssl_enabled: Optional[bool] = False,
+        default_api_path: Optional[str] = "",
+        chroma_server_http_port: Optional[int] = 8000,
+    ) -> str:
+        _skip_port = False
+        _chroma_server_host = chroma_server_host
+        FastAPI._validate_host(_chroma_server_host)
+        if _chroma_server_host.startswith("http"):
+            logger.debug("Skipping port as the user is passing a full URL")
+            _skip_port = True
+        parsed = urlparse(_chroma_server_host)
+
+        scheme = "https" if chroma_server_ssl_enabled else parsed.scheme or "http"
+        net_loc = parsed.netloc or parsed.hostname or chroma_server_host
+        port = (
+            ":" + str(parsed.port or chroma_server_http_port) if not _skip_port else ""
+        )
+        path = parsed.path or default_api_path
+
+        if not path or path == net_loc:
+            path = default_api_path if default_api_path else ""
+        if not path.endswith(default_api_path or ""):
+            path = path + default_api_path if default_api_path else ""
+        full_url = urlunparse(
+            (scheme, f"{net_loc}{port}", quote(path.replace("//", "/")), "", "", "")
+        )
+
+        return full_url
+
     def __init__(self, system: System):
         super().__init__(system)
-        url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
         self._telemetry_client = self.require(Telemetry)
         self._settings = system.settings
 
-        port_suffix = (
-            f":{system.settings.chroma_server_http_port}"
-            if system.settings.chroma_server_http_port
-            else ""
-        )
-        self._api_url = (
-            f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
+        self._api_url = FastAPI.resolve_url(
+            chroma_server_host=str(system.settings.chroma_server_host),
+            chroma_server_http_port=int(str(system.settings.chroma_server_http_port)),
+            chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
+            default_api_path=system.settings.chroma_server_api_default_path,
         )
 
         self._header = system.settings.chroma_server_headers

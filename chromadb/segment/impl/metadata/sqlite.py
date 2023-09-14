@@ -1,8 +1,8 @@
-from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict
+from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
-from chromadb.types import Segment
+from chromadb.types import Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
 from chromadb.db.base import (
@@ -105,7 +105,6 @@ class SqliteMetadataSegment(MetadataReader):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
-
         embeddings_t, metadata_t, fulltext_t = Tables(
             "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
@@ -135,7 +134,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         if where:
             q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
-
         if where_document:
             q = q.where(
                 self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
@@ -146,7 +144,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         limit = limit or 2**63 - 1
         offset = offset or 0
-
         with self._db.tx() as cur:
             return list(islice(self._records(cur, q), offset, offset + limit))
 
@@ -405,7 +402,6 @@ class SqliteMetadataSegment(MetadataReader):
         self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
     ) -> Criterion:
         clause: list[Criterion] = []
-
         for k, v in where.items():
             if k == "$and":
                 criteria = [
@@ -466,6 +462,10 @@ class SqliteMetadataSegment(MetadataReader):
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
 
+    @override
+    def delete(self) -> None:
+        raise NotImplementedError()
+
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
     """Encode a SeqID into a byte array"""
@@ -488,24 +488,31 @@ def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
 
 
 def _where_clause(
-    expr: Union[LiteralValue, Dict[WhereOperator, LiteralValue]],
+    expr: Union[
+        LiteralValue,
+        Dict[WhereOperator, LiteralValue],
+        Dict[InclusionExclusionOperator, List[LiteralValue]],
+    ],
     table: Table,
 ) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
     if isinstance(expr, (str, int, float, bool)):
-        return _where_clause({"$eq": expr}, table)
+        return _where_clause({cast(WhereOperator, "$eq"): expr}, table)
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
     return _value_criterion(value, operator, table)
 
 
-def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Criterion:
+def _value_criterion(
+    value: Union[LiteralValue, List[LiteralValue]],
+    op: Union[WhereOperator, InclusionExclusionOperator],
+    table: Table,
+) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
-
     if isinstance(value, str):
         cols = [table.string_value]
     # isinstance(True, int) evaluates to True, so we need to check for bools separately
@@ -515,6 +522,43 @@ def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Cr
         cols = [table.int_value]
     elif isinstance(value, float) and op in ("$eq", "$ne"):
         cols = [table.float_value]
+    elif isinstance(value, list) and op in ("$in", "$nin"):
+        _v = value
+        if len(_v) == 0:
+            raise ValueError(f"Empty list for {op} operator")
+        if isinstance(value[0], str):
+            col_exprs = [
+                table.string_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.str_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], bool):
+            col_exprs = [
+                table.bool_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.bool_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], int):
+            col_exprs = [
+                table.int_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.int_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], float):
+            col_exprs = [
+                table.float_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.float_value.notin(ParameterValue(_v))
+            ]
+    elif isinstance(value, list) and op in ("$in", "$nin"):
+        col_exprs = [
+            table.int_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.int_value.notin(ParameterValue(value)),
+            table.float_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.float_value.notin(ParameterValue(value)),
+        ]
     else:
         cols = [table.int_value, table.float_value]
 

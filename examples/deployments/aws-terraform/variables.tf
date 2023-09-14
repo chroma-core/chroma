@@ -1,34 +1,21 @@
-variable "project_id" {
-  type        = string
-  description = "The project id to deploy to"
-}
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.9"
+  default     = "0.4.8"
 }
 
-variable "zone" {
-  type    = string
-  default = "us-central1-a"
-}
-
-variable "image" {
-  default     = "debian-cloud/debian-11"
-  description = "The image to use for the instance"
+variable "region" {
+  description = "AWS Region"
   type        = string
+  default     = "us-west-1"
 }
 
-variable "vm_user" {
-  default     = "debian"
-  description = "The user to use for connecting to the instance. This is usually the default image user"
+variable "instance_type" {
+  description = "AWS EC2 Instance Type"
   type        = string
+  default     = "t3.medium"
 }
 
-variable "machine_type" {
-  type    = string
-  default = "e2-small"
-}
 
 variable "public_access" {
   description = "Enable public ingress on port 8000"
@@ -75,10 +62,6 @@ locals {
   token_auth_credentials = {
     token = random_password.chroma_token.result
   }
-  tags = [
-    "chroma",
-    "release-${replace(var.chroma_release, ".", "")}",
-  ]
 }
 
 variable "ssh_public_key" {
@@ -99,44 +82,13 @@ variable "chroma_instance_volume_size" {
 }
 
 variable "chroma_data_volume_size" {
-  description = "Volume Size of the attached data volume where your chroma data is stored"
+  description = "EBS Volume Size of the attached data volume where your chroma data is stored"
   type        = number
   default     = 20
 }
 
-variable "chroma_data_volume_device_name" {
-  default     = "chroma-disk-0"
-  description = "The device name of the chroma data volume"
-  type        = string
-}
-
 variable "prevent_chroma_data_volume_delete" {
-  description = "Prevent the chroma data volume from being deleted when the instance is terminated"
-  type        = bool
-  default     = false
-}
-
-variable "disk_type" {
-  default     = "pd-ssd"
-  description = "The type of disk to use for the instance. Can be either pd-standard or pd-ssd"
-}
-
-variable "labels" {
-  default = {
-    environment = "dev"
-  }
-  description = "Labels to apply to all resources in this example"
-  type        = map(string)
-}
-
-variable "chroma_port" {
-  default     = "8000"
-  description = "The port that chroma listens on"
-  type        = string
-}
-
-variable "source_ranges" {
-  default     = ["0.0.0.0/0"]
-  type        = list(string)
-  description = "List of CIDR ranges to allow through the firewall"
+    description = "Prevent the chroma data volume from being deleted when the instance is terminated"
+    type        = bool
+    default     = false
 }
