@@ -399,3 +399,23 @@ class API(Component, ABC):
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
         pass
+
+    @abstractmethod
+    def get_system_info(
+        self,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
+    ) -> Dict[str, Any]:
+        """Get system info of the Chroma server.
+
+        Returns:
+            dict: The system info of the Chroma server.
+
+        """
+        pass
