@@ -1,7 +1,7 @@
 import random
 import uuid
 from random import randint
-from typing import cast, List, Any, TypedDict
+from typing import cast, List, Any, Dict
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
@@ -58,7 +58,7 @@ def create_large_recordset(
     metadatas = [{"some_key": f"{i}"} for i in range(size)]
     documents = [f"Document {i}" for i in range(size)]
     embeddings = [[1, 2, 3] for _ in range(size)]
-    record_set: TypedDict[str, List[Any]] = {
+    record_set: Dict[str, List[Any]] = {
         "ids": ids,
         "embeddings": cast(Embeddings, embeddings),
         "metadatas": metadatas,
