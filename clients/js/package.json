@@ -62,7 +62,7 @@
     "@visheratin/web-ai-node": "^1.0.0",
     "@xenova/transformers": "^2.0.0",
     "cohere-ai": "^6.0.0",
-    "openai": "^3.0.0 | ^4.0.0"
+    "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
     "@visheratin/web-ai": {
