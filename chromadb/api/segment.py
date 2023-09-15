@@ -31,12 +31,14 @@ from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
 import chromadb.types as t
 
-from typing import Optional, Sequence, Generator, List, cast, Set, Dict
+from typing import Optional, Sequence, Generator, List, cast, Set, Dict, Any
 from overrides import override
 from uuid import UUID, uuid4
 import time
 import logging
 import re
+
+from chromadb.utils import system_info_utils
 
 logger = logging.getLogger(__name__)
 
@@ -565,6 +567,30 @@ class SegmentAPI(API):
                 )
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
+
+    @override
+    def get_system_info(
+        self,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
+    ) -> Dict[str, Any]:
+        return system_info_utils.system_info(
+            python_version=python_version,
+            os_info=os_info,
+            memory_info=memory_info,
+            cpu_info=cpu_info,
+            disk_info=disk_info,
+            network_info=network_info,
+            env_vars=env_vars,
+            collections_info=collections_info,
+            api=self,
+        )
 
 
 def _records(

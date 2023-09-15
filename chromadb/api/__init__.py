@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Any, Dict
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
@@ -375,6 +375,26 @@ class API(Component, ABC):
 
         Returns:
             Settings: The settings used to initialize the client.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_system_info(
+        self,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
+    ) -> Dict[str, Any]:
+        """Get system info of the Chroma server.
+
+        Returns:
+            dict: The system info of the Chroma server.
 
         """
         pass

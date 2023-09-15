@@ -8,6 +8,7 @@ numpy==1.22.4; python_version >= '3.8'
 onnxruntime==1.14.1
 overrides==7.3.1
 posthog==2.4.0
+psutil>=5.9.5
 pulsar-client==3.1.0
 pydantic>=1.9,<2.0
 pypika==0.48.9

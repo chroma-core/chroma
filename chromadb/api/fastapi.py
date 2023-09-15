@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, cast
+from typing import Optional, cast, Dict, Any
 from typing import Sequence
 from uuid import UUID
 
@@ -433,6 +433,29 @@ class FastAPI(API):
     def get_settings(self) -> Settings:
         """Returns the settings of the client"""
         return self._settings
+
+    @override
+    def get_system_info(
+        self,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
+    ) -> Dict[str, Any]:
+        """Returns the system info of the server"""
+        resp = self._session.get(
+            self._api_url + f"/system-info?python_version={python_version}"
+            f"&os_info={os_info}&memory_info={memory_info}"
+            f"&cpu_info={cpu_info}&disk_info={disk_info}"
+            f"&network_info={network_info}&env_vars={env_vars}"
+            f"&collections_info={collections_info}"
+        )
+        raise_chroma_error(resp)
+        return cast(Dict[str, Any], resp.json())
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

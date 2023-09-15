@@ -1,4 +1,5 @@
 # type: ignore
+import requests
 
 import chromadb
 from chromadb.api.types import QueryResult
@@ -1362,3 +1363,12 @@ def test_invalid_embeddings(api):
     with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
     assert "embedding" in str(e.value)
+
+
+def test_system_info(api):
+    if not isinstance(api, chromadb.api.fastapi.FastAPI):
+        pytest.skip("Not a FastAPI instance")
+
+    resp = requests.get(f"{api._api_url}/system-info")
+    assert resp.status_code == 200
+    assert resp.json() is not None

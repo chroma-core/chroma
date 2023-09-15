@@ -1,14 +1,18 @@
+import logging
 from typing import Any, Callable, Dict, List, Sequence
-import fastapi
-from fastapi import FastAPI as _FastAPI, Response
-from fastapi.responses import JSONResponse
-
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.routing import APIRoute
-from fastapi import HTTPException, status
 from uuid import UUID
 
+import fastapi
+from fastapi import FastAPI as _FastAPI, Response
+from fastapi import HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from starlette.requests import Request
+
 import chromadb
+import chromadb.api
+import chromadb.server
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth.fastapi import (
@@ -16,8 +20,6 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddlewareWrapper,
 )
 from chromadb.config import Settings
-import chromadb.server
-import chromadb.api
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
@@ -32,9 +34,6 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
-from starlette.requests import Request
-
-import logging
 from chromadb.telemetry import ServerContext, Telemetry
 
 logger = logging.getLogger(__name__)
@@ -125,6 +124,9 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/system-info", self.system_info, methods=["GET"]
+        )
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
 
         self.router.add_api_route(
@@ -217,6 +219,28 @@ class FastAPI(chromadb.server.Server):
 
     def version(self) -> str:
         return self._api.get_version()
+
+    def system_info(
+        self,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
+    ) -> Dict[str, Any]:
+        return self._api.get_system_info(
+            python_version=python_version,
+            os_info=os_info,
+            memory_info=memory_info,
+            cpu_info=cpu_info,
+            disk_info=disk_info,
+            network_info=network_info,
+            env_vars=env_vars,
+            collections_info=collections_info,
+        )
 
     def list_collections(self) -> Sequence[Collection]:
         return self._api.list_collections()
