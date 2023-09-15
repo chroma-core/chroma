@@ -1,12 +1,12 @@
 import random
 import uuid
 from random import randint
-from typing import cast
+from typing import cast, List, Any, TypedDict
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import API
-from chromadb.api.types import Embeddings
+from chromadb.api.types import Embeddings, Metadatas
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.utils.batch_utils import create_batches
@@ -58,12 +58,13 @@ def create_large_recordset(
     metadatas = [{"some_key": f"{i}"} for i in range(size)]
     documents = [f"Document {i}" for i in range(size)]
     embeddings = [[1, 2, 3] for _ in range(size)]
-    return {
+    record_set: TypedDict[str, List[Any]] = {
         "ids": ids,
-        "embeddings": embeddings,
+        "embeddings": cast(Embeddings, embeddings),
         "metadatas": metadatas,
         "documents": documents,
     }
+    return record_set
 
 
 @given(collection=collection_st)
@@ -85,7 +86,13 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
         with pytest.raises(Exception):
             coll.add(**normalized_record_set)
         return
-    for batch in create_batches(api, **record_set):
+    for batch in create_batches(
+        api.max_batch_size,
+        ids=cast(List[str], record_set["ids"]),
+        embeddings=cast(Embeddings, record_set["embeddings"]),
+        metadatas=cast(Metadatas, record_set["metadatas"]),
+        documents=cast(List[str], record_set["documents"]),
+    ):
         coll.add(*batch)
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
 
