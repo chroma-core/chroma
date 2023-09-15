@@ -1,5 +1,4 @@
 import json
-from typing import Optional, cast, Tuple
 import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
@@ -36,7 +35,6 @@ from chromadb.telemetry import Telemetry
 from urllib.parse import urlparse, urlunparse, quote
 
 logger = logging.getLogger(__name__)
-from chromadb.utils.batch_utils import create_batches
 
 
 class FastAPI(API):
@@ -441,9 +439,9 @@ class FastAPI(API):
     @property
     @override
     def max_batch_size(self) -> int:
-        resp = self._session.get(self._api_url + "/pre-flight-checks")
-        raise_chroma_error(resp)
         if self._max_batch_size == -1:
+            resp = self._session.get(self._api_url + "/pre-flight-checks")
+            raise_chroma_error(resp)
             self._max_batch_size = cast(int, resp.json()["max_batch_size"])
         return self._max_batch_size
 

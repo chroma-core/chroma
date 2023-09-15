@@ -87,7 +87,7 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
             coll.add(**normalized_record_set)
         return
     for batch in create_batches(
-        api.max_batch_size,
+        api=api,
         ids=cast(List[str], record_set["ids"]),
         embeddings=cast(Embeddings, record_set["embeddings"]),
         metadatas=cast(Metadatas, record_set["metadatas"]),

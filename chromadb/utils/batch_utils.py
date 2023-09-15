@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, List
-
+from chromadb.api import API
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -9,7 +9,7 @@ from chromadb.api.types import (
 
 
 def create_batches(
-    max_batch_size: int,
+    api: API,
     ids: IDs,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
@@ -18,15 +18,15 @@ def create_batches(
     _batches: List[
         Tuple[IDs, Embeddings, Optional[Metadatas], Optional[Documents]]
     ] = []
-    if len(ids) > max_batch_size:
+    if len(ids) > api.max_batch_size:
         # create split batches
-        for i in range(0, len(ids), max_batch_size):
+        for i in range(0, len(ids), api.max_batch_size):
             _batches.append(
                 (  # type: ignore
-                    ids[i : i + max_batch_size],
-                    embeddings[i : i + max_batch_size] if embeddings else None,
-                    metadatas[i : i + max_batch_size] if metadatas else None,
-                    documents[i : i + max_batch_size] if documents else None,
+                    ids[i : i + api.max_batch_size],
+                    embeddings[i : i + api.max_batch_size] if embeddings else None,
+                    metadatas[i : i + api.max_batch_size] if metadatas else None,
+                    documents[i : i + api.max_batch_size] if documents else None,
                 )
             )
     else:
