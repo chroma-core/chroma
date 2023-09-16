@@ -31,7 +31,7 @@ def test_system_info() -> None:
     result = runner.invoke(
         app,
         [
-            "system-info",
+            "env",
         ],
     )
     assert "chroma_version" in result.stdout
@@ -53,7 +53,7 @@ def test_system_info_with_remote() -> None:
     result = runner.invoke(
         app,
         [
-            "system-info",
+            "env",
             "--remote",
             f"http://localhost:{os.environ.get('CHROMA_SERVER_HTTP_PORT', 8000)}",
         ],
@@ -90,7 +90,7 @@ def test_system_info_with_flags(flags_dict: List[Dict[str, List[str]]]) -> None:
 
     result = runner.invoke(
         app,
-        ["system-info", *flags],
+        ["env", *flags],
     )
 
     for flag in check_response_flags:
