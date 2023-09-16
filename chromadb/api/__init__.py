@@ -401,7 +401,7 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
-    def get_system_info(
+    def env(
         self,
         python_version: bool = True,
         os_info: bool = True,
