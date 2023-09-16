@@ -3,9 +3,10 @@ import logging
 import os
 import platform
 import socket
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, cast
 import re
 import chromadb
+from chromadb.config import Settings
 from chromadb.api import API
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ except ImportError:
     )
 
 SENSITIVE_VARS_PATTERNS = [".*PASSWORD.*", ".*KEY.*", ".*AUTH.*"]
+SENSITIVE_SETTINGS_PATTERNS = [".*credentials.*"]
 
 
 def sanitized_environ() -> Dict[str, str]:
@@ -54,19 +56,30 @@ def get_release_info(system: str) -> str:
         return "Unknown OS"
 
 
+def sanitize_settings(settings: Settings) -> Dict[str, Any]:
+    _settings_dict = settings.dict()
+    for key in _settings_dict.keys():
+        if any(re.match(pattern, key) for pattern in SENSITIVE_VARS_PATTERNS):
+            _settings_dict[key] = "*****"
+        if any(re.match(pattern, key) for pattern in SENSITIVE_SETTINGS_PATTERNS):
+            _settings_dict[key] = "*****"
+    return cast(Dict[str, Any], _settings_dict)
+
+
 def system_info(
     api: Optional[API] = None,
     python_version: bool = True,
     os_info: bool = True,
     memory_info: bool = True,
     cpu_info: bool = True,
-    disk_info: bool = True,
-    network_info: bool = True,
-    env_vars: bool = True,
-    collections_info: bool = True,
+    disk_info: bool = False,
+    network_info: bool = False,
+    env_vars: bool = False,
+    collections_info: bool = False,
 ) -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "chroma_version": chromadb.__version__,
+        "chroma_settings": sanitize_settings(api.get_settings()) if api else {},
         "datetime": datetime.datetime.now().isoformat(),
     }
 

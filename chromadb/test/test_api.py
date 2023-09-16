@@ -1365,10 +1365,18 @@ def test_invalid_embeddings(api):
     assert "embedding" in str(e.value)
 
 
-def test_system_info(api):
-    if not isinstance(api, chromadb.api.fastapi.FastAPI):
-        pytest.skip("Not a FastAPI instance")
-
-    resp = requests.get(f"{api._api_url}/system-info")
-    assert resp.status_code == 200
-    assert resp.json() is not None
+def test_system_info(api_obs):
+    if not isinstance(api_obs, chromadb.api.fastapi.FastAPI):
+        _env = api_obs.env()
+        assert _env is not None
+        assert _env["chroma_version"] is not None
+        assert _env["chroma_settings"] is not None
+    elif api_obs.get_settings().chroma_server_env_endpoint_enabled:
+        resp = requests.get(f"{api_obs._api_url}/env")
+        assert resp.status_code == 200
+        assert resp.json() is not None
+        assert resp.json()["chroma_version"] is not None
+        assert resp.json()["chroma_settings"] is not None
+    else:
+        resp = requests.get(f"{api_obs._api_url}/env")
+        assert resp.status_code == 404

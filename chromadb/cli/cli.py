@@ -91,7 +91,7 @@ def run(
 
 
 @app.command(help="Local and remote Chroma system information")  # type: ignore
-def system_info(
+def env(
     remote: str = typer.Option(
         None, help="Remote Chroma server to connect to.", show_envvar=False, hidden=True
     ),
@@ -109,7 +109,7 @@ def system_info(
 ) -> None:
     if remote:
         remote_response = requests.get(
-            f"{remote}/api/v1/system-info?python_version={python_version}&os_info={os_info}&memory_info={memory_info}"
+            f"{remote}/api/v1/env?python_version={python_version}&os_info={os_info}&memory_info={memory_info}"
             f"&cpu_info={cpu_info}&disk_info={disk_info}&network_info={network_info}&env_vars={env_vars}"
             f"&collections_info={collections_info}"
         )
@@ -130,7 +130,7 @@ def system_info(
             raise typer.Exit(code=1)
         client = chromadb.PersistentClient(path=path)
         rprint(
-            client.get_system_info(
+            client.env(
                 python_version=python_version,
                 os_info=os_info,
                 memory_info=memory_info,
@@ -169,7 +169,7 @@ def rstat(
 ) -> None:
     while True:
         remote_response = requests.get(
-            f"{remote}/api/v1/system-info?python_version=false&os_info=false&memory_info=true"
+            f"{remote}/api/v1/env?python_version=false&os_info=false&memory_info=true"
             f"&cpu_info=true&disk_info=false&network_info=false&env_vars=false"
             f"&collections_info=false"
         )

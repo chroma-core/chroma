@@ -435,7 +435,7 @@ class FastAPI(API):
         return self._settings
 
     @override
-    def get_system_info(
+    def env(
         self,
         python_version: bool = True,
         os_info: bool = True,

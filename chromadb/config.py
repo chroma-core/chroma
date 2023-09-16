@@ -143,6 +143,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_client_auth_credentials: Optional[str] = None
     chroma_client_auth_token_transport_header: Optional[str] = None
     chroma_server_auth_token_transport_header: Optional[str] = None
+    chroma_server_env_endpoint_enabled: bool = False
 
     anonymized_telemetry: bool = True
 

@@ -124,9 +124,8 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route(
-            "/api/v1/system-info", self.system_info, methods=["GET"]
-        )
+        if settings.chroma_server_env_endpoint_enabled:
+            self.router.add_api_route("/api/v1/env", self.env, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
 
         self.router.add_api_route(
@@ -220,7 +219,7 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def system_info(
+    def env(
         self,
         python_version: bool = True,
         os_info: bool = True,
@@ -231,7 +230,7 @@ class FastAPI(chromadb.server.Server):
         env_vars: bool = False,
         collections_info: bool = False,
     ) -> Dict[str, Any]:
-        return self._api.get_system_info(
+        return self._api.env(
             python_version=python_version,
             os_info=os_info,
             memory_info=memory_info,
