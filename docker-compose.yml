@@ -22,7 +22,6 @@ services:
       - CHROMA_SERVER_AUTH_CREDENTIALS=${CHROMA_SERVER_AUTH_CREDENTIALS}
       - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=${CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER}
       - PERSIST_DIRECTORY=${PERSIST_DIRECTORY:-/chroma/chroma}
-      - chroma_server_env_endpoint_enabled=1
     ports:
       - 8000:8000
     networks:

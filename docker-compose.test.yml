@@ -17,6 +17,7 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
       - IS_PERSISTENT=TRUE
+      - CHROMA_SERVER_ENV_ENDPOINT_ENABLED=1
     ports:
       - ${CHROMA_PORT}:8000
     networks:
