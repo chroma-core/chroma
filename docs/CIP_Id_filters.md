@@ -18,7 +18,7 @@ The changes will affect the following public interfaces:
 
 We suggest the introduction of a new `where_id` argument to `query()`.
 
-We suggest the following new definition:
+The following new definition will be introduced:
 
 ```python
 
