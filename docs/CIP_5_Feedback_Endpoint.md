@@ -49,9 +49,12 @@ When tuning is complete, the collection's `embedding_function` will be updated t
 Introducing the capabiltiy to tune the embedding space with respect to human feedback reqiures several components.
 
 - An API endpoint to collect feedback signal. We propose adding this endpoint on a collection, since there is a 1:1 relationship between collection and embedding model.
-- A way to store feedback such that it can be accessed by the tuning process. Initially we propose creating a 'feedback' collection for each collection which has feedback. The feedback collection will be created automatically the first time `add_feedback` is called on a collection.
-  - Queries and results are stored in the same feedback collection, separated and associated via metadata.
-  - The feedback collection itself is associated with the query collection via collection metadata.
+- A way to store feedback such that it can be accessed by the tuning process.
+
+Initially we propose creating a 'feedback' collection for each collection which has feedback. The feedback collection will be created automatically the first time `add_feedback` is called on a collection.
+
+- Queries and results are stored in the same feedback collection, separated and associated via metadata.
+- The feedback collection itself is associated with the query collection via collection metadata.
 
 ```
 
