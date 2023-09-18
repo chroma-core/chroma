@@ -118,7 +118,10 @@ class BasicAuthClientAuthProvider implements ClientAuthProvider {
      * @throws {Error} If neither credentials provider or text credentials are supplied.
      */
 
-    constructor(options: { textCredentials: any; credentialsProvider: ClientAuthCredentialsProvider<any> | undefined }) {
+    constructor(options: {
+        textCredentials: any;
+        credentialsProvider: ClientAuthCredentialsProvider<any> | undefined
+    }) {
         if (!options.credentialsProvider && !options.textCredentials) {
             throw new Error("Either credentials provider or text credentials must be supplied.");
         }
@@ -129,6 +132,85 @@ class BasicAuthClientAuthProvider implements ClientAuthProvider {
         return new BasicAuthClientAuthResponse(this.credentialsProvider.getCredentials());
     }
 }
+
+class TokenAuthCredentials implements AbstractCredentials<SecretStr> {
+    private readonly credentials: SecretStr;
+
+    constructor(_creds: string) {
+        this.credentials = new SecretStr(_creds)
+    }
+
+    getCredentials(): SecretStr {
+        return this.credentials;
+    }
+}
+
+export class TokenCredentialsProvider implements ClientAuthCredentialsProvider<TokenAuthCredentials> {
+    private readonly credentials: TokenAuthCredentials;
+
+    constructor(_creds: string | undefined) {
+        if (_creds === undefined && !process.env.CHROMA_CLIENT_AUTH_CREDENTIALS) throw new Error("Credentials must be supplied via environment variable (CHROMA_CLIENT_AUTH_CREDENTIALS) or passed in as configuration.");
+        this.credentials = new TokenAuthCredentials((_creds ?? process.env.CHROMA_CLIENT_AUTH_CREDENTIALS) as string);
+    }
+
+    getCredentials(): TokenAuthCredentials {
+        return this.credentials;
+    }
+}
+
+export class TokenClientAuthProvider implements ClientAuthProvider {
+    private readonly credentialsProvider: ClientAuthCredentialsProvider<any>;
+    private readonly providerOptions: { headerType: TokenHeaderType };
+
+    constructor(options: {
+        textCredentials: any;
+        credentialsProvider: ClientAuthCredentialsProvider<any> | undefined,
+        providerOptions?: { headerType: TokenHeaderType }
+    }) {
+        if (!options.credentialsProvider && !options.textCredentials) {
+            throw new Error("Either credentials provider or text credentials must be supplied.");
+        }
+        if (options.providerOptions === undefined || !options.providerOptions.hasOwnProperty("headerType")) {
+            this.providerOptions = {headerType: "AUTHORIZATION"};
+        } else {
+            this.providerOptions = {headerType: options.providerOptions.headerType};
+        }
+        this.credentialsProvider = options.credentialsProvider || new TokenCredentialsProvider(options.textCredentials);
+    }
+
+    authenticate(): ClientAuthResponse {
+        return new TokenClientAuthResponse(this.credentialsProvider.getCredentials(), this.providerOptions.headerType);
+    }
+
+}
+
+
+type TokenHeaderType = 'AUTHORIZATION' | 'X_CHROMA_TOKEN';
+
+const TokenHeader: Record<TokenHeaderType, (value: string) => { key: string; value: string; }> = {
+    AUTHORIZATION: (value: string) => ({key: "Authorization", value: `Bearer ${value}`}),
+    X_CHROMA_TOKEN: (value: string) => ({key: "X-Chroma-Token", value: value})
+}
+
+class TokenClientAuthResponse implements ClientAuthResponse {
+    constructor(private readonly credentials: TokenAuthCredentials, private readonly headerType: TokenHeaderType = 'AUTHORIZATION') {
+    }
+
+    getAuthInfo(): { key: string; value: string } {
+        if (this.headerType === 'AUTHORIZATION') {
+            return TokenHeader.AUTHORIZATION(this.credentials.getCredentials().getSecret());
+        } else if (this.headerType === 'X_CHROMA_TOKEN') {
+            return TokenHeader.X_CHROMA_TOKEN(this.credentials.getCredentials().getSecret());
+        } else {
+            throw new Error("Invalid header type: " + this.headerType + ". Valid types are: " + Object.keys(TokenHeader).join(", "));
+        }
+    }
+
+    getAuthInfoType(): AuthInfoType {
+        return AuthInfoType.HEADER;
+    }
+}
+
 
 export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProtocolAdapter<RequestInit> {
     authProvider: ClientAuthProvider | undefined;
@@ -144,7 +226,17 @@ export class IsomorphicFetchClientAuthProtocolAdapter implements ClientAuthProto
 
         switch (authConfiguration.provider) {
             case "basic":
-                this.authProvider = new BasicAuthClientAuthProvider({textCredentials: authConfiguration.credentials, credentialsProvider: authConfiguration.credentialsProvider});
+                this.authProvider = new BasicAuthClientAuthProvider({
+                    textCredentials: authConfiguration.credentials,
+                    credentialsProvider: authConfiguration.credentialsProvider
+                });
+                break;
+            case "token":
+                this.authProvider = new TokenClientAuthProvider({
+                    textCredentials: authConfiguration.credentials,
+                    credentialsProvider: authConfiguration.credentialsProvider,
+                    providerOptions: authConfiguration.providerOptions
+                });
                 break;
             default:
                 this.authProvider = undefined;
@@ -225,4 +317,5 @@ export type AuthOptions = {
     credentialsProvider?: ClientAuthCredentialsProvider<any> | undefined,
     configProvider?: ClientAuthConfigurationProvider<any> | undefined,
     credentials?: any | undefined,
+    providerOptions?: any | undefined
 }
