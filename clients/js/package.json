@@ -65,22 +65,10 @@
     "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
-    "@visheratin/web-ai": "^1.0.0",
-    "@visheratin/web-ai-node": "^1.0.0",
-    "@xenova/transformers": "^2.0.0",
-    "cohere-ai": "^6.0.0",
+    "cohere-ai": "^5.1.0",
     "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@visheratin/web-ai": {
-      "optional": true
-    },
-    "@visheratin/web-ai-node": {
-      "optional": true
-    },
-    "@xenova/transformers": {
-      "optional": true
-    },
     "cohere-ai": {
       "optional": true
     },
