@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any
+from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any, Tuple
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -367,3 +367,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
                 f"Expected each value in the embedding to be a int or float, got {embeddings}"
             )
     return embeddings
+
+
+def validate_batch(
+    batch: Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]],
+    limits: Dict[str, Any],
+) -> None:
+    if len(batch[0]) > limits["max_batch_size"]:
+        raise ValueError(
+            f"Batch size {len(batch[0])} exceeds maximum batch size {limits['max_batch_size']}"
+        )

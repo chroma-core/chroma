@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, cast, Dict, Any
+from typing import Optional, cast, Tuple, Dict, Any
 from typing import Sequence
 from uuid import UUID
 
@@ -23,6 +23,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
+    validate_batch,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 class FastAPI(API):
     _settings: Settings
+    _max_batch_size: int = -1
 
     @staticmethod
     def _validate_host(host: str) -> None:
@@ -296,6 +298,29 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(IDs, resp.json())
 
+    def _submit_batch(
+        self,
+        batch: Tuple[
+            IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]
+        ],
+        url: str,
+    ) -> requests.Response:
+        """
+        Submits a batch of embeddings to the database
+        """
+        resp = self._session.post(
+            self._api_url + url,
+            data=json.dumps(
+                {
+                    "ids": batch[0],
+                    "embeddings": batch[1],
+                    "metadatas": batch[2],
+                    "documents": batch[3],
+                }
+            ),
+        )
+        return resp
+
     @override
     def _add(
         self,
@@ -309,18 +334,9 @@ class FastAPI(API):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/add",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                }
-            ),
-        )
-
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
         return True
 
@@ -337,18 +353,11 @@ class FastAPI(API):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/update",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                }
-            ),
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/update"
         )
-
         resp.raise_for_status()
         return True
 
@@ -365,18 +374,11 @@ class FastAPI(API):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/upsert",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                }
-            ),
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/upsert"
         )
-
         resp.raise_for_status()
         return True
 
@@ -456,6 +458,15 @@ class FastAPI(API):
         )
         raise_chroma_error(resp)
         return cast(Dict[str, Any], resp.json())
+
+    @property
+    @override
+    def max_batch_size(self) -> int:
+        if self._max_batch_size == -1:
+            resp = self._session.get(self._api_url + "/pre-flight-checks")
+            raise_chroma_error(resp)
+            self._max_batch_size = cast(int, resp.json()["max_batch_size"])
+        return self._max_batch_size
 
 
 def raise_chroma_error(resp: requests.Response) -> None:
