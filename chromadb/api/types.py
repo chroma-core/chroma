@@ -467,7 +467,7 @@ def validate_n_results(n_results: int) -> int:
 def validate_embeddings(
     embeddings: Union[Embeddings, np.ndarray[Any, Any]]
 ) -> Embeddings:
-    """Validates embeddings to ensure it is a list of list of ints, or floats"""
+    """Validates embeddings to ensure it is a list of list of ints, or floats. If it is a valid numpy array, it casts it to a python list."""
     if not isinstance(embeddings, (list, np.ndarray)):
         raise ValueError(f"Expected embeddings to be a list, got {embeddings}")
     if len(embeddings) == 0:
