@@ -378,3 +378,10 @@ class API(Component, ABC):
 
         """
         pass
+
+    @property
+    @abstractmethod
+    def max_batch_size(self) -> int:
+        """Return the maximum number of records that can be submitted in a single call
+        to submit_embeddings."""
+        pass
