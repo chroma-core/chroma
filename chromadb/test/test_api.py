@@ -1,6 +1,8 @@
 # type: ignore
+import requests
 
 import chromadb
+from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 import chromadb.server.fastapi
@@ -162,6 +164,22 @@ def test_heartbeat(api):
     heartbeat_s = heartbeat_ns // 10**9
     heartbeat = datetime.fromtimestamp(heartbeat_s)
     assert heartbeat > datetime.now() - timedelta(seconds=10)
+
+
+def test_max_batch_size(api):
+    print(api)
+    batch_size = api.max_batch_size
+    assert batch_size > 0
+
+
+def test_pre_flight_checks(api):
+    if not isinstance(api, FastAPI):
+        pytest.skip("Not a FastAPI instance")
+
+    resp = requests.get(f"{api._api_url}/pre-flight-checks")
+    assert resp.status_code == 200
+    assert resp.json() is not None
+    assert "max_batch_size" in resp.json().keys()
 
 
 batch_records = {
