@@ -6,10 +6,24 @@ import socket
 from typing import Dict, Any, Optional, cast
 import re
 import chromadb
+from chromadb.api.types import SystemInfoFlags
 from chromadb.config import Settings
 from chromadb.api import API
 
 logger = logging.getLogger(__name__)
+
+
+def format_size(size_in_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    unit_index = 0
+    size = float(size_in_bytes)
+
+    while size > 1024 and unit_index < 4:
+        size /= 1024.0
+        unit_index += 1
+
+    return f"{size:.2f} {units[unit_index]}"
+
 
 try:
     import psutil
@@ -68,15 +82,9 @@ def sanitize_settings(settings: Settings) -> Dict[str, Any]:
 
 def system_info(
     api: Optional[API] = None,
-    python_version: bool = True,
-    os_info: bool = True,
-    memory_info: bool = True,
-    cpu_info: bool = True,
-    disk_info: bool = False,
-    network_info: bool = False,
-    env_vars: bool = False,
-    collections_info: bool = False,
+    system_info_flags: Optional[SystemInfoFlags] = None,
 ) -> Dict[str, Any]:
+    _flags = system_info_flags or SystemInfoFlags()
     data: Dict[str, Any] = {
         "chroma_version": chromadb.__version__,
         "chroma_settings": sanitize_settings(api.get_settings()) if api else {},
@@ -88,15 +96,15 @@ def system_info(
             api.get_settings().persist_directory if api else ""
         )
 
-    if python_version:
+    if _flags.python_version:
         data["python_version"] = platform.python_version()
 
-    if os_info:
+    if _flags.os_info:
         data["os"] = platform.system()
         data["os_version"] = platform.release()
         data["os_release"] = get_release_info(system=platform.system())
 
-    if memory_info and PSUTIL_INSTALLED:
+    if _flags.memory_info and PSUTIL_INSTALLED:
         mem = psutil.virtual_memory()
         process = psutil.Process(os.getpid())
         memory_info = process.memory_info()
@@ -105,11 +113,11 @@ def system_info(
             "total_memory": mem.total,
         }
         data["memory_info"]["process_memory"] = {
-            "rss": memory_info.rss,  # type: ignore
-            "vms": memory_info.vms,  # type: ignore
+            "rss": memory_info.rss,
+            "vms": memory_info.vms,
         }
 
-    if cpu_info:
+    if _flags.cpu_info:
         data["cpu_info"] = {
             "architecture": platform.machine(),
             "number_of_cpus": os.cpu_count(),
@@ -117,7 +125,7 @@ def system_info(
         if PSUTIL_INSTALLED:
             data["cpu_info"]["cpu_usage"] = psutil.cpu_percent(interval=1)
 
-    if disk_info and PSUTIL_INSTALLED:
+    if _flags.disk_info and PSUTIL_INSTALLED:
         disk = psutil.disk_usage("/")
         data["disk_info"] = {
             "total_space": disk.total,
@@ -125,17 +133,17 @@ def system_info(
             "free_space": disk.free,
         }
 
-    if network_info and PSUTIL_INSTALLED:
+    if _flags.network_info and PSUTIL_INSTALLED:
         ip_info = {
             interface: [addr.address for addr in addrs if addr.family == socket.AF_INET]
             for interface, addrs in psutil.net_if_addrs().items()
         }
         data["network_info"] = ip_info
 
-    if env_vars:
+    if _flags.env_vars:
         data["env_vars"] = sanitized_environ()
 
-    if collections_info and api:
+    if _flags.collections_info and api:
         data["collections_info"] = [
             {
                 "name": collection.name,

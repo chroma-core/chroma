@@ -27,6 +27,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    SystemInfoFlags,
 )
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
@@ -603,25 +604,10 @@ class SegmentAPI(API):
 
     @override
     def env(
-        self,
-        python_version: bool = True,
-        os_info: bool = True,
-        memory_info: bool = True,
-        cpu_info: bool = True,
-        disk_info: bool = False,
-        network_info: bool = False,
-        env_vars: bool = False,
-        collections_info: bool = False,
+        self, system_info_flags: Optional[SystemInfoFlags] = None
     ) -> Dict[str, Any]:
         return system_info_utils.system_info(
-            python_version=python_version,
-            os_info=os_info,
-            memory_info=memory_info,
-            cpu_info=cpu_info,
-            disk_info=disk_info,
-            network_info=network_info,
-            env_vars=env_vars,
-            collections_info=collections_info,
+            system_info_flags=system_info_flags or SystemInfoFlags(),
             api=self,
         )
 

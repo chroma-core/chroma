@@ -40,13 +40,13 @@ the `CHROMA_SERVER_ENV_ENDPOINT_ENABLED=1` on the server.
 
 We also suggest the introduction of two cli commands:
 
-- `chroma env` that will print the system information to the console.
-- `chroma rstat` that will continuously print CPU and memory usage statistics to the console.
+- `chroma env info` that will print the system information to the console.
+- `chroma env rstat` that will continuously print CPU and memory usage statistics to the console.
 
 ### Example Usage
 
 ```bash
-chroma env --remote http://localhost:8000 --path ./chroma --collections-info
+chroma env info --remote http://localhost:8000 --path ./chroma --collections-info
 
 ===================================== Remote system info =====================================
 {
@@ -275,7 +275,7 @@ curl http://localhost:8000/api/v1/env?python_version=True&os_info=True&memory_in
 ```
 
 ```bash
-chroma rstat --remote http://localhost:8000 --interval 5
+chroma env rstat --remote http://localhost:8000 --interval 5
 0.3 %   77.79 MB
 0.3 %   77.79 MB
 0.2 %   77.79 MB
@@ -283,8 +283,6 @@ chroma rstat --remote http://localhost:8000 --interval 5
 ^C
 Aborted.
 ```
-
-> Note: To get friendlier version of the
 
 ## Proposed Changes
 

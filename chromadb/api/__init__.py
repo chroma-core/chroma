@@ -14,6 +14,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    SystemInfoFlags,
 )
 from chromadb.config import Component, Settings
 import chromadb.utils.embedding_functions as ef
@@ -382,14 +383,7 @@ class API(Component, ABC):
     @abstractmethod
     def env(
         self,
-        python_version: bool = True,
-        os_info: bool = True,
-        memory_info: bool = True,
-        cpu_info: bool = True,
-        disk_info: bool = False,
-        network_info: bool = False,
-        env_vars: bool = False,
-        collections_info: bool = False,
+        system_info_flags: Optional[SystemInfoFlags] = None,
     ) -> Dict[str, Any]:
         """Get system info of the Chroma server.
 
@@ -398,7 +392,7 @@ class API(Component, ABC):
 
         """
         pass
-      
+
     @property
     @abstractmethod
     def max_batch_size(self) -> int:

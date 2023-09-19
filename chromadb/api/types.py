@@ -1,4 +1,14 @@
-from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any, Tuple
+from typing import (
+    Optional,
+    Union,
+    Sequence,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    NamedTuple,
+)
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -79,6 +89,21 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
+
+
+class SystemInfoFlags(NamedTuple):
+    """
+    Flags for the system info endpoint
+    """
+
+    python_version: bool = True
+    os_info: bool = True
+    memory_info: bool = True
+    cpu_info: bool = True
+    disk_info: bool = False
+    network_info: bool = False
+    env_vars: bool = False
+    collections_info: bool = False
 
 
 class EmbeddingFunction(Protocol):

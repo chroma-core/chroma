@@ -24,6 +24,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    SystemInfoFlags,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -438,24 +439,12 @@ class FastAPI(API):
 
     @override
     def env(
-        self,
-        python_version: bool = True,
-        os_info: bool = True,
-        memory_info: bool = True,
-        cpu_info: bool = True,
-        disk_info: bool = False,
-        network_info: bool = False,
-        env_vars: bool = False,
-        collections_info: bool = False,
+        self, system_info_flags: Optional[SystemInfoFlags] = None
     ) -> Dict[str, Any]:
         """Returns the system info of the server"""
-        resp = self._session.get(
-            self._api_url + f"/system-info?python_version={python_version}"
-            f"&os_info={os_info}&memory_info={memory_info}"
-            f"&cpu_info={cpu_info}&disk_info={disk_info}"
-            f"&network_info={network_info}&env_vars={env_vars}"
-            f"&collections_info={collections_info}"
-        )
+        _sys_flags = system_info_flags or SystemInfoFlags()
+        params = {field: getattr(_sys_flags, field) for field in _sys_flags._fields}
+        resp = self._session.get(self._api_url + "/env", params=params)
         raise_chroma_error(resp)
         return cast(Dict[str, Any], resp.json())
 

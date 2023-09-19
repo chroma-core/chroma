@@ -3,18 +3,17 @@ from typing import Any, Callable, Dict, List, Sequence
 from uuid import UUID
 
 import fastapi
-from fastapi import FastAPI as _FastAPI, Response
+from fastapi import FastAPI as _FastAPI, Response, Depends
 from fastapi import HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from starlette.requests import Request
-
 import chromadb
 import chromadb.api
 import chromadb.server
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import GetResult, QueryResult, SystemInfoFlags
 from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
@@ -69,6 +68,37 @@ def _uuid(uuid_str: str) -> UUID:
         return UUID(uuid_str)
     except ValueError:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
+
+
+def query_bool(
+    query: str,
+    default: bool,
+) -> bool:
+    if query is None:
+        return default
+    return query.lower() == "true"
+
+
+async def env_query_params(
+    python_version: bool = True,
+    os_info: bool = True,
+    memory_info: bool = True,
+    cpu_info: bool = True,
+    disk_info: bool = False,
+    network_info: bool = False,
+    env_vars: bool = False,
+    collections_info: bool = False,
+) -> SystemInfoFlags:
+    return SystemInfoFlags(
+        python_version=python_version,
+        os_info=os_info,
+        memory_info=memory_info,
+        cpu_info=cpu_info,
+        disk_info=disk_info,
+        network_info=network_info,
+        env_vars=env_vars,
+        collections_info=collections_info,
+    )
 
 
 class ChromaAPIRouter(fastapi.APIRouter):
@@ -224,25 +254,9 @@ class FastAPI(chromadb.server.Server):
 
     def env(
         self,
-        python_version: bool = True,
-        os_info: bool = True,
-        memory_info: bool = True,
-        cpu_info: bool = True,
-        disk_info: bool = False,
-        network_info: bool = False,
-        env_vars: bool = False,
-        collections_info: bool = False,
+        system_info_flags: SystemInfoFlags = Depends(env_query_params),
     ) -> Dict[str, Any]:
-        return self._api.env(
-            python_version=python_version,
-            os_info=os_info,
-            memory_info=memory_info,
-            cpu_info=cpu_info,
-            disk_info=disk_info,
-            network_info=network_info,
-            env_vars=env_vars,
-            collections_info=collections_info,
-        )
+        return self._api.env(system_info_flags=system_info_flags)
 
     def list_collections(self) -> Sequence[Collection]:
         return self._api.list_collections()
