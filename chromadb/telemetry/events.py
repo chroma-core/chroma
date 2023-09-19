@@ -1,58 +1,68 @@
-from dataclasses import dataclass
 from typing import cast, ClassVar
 from chromadb.telemetry import TelemetryEvent
 
 
-@dataclass
 class ClientStartEvent(TelemetryEvent):
     name: ClassVar[str] = "client_start"
 
-
-@dataclass
-class ServerStartEvent(TelemetryEvent):
-    name: ClassVar[str] = "server_start"
+    def __init__(self) -> None:
+        super().__init__()
 
 
-@dataclass
 class ClientCreateCollectionEvent(TelemetryEvent):
     name: ClassVar[str] = "client_create_collection"
     collection_uuid: str
     embedding_function: str
 
+    def __init__(self, collection_uuid: str, embedding_function: str):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.embedding_function = embedding_function
 
-@dataclass
+
 class CollectionAddEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_add"
+    max_batch_size: ClassVar[int] = 20
     collection_uuid: str
     add_amount: int
-    with_embeddings: bool
-    with_metadata: bool
-    with_documents: bool
-    batch_size = 4
+    with_documents: int
+    with_metadata: int
+
+    def __init__(
+        self,
+        collection_uuid: str,
+        add_amount: int,
+        with_documents: int,
+        with_metadata: int,
+        batch_size: int = 1,
+    ):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.add_amount = add_amount
+        self.with_documents = with_documents
+        self.with_metadata = with_metadata
+        self.batch_size = batch_size
 
     def can_batch(self, other: TelemetryEvent) -> bool:
         return (
             isinstance(other, CollectionAddEvent)
             and self.collection_uuid == other.collection_uuid
-            and self.with_embeddings == other.with_embeddings
-            and self.with_metadata == other.with_metadata
-            and self.with_documents == other.with_documents
         )
 
     def batch(self, other: "TelemetryEvent") -> "CollectionAddEvent":
         if not self.can_batch(other):
             raise ValueError("Cannot batch events")
         other = cast(CollectionAddEvent, other)
+        total_amount = self.add_amount + other.add_amount
         return CollectionAddEvent(
             collection_uuid=self.collection_uuid,
-            add_amount=self.add_amount + other.add_amount,
-            with_embeddings=self.with_embeddings,
-            with_metadata=self.with_metadata,
-            with_documents=self.with_documents,
+            add_amount=total_amount,
+            with_documents=self.with_documents + other.with_documents,
+            with_metadata=self.with_metadata + other.with_metadata,
+            batch_size=self.batch_size + other.batch_size,
         )
 
 
-@dataclass
 class CollectionUpdateEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_update"
     collection_uuid: str
@@ -61,8 +71,22 @@ class CollectionUpdateEvent(TelemetryEvent):
     with_metadata: bool
     with_documents: bool
 
+    def __init__(
+        self,
+        collection_uuid: str,
+        update_amount: int,
+        with_embeddings: bool,
+        with_metadata: bool,
+        with_documents: bool,
+    ):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.update_amount = update_amount
+        self.with_embeddings = with_embeddings
+        self.with_metadata = with_metadata
+        self.with_documents = with_documents
 
-@dataclass
+
 class CollectionQueryEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_query"
     collection_uuid: str
@@ -74,8 +98,28 @@ class CollectionQueryEvent(TelemetryEvent):
     include_documents: bool
     include_distances: bool
 
+    def __init__(
+        self,
+        collection_uuid: str,
+        query_amount: int,
+        with_metadata_filter: bool,
+        with_document_filter: bool,
+        n_results: int,
+        include_metadatas: bool,
+        include_documents: bool,
+        include_distances: bool,
+    ):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.query_amount = query_amount
+        self.with_metadata_filter = with_metadata_filter
+        self.with_document_filter = with_document_filter
+        self.n_results = n_results
+        self.include_metadatas = include_metadatas
+        self.include_documents = include_documents
+        self.include_distances = include_distances
 
-@dataclass
+
 class CollectionGetEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_get"
     collection_uuid: str
@@ -84,9 +128,28 @@ class CollectionGetEvent(TelemetryEvent):
     include_metadata: bool
     include_documents: bool
 
+    def __init__(
+        self,
+        collection_uuid: str,
+        ids_count: int,
+        limit: int,
+        include_metadata: bool,
+        include_documents: bool,
+    ):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.ids_count = ids_count
+        self.limit = limit
+        self.include_metadata = include_metadata
+        self.include_documents = include_documents
 
-@dataclass
+
 class CollectionDeleteEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_delete"
     collection_uuid: str
     delete_amount: int
+
+    def __init__(self, collection_uuid: str, delete_amount: int):
+        super().__init__()
+        self.collection_uuid = collection_uuid
+        self.delete_amount = delete_amount

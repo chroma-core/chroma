@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from dataclasses import asdict, dataclass
 import os
 from typing import Callable, ClassVar, Dict, Any
 import uuid
@@ -22,14 +21,17 @@ class ServerContext(Enum):
     FASTAPI = "FastAPI"
 
 
-@dataclass
 class TelemetryEvent:
     name: ClassVar[str]
-    batch_size: ClassVar[int] = 1
+    max_batch_size: ClassVar[int] = 1
+    batch_size: int
+
+    def __init__(self, batch_size: int = 1):
+        self.batch_size = batch_size
 
     @property
     def properties(self) -> Dict[str, Any]:
-        return asdict(self)
+        return self.__dict__
 
     def can_batch(self, other: "TelemetryEvent") -> bool:
         raise NotImplementedError

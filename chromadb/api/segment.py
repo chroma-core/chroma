@@ -277,9 +277,8 @@ class SegmentAPI(API):
             CollectionAddEvent(
                 collection_uuid=str(collection_id),
                 add_amount=len(ids),
-                with_embeddings=embeddings is not None,
-                with_metadata=metadatas is not None,
-                with_documents=documents is not None,
+                with_metadata=len(ids) if metadatas is not None else 0,
+                with_documents=len(ids) if documents is not None else 0,
             )
         )
         return True
@@ -479,7 +478,9 @@ class SegmentAPI(API):
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(
-            CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
+            CollectionDeleteEvent(
+                collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
+            )
         )
         return ids_to_delete
 
