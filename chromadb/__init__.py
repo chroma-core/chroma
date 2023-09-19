@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.10"
+__version__ = "0.4.11"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
