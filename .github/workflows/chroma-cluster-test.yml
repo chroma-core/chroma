@@ -1,4 +1,4 @@
-name: Chroma Integration Tests
+name: Chroma Cluster Tests
 
 on:
   push:
@@ -28,4 +28,4 @@ jobs:
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
     - name: Integration Test
-      run: bin/cluster-test ${{ matrix.testfile }}
+      run: bin/cluster-test.sh ${{ matrix.testfile }}
