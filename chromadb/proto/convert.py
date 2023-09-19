@@ -1,5 +1,5 @@
 import array
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import (
@@ -31,6 +31,7 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
 
 def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     encoding = vector.encoding
+    as_array: array.array[float] | array.array[int]
     if encoding == proto.ScalarEncoding.FLOAT32:
         as_array = array.array("f")
         out_encoding = ScalarEncoding.FLOAT32
@@ -60,7 +61,9 @@ def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
         raise RuntimeError(f"Unknown operation {operation}")  # TODO: full error
 
 
-def from_proto_metadata(metadata: proto.UpdateMetadata) -> Metadata:
+def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
+    if not metadata.metadata:
+        return None
     out_metadata = {}
     for key, value in metadata.metadata.items():
         if value.HasField("string_value"):
@@ -140,6 +143,8 @@ def to_proto_submit(
     return proto.SubmitEmbeddingRecord(
         id=submit_record["id"],
         vector=vector,
-        metadata=proto.UpdateMetadata(metadata=metadata),
+        metadata=proto.UpdateMetadata(metadata=metadata)
+        if metadata is not None
+        else None,
         operation=to_proto_operation(submit_record["operation"]),
     )

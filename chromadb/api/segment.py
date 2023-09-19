@@ -1,6 +1,7 @@
 from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
+from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
@@ -513,7 +514,7 @@ class SegmentAPI(API):
         return self._settings
 
     def _topic(self, collection_id: UUID) -> str:
-        return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
+        return create_topic_name(self._tenant_id, self._topic_ns, str(collection_id))
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
