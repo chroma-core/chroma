@@ -43,14 +43,12 @@ class CollectionAddEvent(TelemetryEvent):
         self.with_metadata = with_metadata
         self.batch_size = batch_size
 
-    def can_batch(self, other: TelemetryEvent) -> bool:
-        return (
-            isinstance(other, CollectionAddEvent)
-            and self.collection_uuid == other.collection_uuid
-        )
+    @property
+    def batch_key(self) -> str:
+        return self.collection_uuid + self.name
 
     def batch(self, other: "TelemetryEvent") -> "CollectionAddEvent":
-        if not self.can_batch(other):
+        if not self.batch_key == other.batch_key:
             raise ValueError("Cannot batch events")
         other = cast(CollectionAddEvent, other)
         total_amount = self.add_amount + other.add_amount

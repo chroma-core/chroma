@@ -33,8 +33,9 @@ class TelemetryEvent:
     def properties(self) -> Dict[str, Any]:
         return self.__dict__
 
-    def can_batch(self, other: "TelemetryEvent") -> bool:
-        raise NotImplementedError
+    @property
+    def batch_key(self) -> str:
+        return self.name
 
     def batch(self, other: "TelemetryEvent") -> "TelemetryEvent":
         raise NotImplementedError
