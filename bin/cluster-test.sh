@@ -8,7 +8,7 @@ function cleanup {
 
 trap cleanup EXIT
 
-docker-compose -f docker-compose.cluster.yml up -d --wait pulsar
+docker compose -f docker-compose.cluster.yml up -d --wait pulsar
 
 export CHROMA_CLUSTER_TEST_ONLY=1
 
