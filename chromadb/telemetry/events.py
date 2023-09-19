@@ -6,13 +6,11 @@ from chromadb.telemetry import TelemetryEvent
 @dataclass
 class ClientStartEvent(TelemetryEvent):
     name: ClassVar[str] = "client_start"
-    max_batch_size = 1
 
 
 @dataclass
 class ServerStartEvent(TelemetryEvent):
     name: ClassVar[str] = "server_start"
-    max_batch_size = 1
 
 
 @dataclass
@@ -20,7 +18,6 @@ class ClientCreateCollectionEvent(TelemetryEvent):
     name: ClassVar[str] = "client_create_collection"
     collection_uuid: str
     embedding_function: str
-    max_batch_size = 1
 
 
 @dataclass
@@ -63,7 +60,6 @@ class CollectionUpdateEvent(TelemetryEvent):
     with_embeddings: bool
     with_metadata: bool
     with_documents: bool
-    max_batch_size = 1
 
 
 @dataclass
@@ -77,7 +73,6 @@ class CollectionQueryEvent(TelemetryEvent):
     include_metadatas: bool
     include_documents: bool
     include_distances: bool
-    max_batch_size = 1
 
 
 @dataclass
@@ -88,7 +83,6 @@ class CollectionGetEvent(TelemetryEvent):
     limit: int
     include_metadata: bool
     include_documents: bool
-    max_batch_size = 1
 
 
 @dataclass
@@ -96,4 +90,3 @@ class CollectionDeleteEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_delete"
     collection_uuid: str
     delete_amount: int
-    max_batch_size = 1
