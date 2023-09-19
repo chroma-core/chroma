@@ -35,7 +35,7 @@ class Posthog(Telemetry):
             self._direct_capture(event)
             return
         batch_key = event.batch_key
-        if self.batched_events[batch_key] is None:
+        if not self.batched_events[batch_key]:
             self.batched_events[batch_key] = event
             return
         batched_event = self.batched_events[batch_key].batch(event)
