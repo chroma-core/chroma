@@ -28,7 +28,14 @@ from chromadb.api.types import (
     validate_where_document,
     validate_batch,
 )
-from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
+from chromadb.telemetry.events import (
+    CollectionAddEvent,
+    CollectionDeleteEvent,
+    CollectionGetEvent,
+    CollectionUpdateEvent,
+    CollectionQueryEvent,
+    ClientCreateCollectionEvent,
+)
 
 import chromadb.types as t
 
@@ -135,6 +142,13 @@ class SegmentAPI(API):
         self._sysdb.create_collection(coll)
         for segment in segments:
             self._sysdb.create_segment(segment)
+
+        self._telemetry_client.capture(
+            ClientCreateCollectionEvent(
+                collection_uuid=str(id),
+                embedding_function=embedding_function.__class__.__name__,
+            )
+        )
 
         return Collection(
             client=self,
@@ -259,7 +273,15 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
+        self._telemetry_client.capture(
+            CollectionAddEvent(
+                collection_uuid=str(collection_id),
+                add_amount=len(ids),
+                with_embeddings=embeddings is not None,
+                with_metadata=metadatas is not None,
+                with_documents=documents is not None,
+            )
+        )
         return True
 
     @override
@@ -288,6 +310,16 @@ class SegmentAPI(API):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
+
+        self._telemetry_client.capture(
+            CollectionUpdateEvent(
+                collection_uuid=str(collection_id),
+                update_amount=len(ids),
+                with_embeddings=embeddings is not None,
+                with_metadata=metadatas is not None,
+                with_documents=documents is not None,
+            )
+        )
 
         return True
 
@@ -372,6 +404,16 @@ class SegmentAPI(API):
 
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
+
+        self._telemetry_client.capture(
+            CollectionGetEvent(
+                collection_uuid=str(collection_id),
+                ids_count=len(ids) if ids else 0,
+                limit=limit if limit else 0,
+                include_metadata="metadatas" in include,
+                include_documents="documents" in include,
+            )
+        )
 
         return GetResult(
             ids=[r["id"] for r in records],
@@ -523,6 +565,19 @@ class SegmentAPI(API):
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
+
+        self._telemetry_client.capture(
+            CollectionQueryEvent(
+                collection_uuid=str(collection_id),
+                query_amount=len(query_embeddings),
+                n_results=n_results,
+                with_metadata_filter=where is not None,
+                with_document_filter=where_document is not None,
+                include_metadatas="metadatas" in include,
+                include_documents="documents" in include,
+                include_distances="distances" in include,
+            )
+        )
 
         return QueryResult(
             ids=ids,

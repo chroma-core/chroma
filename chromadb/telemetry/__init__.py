@@ -25,10 +25,17 @@ class ServerContext(Enum):
 @dataclass
 class TelemetryEvent:
     name: ClassVar[str]
+    max_batch_size: ClassVar[int] = 1
 
     @property
     def properties(self) -> Dict[str, Any]:
         return asdict(self)
+
+    def can_batch(self, other: "TelemetryEvent") -> bool:
+        raise NotImplementedError
+
+    def batch(self, other: "TelemetryEvent") -> "TelemetryEvent":
+        raise NotImplementedError
 
 
 class RepeatedTelemetry:
