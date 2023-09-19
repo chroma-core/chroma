@@ -225,11 +225,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 exists_in_index = self._id_to_label.get(
                     id, None
                 ) is not None or self._brute_force_index.has_id(id)
+                exists_in_bf_index = self._brute_force_index.has_id(id)
 
                 if op == Operation.DELETE:
                     if exists_in_index:
                         self._curr_batch.apply(record)
-                        self._brute_force_index.delete([record])
+                        if exists_in_bf_index:
+                            self._brute_force_index.delete([record])
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
