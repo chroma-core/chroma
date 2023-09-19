@@ -314,9 +314,9 @@ class SegmentAPI(API):
             CollectionUpdateEvent(
                 collection_uuid=str(collection_id),
                 update_amount=len(ids),
-                with_embeddings=embeddings is not None,
-                with_metadata=metadatas is not None,
-                with_documents=documents is not None,
+                with_embeddings=len(embeddings) if embeddings else 0,
+                with_metadata=len(metadatas) if metadatas else 0,
+                with_documents=len(documents) if documents else 0,
             )
         )
 

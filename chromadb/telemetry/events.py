@@ -65,17 +65,17 @@ class CollectionUpdateEvent(TelemetryEvent):
     name: ClassVar[str] = "collection_update"
     collection_uuid: str
     update_amount: int
-    with_embeddings: bool
-    with_metadata: bool
-    with_documents: bool
+    with_embeddings: int
+    with_metadata: int
+    with_documents: int
 
     def __init__(
         self,
         collection_uuid: str,
         update_amount: int,
-        with_embeddings: bool,
-        with_metadata: bool,
-        with_documents: bool,
+        with_embeddings: int,
+        with_metadata: int,
+        with_documents: int,
     ):
         super().__init__()
         self.collection_uuid = collection_uuid
