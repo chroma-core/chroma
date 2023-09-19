@@ -33,6 +33,9 @@ class TelemetryEvent:
     def properties(self) -> Dict[str, Any]:
         return self.__dict__
 
+    # A batch key is used to determine whether two events can be batched together.
+    # If a TelemetryEvent's max_batch_size > 1, batch_key() and batch() MUST be implemented.
+    # Otherwise they are ignored.
     @property
     def batch_key(self) -> str:
         return self.name
