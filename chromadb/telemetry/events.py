@@ -28,7 +28,7 @@ class CollectionAddEvent(TelemetryEvent):
     with_embeddings: bool
     with_metadata: bool
     with_documents: bool
-    max_batch_size = 4
+    batch_size = 4
 
     def can_batch(self, other: TelemetryEvent) -> bool:
         return (

@@ -25,7 +25,7 @@ class ServerContext(Enum):
 @dataclass
 class TelemetryEvent:
     name: ClassVar[str]
-    max_batch_size: ClassVar[int] = 1
+    batch_size: ClassVar[int] = 1
 
     @property
     def properties(self) -> Dict[str, Any]:

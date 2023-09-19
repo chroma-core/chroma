@@ -30,7 +30,7 @@ class Posthog(Telemetry):
 
     @override
     def capture(self, event: TelemetryEvent) -> None:
-        if event.max_batch_size == 1:
+        if event.batch_size == 1:
             self._direct_capture(event)
             return
         if self.batched_event is None:
@@ -44,7 +44,7 @@ class Posthog(Telemetry):
             return
         self.batched_event = self.batched_event.batch(event)
         self.batch_size += 1
-        if self.batch_size >= self.batched_event.max_batch_size:
+        if self.batch_size >= self.batched_event.batch_size:
             self._direct_capture(self.batched_event)
             self.batched_event = None
             self.batch_size = 0
