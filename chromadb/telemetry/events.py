@@ -3,14 +3,11 @@ from chromadb.telemetry import TelemetryEvent
 
 
 class ClientStartEvent(TelemetryEvent):
-    name: ClassVar[str] = "client_start"
-
     def __init__(self) -> None:
         super().__init__()
 
 
 class ClientCreateCollectionEvent(TelemetryEvent):
-    name: ClassVar[str] = "client_create_collection"
     collection_uuid: str
     embedding_function: str
 
@@ -21,7 +18,6 @@ class ClientCreateCollectionEvent(TelemetryEvent):
 
 
 class CollectionAddEvent(TelemetryEvent):
-    name: ClassVar[str] = "collection_add"
     max_batch_size: ClassVar[int] = 20
     collection_uuid: str
     add_amount: int
@@ -62,7 +58,6 @@ class CollectionAddEvent(TelemetryEvent):
 
 
 class CollectionUpdateEvent(TelemetryEvent):
-    name: ClassVar[str] = "collection_update"
     collection_uuid: str
     update_amount: int
     with_embeddings: int
@@ -86,7 +81,6 @@ class CollectionUpdateEvent(TelemetryEvent):
 
 
 class CollectionQueryEvent(TelemetryEvent):
-    name: ClassVar[str] = "collection_query"
     collection_uuid: str
     query_amount: int
     with_metadata_filter: bool
@@ -119,7 +113,6 @@ class CollectionQueryEvent(TelemetryEvent):
 
 
 class CollectionGetEvent(TelemetryEvent):
-    name: ClassVar[str] = "collection_get"
     collection_uuid: str
     ids_count: int
     limit: int
@@ -143,7 +136,6 @@ class CollectionGetEvent(TelemetryEvent):
 
 
 class CollectionDeleteEvent(TelemetryEvent):
-    name: ClassVar[str] = "collection_delete"
     collection_uuid: str
     delete_amount: int
 
