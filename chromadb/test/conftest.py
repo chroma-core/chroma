@@ -350,6 +350,10 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
 
 def system_fixture_observability() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [fastapi, sqlite, fastapi_server_env_endpoint_enabled]
+    if "CHROMA_INTEGRATION_TEST" in os.environ:
+        fixtures.append(integration)
+    if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
+        fixtures = [integration]
     return fixtures
 
 
