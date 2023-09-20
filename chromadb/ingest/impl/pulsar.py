@@ -65,6 +65,21 @@ class PulsarProducer(Producer, EnforceOverrides):
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
     ) -> Sequence[SeqId]:
+        if not self._running:
+            raise RuntimeError("Component not running")
+
+        if len(embeddings) == 0:
+            return []
+
+        if len(embeddings) > self.max_batch_size:
+            raise ValueError(
+                f"""
+                Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                Please submit your embeddings in batches of size
+                {self.max_batch_size:,} or less.
+                """
+            )
+
         producer = self._get_or_create_producer(topic_name)
         protos_to_submit = [to_proto_submit(embedding) for embedding in embeddings]
 
@@ -106,9 +121,9 @@ class PulsarProducer(Producer, EnforceOverrides):
     @property
     @overrides
     def max_batch_size(self) -> int:
-        # For now, we use 100,000
+        # For now, we use 1,000
         # TODO: tune this to a reasonable value by default
-        return 100000
+        return 1000
 
     def _get_or_create_producer(self, topic_name: str) -> pulsar.Producer:
         if topic_name not in self._topic_to_producer:
@@ -156,12 +171,14 @@ class PulsarConsumer(Consumer, EnforceOverrides):
     _connection_str: str
     _client: pulsar.Client
     _subscriptions: Dict[str, Set[PulsarSubscription]]
+    _settings: Settings
 
     def __init__(self, system: System) -> None:
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
         self._subscriptions = defaultdict(set)
+        self._settings = system.settings
         super().__init__(system)
 
     @overrides
@@ -272,3 +289,15 @@ class PulsarConsumer(Consumer, EnforceOverrides):
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
         return 2**192 - 1
+
+    @overrides
+    def reset_state(self) -> None:
+        if not self._settings.require("allow_reset"):
+            raise ValueError(
+                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+            )
+        for topic_name, subscriptions in self._subscriptions.items():
+            for subscription in subscriptions:
+                subscription.consumer.close()
+        self._subscriptions = defaultdict(set)
+        super().reset_state()
