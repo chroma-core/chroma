@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import Dict, Optional, Tuple, Union
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
+from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
     EmbeddingRecord,
     Metadata,
@@ -15,7 +16,7 @@ from chromadb.types import (
     Vector,
     VectorEmbeddingRecord,
 )
-from chromadb.utils.messageid import bytes_to_int, int_to_bytes
+
 
 # TODO: Unit tests for this file, handling optional states etc
 
@@ -55,7 +56,7 @@ def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     return (as_array.tolist(), out_encoding)
 
 
-def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
+def from_proto_operation(operation: proto.Operation) -> Operation:
     if operation == proto.Operation.ADD:
         return Operation.ADD
     elif operation == proto.Operation.UPDATE:
@@ -71,7 +72,7 @@ def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
 def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
     if not metadata.metadata:
         return None
-    out_metadata: Dict[str, Union[str, int, float, bool]] = {}
+    out_metadata: Dict[str, Union[str, int, float]] = {}
     for key, value in metadata.metadata.items():
         if value.HasField("string_value"):
             out_metadata[key] = value.string_value
@@ -163,7 +164,7 @@ def to_proto_metadata_update_value(
         )
 
 
-def to_proto_operation(operation: Operation) -> proto.Operation.ValueType:
+def to_proto_operation(operation: Operation) -> proto.Operation:
     if operation == Operation.ADD:
         return proto.Operation.ADD
     elif operation == Operation.UPDATE:

@@ -1,6 +1,6 @@
+from __future__ import annotations
 from collections import defaultdict
-import sys
-from typing import Dict, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 import uuid
 from chromadb.config import Settings, System
 from chromadb.ingest import Consumer, ConsumerCallbackFn, Producer
@@ -12,6 +12,7 @@ from chromadb.proto.convert import from_proto_submit, to_proto_submit
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
+from concurrent.futures import wait, Future
 
 from chromadb.utils.messageid import int_to_pulsar, pulsar_to_int
 
@@ -65,17 +66,65 @@ class PulsarProducer(Producer, EnforceOverrides):
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
     ) -> Sequence[SeqId]:
-        # For now, just call submit_embedding in a loop. TODO: batch performance / async
-        return [
-            self.submit_embedding(topic_name, embedding) for embedding in embeddings
-        ]
+        if not self._running:
+            raise RuntimeError("Component not running")
+
+        if len(embeddings) == 0:
+            return []
+
+        if len(embeddings) > self.max_batch_size:
+            raise ValueError(
+                f"""
+                Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                Please submit your embeddings in batches of size
+                {self.max_batch_size:,} or less.
+                """
+            )
+
+        producer = self._get_or_create_producer(topic_name)
+        protos_to_submit = [to_proto_submit(embedding) for embedding in embeddings]
+
+        def create_producer_callback(
+            future: Future[int],
+        ) -> Callable[[Any, pulsar.MessageId], None]:
+            def producer_callback(res: Any, msg_id: pulsar.MessageId) -> None:
+                if msg_id:
+                    future.set_result(pulsar_to_int(msg_id))
+                else:
+                    future.set_exception(
+                        Exception(
+                            "Unknown error while submitting embedding in producer_callback"
+                        )
+                    )
+
+            return producer_callback
+
+        futures = []
+        for proto_to_submit in protos_to_submit:
+            future: Future[int] = Future()
+            producer.send_async(
+                proto_to_submit.SerializeToString(),
+                callback=create_producer_callback(future),
+            )
+            futures.append(future)
+
+        wait(futures)
+
+        results: List[SeqId] = []
+        for future in futures:
+            exception = future.exception()
+            if exception is not None:
+                raise exception
+            results.append(future.result())
+
+        return results
 
     @property
     @overrides
     def max_batch_size(self) -> int:
-        # For now, the max pulsar batch size is the max int.
+        # For now, we use 1,000
         # TODO: tune this to a reasonable value by default
-        return sys.maxsize
+        return 1000
 
     def _get_or_create_producer(self, topic_name: str) -> pulsar.Producer:
         if topic_name not in self._topic_to_producer:
@@ -123,12 +172,14 @@ class PulsarConsumer(Consumer, EnforceOverrides):
     _connection_str: str
     _client: pulsar.Client
     _subscriptions: Dict[str, Set[PulsarSubscription]]
+    _settings: Settings
 
     def __init__(self, system: System) -> None:
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
         self._subscriptions = defaultdict(set)
+        self._settings = system.settings
         super().__init__(system)
 
     @overrides
@@ -239,3 +290,15 @@ class PulsarConsumer(Consumer, EnforceOverrides):
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
         return 2**192 - 1
+
+    @overrides
+    def reset_state(self) -> None:
+        if not self._settings.require("allow_reset"):
+            raise ValueError(
+                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+            )
+        for topic_name, subscriptions in self._subscriptions.items():
+            for subscription in subscriptions:
+                subscription.consumer.close()
+        self._subscriptions = defaultdict(set)
+        super().reset_state()

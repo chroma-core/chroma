@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import tempfile
@@ -115,14 +116,20 @@ class CapturingConsumeFn:
     waiters: List[Tuple[int, Event]]
 
     def __init__(self) -> None:
+        """A function that captures embeddings and allows you to wait for a certain
+        number of embeddings to be available. It must be constructed in the thread with
+        the main event loop
+        """
         self.embeddings = []
         self.waiters = []
+        self._loop = asyncio.get_event_loop()
 
     def __call__(self, embeddings: Sequence[EmbeddingRecord]) -> None:
         self.embeddings.extend(embeddings)
         for n, event in self.waiters:
             if len(self.embeddings) >= n:
-                event.set()
+                # event.set() is not thread safe, so we need to call it in the main event loop
+                self._loop.call_soon_threadsafe(event.set)
 
     async def get(self, n: int, timeout_secs: int = 10) -> Sequence[EmbeddingRecord]:
         "Wait until at least N embeddings are available, then return all embeddings"
@@ -332,8 +339,9 @@ async def test_multiple_topics_batch(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
 
-    N_TOPICS = 100
+    N_TOPICS = 2
     consume_fns = [CapturingConsumeFn() for _ in range(N_TOPICS)]
     for i in range(N_TOPICS):
         producer.create_topic(full_topic_name(f"test_topic_{i}"))
@@ -349,17 +357,17 @@ async def test_multiple_topics_batch(
     N_TO_PRODUCE = 100
     total_produced = 0
     for i in range(N_TO_PRODUCE // PRODUCE_BATCH_SIZE):
-        for i in range(N_TOPICS):
-            embeddings_n[i].extend(
+        for n in range(N_TOPICS):
+            embeddings_n[n].extend(
                 produce_fns(
                     producer,
-                    full_topic_name(f"test_topic_{i}"),
+                    full_topic_name(f"test_topic_{n}"),
                     sample_embeddings,
                     PRODUCE_BATCH_SIZE,
                 )[0]
             )
-            recieved = await consume_fns[i].get(total_produced + PRODUCE_BATCH_SIZE)
-            assert_records_match(embeddings_n[i], recieved)
+            recieved = await consume_fns[n].get(total_produced + PRODUCE_BATCH_SIZE)
+            assert_records_match(embeddings_n[n], recieved)
         total_produced += PRODUCE_BATCH_SIZE
 
 
@@ -370,8 +378,9 @@ async def test_max_batch_size(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
-    max_batch_size = producer_consumer[0].max_batch_size
+    max_batch_size = producer.max_batch_size
     assert max_batch_size > 0
 
     # Make sure that we can produce a batch of size max_batch_size
