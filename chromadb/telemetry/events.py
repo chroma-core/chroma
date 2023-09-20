@@ -1,3 +1,4 @@
+import inspect
 from typing import cast, ClassVar
 from chromadb.telemetry import TelemetryEvent
 
@@ -14,7 +15,21 @@ class ClientCreateCollectionEvent(TelemetryEvent):
     def __init__(self, collection_uuid: str, embedding_function: str):
         super().__init__()
         self.collection_uuid = collection_uuid
-        self.embedding_function = embedding_function
+
+        # We have to do this here to avoid a circular import
+        import chromadb.utils.embedding_functions
+
+        embedding_function_names = [
+            name
+            for name, _ in inspect.getmembers(chromadb.utils.embedding_functions)
+            if name.endswith("EmbeddingFunction") and name != "EmbeddingFunction"
+        ]
+
+        self.embedding_function = (
+            embedding_function
+            if embedding_function in embedding_function_names
+            else "custom"
+        )
 
 
 class CollectionAddEvent(TelemetryEvent):
