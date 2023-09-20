@@ -1,20 +1,27 @@
 # type: ignore
+import requests
+
 import chromadb
+from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
+import os
+import shutil
 from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
 
+persist_dir = tempfile.mkdtemp()
+
 
 @pytest.fixture
 def local_persist_api():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -23,15 +30,17 @@ def local_persist_api():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir(),
+            persist_directory=persist_dir,
         ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
-    return chromadb.Client(
+    yield chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -40,9 +49,11 @@ def local_persist_api_cache_bust():
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
-            persist_directory=tempfile.gettempdir(),
+            persist_directory=persist_dir,
         ),
     )
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir, ignore_errors=True)
 
 
 def approx_equal(a, b, tolerance=1e-6) -> bool:
@@ -155,6 +166,22 @@ def test_heartbeat(api):
     assert heartbeat > datetime.now() - timedelta(seconds=10)
 
 
+def test_max_batch_size(api):
+    print(api)
+    batch_size = api.max_batch_size
+    assert batch_size > 0
+
+
+def test_pre_flight_checks(api):
+    if not isinstance(api, FastAPI):
+        pytest.skip("Not a FastAPI instance")
+
+    resp = requests.get(f"{api._api_url}/pre-flight-checks")
+    assert resp.status_code == 200
+    assert resp.json() is not None
+    assert "max_batch_size" in resp.json().keys()
+
+
 batch_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["https://example.com/1", "https://example.com/2"],
@@ -228,7 +255,6 @@ def test_get_nearest_neighbors(api):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    # assert api.create_index(collection_name="testspace") # default is auto now
 
     nn = collection.query(
         query_embeddings=[1.1, 2.3, 3.2],
@@ -264,8 +290,8 @@ def test_delete(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
-    collection.delete()
-    assert collection.count() == 0
+    with pytest.raises(Exception):
+        collection.delete()
 
 
 def test_delete_with_index(api):
@@ -359,7 +385,6 @@ def test_increment_index_on(api):
     assert collection.count() == 2
 
     # increment index
-    # collection.create_index(index_type="hnsw", index_params={"M": 16, "efConstruction": 200})
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,
@@ -367,35 +392,6 @@ def test_increment_index_on(api):
     )
     for key in nn.keys():
         assert len(nn[key]) == 1
-
-
-def test_increment_index_off(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    collection.create_index()
-    nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]],
-        n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
-    )
-    for key in nn.keys():
-        assert len(nn[key]) == 1
-
-
-def skipping_indexing_will_fail(api):
-    api.reset()
-    collection = api.create_collection("testspace")
-    collection.add(**batch_records, increment_index=False)
-    assert collection.count() == 2
-
-    # incremental index
-    with pytest.raises(Exception) as e:
-        collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
-    assert str(e.value).__contains__("index not found")
 
 
 def test_add_a_collection(api):

@@ -17,6 +17,7 @@ import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
 import random
+import re
 
 
 def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
@@ -25,7 +26,12 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
     key, expr = list(clause.items())[0]
 
     # Handle the shorthand for equal: {key: val} where val is a simple value
-    if isinstance(expr, str) or isinstance(expr, int) or isinstance(expr, float):
+    if (
+        isinstance(expr, str)
+        or isinstance(expr, bool)
+        or isinstance(expr, int)
+        or isinstance(expr, float)
+    ):
         return _filter_where_clause({key: {"$eq": expr}}, metadata)
 
     # expr is a list of clauses
@@ -36,11 +42,16 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
     if key == "$or":
         assert isinstance(expr, list)
         return any(_filter_where_clause(clause, metadata) for clause in expr)
+    if key == "$in":
+        assert isinstance(expr, list)
+        return metadata[key] in expr if key in metadata else False
+    if key == "$nin":
+        assert isinstance(expr, list)
+        return metadata[key] not in expr
 
     # expr is an operator expression
     assert isinstance(expr, dict)
     op, val = list(expr.items())[0]
-
     assert isinstance(metadata, dict)
     if key not in metadata:
         return False
@@ -49,6 +60,10 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         return key in metadata and metadata_key == val
     elif op == "$ne":
         return key in metadata and metadata_key != val
+    elif op == "$in":
+        return key in metadata and metadata_key in val
+    elif op == "$nin":
+        return key in metadata and metadata_key not in val
 
     # The following conditions only make sense for numeric values
     assert isinstance(metadata_key, int) or isinstance(metadata_key, float)
@@ -78,6 +93,11 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     # Simple $contains clause
     assert isinstance(expr, str)
     if key == "$contains":
+        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
+        # treat them as wildcards
+        if "%" in expr or "_" in expr:
+            expr = expr.replace("%", ".").replace("_", ".")
+            return re.search(expr, doc) is not None
         return expr in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
@@ -121,7 +141,6 @@ def _filter_embedding_set(
             )
             if not _filter_where_doc_clause(filter["where_document"], documents[i]):
                 ids.discard(normalized_record_set["ids"][i])
-
     return list(ids)
 
 
@@ -153,7 +172,7 @@ def test_filterable_metadata_get(
     api.reset()
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
 
@@ -163,7 +182,6 @@ def test_filterable_metadata_get(
         return
 
     coll.add(**record_set)
-
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
@@ -273,7 +291,6 @@ def test_empty_filter(api: API) -> None:
     assert res["metadatas"] == [[], []]
 
 
-@pytest.mark.xfail(reason="Boolean metadata is not supported yet")
 def test_boolean_metadata(api: API) -> None:
     """Test that metadata with boolean values is correctly filtered"""
     api.reset()

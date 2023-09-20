@@ -1,6 +1,16 @@
-from typing import Optional, cast
+import json
+import logging
+from typing import Optional, cast, Tuple
+from typing import Sequence
+from uuid import UUID
+
+import requests
+from overrides import override
+
+import chromadb.errors as errors
+import chromadb.utils.embedding_functions as ef
 from chromadb.api import API
-from chromadb.config import Settings, System
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -13,43 +23,107 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
+    validate_batch,
 )
-import chromadb.utils.embedding_functions as ef
-
-import pandas as pd
-import requests
-import json
-from typing import Sequence
-from chromadb.api.models.Collection import Collection
-import chromadb.errors as errors
-from uuid import UUID
+from chromadb.auth import (
+    ClientAuthProvider,
+)
+from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
+from chromadb.auth.registry import resolve_provider
+from chromadb.config import Settings, System
 from chromadb.telemetry import Telemetry
-from overrides import override
+from urllib.parse import urlparse, urlunparse, quote
+
+logger = logging.getLogger(__name__)
 
 
 class FastAPI(API):
     _settings: Settings
+    _max_batch_size: int = -1
+
+    @staticmethod
+    def _validate_host(host: str) -> None:
+        parsed = urlparse(host)
+        if "/" in host and parsed.scheme not in {"http", "https"}:
+            raise ValueError(
+                "Invalid URL. " f"Unrecognized protocol - {parsed.scheme}."
+            )
+        if "/" in host and (not host.startswith("http")):
+            raise ValueError(
+                "Invalid URL. "
+                "Seems that you are trying to pass URL as a host but without specifying the protocol. "
+                "Please add http:// or https:// to the host."
+            )
+
+    @staticmethod
+    def resolve_url(
+        chroma_server_host: str,
+        chroma_server_ssl_enabled: Optional[bool] = False,
+        default_api_path: Optional[str] = "",
+        chroma_server_http_port: Optional[int] = 8000,
+    ) -> str:
+        _skip_port = False
+        _chroma_server_host = chroma_server_host
+        FastAPI._validate_host(_chroma_server_host)
+        if _chroma_server_host.startswith("http"):
+            logger.debug("Skipping port as the user is passing a full URL")
+            _skip_port = True
+        parsed = urlparse(_chroma_server_host)
+
+        scheme = "https" if chroma_server_ssl_enabled else parsed.scheme or "http"
+        net_loc = parsed.netloc or parsed.hostname or chroma_server_host
+        port = (
+            ":" + str(parsed.port or chroma_server_http_port) if not _skip_port else ""
+        )
+        path = parsed.path or default_api_path
+
+        if not path or path == net_loc:
+            path = default_api_path if default_api_path else ""
+        if not path.endswith(default_api_path or ""):
+            path = path + default_api_path if default_api_path else ""
+        full_url = urlunparse(
+            (scheme, f"{net_loc}{port}", quote(path.replace("//", "/")), "", "", "")
+        )
+
+        return full_url
 
     def __init__(self, system: System):
         super().__init__(system)
-        url_prefix = "https" if system.settings.chroma_server_ssl_enabled else "http"
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
         self._telemetry_client = self.require(Telemetry)
         self._settings = system.settings
 
-        port_suffix = (
-            f":{system.settings.chroma_server_http_port}"
-            if system.settings.chroma_server_http_port
-            else ""
-        )
-        self._api_url = (
-            f"{url_prefix}://{system.settings.chroma_server_host}{port_suffix}/api/v1"
+        self._api_url = FastAPI.resolve_url(
+            chroma_server_host=str(system.settings.chroma_server_host),
+            chroma_server_http_port=int(str(system.settings.chroma_server_http_port)),
+            chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
+            default_api_path=system.settings.chroma_server_api_default_path,
         )
 
         self._header = system.settings.chroma_server_headers
-        self._session = requests.Session()
+        if (
+            system.settings.chroma_client_auth_provider
+            and system.settings.chroma_client_auth_protocol_adapter
+        ):
+            self._auth_provider = self.require(
+                resolve_provider(
+                    system.settings.chroma_client_auth_provider, ClientAuthProvider
+                )
+            )
+            self._adapter = cast(
+                RequestsClientAuthProtocolAdapter,
+                system.require(
+                    resolve_provider(
+                        system.settings.chroma_client_auth_protocol_adapter,
+                        RequestsClientAuthProtocolAdapter,
+                    )
+                ),
+            )
+            self._session = self._adapter.session
+        else:
+            self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
 
@@ -224,6 +298,29 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(IDs, resp.json())
 
+    def _submit_batch(
+        self,
+        batch: Tuple[
+            IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]
+        ],
+        url: str,
+    ) -> requests.Response:
+        """
+        Submits a batch of embeddings to the database
+        """
+        resp = self._session.post(
+            self._api_url + url,
+            data=json.dumps(
+                {
+                    "ids": batch[0],
+                    "embeddings": batch[1],
+                    "metadatas": batch[2],
+                    "documents": batch[3],
+                }
+            ),
+        )
+        return resp
+
     @override
     def _add(
         self,
@@ -232,27 +329,14 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
-        - by default, the index is progressively built up as you add more data. If for ingestion performance reasons you want to disable this, set increment_index to False
-        -   and then manually create the index yourself with collection.create_index()
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/add",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                    "increment_index": increment_index,
-                }
-            ),
-        )
-
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
         return True
 
@@ -269,18 +353,11 @@ class FastAPI(API):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/update",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                }
-            ),
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/update"
         )
-
         resp.raise_for_status()
         return True
 
@@ -292,25 +369,16 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/upsert",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "embeddings": embeddings,
-                    "metadatas": metadatas,
-                    "documents": documents,
-                    "increment_index": increment_index,
-                }
-            ),
+        batch = (ids, embeddings, metadatas, documents)
+        validate_batch(batch, {"max_batch_size": self.max_batch_size})
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/upsert"
         )
-
         resp.raise_for_status()
         return True
 
@@ -357,24 +425,6 @@ class FastAPI(API):
         return cast(bool, resp.json())
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        """Runs a raw SQL query against the database"""
-        resp = self._session.post(
-            self._api_url + "/raw_sql", data=json.dumps({"raw_sql": sql})
-        )
-        raise_chroma_error(resp)
-        return pd.DataFrame.from_dict(resp.json())
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        """Soon deprecated"""
-        resp = self._session.post(
-            self._api_url + "/collections/" + collection_name + "/create_index"
-        )
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
-
-    @override
     def get_version(self) -> str:
         """Returns the version of the server"""
         resp = self._session.get(self._api_url + "/version")
@@ -385,6 +435,15 @@ class FastAPI(API):
     def get_settings(self) -> Settings:
         """Returns the settings of the client"""
         return self._settings
+
+    @property
+    @override
+    def max_batch_size(self) -> int:
+        if self._max_batch_size == -1:
+            resp = self._session.get(self._api_url + "/pre-flight-checks")
+            raise_chroma_error(resp)
+            self._max_batch_size = cast(int, resp.json()["max_batch_size"])
+        return self._max_batch_size
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

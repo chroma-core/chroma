@@ -3,8 +3,8 @@ from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-Metadata = Mapping[str, Union[str, int, float]]
-UpdateMetadata = Mapping[str, Union[int, float, str, None]]
+Metadata = Mapping[str, Union[str, int, float, bool]]
+UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -99,7 +99,7 @@ class VectorQuery(TypedDict):
     k: int
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
-    options: Optional[Dict[str, Union[str, int, float]]]
+    options: Optional[Dict[str, Union[str, int, float, bool]]]
 
 
 class VectorQueryResult(TypedDict):
@@ -112,7 +112,7 @@ class VectorQueryResult(TypedDict):
 
 
 # Metadata Query Grammar
-LiteralValue = Union[str, int, float]
+LiteralValue = Union[str, int, float, bool]
 LogicalOperator = Union[Literal["$and"], Literal["$or"]]
 WhereOperator = Union[
     Literal["$gt"],
@@ -122,7 +122,11 @@ WhereOperator = Union[
     Literal["$ne"],
     Literal["$eq"],
 ]
-OperatorExpression = Dict[Union[WhereOperator, LogicalOperator], LiteralValue]
+InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
+OperatorExpression = Union[
+    Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
+    Dict[InclusionExclusionOperator, List[LiteralValue]],
+]
 
 Where = Dict[
     Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]

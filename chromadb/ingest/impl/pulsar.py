@@ -1,5 +1,6 @@
 from collections import defaultdict
-from typing import Dict, Optional, Set, Tuple
+import sys
+from typing import Dict, Optional, Sequence, Set, Tuple
 import uuid
 from chromadb.config import Settings, System
 from chromadb.ingest import Consumer, ConsumerCallbackFn, Producer
@@ -59,6 +60,22 @@ class PulsarProducer(Producer, EnforceOverrides):
         # TODO: batch performance / async
         msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
         return pulsar_to_int(msg_id)
+
+    @overrides
+    def submit_embeddings(
+        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+    ) -> Sequence[SeqId]:
+        # For now, just call submit_embedding in a loop. TODO: batch performance / async
+        return [
+            self.submit_embedding(topic_name, embedding) for embedding in embeddings
+        ]
+
+    @property
+    @overrides
+    def max_batch_size(self) -> int:
+        # For now, the max pulsar batch size is the max int.
+        # TODO: tune this to a reasonable value by default
+        return sys.maxsize
 
     def _get_or_create_producer(self, topic_name: str) -> pulsar.Producer:
         if topic_name not in self._topic_to_producer:

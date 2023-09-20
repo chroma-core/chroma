@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-docker build . --target chroma_server -t ghcr.io/chroma-core/chroma-server:`bin/version`

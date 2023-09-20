@@ -14,6 +14,7 @@ from hypothesis.stateful import RuleBasedStateMachine
 from dataclasses import dataclass
 
 from chromadb.api.types import Documents, Embeddings, Metadata
+from chromadb.types import LiteralValue
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -110,10 +111,11 @@ safe_floats = st.floats(
     max_value=1e6,
 )  # TODO: handle infinity and NAN
 
-safe_values: List[SearchStrategy[Union[int, float, str]]] = [
+safe_values: List[SearchStrategy[Union[int, float, str, bool]]] = [
     safe_text,
     safe_integers,
     safe_floats,
+    st.booleans(),
 ]
 
 
@@ -447,6 +449,26 @@ class DeterministicRuleStrategy(SearchStrategy):  # type: ignore
         return True
 
 
+def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
+    """
+    Returns a strategy that will generate all valid values except the input value - testing of $nin
+    """
+    if isinstance(value, float):
+        return st.floats(allow_nan=False, allow_infinity=False).filter(
+            lambda x: x != value
+        )
+    elif isinstance(value, str):
+        return safe_text.filter(lambda x: x != value)
+    elif isinstance(value, bool):
+        return st.booleans().filter(lambda x: x != value)
+    elif isinstance(value, int):
+        return st.integers(min_value=-(2**31), max_value=2**31 - 1).filter(
+            lambda x: x != value
+        )
+    else:
+        return st.from_type(type(value)).filter(lambda x: x != value)
+
+
 @st.composite
 def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     """Generate a filter that could be used in a query against the given collection"""
@@ -456,8 +478,8 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    legal_ops: List[Optional[str]] = [None, "$eq", "$ne"]
-    if not isinstance(value, str):
+    legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
@@ -467,6 +489,14 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
 
     if op is None:
         return {key: value}
+    elif op == "$in":
+        if isinstance(value, str) and not value:
+            return {}
+        return {key: {op: [value, *[draw(opposite_value(value)) for _ in range(3)]]}}
+    elif op == "$nin":
+        if isinstance(value, str) and not value:
+            return {}
+        return {key: {op: [draw(opposite_value(value)) for _ in range(3)]}}
     else:
         return {key: {op: value}}
 

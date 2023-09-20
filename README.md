@@ -35,7 +35,7 @@
 ```bash
 pip install chromadb # python client
 # for javascript, npm install chromadb!
-# for client-server mode, docker-compose up -d --build
+# for client-server mode, chroma run --path /chroma_db_path
 ```
 
 The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
@@ -96,6 +96,7 @@ Chroma is a rapidly developing project. We welcome PR contributors and ideas for
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x) - `#contributing` channel
 - [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues) - [`Good first issue tag`](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+- [Read our contributing guide](https://docs.trychroma.com/contributing)
 
 **Release Cadence**
 We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.

@@ -21,7 +21,6 @@ export namespace Api {
 		metadatas?: Api.AddEmbedding.Metadata[];
 		documents?: string[];
 		ids: string[];
-		'increment_index'?: boolean;
 	}
 
 	/**
@@ -63,9 +62,6 @@ export namespace Api {
 	}
 
 	export interface CreateCollection200Response {
-	}
-
-	export interface CreateIndex200Response {
 	}
 
 	export interface DeleteCollection200Response {
@@ -152,9 +148,6 @@ export namespace Api {
 	export interface GetNearestNeighbors200Response {
 	}
 
-	export interface Heartbeat200Response {
-	}
-
 	export interface HTTPValidationError {
 		detail?: Api.ValidationError[];
 	}
@@ -215,19 +208,6 @@ export namespace Api {
 
 	}
 
-	export interface RawSql {
-		'raw_sql': string;
-	}
-
-	export interface RawSql200Response {
-	}
-
-	export interface Reset200Response {
-	}
-
-	export interface Root200Response {
-	}
-
 	export interface Update200Response {
 	}
 
@@ -254,7 +234,6 @@ export namespace Api {
 		metadatas?: Api.UpdateEmbedding.Metadata[];
 		documents?: string[];
 		ids: string[];
-		'increment_index'?: boolean;
 	}
 
 	/**
@@ -277,9 +256,6 @@ export namespace Api {
 		loc: (string | number)[];
 		msg: string;
 		'type': string;
-	}
-
-	export interface Version200Response {
 	}
 
 }
