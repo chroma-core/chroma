@@ -1,6 +1,7 @@
 from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
+from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
@@ -130,6 +131,9 @@ class SegmentAPI(API):
         coll = t.Collection(
             id=id, name=name, metadata=metadata, topic=self._topic(id), dimension=None
         )
+        # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
+        # and the producer should just be responsible for publishing messages. Coordinator should
+        # be responsible for all management of topics.
         self._producer.create_topic(coll["topic"])
         segments = self._manager.create_segments(coll)
         self._sysdb.create_collection(coll)
@@ -559,7 +563,7 @@ class SegmentAPI(API):
         return self._producer.max_batch_size
 
     def _topic(self, collection_id: UUID) -> str:
-        return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
+        return create_topic_name(self._tenant_id, self._topic_ns, str(collection_id))
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.

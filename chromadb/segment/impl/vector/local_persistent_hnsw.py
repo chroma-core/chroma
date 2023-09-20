@@ -207,7 +207,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
-
         with WriteRWLock(self._lock):
             for record in records:
                 if record["embedding"] is not None:

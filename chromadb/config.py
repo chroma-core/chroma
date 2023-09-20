@@ -92,6 +92,10 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_grpc_port: Optional[str] = None
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
+    pulsar_broker_url: Optional[str] = None
+    pulsar_admin_port: Optional[str] = None
+    pulsar_broker_port: Optional[str] = None
+
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)

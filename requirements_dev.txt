@@ -3,8 +3,10 @@ build
 httpx
 hypothesis
 hypothesis[numpy]
+mypy-protobuf
 pre-commit
 pytest
 pytest-asyncio
 setuptools_scm
+types-protobuf
 types-requests==2.30.0.0
