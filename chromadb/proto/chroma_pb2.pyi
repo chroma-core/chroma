@@ -66,18 +66,21 @@ class Vector(google.protobuf.message.Message):
 
     DIMENSION_FIELD_NUMBER: builtins.int
     VECTOR_FIELD_NUMBER: builtins.int
+    ENCODING_FIELD_NUMBER: builtins.int
     dimension: builtins.int
     vector: builtins.bytes
+    encoding: global___ScalarEncoding.ValueType
     def __init__(
         self,
         *,
         dimension: builtins.int = ...,
         vector: builtins.bytes = ...,
+        encoding: global___ScalarEncoding.ValueType = ...,
     ) -> None: ...
     def ClearField(
         self,
         field_name: typing_extensions.Literal[
-            "dimension", b"dimension", "vector", b"vector"
+            "dimension", b"dimension", "encoding", b"encoding", "vector", b"vector"
         ],
     ) -> None: ...
 

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
+
 import pandas as pd
 from uuid import UUID
 from chromadb.api.models.Collection import Collection

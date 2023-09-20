@@ -16,6 +16,7 @@ from typing import (
 )
 from chromadb.ingest import Producer, Consumer
 from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.types import (
     SubmitEmbeddingRecord,
     Operation,
@@ -50,8 +51,33 @@ def sqlite_persistent() -> Generator[Tuple[Producer, Consumer], None, None]:
         shutil.rmtree(save_path)
 
 
+def pulsar() -> Generator[Tuple[Producer, Consumer], None, None]:
+    """Fixture generator for pulsar Producer + Consumer. This fixture requires a running
+    pulsar cluster. You can use bin/cluster-test.sh to start a standalone pulsar and run this test
+    """
+    system = System(
+        Settings(
+            allow_reset=True,
+            chroma_producer_impl="chromadb.ingest.impl.pulsar.PulsarProducer",
+            chroma_consumer_impl="chromadb.ingest.impl.pulsar.PulsarConsumer",
+            pulsar_broker_url="localhost",
+            pulsar_admin_port="8080",
+            pulsar_broker_port="6650",
+        )
+    )
+    producer = system.require(Producer)
+    consumer = system.require(Consumer)
+    system.start()
+    yield producer, consumer
+    system.stop()
+
+
 def fixtures() -> List[Callable[[], Generator[Tuple[Producer, Consumer], None, None]]]:
-    return [sqlite, sqlite_persistent]
+    fixtures = [sqlite, sqlite_persistent]
+    if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
+        fixtures = [pulsar]
+
+    return fixtures
 
 
 @pytest.fixture(scope="module", params=fixtures())
@@ -131,6 +157,10 @@ def assert_records_match(
             assert_approx_equal(inserted["embedding"], consumed["embedding"])
 
 
+def full_topic_name(topic_name: str) -> str:
+    return create_topic_name("default", "default", topic_name)
+
+
 @pytest.mark.asyncio
 async def test_backfill(
     producer_consumer: Tuple[Producer, Consumer],
@@ -141,12 +171,13 @@ async def test_backfill(
 
     embeddings = [next(sample_embeddings) for _ in range(3)]
 
-    producer.create_topic("test_topic")
+    topic_name = full_topic_name("test_topic")
+    producer.create_topic(topic_name)
     for e in embeddings:
-        producer.submit_embedding("test_topic", e)
+        producer.submit_embedding(topic_name, e)
 
     consume_fn = CapturingConsumeFn()
-    consumer.subscribe("test_topic", consume_fn, start=consumer.min_seqid())
+    consumer.subscribe(topic_name, consume_fn, start=consumer.min_seqid())
 
     recieved = await consume_fn.get(3)
     assert_records_match(embeddings, recieved)
@@ -159,18 +190,20 @@ async def test_notifications(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
-    producer.create_topic("test_topic")
+    topic_name = full_topic_name("test_topic")
+
+    producer.create_topic(topic_name)
 
     embeddings: List[SubmitEmbeddingRecord] = []
 
     consume_fn = CapturingConsumeFn()
 
-    consumer.subscribe("test_topic", consume_fn, start=consumer.min_seqid())
+    consumer.subscribe(topic_name, consume_fn, start=consumer.min_seqid())
 
     for i in range(10):
         e = next(sample_embeddings)
         embeddings.append(e)
-        producer.submit_embedding("test_topic", e)
+        producer.submit_embedding(topic_name, e)
         received = await consume_fn.get(i + 1)
         assert_records_match(embeddings, received)
 
@@ -182,8 +215,10 @@ async def test_multiple_topics(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
-    producer.create_topic("test_topic_1")
-    producer.create_topic("test_topic_2")
+    topic_name_1 = full_topic_name("test_topic_1")
+    topic_name_2 = full_topic_name("test_topic_2")
+    producer.create_topic(topic_name_1)
+    producer.create_topic(topic_name_2)
 
     embeddings_1: List[SubmitEmbeddingRecord] = []
     embeddings_2: List[SubmitEmbeddingRecord] = []
@@ -191,19 +226,19 @@ async def test_multiple_topics(
     consume_fn_1 = CapturingConsumeFn()
     consume_fn_2 = CapturingConsumeFn()
 
-    consumer.subscribe("test_topic_1", consume_fn_1, start=consumer.min_seqid())
-    consumer.subscribe("test_topic_2", consume_fn_2, start=consumer.min_seqid())
+    consumer.subscribe(topic_name_1, consume_fn_1, start=consumer.min_seqid())
+    consumer.subscribe(topic_name_2, consume_fn_2, start=consumer.min_seqid())
 
     for i in range(10):
         e_1 = next(sample_embeddings)
         embeddings_1.append(e_1)
-        producer.submit_embedding("test_topic_1", e_1)
+        producer.submit_embedding(topic_name_1, e_1)
         results_2 = await consume_fn_1.get(i + 1)
         assert_records_match(embeddings_1, results_2)
 
         e_2 = next(sample_embeddings)
         embeddings_2.append(e_2)
-        producer.submit_embedding("test_topic_2", e_2)
+        producer.submit_embedding(topic_name_2, e_2)
         results_2 = await consume_fn_2.get(i + 1)
         assert_records_match(embeddings_2, results_2)
 
@@ -215,28 +250,29 @@ async def test_start_seq_id(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
-    producer.create_topic("test_topic")
+    topic_name = full_topic_name("test_topic")
+    producer.create_topic(topic_name)
 
     consume_fn_1 = CapturingConsumeFn()
     consume_fn_2 = CapturingConsumeFn()
 
-    consumer.subscribe("test_topic", consume_fn_1, start=consumer.min_seqid())
+    consumer.subscribe(topic_name, consume_fn_1, start=consumer.min_seqid())
 
     embeddings = []
     for _ in range(5):
         e = next(sample_embeddings)
         embeddings.append(e)
-        producer.submit_embedding("test_topic", e)
+        producer.submit_embedding(topic_name, e)
 
     results_1 = await consume_fn_1.get(5)
     assert_records_match(embeddings, results_1)
 
     start = consume_fn_1.embeddings[-1]["seq_id"]
-    consumer.subscribe("test_topic", consume_fn_2, start=start)
+    consumer.subscribe(topic_name, consume_fn_2, start=start)
     for _ in range(5):
         e = next(sample_embeddings)
         embeddings.append(e)
-        producer.submit_embedding("test_topic", e)
+        producer.submit_embedding(topic_name, e)
 
     results_2 = await consume_fn_2.get(5)
     assert_records_match(embeddings[-5:], results_2)
@@ -249,24 +285,25 @@ async def test_end_seq_id(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
-    producer.create_topic("test_topic")
+    topic_name = full_topic_name("test_topic")
+    producer.create_topic(topic_name)
 
     consume_fn_1 = CapturingConsumeFn()
     consume_fn_2 = CapturingConsumeFn()
 
-    consumer.subscribe("test_topic", consume_fn_1, start=consumer.min_seqid())
+    consumer.subscribe(topic_name, consume_fn_1, start=consumer.min_seqid())
 
     embeddings = []
     for _ in range(10):
         e = next(sample_embeddings)
         embeddings.append(e)
-        producer.submit_embedding("test_topic", e)
+        producer.submit_embedding(topic_name, e)
 
     results_1 = await consume_fn_1.get(10)
     assert_records_match(embeddings, results_1)
 
     end = consume_fn_1.embeddings[-5]["seq_id"]
-    consumer.subscribe("test_topic", consume_fn_2, start=consumer.min_seqid(), end=end)
+    consumer.subscribe(topic_name, consume_fn_2, start=consumer.min_seqid(), end=end)
 
     results_2 = await consume_fn_2.get(6)
     assert_records_match(embeddings[:6], results_2)

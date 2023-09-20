@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
     pulsar_broker_url: Optional[str] = None
+    pulsar_admin_port: Optional[str] = None
     pulsar_broker_port: Optional[str] = None
 
     anonymized_telemetry: bool = True
