@@ -1,8 +1,8 @@
-from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict
+from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
-from chromadb.types import Segment
+from chromadb.types import Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
 from chromadb.db.base import (
@@ -25,7 +25,7 @@ from uuid import UUID
 from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
-from pypika.terms import Criterion, Function
+from pypika.terms import Criterion
 from itertools import islice, groupby
 from functools import reduce
 import sqlite3
@@ -105,9 +105,8 @@ class SqliteMetadataSegment(MetadataReader):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
-
         embeddings_t, metadata_t, fulltext_t = Tables(
-            "embeddings", "embedding_metadata", "embedding_fulltext"
+            "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
 
         q = (
@@ -125,6 +124,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.string_value,
                 metadata_t.int_value,
                 metadata_t.float_value,
+                metadata_t.bool_value,
             )
             .where(
                 embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
@@ -134,20 +134,16 @@ class SqliteMetadataSegment(MetadataReader):
 
         if where:
             q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
-
         if where_document:
             q = q.where(
                 self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
             )
-            pass
-            # q = self._where_document_query(q, where_document, embeddings_t, fulltext_t)
 
         if ids:
             q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
 
         limit = limit or 2**63 - 1
         offset = offset or 0
-
         with self._db.tx() as cur:
             return list(islice(self._records(cur, q), offset, offset + limit))
 
@@ -172,13 +168,18 @@ class SqliteMetadataSegment(MetadataReader):
         _, embedding_id, seq_id = rows[0][:3]
         metadata = {}
         for row in rows:
-            key, string_value, int_value, float_value = row[3:]
+            key, string_value, int_value, float_value, bool_value = row[3:]
             if string_value is not None:
                 metadata[key] = string_value
             elif int_value is not None:
                 metadata[key] = int_value
             elif float_value is not None:
                 metadata[key] = float_value
+            elif bool_value is not None:
+                if bool_value == 1:
+                    metadata[key] = True
+                else:
+                    metadata[key] = False
 
         return MetadataEmbeddingRecord(
             id=embedding_id,
@@ -235,17 +236,6 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        if "chroma:document" in metadata:
-            t = Table("embedding_fulltext")
-            q = (
-                self._db.querybuilder()
-                .from_(t)
-                .where(t.id == ParameterValue(id))
-                .delete()
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
-
         self._insert_metadata(cur, id, metadata)
 
     def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
@@ -254,7 +244,9 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .into(t)
-            .columns(t.id, t.key, t.string_value, t.int_value, t.float_value)
+            .columns(
+                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+            )
         )
         for key, value in metadata.items():
             if isinstance(value, str):
@@ -264,6 +256,17 @@ class SqliteMetadataSegment(MetadataReader):
                     ParameterValue(value),
                     None,
                     None,
+                    None,
+                )
+            # isinstance(True, int) evaluates to True, so we need to check for bools separately
+            elif isinstance(value, bool):
+                q = q.insert(
+                    ParameterValue(id),
+                    ParameterValue(key),
+                    None,
+                    None,
+                    None,
+                    ParameterValue(value),
                 )
             elif isinstance(value, int):
                 q = q.insert(
@@ -271,6 +274,7 @@ class SqliteMetadataSegment(MetadataReader):
                     ParameterValue(key),
                     None,
                     ParameterValue(value),
+                    None,
                     None,
                 )
             elif isinstance(value, float):
@@ -280,6 +284,7 @@ class SqliteMetadataSegment(MetadataReader):
                     None,
                     None,
                     ParameterValue(value),
+                    None,
                 )
 
         sql, params = get_sql(q)
@@ -288,15 +293,33 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(sql, params)
 
         if "chroma:document" in metadata:
-            t = Table("embedding_fulltext")
-            q = (
-                self._db.querybuilder()
-                .into(t)
-                .columns(t.id, t.string_value)
-                .insert(ParameterValue(id), ParameterValue(metadata["chroma:document"]))
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
+            t = Table("embedding_fulltext_search")
+
+            def insert_into_fulltext_search() -> None:
+                q = (
+                    self._db.querybuilder()
+                    .into(t)
+                    .columns(t.rowid, t.string_value)
+                    .insert(
+                        ParameterValue(id),
+                        ParameterValue(metadata["chroma:document"]),
+                    )
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+
+            try:
+                insert_into_fulltext_search()
+            except sqlite3.IntegrityError:
+                q = (
+                    self._db.querybuilder()
+                    .from_(t)
+                    .where(t.rowid == ParameterValue(id))
+                    .delete()
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+                insert_into_fulltext_search()
 
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
@@ -379,7 +402,6 @@ class SqliteMetadataSegment(MetadataReader):
         self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
     ) -> Criterion:
         clause: list[Criterion] = []
-
         for k, v in where.items():
             if k == "$and":
                 criteria = [
@@ -405,16 +427,6 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
-    class EscapedLike(Function):  # type: ignore
-        def __init__(self, column_name: str, search_term: str, escape_char: str = "\\"):
-            self.column_name = column_name
-            self.search_term = search_term
-            self.escape_char = escape_char
-            super().__init__("LIKE", column_name, search_term)
-
-        def get_function_sql(self, **kwargs: Any) -> str:
-            return f"{self.column_name} LIKE {self.search_term} ESCAPE '{self.escape_char}'"
-
     def _where_doc_criterion(
         self,
         q: QueryBuilder,
@@ -437,34 +449,22 @@ class SqliteMetadataSegment(MetadataReader):
                 return reduce(lambda x, y: x | y, criteria)
             elif k == "$contains":
                 v = cast(str, v)
-                search_term = f"%{_escape_characters(v)}%"
+                search_term = f"%{v}%"
 
                 sq = (
                     self._db.querybuilder()
                     .from_(fulltext_t)
-                    .select(fulltext_t.id)
-                    .where(
-                        self.EscapedLike(
-                            fulltext_t.string_value,
-                            ParameterValue(search_term),
-                        )
-                    )
+                    .select(fulltext_t.rowid)
+                    .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
 
-
-def _escape_characters(string: str) -> str:
-    """Escape % and _ characters in a string with a backslash as they are reserved in
-    LIKE clauses"""
-    escaped_string = ""
-    for char in string:
-        if char == "%" or char == "_":
-            escaped_string += "\\"
-        escaped_string += char
-    return escaped_string
+    @override
+    def delete(self) -> None:
+        raise NotImplementedError()
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
@@ -488,30 +488,77 @@ def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
 
 
 def _where_clause(
-    expr: Union[LiteralValue, Dict[WhereOperator, LiteralValue]],
+    expr: Union[
+        LiteralValue,
+        Dict[WhereOperator, LiteralValue],
+        Dict[InclusionExclusionOperator, List[LiteralValue]],
+    ],
     table: Table,
 ) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
-    if isinstance(expr, (str, int, float)):
-        return _where_clause({"$eq": expr}, table)
+    if isinstance(expr, (str, int, float, bool)):
+        return _where_clause({cast(WhereOperator, "$eq"): expr}, table)
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
     return _value_criterion(value, operator, table)
 
 
-def _value_criterion(value: LiteralValue, op: WhereOperator, table: Table) -> Criterion:
+def _value_criterion(
+    value: Union[LiteralValue, List[LiteralValue]],
+    op: Union[WhereOperator, InclusionExclusionOperator],
+    table: Table,
+) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
-
     if isinstance(value, str):
         cols = [table.string_value]
+    # isinstance(True, int) evaluates to True, so we need to check for bools separately
+    elif isinstance(value, bool) and op in ("$eq", "$ne"):
+        cols = [table.bool_value]
     elif isinstance(value, int) and op in ("$eq", "$ne"):
         cols = [table.int_value]
     elif isinstance(value, float) and op in ("$eq", "$ne"):
         cols = [table.float_value]
+    elif isinstance(value, list) and op in ("$in", "$nin"):
+        _v = value
+        if len(_v) == 0:
+            raise ValueError(f"Empty list for {op} operator")
+        if isinstance(value[0], str):
+            col_exprs = [
+                table.string_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.str_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], bool):
+            col_exprs = [
+                table.bool_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.bool_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], int):
+            col_exprs = [
+                table.int_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.int_value.notin(ParameterValue(_v))
+            ]
+        elif isinstance(value[0], float):
+            col_exprs = [
+                table.float_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.float_value.notin(ParameterValue(_v))
+            ]
+    elif isinstance(value, list) and op in ("$in", "$nin"):
+        col_exprs = [
+            table.int_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.int_value.notin(ParameterValue(value)),
+            table.float_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.float_value.notin(ParameterValue(value)),
+        ]
     else:
         cols = [table.int_value, table.float_value]
 

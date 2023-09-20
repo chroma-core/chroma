@@ -47,6 +47,11 @@ class SegmentImplementation(Component):
         segment. Validation errors will be reported to the user."""
         return None
 
+    @abstractmethod
+    def delete(self) -> None:
+        """Delete the segment and all its data"""
+        ...
+
 
 S = TypeVar("S", bound=SegmentImplementation)
 

@@ -14,3 +14,7 @@ def parse_topic_name(topic_name: str) -> Tuple[str, str, str]:
 
 def create_pulsar_connection_str(host: str, port: str) -> str:
     return f"pulsar://{host}:{port}"
+
+
+def create_topic_name(tenant: str, namespace: str, topic: str) -> str:
+    return f"persistent://{tenant}/{namespace}/{topic}"

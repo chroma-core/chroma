@@ -11,18 +11,16 @@ class AddEmbedding(BaseModel):  # type: ignore
     # Union[int, float] so we use Any here to ensure data is parsed
     # to its original type.
     embeddings: Optional[List[Any]] = None
-    metadatas: Optional[List[Dict[Any, Any]]] = None
-    documents: Optional[List[str]] = None
+    metadatas: Optional[List[Optional[Dict[Any, Any]]]] = None
+    documents: Optional[List[Optional[str]]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
 class UpdateEmbedding(BaseModel):  # type: ignore
     embeddings: Optional[List[Any]] = None
-    metadatas: Optional[List[Dict[Any, Any]]] = None
-    documents: Optional[List[str]] = None
+    metadatas: Optional[List[Optional[Dict[Any, Any]]]] = None
+    documents: Optional[List[Optional[str]]] = None
     ids: List[str]
-    increment_index: bool = True
 
 
 class QueryEmbedding(BaseModel):  # type: ignore
@@ -44,10 +42,6 @@ class GetEmbedding(BaseModel):  # type: ignore
     limit: Optional[int] = None
     offset: Optional[int] = None
     include: Include = ["metadatas", "documents"]
-
-
-class RawSql(BaseModel):  # type: ignore
-    raw_sql: str
 
 
 class DeleteEmbedding(BaseModel):  # type: ignore

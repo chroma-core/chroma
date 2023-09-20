@@ -36,22 +36,17 @@ print(api.heartbeat())
 This by default saves your db and your indexes to a `.chroma` directory and can also load from them.
 ```python
 import chromadb
-from chromadb.config import Settings
-api = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet",
-                      persist_directory="/path/to/persist/directory"))
+api = chromadb.PersistentClient(path="/path/to/persist/directory")
 print(api.heartbeat())
 ```
 
 
 3. With a persistent backend and a small frontend client
 
-Run `docker-compose up -d --build`
+Run `chroma run --path /chroma_db_path`
 ```python
 import chromadb
-from chromadb.config import Settings
-api = chromadb.Client(Settings(chroma_api_impl="rest",
-                              chroma_server_host="localhost",
-                              chroma_server_http_port="8000") )
+api = chromadb.HttpClient(host="localhost", port="8000")
 
 print(api.heartbeat())
 ```

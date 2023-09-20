@@ -1,6 +1,8 @@
-from typing import Dict, Optional
+from collections import defaultdict
+import sys
+from typing import Dict, Optional, Sequence, Set, Tuple
 import uuid
-from chromadb.config import System
+from chromadb.config import Settings, System
 from chromadb.ingest import Consumer, ConsumerCallbackFn, Producer
 from overrides import overrides, EnforceOverrides
 from uuid import UUID
@@ -11,7 +13,7 @@ import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
 
-from chromadb.utils.messageid import pulsar_to_int
+from chromadb.utils.messageid import int_to_pulsar, pulsar_to_int
 
 
 class PulsarProducer(Producer, EnforceOverrides):
@@ -19,12 +21,14 @@ class PulsarProducer(Producer, EnforceOverrides):
     _topic_to_producer: Dict[str, pulsar.Producer]
     _client: pulsar.Client
     _admin: PulsarAdmin
+    _settings: Settings
 
     def __init__(self, system: System) -> None:
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
         self._topic_to_producer = {}
+        self._settings = system.settings
         self._admin = PulsarAdmin(system)
         super().__init__(system)
 
@@ -44,9 +48,7 @@ class PulsarProducer(Producer, EnforceOverrides):
 
     @overrides
     def delete_topic(self, topic_name: str) -> None:
-        # TODO: determine how to implement this given that pulsar doesn't support deleting topics without
-        # using admin api
-        pass
+        self._admin.delete_topic(topic_name)
 
     @overrides
     def submit_embedding(
@@ -59,21 +61,74 @@ class PulsarProducer(Producer, EnforceOverrides):
         msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
         return pulsar_to_int(msg_id)
 
+    @overrides
+    def submit_embeddings(
+        self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
+    ) -> Sequence[SeqId]:
+        # For now, just call submit_embedding in a loop. TODO: batch performance / async
+        return [
+            self.submit_embedding(topic_name, embedding) for embedding in embeddings
+        ]
+
+    @property
+    @overrides
+    def max_batch_size(self) -> int:
+        # For now, the max pulsar batch size is the max int.
+        # TODO: tune this to a reasonable value by default
+        return sys.maxsize
+
     def _get_or_create_producer(self, topic_name: str) -> pulsar.Producer:
         if topic_name not in self._topic_to_producer:
             producer = self._client.create_producer(topic_name)
             self._topic_to_producer[topic_name] = producer
         return self._topic_to_producer[topic_name]
 
+    @overrides
+    def reset_state(self) -> None:
+        if not self._settings.require("allow_reset"):
+            raise ValueError(
+                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+            )
+        for topic_name in self._topic_to_producer:
+            self._admin.delete_topic(topic_name)
+        self._topic_to_producer = {}
+        super().reset_state()
+
 
 class PulsarConsumer(Consumer, EnforceOverrides):
+    class PulsarSubscription:
+        id: UUID
+        topic_name: str
+        start: int
+        end: int
+        callback: ConsumerCallbackFn
+        consumer: pulsar.Consumer
+
+        def __init__(
+            self,
+            id: UUID,
+            topic_name: str,
+            start: int,
+            end: int,
+            callback: ConsumerCallbackFn,
+            consumer: pulsar.Consumer,
+        ):
+            self.id = id
+            self.topic_name = topic_name
+            self.start = start
+            self.end = end
+            self.callback = callback
+            self.consumer = consumer
+
     _connection_str: str
     _client: pulsar.Client
+    _subscriptions: Dict[str, Set[PulsarSubscription]]
 
     def __init__(self, system: System) -> None:
         pulsar_host = system.settings.require("pulsar_broker_url")
         pulsar_port = system.settings.require("pulsar_broker_port")
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
+        self._subscriptions = defaultdict(set)
         super().__init__(system)
 
     @overrides
@@ -110,7 +165,6 @@ class PulsarConsumer(Consumer, EnforceOverrides):
 
         Takes an optional UUID as a unique subscription ID. If no ID is provided, a new
         ID will be generated and returned."""
-        print("subscribing")
         if not self._running:
             raise RuntimeError("Consumer must be started before subscribing")
 
@@ -118,15 +172,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
             id or uuid.uuid4()
         )  # TODO: this should really be created by the coordinator and stored in sysdb
 
-        # start, end = self._validate_range(start, end)
-
-        # subscription = self.Subscription(
-        #     subscription_id, topic_name, start, end, consume_fn
-        # )
-
-        # # Backfill first, so if it errors we do not add the subscription
-        # self._backfill(subscription)
-        # self._subscriptions[topic_name].add(subscription)
+        start, end = self._validate_range(start, end)
 
         def wrap_callback(consumer: pulsar.Consumer, message: pulsar.Message) -> None:
             msg_data = message.data()
@@ -139,31 +185,57 @@ class PulsarConsumer(Consumer, EnforceOverrides):
             consume_fn([embedding_record])
             consumer.acknowledge(message)
             if msg_id == end:
-                consumer.close()
+                self.unsubscribe(subscription_id)
 
         consumer = self._client.subscribe(
             topic_name,
             subscription_id.hex,
             message_listener=wrap_callback,
         )
-        if start is None:
-            # TODO: race condition between subscribing and seeking?
-            consumer.seek(pulsar.MessageId.earliest)
+
+        subscription = self.PulsarSubscription(
+            subscription_id, topic_name, start, end, consume_fn, consumer
+        )
+        self._subscriptions[topic_name].add(subscription)
+
+        # NOTE: For some reason the seek() method expects a shadowed MessageId type
+        # which resides in _msg_id.
+        consumer.seek(int_to_pulsar(start)._msg_id)
 
         return subscription_id
+
+    def _validate_range(
+        self, start: Optional[SeqId], end: Optional[SeqId]
+    ) -> Tuple[int, int]:
+        """Validate and normalize the start and end SeqIDs for a subscription using this
+        impl."""
+        start = start or pulsar_to_int(pulsar.MessageId.latest)
+        end = end or self.max_seqid()
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise ValueError("SeqIDs must be integers")
+        if start >= end:
+            raise ValueError(f"Invalid SeqID range: {start} to {end}")
+        return start, end
 
     @overrides
     def unsubscribe(self, subscription_id: UUID) -> None:
         """Unregister a subscription. The consume function will no longer be invoked,
         and resources associated with the subscription will be released."""
-        pass
+        for topic_name, subscriptions in self._subscriptions.items():
+            for subscription in subscriptions:
+                if subscription.id == subscription_id:
+                    subscription.consumer.close()
+                    subscriptions.remove(subscription)
+                    if len(subscriptions) == 0:
+                        del self._subscriptions[topic_name]
+                    return
 
     @overrides
     def min_seqid(self) -> SeqId:
         """Return the minimum possible SeqID in this implementation."""
-        return -1
+        return pulsar_to_int(pulsar.MessageId.earliest)
 
     @overrides
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
-        return 2**191 - 1
+        return 2**192 - 1

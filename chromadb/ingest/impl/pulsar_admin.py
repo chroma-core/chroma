@@ -60,3 +60,22 @@ class PulsarAdmin:
 
         if response.status_code != 204 and response.status_code != 409:
             raise RuntimeError(f"Failed to create topic {topic_name}")
+
+    def delete_topic(self, topic: str) -> None:
+        tenant, namespace, topic_name = parse_topic_name(topic)
+
+        if tenant != "default":
+            raise ValueError(f"Only the default tenant is supported, got {tenant}")
+        if namespace != "default":
+            raise ValueError(
+                f"Only the default namespace is supported, got {namespace}"
+            )
+
+        # Make a PUT request to the admin api to delete the topic
+        path = f"/admin/v2/persistent/{tenant}/{namespace}/{topic_name}"
+        # Force delete the topic
+        path += "?force=true"
+        url = self._connection_str + path
+        response = requests.delete(url)
+        if response.status_code != 204 and response.status_code != 409:
+            raise RuntimeError(f"Failed to delete topic {topic_name}")

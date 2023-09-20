@@ -1,6 +1,7 @@
 from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
+from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
@@ -26,6 +27,7 @@ from chromadb.api.types import (
     validate_update_metadata,
     validate_where,
     validate_where_document,
+    validate_batch,
 )
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
@@ -34,10 +36,10 @@ import chromadb.types as t
 from typing import Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
-import pandas as pd
 import time
 import logging
 import re
+
 
 logger = logging.getLogger(__name__)
 
@@ -242,14 +244,24 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
-
-        for r in _records(t.Operation.ADD, ids, embeddings, metadatas, documents):
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.ADD,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+        ):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(CollectionAddEvent(str(collection_id), len(ids)))
         return True
@@ -265,10 +277,21 @@ class SegmentAPI(API):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
-
-        for r in _records(t.Operation.UPDATE, ids, embeddings, metadatas, documents):
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.UPDATE,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+        ):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -280,14 +303,24 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        increment_index: bool = True,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
-
-        for r in _records(t.Operation.UPSERT, ids, embeddings, metadatas, documents):
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.UPSERT,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+        ):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         return True
 
@@ -329,7 +362,7 @@ class SegmentAPI(API):
             offset=offset,
         )
 
-        vectors = None
+        vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
@@ -346,7 +379,9 @@ class SegmentAPI(API):
 
         return GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors] if vectors else None,
+            embeddings=[r["embedding"] for r in vectors]
+            if "embeddings" in include
+            else None,
             metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
@@ -366,11 +401,27 @@ class SegmentAPI(API):
             else None
         )
 
+        # You must have at least one of non-empty ids, where, or where_document.
+        if (
+            (ids is None or (ids is not None and len(ids) == 0))
+            and (where is None or (where is not None and len(where) == 0))
+            and (
+                where_document is None
+                or (where_document is not None and len(where_document) == 0)
+            )
+        ):
+            raise ValueError(
+                """
+                You must provide either ids, where, or where_document to delete. If
+                you want to delete all data in a collection you can delete the
+                collection itself using the delete_collection method. Or alternatively,
+                you can get() all the relevant ids and then delete them.
+                """
+            )
+
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
-        # TODO: Do we want to warn the user that unrestricted _delete() is 99% of the
-        # time a bad idea?
         if (where or where_document) or not ids:
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
@@ -380,9 +431,14 @@ class SegmentAPI(API):
         else:
             ids_to_delete = ids
 
+        if len(ids_to_delete) == 0:
+            return []
+
+        records_to_submit = []
         for r in _records(t.Operation.DELETE, ids_to_delete):
             self._validate_embedding_record(coll, r)
-            self._producer.submit_embedding(coll["topic"], r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
         self._telemetry_client.capture(
             CollectionDeleteEvent(str(collection_id), len(ids_to_delete))
@@ -498,27 +554,21 @@ class SegmentAPI(API):
         return True
 
     @override
-    def raw_sql(self, sql: str) -> pd.DataFrame:
-        raise NotImplementedError()
-
-    @override
-    def create_index(self, collection_name: str) -> bool:
-        logger.warning(
-            "Calling create_index is unnecessary, data is now automatically indexed"
-        )
-        return True
-
-    @override
     def get_settings(self) -> Settings:
         return self._settings
 
-    # TODO: promote collection -> topic to a base class method so that it can be
-    # used for channel assignment in the distributed version of the system.
+    @property
+    @override
+    def max_batch_size(self) -> int:
+        return self._producer.max_batch_size
+
     def _topic(self, collection_id: UUID) -> str:
-        return f"persistent://{self._tenant_id}/{self._topic_ns}/{collection_id}"
+        return create_topic_name(self._tenant_id, self._topic_ns, str(collection_id))
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
+    # TODO: promote collection -> topic to a base class method so that it can be
+    # used for channel assignment in the distributed version of the system.
     def _validate_embedding_record(
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:

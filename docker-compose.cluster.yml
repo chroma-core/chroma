@@ -33,7 +33,7 @@ services:
     networks:
       - net
 
-  # Rename to segment-worker
+  # TODO: Rename to segment-worker
   segment-server:
     image: segment-server
     build:
