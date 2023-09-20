@@ -77,7 +77,5 @@ class PulsarAdmin:
         path += "?force=true"
         url = self._connection_str + path
         response = requests.delete(url)
-        print(response.status_code)
-        print(response.text)
         if response.status_code != 204 and response.status_code != 409:
             raise RuntimeError(f"Failed to delete topic {topic_name}")
