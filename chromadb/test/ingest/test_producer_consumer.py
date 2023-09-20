@@ -349,17 +349,17 @@ async def test_multiple_topics_batch(
     N_TO_PRODUCE = 100
     total_produced = 0
     for i in range(N_TO_PRODUCE // PRODUCE_BATCH_SIZE):
-        for i in range(N_TOPICS):
-            embeddings_n[i].extend(
+        for n in range(N_TOPICS):
+            embeddings_n[n].extend(
                 produce_fns(
                     producer,
-                    full_topic_name(f"test_topic_{i}"),
+                    full_topic_name(f"test_topic_{n}"),
                     sample_embeddings,
                     PRODUCE_BATCH_SIZE,
                 )[0]
             )
-            recieved = await consume_fns[i].get(total_produced + PRODUCE_BATCH_SIZE)
-            assert_records_match(embeddings_n[i], recieved)
+            recieved = await consume_fns[n].get(total_produced + PRODUCE_BATCH_SIZE)
+            assert_records_match(embeddings_n[n], recieved)
         total_produced += PRODUCE_BATCH_SIZE
 
 
