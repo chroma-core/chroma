@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 import uuid
