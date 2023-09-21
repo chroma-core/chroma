@@ -177,6 +177,7 @@ async def test_backfill(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
     producer.create_topic(topic_name)
     embeddings = produce_fns(producer, topic_name, sample_embeddings, 3)[0]
@@ -195,6 +196,7 @@ async def test_notifications(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
 
     producer.create_topic(topic_name)
@@ -220,6 +222,7 @@ async def test_multiple_topics(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name_1 = full_topic_name("test_topic_1")
     topic_name_2 = full_topic_name("test_topic_2")
     producer.create_topic(topic_name_1)
@@ -256,6 +259,7 @@ async def test_start_seq_id(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
     producer.create_topic(topic_name)
 
@@ -286,6 +290,7 @@ async def test_end_seq_id(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
     producer.create_topic(topic_name)
 
@@ -317,6 +322,7 @@ async def test_submit_batch(
 ) -> None:
     producer, consumer = producer_consumer
     producer.reset_state()
+    consumer.reset_state()
     topic_name = full_topic_name("test_topic")
 
     embeddings = [next(sample_embeddings) for _ in range(100)]
