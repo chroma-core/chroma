@@ -1,6 +1,6 @@
-import inspect
 from typing import cast, ClassVar
 from chromadb.telemetry import TelemetryEvent
+from chromadb.utils.embedding_functions import get_builtins
 
 
 class ClientStartEvent(TelemetryEvent):
@@ -16,13 +16,11 @@ class ClientCreateCollectionEvent(TelemetryEvent):
         super().__init__()
         self.collection_uuid = collection_uuid
 
-        # We have to do this here to avoid a circular import
-        import chromadb.utils.embedding_functions
-
         embedding_function_names = [
-            name
-            for name, _ in inspect.getmembers(chromadb.utils.embedding_functions)
-            if name.endswith("EmbeddingFunction") and name != "EmbeddingFunction"
+            obj.__name__
+            for obj in get_builtins()
+            if obj.__name__.endswith("EmbeddingFunction")
+            and obj.__name__ != "EmbeddingFunction"
         ]
 
         self.embedding_function = (
