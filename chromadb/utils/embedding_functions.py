@@ -481,11 +481,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
 # List of all classes in this module
 _classes = [
-    obj
+    (name, obj)
     for name, obj in inspect.getmembers(sys.modules[__name__], inspect.isclass)
     if obj.__module__ == __name__
 ]
 
 
-def get_builtins() -> List[type]:
+def get_builtins() -> List[tuple[str, type]]:
     return _classes

@@ -16,12 +16,7 @@ class ClientCreateCollectionEvent(TelemetryEvent):
         super().__init__()
         self.collection_uuid = collection_uuid
 
-        embedding_function_names = [
-            obj.__name__
-            for obj in get_builtins()
-            if obj.__name__.endswith("EmbeddingFunction")
-            and obj.__name__ != "EmbeddingFunction"
-        ]
+        embedding_function_names = [name for name, _ in get_builtins()]
 
         self.embedding_function = (
             embedding_function
