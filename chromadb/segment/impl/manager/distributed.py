@@ -15,6 +15,7 @@ from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
 from enum import Enum
+from chromadb.segment import SegmentDirectory
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, List, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
@@ -36,21 +37,22 @@ class DistributedSegmentManager(SegmentManager):
     _sysdb: SysDB
     _system: System
     _instances: Dict[UUID, SegmentImplementation]
-    _segment_cache: Dict[UUID, Dict[SegmentScope, Segment]]
+    _segment_cache: Dict[
+        UUID, Dict[SegmentScope, Segment]
+    ]  # collection_id -> scope -> segment
+    _segment_directory: SegmentDirectory
     _lock: Lock
-    _segment_server_stub: SegmentServerStub
+    _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
 
     def __init__(self, system: System):
         super().__init__(system)
         self._sysdb = self.require(SysDB)
+        self._segment_directory = self.require(SegmentDirectory)
         self._system = system
         self._instances = {}
         self._segment_cache = defaultdict(dict)
+        self._segment_server_stubs = {}
         self._lock = Lock()
-
-        # TODO: this should be configurable based on segment info in sysdb metadata
-        channel = grpc.insecure_channel("segment-server.chroma:50051")
-        self._segment_server_stub = SegmentServerStub(channel)
 
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
@@ -80,6 +82,13 @@ class DistributedSegmentManager(SegmentManager):
             known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
             # Get the first segment of a known type
             segment = next(filter(lambda s: s["type"] in known_types, segments))
+            grpc_url = self._segment_directory.get_segment_endpoint(segment)
+            if segment["metadata"] is not None:
+                segment["metadata"]["grpc_url"] = grpc_url  # type: ignore
+            else:
+                segment["metadata"] = {"grpc_url": grpc_url}
+            # TODO: Register a callback to update the segment when it gets moved
+            # self._segment_directory.register_updated_segment_callback()
             self._segment_cache[collection_id][scope] = segment
 
         # Instances must be atomically created, so we use a lock to ensure that only one thread
@@ -104,8 +113,15 @@ class DistributedSegmentManager(SegmentManager):
                 )
                 known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
                 segment = next(filter(lambda s: s["type"] in known_types, segments))
-                print(f"Loading segment {segment}")
-                self._segment_server_stub.LoadSegment(to_proto_segment(segment))
+                grpc_url = self._segment_directory.get_segment_endpoint(segment)
+
+                if grpc_url not in self._segment_server_stubs:
+                    channel = grpc.insecure_channel(grpc_url)
+                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
+
+                self._segment_server_stubs[grpc_url].LoadSegment(
+                    to_proto_segment(segment)
+                )
 
     # TODO: rethink duplication from local segment manager
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:

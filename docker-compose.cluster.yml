@@ -50,8 +50,9 @@ services:
       - PULSAR_BROKER_URL=pulsar
       - PULSAR_BROKER_PORT=6650
       - PULSAR_ADMIN_PORT=8080
+      - CHROMA_SERVER_GRPC_PORT=50051
     ports:
-      - 50051:50051 # TODO: parameterize this in env
+      - 50051:50051
     depends_on:
       pulsar:
         condition: service_healthy
