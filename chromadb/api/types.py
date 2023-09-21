@@ -1,4 +1,5 @@
-from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any, Tuple
+from enum import Enum
+from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any, Tuple, Set
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -79,6 +80,18 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
+
+
+AllowedIndexColumns = Literal["string_value", "int_value", "float_value"]
+
+class IndexType(str,Enum):
+    METADATA = "metadata"
+    DOCUMENT = "document"
+
+class SqlBackedIndex(TypedDict):
+    name: str
+    columns: Set[AllowedIndexColumns]
+    index_type: IndexType
 
 
 class EmbeddingFunction(Protocol):

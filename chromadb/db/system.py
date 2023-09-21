@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from typing import Optional, Sequence
 from uuid import UUID
+
+from chromadb.api.types import SqlBackedIndex
 from chromadb.types import (
     Collection,
     Segment,
@@ -28,23 +30,23 @@ class SysDB(Component):
 
     @abstractmethod
     def get_segments(
-        self,
-        id: Optional[UUID] = None,
-        type: Optional[str] = None,
-        scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
-        collection: Optional[UUID] = None,
+            self,
+            id: Optional[UUID] = None,
+            type: Optional[str] = None,
+            scope: Optional[SegmentScope] = None,
+            topic: Optional[str] = None,
+            collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, type, scope, topic or collection."""
         pass
 
     @abstractmethod
     def update_segment(
-        self,
-        id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
-        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+            self,
+            id: UUID,
+            topic: OptionalArgument[Optional[str]] = Unspecified(),
+            collection: OptionalArgument[Optional[UUID]] = Unspecified(),
+            metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a segment. Unspecified fields will be left unchanged. For the
         metadata, keys with None values will be removed and keys not present in the
@@ -63,24 +65,44 @@ class SysDB(Component):
 
     @abstractmethod
     def get_collections(
-        self,
-        id: Optional[UUID] = None,
-        topic: Optional[str] = None,
-        name: Optional[str] = None,
+            self,
+            id: Optional[UUID] = None,
+            topic: Optional[str] = None,
+            name: Optional[str] = None,
     ) -> Sequence[Collection]:
         """Find collections by id, topic or name"""
         pass
 
     @abstractmethod
     def update_collection(
-        self,
-        id: UUID,
-        topic: OptionalArgument[str] = Unspecified(),
-        name: OptionalArgument[str] = Unspecified(),
-        dimension: OptionalArgument[Optional[int]] = Unspecified(),
-        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+            self,
+            id: UUID,
+            topic: OptionalArgument[str] = Unspecified(),
+            name: OptionalArgument[str] = Unspecified(),
+            dimension: OptionalArgument[Optional[int]] = Unspecified(),
+            metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
+        pass
+
+    @abstractmethod
+    def create_index(self, collection_id: UUID, index: SqlBackedIndex) -> None:
+        """Create a new index"""
+        pass
+
+    @abstractmethod
+    def drop_index(self, collection_id: UUID, index_name: str) -> None:
+        """Delete an index"""
+        pass
+
+    @abstractmethod
+    def rebuild_index(self, collection_id: UUID, index_name: str) -> None:
+        """Rebuild an index"""
+        pass
+
+    @abstractmethod
+    def get_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        """Get all indices for a collection"""
         pass

@@ -1,3 +1,4 @@
+import time
 from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
@@ -55,6 +56,8 @@ class SqliteMetadataSegment(MetadataReader):
             self._subscription = self._consumer.subscribe(
                 self._topic, self._write_metadata, start=seq_id
             )
+        # with self._db.tx() as cur:
+        #     cur.execute("ANALYZE;")
 
     @override
     def stop(self) -> None:
@@ -144,8 +147,13 @@ class SqliteMetadataSegment(MetadataReader):
 
         limit = limit or 2**63 - 1
         offset = offset or 0
+        print("SQL: ", q.get_sql())
+        start_time = time.time()
         with self._db.tx() as cur:
-            return list(islice(self._records(cur, q), offset, offset + limit))
+            res = list(islice(self._records(cur, q), offset, offset + limit))
+            end_time = time.time()
+            print(f"Execution time: {end_time - start_time:.4f} seconds")
+            return res
 
     def _records(
         self, cur: Cursor, q: QueryBuilder
@@ -158,7 +166,6 @@ class SqliteMetadataSegment(MetadataReader):
 
         cur_iterator = iter(cur.fetchone, None)
         group_iterator = groupby(cur_iterator, lambda r: int(r[0]))
-
         for _, group in group_iterator:
             yield self._record(list(group))
 
@@ -181,11 +188,12 @@ class SqliteMetadataSegment(MetadataReader):
                 else:
                     metadata[key] = False
 
-        return MetadataEmbeddingRecord(
+        md = MetadataEmbeddingRecord(
             id=embedding_id,
             seq_id=_decode_seq_id(seq_id),
             metadata=metadata or None,
         )
+        return md
 
     def _insert_record(
         self, cur: Cursor, record: EmbeddingRecord, upsert: bool
@@ -205,9 +213,9 @@ class SqliteMetadataSegment(MetadataReader):
             ParameterValue(_encode_seq_id(record["seq_id"])),
         )
         sql, params = get_sql(q)
-        sql = sql + "RETURNING id"
+        sql = sql + "RETURNING id,segment_id"
         try:
-            id = cur.execute(sql, params).fetchone()[0]
+            id, segment_id = cur.execute(sql, params).fetchone()
         except sqlite3.IntegrityError:
             # Can't use INSERT OR REPLACE here because it changes the primary key.
             if upsert:
@@ -219,9 +227,11 @@ class SqliteMetadataSegment(MetadataReader):
                 return
 
         if record["metadata"]:
-            self._update_metadata(cur, id, record["metadata"])
+            self._update_metadata(cur, id, segment_id, record["metadata"])
 
-    def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+    def _update_metadata(
+        self, cur: Cursor, id: int, segment_id: str, metadata: UpdateMetadata
+    ) -> None:
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
         to_delete = [k for k, v in metadata.items() if v is None]
@@ -236,22 +246,31 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
-        self._insert_metadata(cur, id, metadata)
+        self._insert_metadata(cur, id, segment_id, metadata)
 
-    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+    def _insert_metadata(
+        self, cur: Cursor, id: int, segment_id: str, metadata: UpdateMetadata
+    ) -> None:
         """Insert or update each metadata row for a single embedding record"""
         t = Table("embedding_metadata")
         q = (
             self._db.querybuilder()
             .into(t)
             .columns(
-                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+                t.id,
+                t.segment_id,
+                t.key,
+                t.string_value,
+                t.int_value,
+                t.float_value,
+                t.bool_value,
             )
         )
         for key, value in metadata.items():
             if isinstance(value, str):
                 q = q.insert(
                     ParameterValue(id),
+                    ParameterValue(segment_id),
                     ParameterValue(key),
                     ParameterValue(value),
                     None,
@@ -262,6 +281,7 @@ class SqliteMetadataSegment(MetadataReader):
             elif isinstance(value, bool):
                 q = q.insert(
                     ParameterValue(id),
+                    ParameterValue(segment_id),
                     ParameterValue(key),
                     None,
                     None,
@@ -271,6 +291,7 @@ class SqliteMetadataSegment(MetadataReader):
             elif isinstance(value, int):
                 q = q.insert(
                     ParameterValue(id),
+                    ParameterValue(segment_id),
                     ParameterValue(key),
                     None,
                     ParameterValue(value),
@@ -280,6 +301,7 @@ class SqliteMetadataSegment(MetadataReader):
             elif isinstance(value, float):
                 q = q.insert(
                     ParameterValue(id),
+                    ParameterValue(segment_id),
                     ParameterValue(key),
                     None,
                     None,
@@ -421,7 +443,12 @@ class SqliteMetadataSegment(MetadataReader):
                     self._db.querybuilder()
                     .from_(metadata_t)
                     .select(metadata_t.id)
+                    .where(
+                        metadata_t.segment_id
+                        == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
                     .where(metadata_t.key == ParameterValue(k))
+                    .where(metadata_t.key != "chroma:document")
                     .where(_where_clause(expr, metadata_t))
                 )
                 clause.append(embeddings_t.id.isin(sq))

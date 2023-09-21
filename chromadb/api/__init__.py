@@ -13,7 +13,7 @@ from chromadb.api.types import (
     Where,
     QueryResult,
     GetResult,
-    WhereDocument,
+    WhereDocument, SqlBackedIndex,
 )
 from chromadb.config import Component, Settings
 import chromadb.utils.embedding_functions as ef
@@ -51,11 +51,11 @@ class API(Component, ABC):
 
     @abstractmethod
     def create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-        get_or_create: bool = False,
+            self,
+            name: str,
+            metadata: Optional[CollectionMetadata] = None,
+            embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+            get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
         Args:
@@ -85,9 +85,9 @@ class API(Component, ABC):
 
     @abstractmethod
     def get_collection(
-        self,
-        name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+            self,
+            name: str,
+            embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -111,10 +111,10 @@ class API(Component, ABC):
 
     @abstractmethod
     def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+            self,
+            name: str,
+            metadata: Optional[CollectionMetadata] = None,
+            embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -134,10 +134,10 @@ class API(Component, ABC):
         pass
 
     def _modify(
-        self,
-        id: UUID,
-        new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
+            self,
+            id: UUID,
+            new_name: Optional[str] = None,
+            new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -152,8 +152,8 @@ class API(Component, ABC):
 
     @abstractmethod
     def delete_collection(
-        self,
-        name: str,
+            self,
+            name: str,
     ) -> None:
         """Delete a collection with the given name.
         Args:
@@ -175,12 +175,12 @@ class API(Component, ABC):
 
     @abstractmethod
     def _add(
-        self,
-        ids: IDs,
-        collection_id: UUID,
-        embeddings: Embeddings,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
+            self,
+            ids: IDs,
+            collection_id: UUID,
+            embeddings: Embeddings,
+            metadatas: Optional[Metadatas] = None,
+            documents: Optional[Documents] = None,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -199,12 +199,12 @@ class API(Component, ABC):
 
     @abstractmethod
     def _update(
-        self,
-        collection_id: UUID,
-        ids: IDs,
-        embeddings: Optional[Embeddings] = None,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
+            self,
+            collection_id: UUID,
+            ids: IDs,
+            embeddings: Optional[Embeddings] = None,
+            metadatas: Optional[Metadatas] = None,
+            documents: Optional[Documents] = None,
     ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
@@ -222,12 +222,12 @@ class API(Component, ABC):
 
     @abstractmethod
     def _upsert(
-        self,
-        collection_id: UUID,
-        ids: IDs,
-        embeddings: Embeddings,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
+            self,
+            collection_id: UUID,
+            ids: IDs,
+            embeddings: Embeddings,
+            metadatas: Optional[Metadatas] = None,
+            documents: Optional[Documents] = None,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -272,17 +272,17 @@ class API(Component, ABC):
 
     @abstractmethod
     def _get(
-        self,
-        collection_id: UUID,
-        ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        sort: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+            self,
+            collection_id: UUID,
+            ids: Optional[IDs] = None,
+            where: Optional[Where] = {},
+            sort: Optional[str] = None,
+            limit: Optional[int] = None,
+            offset: Optional[int] = None,
+            page: Optional[int] = None,
+            page_size: Optional[int] = None,
+            where_document: Optional[WhereDocument] = {},
+            include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
@@ -305,11 +305,11 @@ class API(Component, ABC):
 
     @abstractmethod
     def _delete(
-        self,
-        collection_id: UUID,
-        ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+            self,
+            collection_id: UUID,
+            ids: Optional[IDs],
+            where: Optional[Where] = {},
+            where_document: Optional[WhereDocument] = {},
     ) -> IDs:
         """[Internal] Deletes entries from a collection specified by UUID.
 
@@ -326,13 +326,13 @@ class API(Component, ABC):
 
     @abstractmethod
     def _query(
-        self,
-        collection_id: UUID,
-        query_embeddings: Embeddings,
-        n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+            self,
+            collection_id: UUID,
+            query_embeddings: Embeddings,
+            n_results: int = 10,
+            where: Where = {},
+            where_document: WhereDocument = {},
+            include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -384,4 +384,20 @@ class API(Component, ABC):
     def max_batch_size(self) -> int:
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
+        pass
+
+    @abstractmethod
+    def _create_collection_index(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        pass
+
+    @abstractmethod
+    def _drop_collection_index(self, collection_id: UUID, index_names: Sequence[str]) -> None:
+        pass
+
+    @abstractmethod
+    def _get_collection_indexes(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        pass
+
+    @abstractmethod
+    def _rebuild_collection_index(self, collection_id: UUID, index_names: Sequence[str]) -> None:
         pass

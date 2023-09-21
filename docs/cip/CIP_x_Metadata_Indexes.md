@@ -14,90 +14,100 @@ Current Status: `Under Discussion`
 ## Motivation
 
 Currently, some users are experiencing extreme slowness when querying with metadata filters, more frequently occurring
-for
-large datasets. This behaviour is due to the full table scan that metadata filters (WHERE clauses) must perform to
+for large datasets. This behaviour is due to the full table scan that metadata filters (WHERE clauses) must perform to
 locate the relevant documents.
 
 ## Public Interfaces
 
-The proposal suggests the introduction of the following public interfaces:
+The proposal suggests the introduction of the following public API interfaces:
 
-- `Collection.modify(indices = Index(name='<name>',columns={'col'},operation=ADD|DROP|UPDATE|REBUILD))` - Allows users
-  to
-  define indices on the collection.
-- `Collection` - introduces a new property `indices` that returns a list of all defined indices on the collection.
+- `/api/v1/collection/{collection_id}/indices` - (POST, GET, DELETE) - allows users to define indices on the collection
+  and get a list of all defined indices on the collection.
+  - `POST` - allows users to define indices on the collection
+  - `GET` - allows users to get a list of all defined indices on the collection
+  - `DELETE` - allows users to drop all indices from the collection
+- `/api/v1/collection/{collection_id}/indices/{index_name}` where:
+  - `PUT` - allows users to update the index
+  - `DELETE` - allows users to drop the index
+  - `PATCH` - allows the user to perform an operation on the index e.g. rebuild
+
+In addition to the API changes above we propose the following `Collection` interface changes:
+
+- `Collection.indices.add()` - allows users to define indices on the collection - this is a convenience method that
+  delegates to the API endpoint above (`POST /api/v1/collection/{collection_id}/indices`)
+- `Collection.indices.list()` - allows users to get a list of all defined indices on the collection - this is a convenience
+  method that delegates to the API endpoint above (`GET /api/v1/collection/{collection_id}/indices`)
+- `Collection.indices.drop_all()` - allows users to drop all indices from the collection - this is a convenience method that
+  delegates to the API endpoint above (`DELETE /api/v1/collection/{collection_id}/indices`)
+- `Collection.indices.get('index_name').drop()` - allows users to drop the index - this is a convenience method that
+  delegates to the API endpoint above (`DELETE /api/v1/collection/{collection_id}/indices/{index_name}`)
+- `Collection.indices.get('index_name').update()` - allows users to update the index - this is a convenience method that
+  delegates to the API endpoint above (`PUT /api/v1/collection/{collection_id}/indices/{index_name}`)
+- `Collection.indices.get('index_name').rebuild()` - allows the user to perform an operation on the index e.g. rebuild  -
+  this is a convenience method that delegates to the API endpoint above (`PATCH /api/v1/collection/{collection_id}/indices/{index_name}`)
+
 
 ## Proposed Changes
 
-We propose the introduction of a new function parameter to `Collection.modify` (`indices`) that will allow users to
-define indices on the collection. The indices will be defined list of Index objects. The indices will be created on the
-SQLite database level.
+This proposal introduces the following domain models:
 
-Index Object:
+- `Index` - represents an index on a collection
+
+### The `Index` model
+
+> Note: The constructs suggested below are for illustration purposes. Final names may differ.
 
 ```python
-AllowedColumns = Literal["string_value", "int_value", "float_value", "key"]
+from enum import Enum
+from typing import Set
+from typing_extensions import Literal, TypedDict
+
+AllowedIndexColumns = Literal["string_value", "int_value", "float_value", "key"]
 
 
-class Index(BaseModel):
+class IndexType(Enum,str):
+    METADATA = "metadata"
+    EMBEDDING = "embedding"
+
+
+class Index(NamedTuple):
     name: str
-    columns: Optional[Set[AllowedColumns]] = None
-    operation: Optional[CollectionIndexOperation] = CollectionIndexOperation.ADD
+    columns: Set[AllowedIndexColumns]
+    index_type: IndexType = IndexType.METADATA
 ```
-
-Where `CollectionIndexOperation` is an enum with the following values:
-
-- `ADD` - add the specified indices to the collection
-- `UPDATE` - update the specified indices on the collection
-- `REBUILD` - rebuild the specified indices on the collection
-- `DROP` - drop all indices from the collection
-
-Furthermore, we propose that `Collection` object adds a propeertry `indices` that will return a dictionary of all:
-
-- `Collection.indices` - returns a dictionary of all defined indices on the collection
 
 ### Examples
 
 #### Add indices
 
 ```python
-collection.modify(indices=[Index(name="my_index", columns={"string_value", "int_value"})])
+collection.indices.add([Index(name="my_index", columns={"string_value", "int_value"})])
 ```
 
 #### Update indices
 
 ```python
-collection.modify(
-    indices=[Index(name="my_index", columns={"int_value", "string_value"}, operation=CollectionIndexOperation.UPDATE)])
+collection.indices.update([Index(name="my_index", columns={"string_value", "int_value","bool_value"})])
 ```
 
 #### Rebuild indices
 
 ```python
-collection.modify(indices=[Index(name="my_index", operation=CollectionIndexOperation.REBUILD)])
+collection.indices.get("my_index").rebuild()
 ```
 
 #### Drop indices
 
 ```python
-collection.modify(indices=[Index(name="my_index", operation=CollectionIndexOperation.DROP)])
+collection.indices.drop(["my_index", "my_index2"])
 ```
 
 #### Get indices
 
 ```python
-collection.get().indices
+collection.indices.list()
 ```
 
-Returns:
-
-```python
-{
-    "my_index": {
-        "columns": ["string_value", "int_value"],
-    }
-}
-```
 
 ### Additional Notes
 

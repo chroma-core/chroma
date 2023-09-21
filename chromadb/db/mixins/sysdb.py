@@ -4,6 +4,7 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
+from chromadb.api.types import SqlBackedIndex
 from chromadb.config import System
 from chromadb.db.base import (
     Cursor,
@@ -14,6 +15,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.db.utils import IndexQuery
 from chromadb.types import (
     OptionalArgument,
     Segment,
@@ -108,12 +110,12 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def get_segments(
-        self,
-        id: Optional[UUID] = None,
-        type: Optional[str] = None,
-        scope: Optional[SegmentScope] = None,
-        topic: Optional[str] = None,
-        collection: Optional[UUID] = None,
+            self,
+            id: Optional[UUID] = None,
+            type: Optional[str] = None,
+            scope: Optional[SegmentScope] = None,
+            topic: Optional[str] = None,
+            collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         segments_t = Table("segments")
         metadata_t = Table("segment_metadata")
@@ -176,10 +178,10 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def get_collections(
-        self,
-        id: Optional[UUID] = None,
-        topic: Optional[str] = None,
-        name: Optional[str] = None,
+            self,
+            id: Optional[UUID] = None,
+            topic: Optional[str] = None,
+            name: Optional[str] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
         collections_t = Table("collections")
@@ -270,11 +272,11 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def update_segment(
-        self,
-        id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
-        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+            self,
+            id: UUID,
+            topic: OptionalArgument[Optional[str]] = Unspecified(),
+            collection: OptionalArgument[Optional[UUID]] = Unspecified(),
+            metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         segments_t = Table("segments")
         metadata_t = Table("segment_metadata")
@@ -322,12 +324,12 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def update_collection(
-        self,
-        id: UUID,
-        topic: OptionalArgument[Optional[str]] = Unspecified(),
-        name: OptionalArgument[str] = Unspecified(),
-        dimension: OptionalArgument[Optional[int]] = Unspecified(),
-        metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+            self,
+            id: UUID,
+            topic: OptionalArgument[Optional[str]] = Unspecified(),
+            name: OptionalArgument[str] = Unspecified(),
+            dimension: OptionalArgument[Optional[int]] = Unspecified(),
+            metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
@@ -379,7 +381,7 @@ class SqlSysDB(SqlDB, SysDB):
                     )
 
     def _metadata_from_rows(
-        self, rows: Sequence[Tuple[Any, ...]]
+            self, rows: Sequence[Tuple[Any, ...]]
     ) -> Optional[Metadata]:
         """Given SQL rows, return a metadata map (assuming that the last four columns
         are the key, str_value, int_value & float_value)"""
@@ -395,13 +397,13 @@ class SqlSysDB(SqlDB, SysDB):
         return metadata or None
 
     def _insert_metadata(
-        self,
-        cur: Cursor,
-        table: Table,
-        id_col: Column,
-        id: UUID,
-        metadata: UpdateMetadata,
-        clear_keys: Optional[Set[str]] = None,
+            self,
+            cur: Cursor,
+            table: Table,
+            id_col: Column,
+            id: UUID,
+            metadata: UpdateMetadata,
+            clear_keys: Optional[Set[str]] = None,
     ) -> None:
         # It would be cleaner to use something like ON CONFLICT UPDATE here But that is
         # very difficult to do in a portable way (e.g sqlite and postgres have
@@ -456,3 +458,66 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         if sql:
             cur.execute(sql, params)
+
+    @override
+    def create_index(self, collection_id: UUID, index: SqlBackedIndex) -> None:
+        segments = Table('segments')
+
+        segment_id_q = (self.querybuilder()
+                        .from_(segments)
+                        .select(segments.id)
+                        .where(segments.collection == ParameterValue(self.uuid_to_db(collection_id)))
+                        .where(segments.scope == 'METADATA')
+                        )
+        segment_id_sql, segment_id_params = get_sql(segment_id_q, self.parameter_format())
+        with self.tx() as cur:
+            cur.execute(segment_id_sql, segment_id_params)
+            segment_id = cur.fetchone()[0]
+
+        # TODO this is only for metadata indices
+        embedding_metadata = Table('embedding_metadata')
+        q = (IndexQuery()
+             .create_index(f'cust_idx_{index["name"]}')
+             .on(embedding_metadata)
+             # , 'segment_id', 'key', 'int_value', 'float_value'
+             .columns(embedding_metadata.key, embedding_metadata.segment_id,
+                      *(embedding_metadata[col] for col in index["columns"]))
+             .where(embedding_metadata.key != 'chroma:document')
+             .where(embedding_metadata.segment_id == segment_id)
+             )
+        print(q.get_sql())
+        with self.tx() as cur:
+            cur.execute(q.get_sql())
+
+    @override
+    def drop_index(self, collection_id: UUID, index_name: str) -> None:
+        sql_master = Table('sqlite_master')
+
+        query_indices = (self.querybuilder()
+                         .from_(sql_master)
+                         .select(sql_master.name)
+                         .where(sql_master.type == 'index')
+                         .where(sql_master.tbl_name == 'embedding_metadata')
+                         .where(sql_master.sql.like(f'%cust_idx_{index_name}%'))
+                         )
+        with self.tx() as cur:
+            cur.execute(query_indices.get_sql())
+            index_to_drop = cur.fetchone()
+            if not index_to_drop:
+                raise NotFoundError(f"Index {index_name} not found")
+            index_to_drop = index_to_drop[0]
+
+        q = IndexQuery().drop_index(index_to_drop)
+
+        print(q.get_sql())
+        with self.tx() as cur:
+            cur.execute(q.get_sql())
+
+    @override
+    def rebuild_index(self, collection_id: UUID, index_name: str) -> None:
+        print("Rebuilding index")
+
+    @override
+    def get_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        print("Getting indices")
+        return []

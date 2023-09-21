@@ -23,7 +23,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
-    validate_batch,
+    validate_batch, SqlBackedIndex,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -444,6 +444,22 @@ class FastAPI(API):
             raise_chroma_error(resp)
             self._max_batch_size = cast(int, resp.json()["max_batch_size"])
         return self._max_batch_size
+
+    def create_index(self, collection_id: UUID, index: SqlBackedIndex) -> None:
+        """Create a new index"""
+        raise NotImplementedError()
+
+    def drop_index(self, collection_id: UUID, index_name: str) -> None:
+        """Delete an index"""
+        raise NotImplementedError()
+
+    def rebuild_index(self, collection_id: UUID, index_name: str) -> None:
+        """Rebuild an index"""
+        raise NotImplementedError()
+
+    def get_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        """Get all indices for a collection"""
+        raise NotImplementedError()
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

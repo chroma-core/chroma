@@ -27,7 +27,7 @@ from chromadb.api.types import (
     validate_update_metadata,
     validate_where,
     validate_where_document,
-    validate_batch,
+    validate_batch, SqlBackedIndex,
 )
 from chromadb.telemetry.events import CollectionAddEvent, CollectionDeleteEvent
 
@@ -604,6 +604,24 @@ class SegmentAPI(API):
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
 
+    @override
+    def _create_collection_index(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        for index in indices:
+            self._sysdb.create_index(collection_id, index)
+
+    @override
+    def _drop_collection_index(self,collection_id: UUID , index_names: Sequence[str]) -> None:
+        for index in index_names:
+            self._sysdb.drop_index(collection_id, index)
+
+
+    @override
+    def _get_collection_indexes(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        raise NotImplementedError()
+
+    @override
+    def _rebuild_collection_index(self, collection_id: UUID, index_names: Sequence[str]) -> None:
+        raise NotImplementedError()
 
 def _records(
     operation: t.Operation,
