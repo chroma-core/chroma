@@ -33,9 +33,8 @@ services:
     networks:
       - net
 
-  # TODO: Rename to segment-worker
-  segment-server:
-    image: segment-server
+  segment-worker:
+    image: segment-worker
     build:
       context: .
       dockerfile: Dockerfile

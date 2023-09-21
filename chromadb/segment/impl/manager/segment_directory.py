@@ -1,10 +1,7 @@
-from abc import ABC, abstractmethod
 from typing import Callable
-
 from overrides import EnforceOverrides, override
-from chromadb.config import Component
-from chromadb.segment import SegmentDirectory
 
+from chromadb.segment import SegmentDirectory
 from chromadb.types import Segment
 
 
@@ -14,7 +11,7 @@ class DockerComposeSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
         # This is just a stub for now, as we don't have a real coordinator to assign and manage this
-        return "segment-server:50051"
+        return "segment-worker:50051"
 
     @override
     def register_updated_segment_callback(
@@ -28,7 +25,7 @@ class DockerComposeSegmentDirectory(SegmentDirectory, EnforceOverrides):
 class KubernetesSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
-        return "segment-server.chroma:50051"
+        return "segment-worker.chroma:50051"
 
     @override
     def register_updated_segment_callback(
