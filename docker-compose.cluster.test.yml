@@ -1,0 +1,96 @@
+# This docker compose file is not meant to be used. It is a work in progress
+# for the distributed version of Chroma. It is not yet functional.
+
+version: '3.9'
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  server:
+    image: server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/chroma
+      - index_data:/index_data
+    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config chromadb/log_config.yml
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
+      - CHROMA_CONSUMER_IMPL=chromadb.ingest.impl.pulsar.PulsarConsumer
+      - CHROMA_SEGMENT_MANAGER_IMPL=chromadb.segment.impl.manager.distributed.DistributedSegmentManager
+      - PULSAR_BROKER_URL=pulsar
+      - PULSAR_BROKER_PORT=6650
+      - PULSAR_ADMIN_PORT=8080
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
+    ports:
+      - 8000:8000
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    networks:
+      - net
+
+  segment-worker:
+    image: segment-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/chroma
+      - index_data:/index_data
+    command: python -m chromadb.segment.impl.distributed.server
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_PRODUCER_IMPL=chromadb.ingest.impl.pulsar.PulsarProducer
+      - CHROMA_CONSUMER_IMPL=chromadb.ingest.impl.pulsar.PulsarConsumer
+      - PULSAR_BROKER_URL=pulsar
+      - PULSAR_BROKER_PORT=6650
+      - PULSAR_ADMIN_PORT=8080
+      - CHROMA_SERVER_GRPC_PORT=50051
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
+    ports:
+      - 50051:50051
+    depends_on:
+      pulsar:
+        condition: service_healthy
+    networks:
+      - net
+
+  pulsar:
+    image: apachepulsar/pulsar
+    volumes:
+      - pulsardata:/pulsar/data
+      - pulsarconf:/pulsar/conf
+    command: bin/pulsar standalone
+    ports:
+      - 6650:6650
+      - 8080:8080
+    networks:
+      - net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "localhost:8080/admin/v2/brokers/health"
+        ]
+      interval: 3s
+      timeout: 1m
+      retries: 10
+
+volumes:
+  index_data:
+    driver: local
+  backups:
+    driver: local
+  pulsardata:
+    driver: local
+  pulsarconf:
+    driver: local
