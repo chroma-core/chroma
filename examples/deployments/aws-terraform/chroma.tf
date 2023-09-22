@@ -111,7 +111,7 @@ resource "aws_ebs_volume" "chroma-volume" {
   }
 
   lifecycle {
-    prevent_destroy = var.prevent_chroma_data_volume_delete # size in GBs
+    prevent_destroy = true
   }
 }
 
