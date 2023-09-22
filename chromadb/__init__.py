@@ -2,8 +2,6 @@ from typing import Dict
 import logging
 import sqlite3
 import chromadb.config
-from chromadb.telemetry.events import ClientStartEvent
-from chromadb.telemetry import Telemetry
 from chromadb.config import Settings, System
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
@@ -38,6 +36,8 @@ __all__ = [
     "QueryResult",
     "GetResult",
 ]
+from chromadb.telemetry.events import ClientStartEvent
+from chromadb.telemetry import Telemetry
 
 
 logger = logging.getLogger(__name__)
