@@ -5,7 +5,6 @@ from typing import cast, Dict, TypeVar, Any
 import requests
 from overrides import override
 from pydantic import SecretStr
-
 from chromadb.auth import (
     ServerAuthCredentialsProvider,
     AbstractCredentials,
