@@ -1,6 +1,7 @@
 import posthog
 import logging
 import sys
+from typing import Any, Dict, Set
 from chromadb.config import System
 from chromadb.telemetry import Telemetry, TelemetryEvent
 from overrides import override
@@ -21,10 +22,29 @@ class Posthog(Telemetry):
         posthog_logger = logging.getLogger("posthog")
         # Silence posthog's logging
         posthog_logger.disabled = True
+
+        self.batched_events: Dict[str, TelemetryEvent] = {}
+        self.seen_event_types: Set[Any] = set()
+
         super().__init__(system)
 
     @override
     def capture(self, event: TelemetryEvent) -> None:
+        if event.max_batch_size == 1 or event.batch_key not in self.seen_event_types:
+            self.seen_event_types.add(event.batch_key)
+            self._direct_capture(event)
+            return
+        batch_key = event.batch_key
+        if batch_key not in self.batched_events:
+            self.batched_events[batch_key] = event
+            return
+        batched_event = self.batched_events[batch_key].batch(event)
+        self.batched_events[batch_key] = batched_event
+        if batched_event.batch_size >= batched_event.max_batch_size:
+            self._direct_capture(batched_event)
+            del self.batched_events[batch_key]
+
+    def _direct_capture(self, event: TelemetryEvent) -> None:
         try:
             posthog.capture(
                 self.user_id,

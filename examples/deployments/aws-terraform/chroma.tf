@@ -100,6 +100,9 @@ resource "aws_ebs_volume" "chroma-volume" {
 
   tags = local.tags
 
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 locals {
