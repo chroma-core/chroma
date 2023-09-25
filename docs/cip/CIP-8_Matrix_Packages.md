@@ -149,6 +149,9 @@ TODO address degrees of freedom with parquet - file metadata, multi-file splitti
 For matrix packages to be useful, the procedure for producing and consuming them must be trivial. This section describes changes to both the Chroma client and CLI in order to support matrix packages.
 
 TODO lollll so much to fill in - sdboyer can do some, but also others/jeffchuber?
+#### User story
+
+TODO describe basic user story/interaction loop, from initial data loading into chroma, massaging, then `chroma export-matrix` , then someone else doing a `chroma import-matrix`, then running their app
 
 #### Import and `chroma import-matrix`
 
