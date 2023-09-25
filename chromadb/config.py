@@ -9,8 +9,19 @@ from typing import Type, TypeVar, cast
 
 from overrides import EnforceOverrides
 from overrides import override
-from pydantic import BaseSettings, validator
 from typing_extensions import Literal
+
+
+in_pydantic_v2 = False
+try:
+    from pydantic import BaseSettings
+except ImportError:
+    in_pydantic_v2 = True
+    from pydantic.v1 import BaseSettings
+    from pydantic.v1 import validator
+
+if not in_pydantic_v2:
+    from pydantic import validator  # type: ignore # noqa
 
 # The thin client will have a flag to control which implementations to use
 is_thin_client = False

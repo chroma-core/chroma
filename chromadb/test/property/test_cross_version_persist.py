@@ -24,6 +24,9 @@ from chromadb.config import Settings
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
+# Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
+VERSIONED_MODULES = ["pydantic"]
+
 
 def versions() -> List[str]:
     """Returns the pinned minimum version and the latest version of chromadb."""
@@ -49,7 +52,7 @@ def _patch_boolean_metadata(
     # boolean value metadata to int
     collection_metadata = collection.metadata
     if collection_metadata is not None:
-        _bool_to_int(collection_metadata)
+        _bool_to_int(collection_metadata)  # type: ignore
 
     if embeddings["metadatas"] is not None:
         if isinstance(embeddings["metadatas"], list):
@@ -162,7 +165,10 @@ def switch_to_version(version: str) -> ModuleType:
     old_modules = {
         n: m
         for n, m in sys.modules.items()
-        if n == module_name or (n.startswith(module_name + "."))
+        if n == module_name
+        or (n.startswith(module_name + "."))
+        or n in VERSIONED_MODULES
+        or (any(n.startswith(m + ".") for m in VERSIONED_MODULES))
     }
     for n in old_modules:
         del sys.modules[n]
@@ -197,7 +203,7 @@ def persist_generated_data_with_old_version(
         api.reset()
         coll = api.create_collection(
             name=collection_strategy.name,
-            metadata=collection_strategy.metadata,
+            metadata=collection_strategy.metadata,  # type: ignore
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
