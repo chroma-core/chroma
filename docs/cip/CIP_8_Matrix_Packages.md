@@ -1,10 +1,8 @@
 ## Motivation
 
-We want to foster an ecosystem of "knowledge packages," such that users can stitch together RAG programs by combining these packages with their own data. We will call such packages, and their format, "matrix." Drop in a matrix package - now your RAG app knows kung fu.
+We want to foster an ecosystem of "knowledge packages," such that users can stitch together RAG programs by combining these packages with their own data. We will call such packages, and their format, "matrix." Drop a matrix package into your RAG app - now it knows kung fu.
 
-While many steps are necessary to reach this overarching goal, a clear initial step and the scope of this CIP is to define a knowledge package format and make the information held in Chroma portable into that format. The completeness criteria for this proposal is to allow a full round trip - chroma->matrix->chroma.
-
-(Note that this CIP explicitly omits any actual dependency management behavior, treating that as a future problem to tackle.)
+Many steps are necessary to reach this overarching goal, but the history of traditional software packaging clearly indicates that simple tools for both producing and consuming packages are prerequisite to healthy ecosystems. The scope of this CIP is an initial step towards that end: define a knowledge package format, and make the information held in Chroma portable into that format. The completeness criteria for this proposal is to define a full round trip, chroma -> matrix -> chroma.
 
 Ideally, the matrix package format could eventually be shared by the many tools in the emergent LLM/AI stack. This proposal seeks to balance that Chroma-agnostic goal with the reality that working, useful software is usually prerequisite to bootstrapping an ecosystem.
 ## Impact
@@ -19,14 +17,16 @@ TODO examples
 
 This is a proposal in two parts. First, we describe a package format. Then, we outline new chroma client capabilities and corresponding CLI subcommands that can round trip to and from this package format.
 
+Note that this CIP explicitly omits any actual dependency management behavior. While certain design choices here are motivated by preparing for that problem, directly addressing it is a problem for a future CIP.
 ### Matrix Package Format
 A matrix package is a filesystem format consisting of two files, co-occurring within the same directory. Each file serves a particular, well-defined role:
 
 - `matrix.package.yaml`: defines the package name, version, and other common metadata, and certain metadata about the dataset in the package. Future iterations will add dependency declarations - the same kind of information that appears in `package.json` or `requirements.txt`. **Required**.
 - `matrix.data.parquet`: contains the package's dataset. Each row closely mirrors Chroma db content, containing original document source, computed embeddings, and metadata. **Required**, but will likely become optional in the future (more below)
-- TODO - how do we serialize a computed index? it doesn't have the same cardinality as the data, does it?
 
-Most critical to note is that a matrix package contains *exactly one* dataset (see further discussion under [alternatives](#Alternatives-Considered)). For now, we can assume a 1:1 relationship between a matrix package and a Chroma collection. This simple correspondence may change once we allow dependencies between matrix packages.
+TODO - how do we serialize a computed index? it doesn't have the same cardinality as the data, does it? so that'd mean a separate file
+
+Most critical to note is that a matrix package contains *exactly one* dataset (see further discussion under [alternatives](#Multi-dataset%20packages.md)). For now, we can assume a 1:1 relationship between a matrix package and a Chroma collection. This simple correspondence may change once we allow dependencies between matrix packages.
 
 Some of the design choices here are oriented towards the expected eventual case of files in a matrix package smoothly coordinating to form a sparse, distributed cache. More detail on the each file follows.
 #### `matrix.package.yaml`
@@ -91,7 +91,7 @@ Given all of the open questions ([for example](https://www.infoworld.com/article
 ##### `data`
 `data` contains metadata about the package's dataset - the contents of `matrix.data.parquet`.
 
-This is the meat of the matrix package, and before we go further, we need a brief detour into the underpinnings of package management.
+This is the meat of the matrix package. It's recommended to read [this appendix](#Appendix%20On%20Applying%20Package%20Management%20to%20AI.md) before going further.
 
 The general principle within the `data` block is to describe correctness properties of the data, without necessarily specifying an exact procedure for arriving at those properties. The (handwavy) goal here is to achieve a distinction analogous to URIs vs. URLs, or types vs. values: enough information to be able to make bounded correctness statements, without being too prescriptive about implementation. It's **where** we're going, rather than **how** to get there.
 
@@ -114,9 +114,9 @@ The purpose of this stanza is to describe type-like properties of the vector spa
 
 `embedding.model` tells us the model that produced the embeddings in the data file. A simple string identifier for the model that produced the embeddings is sufficient here to establish what amounts to a [nominal type system](https://medium.com/@thejameskyle/type-systems-structural-vs-nominal-typing-explained-56511dd969f4). The name of the model here can then be thought of as the name of the universe of weights defined by the trained model, and by extension the computed embeddings.
 
-There is plenty of debate on the virtues of structural vs. nominal typing in the traditional software world. It often amounts to, "is it better DX to assume that 'if it quacks like a duck, it's a duck', or to have interface names implicitly carry some special meaning beyond their formally expressed properties?" For this case, nominal typing is a natural choice, because the opacity nominal typing matches the opacity of a trained model's weights.
+There is plenty of debate on the virtues of structural vs. nominal typing in the traditional software world. It often amounts to, "is it better DX to assume that 'if it quacks like a duck, it's a `Duck`' (structural), or to require explicit opt-in on a definition of `Duck`? (nominal)" Nominal type systems also implicitly allow names to carry opaque, special meaning beyond their formally expressed properties. That opacity makes nominal typing the natural choice for this case, as it mirrors the opacity of a trained model's weights.
 
-This is closely related to, but more constrained than Chroma's embedding function - it names only the model, rather some known invokable function whose (opaque) behavior is to call that model.
+`embedding` is closely related to, but more constrained than Chroma's embedding function - it names only the model, rather some known invokable function whose (opaque) behavior is to call that model.
 
 TODO is this over-abstracting the notion of an embedding func, to the point where it's not useful at all?
 
@@ -133,33 +133,36 @@ TODO finish
 
 ### `matrix.data.parquet`
 
-The `matrix.data.parquet` file contains the core dataset of the matrix package. Each row in this Parquet file closely mirrors Chroma database content and includes the following columns:
+The `matrix.data.parquet` file contains the core dataset of the matrix package. Each row in this Parquet file closely mirrors Chroma database content. The following columns are expected:
 
-- **Original Document Source**: This field holds the original source data, which could be text, documents, or any other relevant information that forms the basis of the dataset.
-- **Computed Embeddings**: Computed embeddings are generated from the original document source using a specific model. These embeddings represent the data in a numerical format suitable for various analytical and machine learning tasks.
-- **Metadata**: Metadata associated with each row provides additional context or information about the data. This metadata could include timestamps, data source references, or any other relevant details.
+- `src`- **Original Document Source**: This field holds the original source data, which could be text, documents, or any other relevant information that forms the basis of the dataset. This maps directly to a Chroma document.
+- `embedding`- **Computed Embeddings**: Computed embeddings are generated from the original document source using the model specified in `matrix.package.yaml`. This maps directly to Chroma embeddings.
+- `meta`- **Metadata**: Metadata associated with each row is a set of key/value pairs that provide context or information about the data. This metadata could include timestamps, data source references, or any other relevant details. This maps directly to Chroma metadata.
 
-The `matrix.data.parquet` file is marked as required for most scenarios within the matrix package format. However, there is one specific case in which it may become optional: when introducing support for remote artifacts, facilitated by the use of OCI registries. In this scenario, the actual dataset might be stored remotely, and the matrix package would include references or pointers to the remote location rather than including the dataset itself. This approach would reduce package size and enhance efficiency in distributing and managing large datasets, making the data file optional in such cases.
+For now, the `matrix.data.parquet` file is required to physically exist adjacent to the `matrix.package.yaml` file. This is an initial implementation simplification and convenience. It is expected that a follow-up shortly after this CIP is implemented will add remote storage support, facilitated by the use of OCI registries.
 
+In this scenario, the actual `matrix.data.parquet` file would be stored remotely, and the matrix package would include references or pointers to the remote location rather than including the dataset itself. This approach would reduce package size and enhance efficiency in distributing and managing large datasets, making the data file optional in such cases.
+
+TODO address degrees of freedom with parquet - file metadata, multi-file splitting, etc.
 ### Chroma Client & CLI Changes
 
-For matrix packages to be useful, the procedure for producing and consuming them must be trivial. This section describes changes to both the Chroma client and CLI for
+For matrix packages to be useful, the procedure for producing and consuming them must be trivial. This section describes changes to both the Chroma client and CLI in order to support matrix packages.
 
-TODO lollll so much to fill in
+TODO lollll so much to fill in - sdboyer can do some, but also others/jeffchuber?
 
-#### Import and `chrome import-matrix`
+#### Import and `chroma import-matrix`
 
 Idempotence is probably critical here
 
-TODO finish
+TODO do this
 
-#### Export and `chrome export-matrix`
+#### Export and `chroma export-matrix`
 
-TODO finish
+TODO do this
 
 ## Alternatives Considered
 
-TODO finish
+This CIP is intended to set us on a good path toward tackling a large problem, not solve the problem outright. As such, some "alternatives" are actually paths we may plausibly explore in the future.
 
 ### Alternate naming patterns
 
@@ -168,14 +171,19 @@ Other naming patterns for matrix packages are possible. The form of name chosen 
 TODO finish
 
 ### Multi-dataset packages
-The proposal allows for only a single dataset in a matrix package.
+The proposal allows for only a single dataset in a matrix package. However, if iterating shows it to be valuable, the design could be backwards compatibly adapted to allow multiple datasets to exist in a single package.
 
 TODO finish
 
 ### Multi-embedding datasets
-The proposal allows for only a single set of embeddings in a matrix package.
+The proposal allows for only a single set of embeddings in a matrix package. Should we allow multiple? As with multi-dataset packages, the proposed design is easily converted to store multiple embeddings in the future. This may become especially important as we explore matrix package dependencies.
 
 TODO finish
+
+### Other `matrix.data` storage formats
+This proposal tightly binds to Parquet for the `matrix.data.parquet` file. Parquet is a battle-tested format for storing large datasets, with wide tooling and language support. Supporting only one data storage format simplifies matrix implementation both initially and long-term, in part because they provide design options to take advantage of parquet's unique features vs. e.g. CSV, such as file-level metadata.
+
+Parquet may not be ideal for every matrix package use case. But as long as it is adequate for the known use cases, we do not plan to support other formats.
 
 ### Appendix: On Applying Package Management to AI
 
@@ -183,7 +191,7 @@ Traditional package ecosystems facilitate a relationship where the particular do
 
 For example, i can rely on `pyarrow.parquet`'s `read_table()` to read parquet files, delegating to the experts knowledge of exactly how that's done. Easy enough - but only because we all, package author and consumer, already know what a "python function" is and can possibly be responsible for, and are expecting to share objects of this type.
 
-This question of exactly what is being shared is the implicit substrate on which every package ecosystem is built. It must be obvious, to the point that discussing it directly seems a bit absurd, for a package ecosystem to be functional. Only then can it impose a sufficiently low cognitive load on both package authors and consumers that open sharing and free exchange becomes maintainable and realistic.
+This question of exactly what is being shared is the implicit substrate on which every package ecosystem is built. It should be obvious, to the point that discussing it directly feels a bit absurd, for a package ecosystem to be functional. Only then can it impose a sufficiently low cognitive load on both package authors and consumers that open sharing and free exchange becomes maintainable and realistic.
 
 For matrix, what's being shared is:
 
@@ -191,6 +199,8 @@ For matrix, what's being shared is:
 - An expert opinion on what the optimal representation of embeddings and metadata is for that dataset
 - The actual embeddings (and some other computed results)
 
-This is immediately problematic. The best traditional software packages find a way to define "optimal implementation" for their domain problem in a way that's largely independent of their dependers' use case. In interacting with LLMs, however, it's unclear the extent to which an "optimal embedding representation" can be expressed independent of a particular use case - domains don't nest tidily.
+This is immediately problematic. Ideal traditional software packages find a way to define "optimal implementation" for their domain problem in a way that's largely independent of their dependers' use case. In interacting with LLMs, however, it's unclear the extent to which an "optimal embedding representation" can be expressed independent of a particular use case - domains don't nest tidily.
 
-That we are pursuing matrix packages at all is, therefore, a bet: we think that it's possible to reach a point of ease, clarity, and utility in these packages such that an ecosystem can take flight.
+But it's not immediately disqualifying. Say a package consumer's use case demands reconfiguring a published matrix package. For example, the "kung fu" package contained information for only a narrow range height, weight, assigned sex, etc. As long as it is easier to reach the end goal by rebuilding parts of the package than it is to start from scratch, matrix packages are plausibly valuable.
+
+There are plenty of other issues to consider for matrix packages. That we are pursuing them at all is, therefore, a bet: we believe there exists a goldilocks zone of ease, clarity, and utility for matrix packages, such that an ecosystem can take flight. Iterating is the only way to find it.
