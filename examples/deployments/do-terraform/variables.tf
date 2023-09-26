@@ -42,7 +42,7 @@ variable "instance_type" {
 variable "public_access" {
   description = "Enable public ingress on port 8000"
   type        = bool
-  default     = true // or true depending on your needs
+  default     = true // or false depending on your needs
 }
 
 variable "enable_auth" {
@@ -54,7 +54,7 @@ variable "enable_auth" {
 variable "auth_type" {
   description = "Authentication type"
   type        = string
-  default     = "token" // or token depending on your needs
+  default     = "token" // or basic depending on your needs
   validation {
     condition     = contains(["basic", "token"], var.auth_type)
     error_message = "The auth type must be either basic or token"
