@@ -152,6 +152,9 @@ ssh -i ./chroma-aws ubuntu@$instance_public_ip
 ```
 
 ### 5. Destroy your Chroma instance
+
+You will need to change `prevent_destroy` to `false` in the `aws_ebs_volume` in `chroma.tf`.
+
 ```bash
 terraform destroy -auto-approve
 ```

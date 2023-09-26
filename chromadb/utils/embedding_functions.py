@@ -9,6 +9,8 @@ from typing import Any, Dict, List, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
+import inspect
+import sys
 from typing import Optional
 
 try:
@@ -43,7 +45,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
         self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, texts: Documents) -> Embeddings:
-        return self._model.encode(
+        return self._model.encode(  # type: ignore
             list(texts),
             convert_to_numpy=True,
             normalize_embeddings=self._normalize_embeddings,
@@ -224,10 +226,10 @@ class InstructorEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, texts: Documents) -> Embeddings:
         if self._instruction is None:
-            return self._model.encode(texts).tolist()
+            return self._model.encode(texts).tolist()  # type: ignore
 
         texts_with_instructions = [[self._instruction, text] for text in texts]
-        return self._model.encode(texts_with_instructions).tolist()
+        return self._model.encode(texts_with_instructions).tolist()  # type: ignore
 
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
@@ -302,12 +304,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction):
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
-    def _normalize(self, v: npt.NDArray) -> npt.NDArray:
+    def _normalize(self, v: npt.NDArray) -> npt.NDArray:  # type: ignore
         norm = np.linalg.norm(v, axis=1)
         norm[norm == 0] = 1e-12
-        return v / norm[:, np.newaxis]
+        return v / norm[:, np.newaxis]  # type: ignore
 
-    def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
+    def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:  # type: ignore
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
         self.tokenizer = cast(self.Tokenizer, self.tokenizer)  # type: ignore
         self.model = cast(self.ort.InferenceSession, self.model)  # type: ignore
@@ -475,3 +477,15 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
                 embeddings.append(response["predictions"]["embeddings"]["values"])
 
         return embeddings
+
+
+# List of all classes in this module
+_classes = [
+    name
+    for name, obj in inspect.getmembers(sys.modules[__name__], inspect.isclass)
+    if obj.__module__ == __name__
+]
+
+
+def get_builtins() -> List[str]:
+    return _classes
