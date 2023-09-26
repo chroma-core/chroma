@@ -100,22 +100,10 @@ variable "ssh_private_key" {
   default     = "./chroma-do"
 }
 
-variable "chroma_instance_volume_size" {
-  description = "The size of the instance volume - the root volume"
-  type        = number
-  default     = 30
-}
-
 variable "chroma_data_volume_size" {
   description = "EBS Volume Size of the attached data volume where your chroma data is stored"
   type        = number
   default     = 20
-}
-
-variable "prevent_chroma_data_volume_delete" {
-  description = "Prevent the chroma data volume from being deleted when the instance is terminated"
-  type        = bool
-  default     = false
 }
 
 
