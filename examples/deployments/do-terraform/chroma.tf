@@ -27,10 +27,13 @@ resource "digitalocean_firewall" "chroma_firewall" {
     source_addresses = var.mgmt_source_ranges
   }
 
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = var.chroma_port
-    source_addresses = var.source_ranges
+  dynamic "inbound_rule" {
+    for_each = var.public_access ? [1] : []
+    content {
+      protocol         = "tcp"
+      port_range       = var.chroma_port
+      source_addresses = var.source_ranges
+    }
   }
 
   outbound_rule {

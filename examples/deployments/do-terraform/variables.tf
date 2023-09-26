@@ -9,9 +9,8 @@ variable "chroma_release" {
   default     = "0.4.12"
 }
 
-#TODO this should be updated to point to https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh in the repo
 data "http" "startup_script_remote" {
-  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/aws-terraform/startup.sh"
+  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh"
 }
 
 data "template_file" "user_data" {
