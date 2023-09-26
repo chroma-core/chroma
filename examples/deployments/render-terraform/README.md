@@ -35,19 +35,19 @@ terraform apply -auto-approve
 
 ### 4. Check your public IP and that Chroma is running
 
-> Note: Depending on your instance type it might take a few minutes for the instance to be ready
+> Note: It might take several minutes for the instance to boot up
 
 Get the public IP of your instance (it should also be printed out after successful `terraform apply`):
 
 ```bash
-terraform output instance_public_ip
+terraform output instance_url
 ```
 
 Check that chroma is running:
 
 ```bash
-export instance_public_ip=$(terraform output instance_public_ip | sed 's/"//g')
-curl -v http://$instance_public_ip:8000/api/v1/heartbeat
+export instance_public_ip=$(terraform output instance_url | sed 's/"//g')
+curl -v $instance_public_ip/api/v1/heartbeat
 ```
 
 #### 4.1 Checking Auth
@@ -76,7 +76,7 @@ export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
 Using the credentials:
 
 ```bash
-curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
+curl -v $instance_public_ip/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
 ```
 
 ##### Basic
@@ -102,21 +102,17 @@ export CHROMA_AUTH=$(terraform output chroma_auth_basic | sed 's/"//g')
 Using the credentials:
 
 ```bash
-curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
+curl -v https://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 ```
 
 > Note: Without `-u` you should be getting 401 Unauthorized response
 
 #### 4.2 SSH to your instance
 
-To SSH to your instance:
-
-```bash
-ssh -i ./chroma-aws debian@$instance_public_ip
-```
+To connect to your instance via SSH you need to go to Render.com service dashboard.
 
 ### 5. Destroy your application
 
 ```bash
-terraform destroy -auto-approve
+terraform destroy
 ```

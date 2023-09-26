@@ -40,12 +40,11 @@ resource "render_service" "chroma" {
       build_command = "curl https://raw.githubusercontent.com/amikos-tech/chroma-core/feature/render-terraform-simple/examples/deployments/render-terraform/sqlite_version.patch | git apply && pip install pysqlite3-binary && pip install -r requirements.txt"
       start_command = "uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 80 --log-config chromadb/log_config.yml"
     }
-
-#    disk = {
-#      name = var.chroma_data_volume_device_name
-#      mount_path = "/chroma-data"
-#      size_gb = var.chroma_data_volume_size
-#    }
+    disk = {
+      name = var.chroma_data_volume_device_name
+      mount_path = "/chroma-data"
+      size_gb = var.chroma_data_volume_size
+    }
   }
 }
 

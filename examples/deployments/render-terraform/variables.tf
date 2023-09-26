@@ -17,7 +17,7 @@ variable "region" {
 
 variable "render_plan" {
   default     = "starter"
-  description = "The Render plan to use. This determines the size of the machine."
+  description = "The Render plan to use. This determines the size of the machine. NOTE: Terraform Render provider uses Render's API which requires at least starter plan."
   type = string
 }
 
@@ -76,35 +76,4 @@ variable "chroma_data_volume_device_name" {
   default     = "chroma-disk-0"
   description = "The device name of the chroma data volume"
   type        = string
-}
-
-variable "prevent_chroma_data_volume_delete" {
-  description = "Prevent the chroma data volume from being deleted when the instance is terminated"
-  type        = bool
-  default     = false
-}
-
-variable "disk_type" {
-  default     = "pd-ssd"
-  description = "The type of disk to use for the instance. Can be either pd-standard or pd-ssd"
-}
-
-variable "labels" {
-  default = {
-    environment = "dev"
-  }
-  description = "Labels to apply to all resources in this example"
-  type        = map(string)
-}
-
-variable "chroma_port" {
-  default     = "8000"
-  description = "The port that chroma listens on"
-  type        = string
-}
-
-variable "source_ranges" {
-  default     = ["0.0.0.0/0"]
-  type        = list(string)
-  description = "List of CIDR ranges to allow through the firewall"
 }
