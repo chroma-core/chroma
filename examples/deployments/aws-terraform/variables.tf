@@ -108,12 +108,6 @@ variable "chroma_data_volume_size" {
   default     = 20
 }
 
-variable "prevent_chroma_data_volume_delete" {
-    description = "Prevent the chroma data volume from being deleted when the instance is terminated"
-    type        = bool
-    default     = false
-}
-
 variable "chroma_data_volume_snapshot_before_destroy" {
     description = "Take a snapshot of the chroma data volume before destroying it"
     type        = bool
