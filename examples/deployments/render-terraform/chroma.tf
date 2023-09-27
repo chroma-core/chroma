@@ -35,7 +35,7 @@ resource "render_service" "chroma" {
     plan = var.render_plan
     region = var.region
     health_check_path = "/api/v1/heartbeat"
-
+    #TODO we need to switch the below to Chroma repo
     native = {
       build_command = "curl https://raw.githubusercontent.com/amikos-tech/chroma-core/feature/render-terraform-simple/examples/deployments/render-terraform/sqlite_version.patch | git apply && pip install pysqlite3-binary && pip install -r requirements.txt"
       start_command = "uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 80 --log-config chromadb/log_config.yml"
@@ -65,7 +65,7 @@ resource "render_service_environment" "chroma_env" {
     },
     {
       key = "CHROMA_SERVER_AUTH_CREDENTIALS"
-      value = local.token_auth_credentials.token
+      value = "test-token"
     },
     {
       key = "CHROMA_SERVER_AUTH_PROVIDER"
