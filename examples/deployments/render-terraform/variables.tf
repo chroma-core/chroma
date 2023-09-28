@@ -7,7 +7,7 @@ variable "chroma_core_repo_url" {
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.12"
+  default     = "0.4.13"
 }
 
 variable "region" {
