@@ -48,7 +48,7 @@ resource "render_service" "chroma" {
       },
       {
         key = "CHROMA_SERVER_AUTH_PROVIDER"
-        value = "token"
+        value = var.auth_type
       }] : []
   )
 
