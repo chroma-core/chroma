@@ -23,7 +23,7 @@ export TF_VAR_render_api_token=<render_api_token>
 # Your Render.com user email
 export TF_VAR_render_user_email=<render_user_email>
 #set the chroma release to deploy
-export TF_VAR_chroma_release="0.4.12"
+export TF_VAR_chroma_release="0.4.13"
 # the region to deploy to. At the time of writing only oregon and frankfurt are available
 export TF_VAR_region="oregon"
 #enable basic auth for the chroma instance
@@ -35,7 +35,7 @@ terraform apply -auto-approve
 
 ### 4. Check your public IP and that Chroma is running
 
-> Note: It might take several minutes for the instance to boot up
+> Note: It might take couple minutes for the instance to boot up
 
 Get the public IP of your instance (it should also be printed out after successful `terraform apply`):
 

@@ -1,7 +1,7 @@
-variable "chroma_core_repo_url" {
-    description = "The URL of the chroma-core repository"
-    type        = string
-    default     = "https://github.com/chroma-core/chroma"
+variable "chroma_image_reg_url" {
+  description = "The URL of the chroma-core image registry (e.g. docker.io/chromadb/chroma). The URL must also include the image itself without the tag."
+  type        = string
+  default     = "docker.io/chromadb/chroma"
 }
 
 variable "chroma_release" {
@@ -32,16 +32,9 @@ variable "auth_type" {
   type        = string
   default     = "token" // or token depending on your needs
   validation {
-    condition     = contains(["basic", "token"], var.auth_type)
-    error_message = "The auth type must be either basic or token"
+    condition     = contains([ "token"], var.auth_type)
+    error_message = "Only token is supported as auth type"
   }
-}
-
-resource "random_password" "chroma_password" {
-  length  = 16
-  special = true
-  lower   = true
-  upper   = true
 }
 
 resource "random_password" "chroma_token" {
@@ -53,21 +46,13 @@ resource "random_password" "chroma_token" {
 
 
 locals {
-  basic_auth_credentials = {
-    username = "chroma"
-    password = random_password.chroma_password.result
-  }
   token_auth_credentials = {
     token = random_password.chroma_token.result
   }
-  tags = [
-    "chroma",
-    "release-${replace(var.chroma_release, ".", "")}",
-  ]
 }
 
 variable "chroma_data_volume_size" {
-  description = "Volume Size of the attached data volume where your chroma data is stored"
+  description = "The size of the attached data volume in GB."
   type        = number
   default     = 20
 }
@@ -75,5 +60,11 @@ variable "chroma_data_volume_size" {
 variable "chroma_data_volume_device_name" {
   default     = "chroma-disk-0"
   description = "The device name of the chroma data volume"
+  type        = string
+}
+
+variable "chroma_data_volume_mount_path" {
+  default     = "/chroma-data"
+  description = "The mount path of the chroma data volume"
   type        = string
 }
