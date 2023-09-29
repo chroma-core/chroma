@@ -626,6 +626,53 @@ def test_where_ne_eq_number(api):
     assert len(items["metadatas"]) == 1
 
 
+def test_where_like_string(api):
+    api.reset()
+    collection = api.create_collection("test_where_like")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_value": {"$like": "%wo%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "%o%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"float_value": {"$like": "%o%"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_where_nlike_string(api):
+    api.reset()
+    collection = api.create_collection("test_where_like")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_value": {"$nlike": "%wo%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$nlike": "%h%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"float_value": {"$nlike": "%wo%"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_where_valid_operators_like(api):
+    api.reset()
+    collection = api.create_collection("test_where_valid_like_operators")
+    collection.add(**operator_records)
+
+    with pytest.raises(ValueError):
+        collection.get(where={"b": {"$like": 4}})  # invalid
+    with pytest.raises(ValueError):
+        collection.get(
+            where={
+                "$or": [
+                    {"a": {"$like": "first"}},  # invalid
+                    {"b": {"$like": 4}},  # invalid
+                    {"$like": "second"},  # valid
+                ]
+            }
+        )
+
+
 def test_where_valid_operators(api):
     api.reset()
     collection = api.create_collection("test_where_valid_operators")
@@ -829,6 +876,20 @@ logical_operator_records = {
         "this document is fourth and great",
     ],
 }
+
+
+def test_where_like_logical_operators(api):
+    api.reset()
+    collection = api.create_collection("test_logical_operators")
+    collection.add(**logical_operator_records)
+    items = collection.get(where={"string_value": {"$like": "%o%"}})
+    assert len(items["metadatas"]) == 3
+    items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "%t%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"string_value": {"$nlike": "%t%"}})
+    assert len(items["metadatas"]) == 2
 
 
 def test_where_logical_operators(api):

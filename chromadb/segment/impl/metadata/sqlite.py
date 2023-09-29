@@ -559,6 +559,7 @@ def _value_criterion(
             if op == "$in"
             else table.float_value.notin(ParameterValue(value)),
         ]
+
     else:
         cols = [table.int_value, table.float_value]
 
@@ -574,7 +575,12 @@ def _value_criterion(
         col_exprs = [col < ParameterValue(value) for col in cols]
     elif op == "$lte":
         col_exprs = [col <= ParameterValue(value) for col in cols]
-
+    elif op == "$like":
+        search_term = f"{cast(str, value)}"
+        col_exprs = [col.like(ParameterValue(search_term)) for col in cols]
+    elif op == "$nlike":
+        search_term = f"{cast(str, value)}"
+        col_exprs = [col.not_like(ParameterValue(search_term)) for col in cols]
     if op == "$ne":
         return reduce(lambda x, y: x & y, col_exprs)
     else:
