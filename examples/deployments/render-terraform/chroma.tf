@@ -39,11 +39,6 @@ resource "render_service" "chroma" {
     plan = var.render_plan
     region = var.region
     health_check_path = "/api/v1/heartbeat"
-    #TODO we need to switch the below to Chroma repo
-#    native = {
-#      build_command = "curl https://raw.githubusercontent.com/amikos-tech/chroma-core/feature/render-terraform-simple/examples/deployments/render-terraform/sqlite_version.patch | git apply && pip install pysqlite3-binary && pip install -r requirements.txt"
-#      start_command = "uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 80 --log-config chromadb/log_config.yml"
-#    }
     disk = {
       name = var.chroma_data_volume_device_name
       mount_path = "/chroma-data"
@@ -82,18 +77,21 @@ resource "render_service_environment" "chroma_env" {
 }
 
 
-#TODO - WIP - waiting on Render support ticket (43854)
+#Necessary workaround for Render Bug related to env vars
 
-#data "http" "restart_service" {
-#  url = "https://api.render.com/v1/services/${render_service.chroma.id}/restart"
-#  method = "POST"
-#  request_headers = {
-#    "accept" = "application/json"
-#    "authorization" = "Bearer ${var.render_api_token}"
-#  }
-#
-#  depends_on = [render_service_environment.chroma_env]
-#}
+data "http" "redeploy_chroma" {
+  url = "https://api.render.com/v1/services/${render_service.chroma.id}/deploys"
+  method = "POST"
+  request_headers = {
+    "accept" = "application/json"
+    "authorization" = "Bearer ${var.render_api_token}"
+    content_type = "application/json"
+  }
+
+  request_body = "{\"clearCache\":\"clear\"}"
+
+  depends_on = [render_service_environment.chroma_env]
+}
 
 
 output "instance_url" {
