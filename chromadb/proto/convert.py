@@ -1,16 +1,25 @@
 import array
-from typing import Optional, Tuple, Union
+from uuid import UUID
+from typing import Dict, Optional, Tuple, Union
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
+from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
     EmbeddingRecord,
     Metadata,
     Operation,
     ScalarEncoding,
+    Segment,
+    SegmentScope,
     SeqId,
     SubmitEmbeddingRecord,
     Vector,
+    VectorEmbeddingRecord,
+    VectorQueryResult,
 )
+
+
+# TODO: Unit tests for this file, handling optional states etc
 
 
 def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
@@ -48,7 +57,7 @@ def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     return (as_array.tolist(), out_encoding)
 
 
-def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
+def from_proto_operation(operation: proto.Operation) -> Operation:
     if operation == proto.Operation.ADD:
         return Operation.ADD
     elif operation == proto.Operation.UPDATE:
@@ -64,7 +73,7 @@ def from_proto_operation(operation: proto.Operation.ValueType) -> Operation:
 def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
     if not metadata.metadata:
         return None
-    out_metadata = {}
+    out_metadata: Dict[str, Union[str, int, float]] = {}
     for key, value in metadata.metadata.items():
         if value.HasField("string_value"):
             out_metadata[key] = value.string_value
@@ -92,6 +101,52 @@ def from_proto_submit(
     return record
 
 
+def from_proto_segment(segment: proto.Segment) -> Segment:
+    return Segment(
+        id=UUID(hex=segment.id),
+        type=segment.type,
+        scope=from_proto_segment_scope(segment.scope),
+        topic=segment.topic,
+        collection=None
+        if not segment.HasField("collection")
+        else UUID(hex=segment.collection),
+        metadata=from_proto_metadata(segment.metadata),
+    )
+
+
+def to_proto_segment(segment: Segment) -> proto.Segment:
+    return proto.Segment(
+        id=segment["id"].hex,
+        type=segment["type"],
+        scope=to_proto_segment_scope(segment["scope"]),
+        topic=segment["topic"],
+        collection=None if segment["collection"] is None else segment["collection"].hex,
+        metadata=None
+        if segment["metadata"] is None
+        else {
+            k: to_proto_metadata_update_value(v) for k, v in segment["metadata"].items()
+        },  # TODO: refactor out to_proto_metadata
+    )
+
+
+def from_proto_segment_scope(segment_scope: proto.SegmentScope) -> SegmentScope:
+    if segment_scope == proto.SegmentScope.VECTOR:
+        return SegmentScope.VECTOR
+    elif segment_scope == proto.SegmentScope.METADATA:
+        return SegmentScope.METADATA
+    else:
+        raise RuntimeError(f"Unknown segment scope {segment_scope}")
+
+
+def to_proto_segment_scope(segment_scope: SegmentScope) -> proto.SegmentScope:
+    if segment_scope == SegmentScope.VECTOR:
+        return proto.SegmentScope.VECTOR
+    elif segment_scope == SegmentScope.METADATA:
+        return proto.SegmentScope.METADATA
+    else:
+        raise RuntimeError(f"Unknown segment scope {segment_scope}")
+
+
 def to_proto_metadata_update_value(
     value: Union[str, int, float, None]
 ) -> proto.UpdateMetadataValue:
@@ -110,7 +165,7 @@ def to_proto_metadata_update_value(
         )
 
 
-def to_proto_operation(operation: Operation) -> proto.Operation.ValueType:
+def to_proto_operation(operation: Operation) -> proto.Operation:
     if operation == Operation.ADD:
         return proto.Operation.ADD
     elif operation == Operation.UPDATE:
@@ -148,3 +203,43 @@ def to_proto_submit(
         else None,
         operation=to_proto_operation(submit_record["operation"]),
     )
+
+
+def from_proto_vector_embedding_record(
+    embedding_record: proto.VectorEmbeddingRecord,
+) -> VectorEmbeddingRecord:
+    return VectorEmbeddingRecord(
+        id=embedding_record.id,
+        seq_id=from_proto_seq_id(embedding_record.seq_id),
+        embedding=from_proto_vector(embedding_record.vector)[0],
+    )
+
+
+def to_proto_vector_embedding_record(
+    embedding_record: VectorEmbeddingRecord,
+    encoding: ScalarEncoding,
+) -> proto.VectorEmbeddingRecord:
+    return proto.VectorEmbeddingRecord(
+        id=embedding_record["id"],
+        seq_id=to_proto_seq_id(embedding_record["seq_id"]),
+        vector=to_proto_vector(embedding_record["embedding"], encoding),
+    )
+
+
+def from_proto_vector_query_result(
+    vector_query_result: proto.VectorQueryResult,
+) -> VectorQueryResult:
+    return VectorQueryResult(
+        id=vector_query_result.id,
+        seq_id=from_proto_seq_id(vector_query_result.seq_id),
+        distance=vector_query_result.distance,
+        embedding=from_proto_vector(vector_query_result.vector)[0],
+    )
+
+
+def to_proto_seq_id(seq_id: SeqId) -> bytes:
+    return int_to_bytes(seq_id)
+
+
+def from_proto_seq_id(seq_id: bytes) -> SeqId:
+    return bytes_to_int(seq_id)

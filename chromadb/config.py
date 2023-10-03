@@ -69,6 +69,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
+    "chromadb.segment.SegmentDirectory": "chroma_segment_directory_impl",
 }
 
 
@@ -87,6 +88,9 @@ class Settings(BaseSettings):  # type: ignore
     chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
+    chroma_segment_directory_impl: str = (
+        "chromadb.segment.impl.manager.segment_directory.DockerComposeSegmentDirectory"
     )
 
     tenant_id: str = "default"

@@ -623,6 +623,8 @@ class SegmentAPI(API):
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
+    # TODO: promote collection -> topic to a base class method so that it can be
+    # used for channel assignment in the distributed version of the system.
     def _validate_embedding_record(
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:

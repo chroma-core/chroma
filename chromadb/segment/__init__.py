@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, TypeVar, Type
+from typing import Callable, Optional, Sequence, TypeVar, Type
 from abc import abstractmethod
 from chromadb.types import (
     Collection,
@@ -15,6 +15,14 @@ from chromadb.types import (
 )
 from chromadb.config import Component, System
 from uuid import UUID
+from enum import Enum
+
+
+class SegmentType(Enum):
+    SQLITE = "urn:chroma:segment/metadata/sqlite"
+    HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
+    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
+    HNSW_DISTRIBUTED = "urn:chroma:segment/vector/hnsw-distributed"
 
 
 class SegmentImplementation(Component):
@@ -117,4 +125,20 @@ class SegmentManager(Component):
         """Signal to the segment manager that a collection is about to be used, so that
         it can preload segments as needed. This is only a hint, and implementations are
         free to ignore it."""
+        pass
+
+
+class SegmentDirectory(Component):
+    """A segment directory is a data interface that manages the location of segments. Concretely, this
+    means that for clustered chroma, it provides the grpc endpoint for a segment."""
+
+    @abstractmethod
+    def get_segment_endpoint(self, segment: Segment) -> str:
+        """Return the segment residence for a given segment ID"""
+
+    @abstractmethod
+    def register_updated_segment_callback(
+        self, callback: Callable[[Segment], None]
+    ) -> None:
+        """Register a callback that will be called when a segment is updated"""
         pass

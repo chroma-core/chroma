@@ -191,6 +191,21 @@ def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
 
 
+def basic_http_client() -> Generator[System, None, None]:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port="8000",
+        allow_reset=True,
+    )
+    system = System(settings)
+    api = system.instance(API)
+    _await_server(api)
+    system.start()
+    yield system
+    system.stop()
+
+
 def fastapi_server_basic_auth() -> Generator[System, None, None]:
     server_auth_file = os.path.abspath(os.path.join(".", "server.htpasswd"))
     with open(server_auth_file, "w") as f:
@@ -327,6 +342,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         fixtures = [integration]
+    if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
+        fixtures = [basic_http_client]
     return fixtures
 
 
@@ -439,5 +456,5 @@ def produce_fns(
     yield request.param
 
 
-def pytest_configure(config):
+def pytest_configure(config):  # type: ignore
     embeddings_queue._called_from_test = True

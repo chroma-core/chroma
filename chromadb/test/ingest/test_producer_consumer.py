@@ -178,7 +178,6 @@ async def test_backfill(
     producer, consumer = producer_consumer
     producer.reset_state()
     consumer.reset_state()
-
     topic_name = full_topic_name("test_topic")
     producer.create_topic(topic_name)
     embeddings = produce_fns(producer, topic_name, sample_embeddings, 3)[0]

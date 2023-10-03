@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package chroma;
+
+enum Operation {
+    ADD = 0;
+    UPDATE = 1;
+    UPSERT = 2;
+    DELETE = 3;
+}
+
+enum ScalarEncoding {
+    FLOAT32 = 0;
+    INT32 = 1;
+}
+
+message Vector {
+    int32 dimension = 1;
+    bytes vector = 2;
+    ScalarEncoding encoding = 3;
+}
+
+enum SegmentScope {
+    VECTOR = 0;
+    METADATA = 1;
+}
+
+message Segment {
+    string id = 1;
+    string type = 2;
+    SegmentScope scope = 3;
+    optional string topic = 4; // TODO should channel <> segment binding exist here?
+    // If a segment has a collection, it implies that this segment implements the full
+    // collection and can be used to service queries (for it's given scope.)
+    optional string collection = 5;
+    optional UpdateMetadata metadata = 6;
+}
+
+message UpdateMetadataValue {
+    oneof value {
+        string string_value = 1;
+        int64 int_value = 2;
+        double float_value = 3;
+    }
+}
+
+message UpdateMetadata {
+    map<string, UpdateMetadataValue> metadata = 1;
+}
+
+message SubmitEmbeddingRecord {
+    string id = 1;
+    optional Vector vector = 2;
+    optional UpdateMetadata metadata = 3;
+    Operation operation = 4;
+}
+
+message VectorEmbeddingRecord {
+    string id = 1;
+    bytes seq_id = 2;
+    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+}
+
+message VectorQueryResult {
+    string id = 1;
+    bytes seq_id = 2;
+    double distance = 3;
+    optional Vector vector = 4;
+}
+
+message VectorQueryResults {
+    repeated VectorQueryResult results = 1;
+}
+
+/* Segment Server Interface */
+
+// TODO: figure out subpackaging, ideally this file is colocated with the segment server implementation
+service SegmentServer {
+    rpc LoadSegment (Segment) returns (SegmentServerResponse) {}
+    rpc ReleaseSegment (Segment) returns (SegmentServerResponse) {} // TODO: this maybe should only take id/type/scope
+}
+
+// TODO: enum of succcess/failure/or already loaded
+message SegmentServerResponse {
+    bool success = 1;
+}
+
+/* Vector Reader Interface */
+
+service VectorReader {
+    rpc GetVectors(GetVectorsRequest) returns (GetVectorsResponse) {}
+    rpc QueryVectors(QueryVectorsRequest) returns (QueryVectorsResponse) {}
+}
+
+message GetVectorsRequest {
+    repeated string ids = 1;
+    string segment_id = 2;
+}
+
+message GetVectorsResponse {
+    repeated VectorEmbeddingRecord records = 1;
+}
+
+message QueryVectorsRequest {
+    repeated Vector vectors = 1;
+    int32 k = 2;
+    repeated string allowed_ids = 3;
+    bool include_embeddings = 4;
+    string segment_id = 5;
+    // TODO: options as in types.py, its currently unused so can add later
+}
+
+message QueryVectorsResponse {
+    repeated VectorQueryResults results = 1;
+}

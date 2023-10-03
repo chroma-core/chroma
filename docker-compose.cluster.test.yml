@@ -25,6 +25,8 @@ services:
       - PULSAR_BROKER_URL=pulsar
       - PULSAR_BROKER_PORT=6650
       - PULSAR_ADMIN_PORT=8080
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
     ports:
       - 8000:8000
     depends_on:
@@ -50,6 +52,8 @@ services:
       - PULSAR_BROKER_PORT=6650
       - PULSAR_ADMIN_PORT=8080
       - CHROMA_SERVER_GRPC_PORT=50051
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
     ports:
       - 50051:50051
     depends_on:
