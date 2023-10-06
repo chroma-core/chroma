@@ -1,7 +1,7 @@
 from threading import Lock
 
 import grpc
-from chromadb.proto.chroma_pb2_grpc import SegmentServerStub
+from chromadb.proto.chroma_pb2_grpc import SegmentServerStub  # type: ignore
 from chromadb.proto.convert import to_proto_segment
 from chromadb.segment import (
     SegmentImplementation,
@@ -14,10 +14,9 @@ from chromadb.segment import (
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
-from enum import Enum
-from chromadb.segment import SegmentDirectory
+from chromadb.segment.distributed import SegmentDirectory
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Dict, List, Type, Sequence, Optional, cast
+from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
 
@@ -117,7 +116,7 @@ class DistributedSegmentManager(SegmentManager):
 
                 if grpc_url not in self._segment_server_stubs:
                     channel = grpc.insecure_channel(grpc_url)
-                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
+                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
 
                 self._segment_server_stubs[grpc_url].LoadSegment(
                     to_proto_segment(segment)

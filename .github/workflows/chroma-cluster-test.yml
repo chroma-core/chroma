@@ -32,6 +32,15 @@ jobs:
         python-version: ${{ matrix.python }}
     - name: Install test dependencies
       run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+    - name: Start minikube
+      id: minikube
+      uses: medyagh/setup-minikube@latest
+      with:
+        minikube-version: latest
+        kubernetes-version: latest
+        driver: docker
+        addons: ingress, ingress-dns
+        profile: chroma-test
     - name: Integration Test
       run: bin/cluster-test.sh ${{ matrix.testfile }}
       continue-on-error: true # Mark the job as successful even if the tests fail for now (Xfail)
