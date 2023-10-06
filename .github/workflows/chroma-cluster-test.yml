@@ -40,7 +40,7 @@ jobs:
         kubernetes-version: latest
         driver: docker
         addons: ingress, ingress-dns
-        profile: chroma-test
+        start-args: '--profile chroma-test'
     - name: Integration Test
       run: bin/cluster-test.sh ${{ matrix.testfile }}
       continue-on-error: true # Mark the job as successful even if the tests fail for now (Xfail)
