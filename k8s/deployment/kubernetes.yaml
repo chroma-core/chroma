@@ -44,6 +44,11 @@ spec:
         - name: pulsar
           image: apachepulsar/pulsar
           command: [ "/pulsar/bin/pulsar", "standalone" ]
+          env:
+          # This is needed by github actions. We force this to be lower everywehre for now.
+          # Since real deployments will configure/use pulsar this way.
+            - name: PULSAR_MEM
+              value: "-Xms128m -Xmx512m"
           ports:
             - containerPort: 6650
             - containerPort: 8080
