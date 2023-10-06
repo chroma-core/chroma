@@ -150,6 +150,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
                     self._notify(self._curr_memberlist)
 
             # Watch the custom resource for changes
+            # Watch with a timeout and retry so we can gracefully stop this if needed
             while not self._kill_watch_thread.is_set():
                 try:
                     do_watch()
