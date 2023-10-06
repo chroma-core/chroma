@@ -30,6 +30,7 @@ docker build -t server:latest -f Dockerfile .
 kubectl apply -f k8s/deployment
 kubectl apply -f k8s/crd
 kubectl apply -f k8s/cr
+kubectl apply -f k8s/test
 
 # Wait for the pods in the chroma namespace to be ready
 kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=300s
@@ -38,7 +39,14 @@ kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=300s
 minikube tunnel -p chroma-test &
 TUNNEL_PID=$!
 
+# Wait for the tunnel to be ready. There isn't an easy way to check if the tunnel is ready. So we just wait for 10 seconds
+sleep 10
+
 export CHROMA_CLUSTER_TEST_ONLY=1
+export CHROMA_SERVER_HOST=$(kubectl get svc server -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+export PULSAR_BROKER_URL=$(kubectl get svc pulsar -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "Chroma Server is running at port $CHROMA_SERVER_HOST"
+echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
 
 echo testing: python -m pytest "$@"
 python -m pytest "$@"

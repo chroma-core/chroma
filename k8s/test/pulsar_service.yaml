@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsar
+  namespace: chroma
+spec:
+  ports:
+    - name: pulsar-port
+      port: 6650
+      targetPort: 6650
+    - name: admin-port
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: pulsar
+  type: LoadBalancer
