@@ -30,7 +30,7 @@ class MemberlistProvider(Component, EnforceOverrides):
     callback may be called from a different thread than the one that called. Callers should ensure
     that they are thread-safe."""
 
-    callbacks: list[Callable[[Memberlist], Any]]
+    callbacks: List[Callable[[Memberlist], Any]]
 
     def __init__(self, system: System):
         self.callbacks = []
