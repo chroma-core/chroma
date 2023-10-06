@@ -16,12 +16,8 @@ jobs:
       matrix:
         python: ['3.7']
         platform: [ubuntu-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py'",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+        testfile: ["chromadb/test/ingest/test_producer_consumer.py",
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
@@ -43,4 +39,3 @@ jobs:
         start-args: '--profile chroma-test'
     - name: Integration Test
       run: bin/cluster-test.sh ${{ matrix.testfile }}
-      continue-on-error: true # Mark the job as successful even if the tests fail for now (Xfail)
