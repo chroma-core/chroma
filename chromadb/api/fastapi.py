@@ -73,7 +73,8 @@ class FastAPI(API):
         scheme = "https" if chroma_server_ssl_enabled else parsed.scheme or "http"
         net_loc = parsed.netloc or parsed.hostname or chroma_server_host
         port = (
-            ":" + str(parsed.port or chroma_server_http_port) if not _skip_port else ""
+            ":" +
+            str(parsed.port or chroma_server_http_port) if not _skip_port else ""
         )
         path = parsed.path or default_api_path
 
@@ -82,7 +83,8 @@ class FastAPI(API):
         if not path.endswith(default_api_path or ""):
             path = path + default_api_path if default_api_path else ""
         full_url = urlunparse(
-            (scheme, f"{net_loc}{port}", quote(path.replace("//", "/")), "", "", "")
+            (scheme, f"{net_loc}{port}", quote(
+                path.replace("//", "/")), "", "", "")
         )
 
         return full_url
@@ -97,7 +99,8 @@ class FastAPI(API):
 
         self._api_url = FastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
-            chroma_server_http_port=int(str(system.settings.chroma_server_http_port)),
+            chroma_server_http_port=int(
+                str(system.settings.chroma_server_http_port)),
             chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
             default_api_path=system.settings.chroma_server_api_default_path,
         )
@@ -151,14 +154,16 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
         resp = self._session.post(
             self._api_url + "/collections",
             data=json.dumps(
-                {"name": name, "metadata": metadata, "get_or_create": get_or_create}
+                {"name": name, "metadata": metadata,
+                    "get_or_create": get_or_create}
             ),
         )
         raise_chroma_error(resp)
@@ -175,7 +180,8 @@ class FastAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
     ) -> Collection:
         """Returns a collection"""
         resp = self._session.get(self._api_url + "/collections/" + name)
@@ -194,7 +200,8 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
     ) -> Collection:
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
@@ -210,7 +217,8 @@ class FastAPI(API):
         """Updates a collection"""
         resp = self._session.put(
             self._api_url + "/collections/" + str(id),
-            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+            data=json.dumps(
+                {"new_metadata": new_metadata, "new_name": new_name}),
         )
         raise_chroma_error(resp)
 
@@ -225,6 +233,16 @@ class FastAPI(API):
         """Returns the number of embeddings in the database"""
         resp = self._session.get(
             self._api_url + "/collections/" + str(collection_id) + "/count"
+        )
+        raise_chroma_error(resp)
+        return cast(int, resp.json())
+
+    @override
+    def _dimensions(self, collection_id: UUID) -> int:
+        """Returns the dimensionality of the embeddings in the collection"""
+        resp = self._session.get(
+            self._api_url + "/collections/" +
+            str(collection_id) + "/dimensions"
         )
         raise_chroma_error(resp)
         return cast(int, resp.json())
@@ -336,7 +354,8 @@ class FastAPI(API):
         """
         batch = (ids, embeddings, metadatas, documents)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
+        resp = self._submit_batch(
+            batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
         return True
 
@@ -456,7 +475,8 @@ def raise_chroma_error(resp: requests.Response) -> None:
         body = resp.json()
         if "error" in body:
             if body["error"] in errors.error_types:
-                chroma_error = errors.error_types[body["error"]](body["message"])
+                chroma_error = errors.error_types[body["error"]](
+                    body["message"])
 
     except BaseException:
         pass

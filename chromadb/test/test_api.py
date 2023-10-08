@@ -87,14 +87,16 @@ def test_persist_index_loading(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading_embedding_function(api_fixture, request):
-    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    def embedding_function(x): return [[1, 2, 3] for _ in range(len(x))]  # noqa E731
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", embedding_function=embedding_function)
+    collection = api.create_collection(
+        "test", embedding_function=embedding_function)
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test", embedding_function=embedding_function)
+    collection = api2.get_collection(
+        "test", embedding_function=embedding_function)
 
     nn = collection.query(
         query_texts="hello",
@@ -107,7 +109,7 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):
-    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    def embedding_function(x): return [[1, 2, 3] for _ in range(len(x))]  # noqa E731
     api = request.getfixturevalue("local_persist_api")
     api.reset()
     collection = api.get_or_create_collection(
@@ -308,6 +310,16 @@ def test_count(api):
     assert collection.count() == 0
     collection.add(**batch_records)
     assert collection.count() == 2
+
+
+def test_dimensions(api):
+    api.reset()
+    collection = api.create_collection("testspace")
+    assert collection.count() == 0
+    assert collection.dimensions() == -1
+    collection.add(**batch_records)
+    assert collection.count() == 2
+    assert collection.dimensions() == len(batch_records["embeddings"][0])
 
 
 def test_modify(api):
@@ -522,7 +534,8 @@ def test_metadata_update_get_int_float(api):
 
     collection.update(
         ids=["id1"],
-        metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}],
+        metadatas=[
+            {"int_value": 2, "string_value": "two", "float_value": 2.002}],
     )
     items = collection.get(ids=["id1"])
     assert items["metadatas"][0]["int_value"] == 2
@@ -563,7 +576,8 @@ def test_where_validation_query(api):
     api.reset()
     collection = api.create_collection("test_where_validation")
     with pytest.raises(ValueError, match="where"):
-        collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
+        collection.query(query_embeddings=[0, 0, 0], where={
+                         "value": {"nested": "5"}})
 
 
 operator_records = {
@@ -650,7 +664,8 @@ def test_where_valid_operators(api):
 
     with pytest.raises(ValueError):
         collection.get(
-            where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]}
+            where={"$gt": [{"int_value": {"$lt": 2}},
+                           {"int_value": {"$gt": 1}}]}
         )
 
     with pytest.raises(ValueError):
@@ -717,7 +732,8 @@ def test_query_document_valid_operators(api):
         collection.get(where_document={"$lt": {"$nested": 2}})
 
     with pytest.raises(ValueError, match="where document"):
-        collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
+        collection.query(query_embeddings=[
+                         0, 0, 0], where_document={"$contains": 2})
 
     with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$contains": []})
@@ -728,7 +744,8 @@ def test_query_document_valid_operators(api):
 
     with pytest.raises(ValueError):
         collection.get(
-            where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]}
+            where_document={
+                "$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]}
         )
 
     with pytest.raises(ValueError):
@@ -819,8 +836,10 @@ logical_operator_records = {
     "metadatas": [
         {"int_value": 1, "string_value": "one", "float_value": 1.001, "is": "doc"},
         {"int_value": 2, "float_value": 2.002, "string_value": "two", "is": "doc"},
-        {"int_value": 3, "float_value": 3.003, "string_value": "three", "is": "doc"},
-        {"int_value": 4, "float_value": 4.004, "string_value": "four", "is": "doc"},
+        {"int_value": 3, "float_value": 3.003,
+            "string_value": "three", "is": "doc"},
+        {"int_value": 4, "float_value": 4.004,
+            "string_value": "four", "is": "doc"},
     ],
     "documents": [
         "this document is first and great",
@@ -839,7 +858,8 @@ def test_where_logical_operators(api):
     items = collection.get(
         where={
             "$and": [
-                {"$or": [{"int_value": {"$gte": 3}}, {"float_value": {"$lt": 1.9}}]},
+                {"$or": [{"int_value": {"$gte": 3}},
+                         {"float_value": {"$lt": 1.9}}]},
                 {"is": "doc"},
             ]
         }
@@ -979,7 +999,8 @@ def test_get_include(api):
     collection = api.create_collection("test_get_include")
     collection.add(**records)
 
-    items = collection.get(include=["metadatas", "documents"], where={"int_value": 1})
+    items = collection.get(
+        include=["metadatas", "documents"], where={"int_value": 1})
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
     assert items["metadatas"][0]["int_value"] == 1
@@ -1059,7 +1080,8 @@ def test_index_params(api):
     api.reset()
     collection = api.create_collection(
         name="test_index_params",
-        metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
+        metadata={"hnsw:space": "cosine",
+                  "hnsw:construction_ef": 20, "hnsw:M": 5},
     )
     collection.add(**records)
     items = collection.query(

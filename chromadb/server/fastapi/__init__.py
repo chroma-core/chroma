@@ -114,7 +114,8 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
         if settings.chroma_server_auth_provider:
-            self._auth_middleware = self._api.require(FastAPIChromaAuthMiddleware)
+            self._auth_middleware = self._api.require(
+                FastAPIChromaAuthMiddleware)
             self._app.add_middleware(
                 FastAPIChromaAuthMiddlewareWrapper,
                 auth_middleware=self._auth_middleware,
@@ -123,9 +124,12 @@ class FastAPI(chromadb.server.Server):
         self.router = ChromaAPIRouter()
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
-        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route(
+            "/api/v1/version", self.version, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
         )
@@ -177,6 +181,12 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/count",
             self.count,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
+            "/api/v1/collections/{collection_id}/dimensions",
+            self.dimensions,
             methods=["GET"],
             response_model=None,
         )
@@ -299,6 +309,9 @@ class FastAPI(chromadb.server.Server):
 
     def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
+
+    def dimensions(self, collection_id: str) -> int:
+        return self._api._dimensions(_uuid(collection_id))
 
     def reset(self) -> bool:
         return self._api.reset()
