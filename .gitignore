@@ -15,6 +15,7 @@ index_data
 # Currently it's located in "./chroma/"
 chroma/
 chroma_test_data
+server.htpasswd
 
 .venv
 venv
