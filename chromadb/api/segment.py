@@ -412,7 +412,7 @@ class SegmentAPI(API):
         self._telemetry_client.capture(
             CollectionGetEvent(
                 collection_uuid=str(collection_id),
-                ids_count=len(ids) if ids else 0,
+                ids_count=ids_amount,
                 limit=limit if limit else 0,
                 include_metadata=ids_amount if "metadatas" in include else 0,
                 include_documents=ids_amount if "documents" in include else 0,
