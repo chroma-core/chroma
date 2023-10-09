@@ -31,7 +31,7 @@ from chromadb.auth import (
 from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import Settings, System
-from chromadb.telemetry import Telemetry
+from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,8 @@ class FastAPI(API):
         if "/" in host and (not host.startswith("http")):
             raise ValueError(
                 "Invalid URL. "
-                "Seems that you are trying to pass URL as a host but without specifying the protocol. "
+                "Seems that you are trying to pass URL as a host but without \
+                    specifying the protocol. "
                 "Please add http:// or https:// to the host."
             )
 
@@ -92,7 +93,7 @@ class FastAPI(API):
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
-        self._telemetry_client = self.require(Telemetry)
+        self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
         self._api_url = FastAPI.resolve_url(

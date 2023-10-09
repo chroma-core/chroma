@@ -3,7 +3,7 @@ from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
-from chromadb.telemetry import Telemetry
+from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
@@ -29,7 +29,7 @@ from chromadb.api.types import (
     validate_where_document,
     validate_batch,
 )
-from chromadb.telemetry.events import (
+from chromadb.telemetry.product.events import (
     CollectionAddEvent,
     CollectionDeleteEvent,
     CollectionGetEvent,
@@ -80,7 +80,7 @@ class SegmentAPI(API):
     _manager: SegmentManager
     _producer: Producer
     # TODO: fire telemetry events
-    _telemetry_client: Telemetry
+    _product_telemetry_client: ProductTelemetryClient
     _tenant_id: str
     _topic_ns: str
     _collection_cache: Dict[UUID, t.Collection]
@@ -90,7 +90,7 @@ class SegmentAPI(API):
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
-        self._telemetry_client = self.require(Telemetry)
+        self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._producer = self.require(Producer)
         self._tenant_id = system.settings.tenant_id
         self._topic_ns = system.settings.topic_namespace
@@ -147,7 +147,7 @@ class SegmentAPI(API):
         for segment in segments:
             self._sysdb.create_segment(segment)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             ClientCreateCollectionEvent(
                 collection_uuid=str(id),
                 embedding_function=embedding_function.__class__.__name__,
@@ -277,7 +277,7 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionAddEvent(
                 collection_uuid=str(collection_id),
                 add_amount=len(ids),
@@ -314,7 +314,7 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionUpdateEvent(
                 collection_uuid=str(collection_id),
                 update_amount=len(ids),
@@ -408,7 +408,7 @@ class SegmentAPI(API):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionGetEvent(
                 collection_uuid=str(collection_id),
                 ids_count=len(ids) if ids else 0,
@@ -481,7 +481,7 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionDeleteEvent(
                 collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
             )
@@ -571,7 +571,7 @@ class SegmentAPI(API):
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=len(query_embeddings),

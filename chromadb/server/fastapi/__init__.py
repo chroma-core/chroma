@@ -35,7 +35,7 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
-from chromadb.telemetry import ServerContext, Telemetry
+from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class ChromaAPIRouter(fastapi.APIRouter):
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
-        Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
+        ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
         self._api: chromadb.api.API = chromadb.Client(settings)
 

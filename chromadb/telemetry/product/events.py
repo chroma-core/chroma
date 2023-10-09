@@ -1,14 +1,14 @@
 from typing import cast, ClassVar
-from chromadb.telemetry import TelemetryEvent
+from chromadb.telemetry.product import ProductTelemetryEvent
 from chromadb.utils.embedding_functions import get_builtins
 
 
-class ClientStartEvent(TelemetryEvent):
+class ClientStartEvent(ProductTelemetryEvent):
     def __init__(self) -> None:
         super().__init__()
 
 
-class ClientCreateCollectionEvent(TelemetryEvent):
+class ClientCreateCollectionEvent(ProductTelemetryEvent):
     collection_uuid: str
     embedding_function: str
 
@@ -25,7 +25,7 @@ class ClientCreateCollectionEvent(TelemetryEvent):
         )
 
 
-class CollectionAddEvent(TelemetryEvent):
+class CollectionAddEvent(ProductTelemetryEvent):
     max_batch_size: ClassVar[int] = 20
     collection_uuid: str
     add_amount: int
@@ -51,7 +51,7 @@ class CollectionAddEvent(TelemetryEvent):
     def batch_key(self) -> str:
         return self.collection_uuid + self.name
 
-    def batch(self, other: "TelemetryEvent") -> "CollectionAddEvent":
+    def batch(self, other: "ProductTelemetryEvent") -> "CollectionAddEvent":
         if not self.batch_key == other.batch_key:
             raise ValueError("Cannot batch events")
         other = cast(CollectionAddEvent, other)
@@ -65,7 +65,7 @@ class CollectionAddEvent(TelemetryEvent):
         )
 
 
-class CollectionUpdateEvent(TelemetryEvent):
+class CollectionUpdateEvent(ProductTelemetryEvent):
     collection_uuid: str
     update_amount: int
     with_embeddings: int
@@ -88,7 +88,7 @@ class CollectionUpdateEvent(TelemetryEvent):
         self.with_documents = with_documents
 
 
-class CollectionQueryEvent(TelemetryEvent):
+class CollectionQueryEvent(ProductTelemetryEvent):
     collection_uuid: str
     query_amount: int
     with_metadata_filter: bool
@@ -120,7 +120,7 @@ class CollectionQueryEvent(TelemetryEvent):
         self.include_distances = include_distances
 
 
-class CollectionGetEvent(TelemetryEvent):
+class CollectionGetEvent(ProductTelemetryEvent):
     collection_uuid: str
     ids_count: int
     limit: int
@@ -143,7 +143,7 @@ class CollectionGetEvent(TelemetryEvent):
         self.include_documents = include_documents
 
 
-class CollectionDeleteEvent(TelemetryEvent):
+class CollectionDeleteEvent(ProductTelemetryEvent):
     collection_uuid: str
     delete_amount: int
 

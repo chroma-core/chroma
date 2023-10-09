@@ -64,7 +64,7 @@ _legacy_config_values = {
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
     "chromadb.api.API": "chroma_api_impl",
-    "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
+    "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
@@ -80,7 +80,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_db_impl: Optional[str] = None
 
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
-    chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
+    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
 
     # New architecture components
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
