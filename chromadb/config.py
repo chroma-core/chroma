@@ -69,7 +69,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.SegmentDirectory": "chroma_segment_directory_impl",
+    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
+    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
 }
 
 
@@ -89,9 +90,11 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
-    chroma_segment_directory_impl: str = (
-        "chromadb.segment.impl.manager.segment_directory.DockerComposeSegmentDirectory"
-    )
+
+    # Distributed architecture specific components
+    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
+    worker_memberlist_name: str = "worker-memberlist"
 
     tenant_id: str = "default"
     topic_namespace: str = "default"
@@ -108,8 +111,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
 
     pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[str] = None
-    pulsar_broker_port: Optional[str] = None
+    pulsar_admin_port: Optional[str] = "8080"
+    pulsar_broker_port: Optional[str] = "6650"
 
     chroma_server_auth_provider: Optional[str] = None
 

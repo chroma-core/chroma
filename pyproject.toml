@@ -35,6 +35,8 @@ dependencies = [
   'grpcio >= 1.58.0',
   'bcrypt >= 4.0.1',
   'typer >= 0.9.0',
+  'kubernetes>=28.1.0',
+  'tenacity>=8.2.3',
 ]
 
 [tool.black]
