@@ -127,6 +127,8 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
         return self._parse_response_memberlist(response_spec)
 
     def _watch_worker_memberlist(self) -> None:
+        # TODO: We may want to make this watch function a library function that can be used by other
+        # components that need to watch k8s custom resources.
         def run_watch() -> None:
             w = watch.Watch()
 
