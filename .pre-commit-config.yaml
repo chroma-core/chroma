@@ -32,5 +32,5 @@ repos:
     rev: "v1.2.0"
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
+        args: [-v, --strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract, --config-file=./mypy.ini]
         additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy", "types-protobuf", "kubernetes"]
