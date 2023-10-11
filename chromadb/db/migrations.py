@@ -6,6 +6,7 @@ import hashlib
 from chromadb.db.base import SqlDB, Cursor
 from abc import abstractmethod
 from chromadb.config import System, Settings
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 
 
 class MigrationFile(TypedDict):
@@ -82,6 +83,7 @@ class MigratableDB(SqlDB):
 
     def __init__(self, system: System) -> None:
         self._settings = system.settings
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
     @staticmethod
@@ -130,30 +132,32 @@ class MigratableDB(SqlDB):
     def validate_migrations(self) -> None:
         """Validate all migrations and throw an exception if there are any unapplied
         migrations in the source repo."""
-        if not self.migrations_initialized():
-            raise UninitializedMigrationsError()
-        for dir in self.migration_dirs():
-            db_migrations = self.db_migrations(dir)
-            source_migrations = find_migrations(dir, self.migration_scope())
-            unapplied_migrations = verify_migration_sequence(
-                db_migrations, source_migrations
-            )
-            if len(unapplied_migrations) > 0:
-                version = unapplied_migrations[0]["version"]
-                raise UnappliedMigrationsError(dir=dir.name, version=version)
+        with self._opentelemetry_client.trace("MigratableDB.validate_migrations"):
+            if not self.migrations_initialized():
+                raise UninitializedMigrationsError()
+            for dir in self.migration_dirs():
+                db_migrations = self.db_migrations(dir)
+                source_migrations = find_migrations(dir, self.migration_scope())
+                unapplied_migrations = verify_migration_sequence(
+                    db_migrations, source_migrations
+                )
+                if len(unapplied_migrations) > 0:
+                    version = unapplied_migrations[0]["version"]
+                    raise UnappliedMigrationsError(dir=dir.name, version=version)
 
     def apply_migrations(self) -> None:
         """Validate existing migrations, and apply all new ones."""
-        self.setup_migrations()
-        for dir in self.migration_dirs():
-            db_migrations = self.db_migrations(dir)
-            source_migrations = find_migrations(dir, self.migration_scope())
-            unapplied_migrations = verify_migration_sequence(
-                db_migrations, source_migrations
-            )
-            with self.tx() as cur:
-                for migration in unapplied_migrations:
-                    self.apply_migration(cur, migration)
+        with self._opentelemetry_client.trace("MigratableDB.apply_migrations"):
+            self.setup_migrations()
+            for dir in self.migration_dirs():
+                db_migrations = self.db_migrations(dir)
+                source_migrations = find_migrations(dir, self.migration_scope())
+                unapplied_migrations = verify_migration_sequence(
+                    db_migrations, source_migrations
+                )
+                with self.tx() as cur:
+                    for migration in unapplied_migrations:
+                        self.apply_migration(cur, migration)
 
 
 # Format is <version>-<name>.<scope>.sql

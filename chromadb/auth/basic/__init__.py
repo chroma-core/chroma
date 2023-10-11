@@ -17,6 +17,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.utils import get_class
 
 logger = logging.getLogger(__name__)
@@ -86,11 +87,16 @@ class BasicAuthServerProvider(ServerAuthProvider):
 
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
-        try:
-            _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
-            return self._credentials_provider.validate_credentials(
-                BasicAuthCredentials.from_header(_auth_header)
-            )
-        except Exception as e:
-            logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
-            return False
+        with self._system.require(OpenTelemetryClient).trace(
+            "BasicAuthServerProvider.authenticate"
+        ):
+            try:
+                _auth_header = request.get_auth_info(
+                    AuthInfoType.HEADER, "Authorization"
+                )
+                return self._credentials_provider.validate_credentials(
+                    BasicAuthCredentials.from_header(_auth_header)
+                )
+            except Exception as e:
+                logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
+                return False

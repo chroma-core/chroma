@@ -31,6 +31,7 @@ from chromadb.auth import (
 from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import Settings, System
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
 
@@ -93,6 +94,7 @@ class FastAPI(API):
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
+        self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
@@ -131,21 +133,23 @@ class FastAPI(API):
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
-        resp = self._session.get(self._api_url)
-        raise_chroma_error(resp)
-        return int(resp.json()["nanosecond heartbeat"])
+        with self._opentelemetry_client.trace("FastAPI.heartbeat"):
+            resp = self._session.get(self._api_url)
+            raise_chroma_error(resp)
+            return int(resp.json()["nanosecond heartbeat"])
 
     @override
     def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
-        resp = self._session.get(self._api_url + "/collections")
-        raise_chroma_error(resp)
-        json_collections = resp.json()
-        collections = []
-        for json_collection in json_collections:
-            collections.append(Collection(self, **json_collection))
+        with self._opentelemetry_client.trace("FastAPI.list_collections"):
+            resp = self._session.get(self._api_url + "/collections")
+            raise_chroma_error(resp)
+            json_collections = resp.json()
+            collections = []
+            for json_collection in json_collections:
+                collections.append(Collection(self, **json_collection))
 
-        return collections
+            return collections
 
     @override
     def create_collection(
@@ -156,21 +160,22 @@ class FastAPI(API):
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
-        resp = self._session.post(
-            self._api_url + "/collections",
-            data=json.dumps(
-                {"name": name, "metadata": metadata, "get_or_create": get_or_create}
-            ),
-        )
-        raise_chroma_error(resp)
-        resp_json = resp.json()
-        return Collection(
-            client=self,
-            id=resp_json["id"],
-            name=resp_json["name"],
-            embedding_function=embedding_function,
-            metadata=resp_json["metadata"],
-        )
+        with self._opentelemetry_client.trace("FastAPI.create_collection"):
+            resp = self._session.post(
+                self._api_url + "/collections",
+                data=json.dumps(
+                    {"name": name, "metadata": metadata, "get_or_create": get_or_create}
+                ),
+            )
+            raise_chroma_error(resp)
+            resp_json = resp.json()
+            return Collection(
+                client=self,
+                id=resp_json["id"],
+                name=resp_json["name"],
+                embedding_function=embedding_function,
+                metadata=resp_json["metadata"],
+            )
 
     @override
     def get_collection(
@@ -179,16 +184,17 @@ class FastAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Returns a collection"""
-        resp = self._session.get(self._api_url + "/collections/" + name)
-        raise_chroma_error(resp)
-        resp_json = resp.json()
-        return Collection(
-            client=self,
-            name=resp_json["name"],
-            id=resp_json["id"],
-            embedding_function=embedding_function,
-            metadata=resp_json["metadata"],
-        )
+        with self._opentelemetry_client.trace("FastAPI.get_collection"):
+            resp = self._session.get(self._api_url + "/collections/" + name)
+            raise_chroma_error(resp)
+            resp_json = resp.json()
+            return Collection(
+                client=self,
+                name=resp_json["name"],
+                id=resp_json["id"],
+                embedding_function=embedding_function,
+                metadata=resp_json["metadata"],
+            )
 
     @override
     def get_or_create_collection(
@@ -197,9 +203,10 @@ class FastAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        return self.create_collection(
-            name, metadata, embedding_function, get_or_create=True
-        )
+        with self._opentelemetry_client.trace("FastAPI.get_or_create_collection"):
+            return self.create_collection(
+                name, metadata, embedding_function, get_or_create=True
+            )
 
     @override
     def _modify(
@@ -209,34 +216,38 @@ class FastAPI(API):
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Updates a collection"""
-        resp = self._session.put(
-            self._api_url + "/collections/" + str(id),
-            data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
-        )
-        raise_chroma_error(resp)
+        with self._opentelemetry_client.trace("FastAPI._modify"):
+            resp = self._session.put(
+                self._api_url + "/collections/" + str(id),
+                data=json.dumps({"new_metadata": new_metadata, "new_name": new_name}),
+            )
+            raise_chroma_error(resp)
 
     @override
     def delete_collection(self, name: str) -> None:
         """Deletes a collection"""
-        resp = self._session.delete(self._api_url + "/collections/" + name)
-        raise_chroma_error(resp)
+        with self._opentelemetry_client.trace("FastAPI.delete_collection"):
+            resp = self._session.delete(self._api_url + "/collections/" + name)
+            raise_chroma_error(resp)
 
     @override
     def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database"""
-        resp = self._session.get(
-            self._api_url + "/collections/" + str(collection_id) + "/count"
-        )
-        raise_chroma_error(resp)
-        return cast(int, resp.json())
+        with self._opentelemetry_client.trace("FastAPI._count"):
+            resp = self._session.get(
+                self._api_url + "/collections/" + str(collection_id) + "/count"
+            )
+            raise_chroma_error(resp)
+            return cast(int, resp.json())
 
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
-        return self._get(
-            collection_id,
-            limit=n,
-            include=["embeddings", "documents", "metadatas"],
-        )
+        with self._opentelemetry_client.trace("FastAPI._peek"):
+            return self._get(
+                collection_id,
+                limit=n,
+                include=["embeddings", "documents", "metadatas"],
+            )
 
     @override
     def _get(
@@ -252,33 +263,34 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
+        with self._opentelemetry_client.trace("FastAPI._get"):
+            if page and page_size:
+                offset = (page - 1) * page_size
+                limit = page_size
 
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/get",
-            data=json.dumps(
-                {
-                    "ids": ids,
-                    "where": where,
-                    "sort": sort,
-                    "limit": limit,
-                    "offset": offset,
-                    "where_document": where_document,
-                    "include": include,
-                }
-            ),
-        )
+            resp = self._session.post(
+                self._api_url + "/collections/" + str(collection_id) + "/get",
+                data=json.dumps(
+                    {
+                        "ids": ids,
+                        "where": where,
+                        "sort": sort,
+                        "limit": limit,
+                        "offset": offset,
+                        "where_document": where_document,
+                        "include": include,
+                    }
+                ),
+            )
 
-        raise_chroma_error(resp)
-        body = resp.json()
-        return GetResult(
-            ids=body["ids"],
-            embeddings=body.get("embeddings", None),
-            metadatas=body.get("metadatas", None),
-            documents=body.get("documents", None),
-        )
+            raise_chroma_error(resp)
+            body = resp.json()
+            return GetResult(
+                ids=body["ids"],
+                embeddings=body.get("embeddings", None),
+                metadatas=body.get("metadatas", None),
+                documents=body.get("documents", None),
+            )
 
     @override
     def _delete(
@@ -289,15 +301,16 @@ class FastAPI(API):
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
         """Deletes embeddings from the database"""
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/delete",
-            data=json.dumps(
-                {"where": where, "ids": ids, "where_document": where_document}
-            ),
-        )
+        with self._opentelemetry_client.trace("FastAPI._delete"):
+            resp = self._session.post(
+                self._api_url + "/collections/" + str(collection_id) + "/delete",
+                data=json.dumps(
+                    {"where": where, "ids": ids, "where_document": where_document}
+                ),
+            )
 
-        raise_chroma_error(resp)
-        return cast(IDs, resp.json())
+            raise_chroma_error(resp)
+            return cast(IDs, resp.json())
 
     def _submit_batch(
         self,
@@ -309,18 +322,19 @@ class FastAPI(API):
         """
         Submits a batch of embeddings to the database
         """
-        resp = self._session.post(
-            self._api_url + url,
-            data=json.dumps(
-                {
-                    "ids": batch[0],
-                    "embeddings": batch[1],
-                    "metadatas": batch[2],
-                    "documents": batch[3],
-                }
-            ),
-        )
-        return resp
+        with self._opentelemetry_client.trace("FastAPI._submit_batch"):
+            resp = self._session.post(
+                self._api_url + url,
+                data=json.dumps(
+                    {
+                        "ids": batch[0],
+                        "embeddings": batch[1],
+                        "metadatas": batch[2],
+                        "documents": batch[3],
+                    }
+                ),
+            )
+            return resp
 
     @override
     def _add(
@@ -335,11 +349,14 @@ class FastAPI(API):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
-        raise_chroma_error(resp)
-        return True
+        with self._opentelemetry_client.trace("FastAPI._add"):
+            batch = (ids, embeddings, metadatas, documents)
+            validate_batch(batch, {"max_batch_size": self.max_batch_size})
+            resp = self._submit_batch(
+                batch, "/collections/" + str(collection_id) + "/add"
+            )
+            raise_chroma_error(resp)
+            return True
 
     @override
     def _update(
@@ -354,13 +371,14 @@ class FastAPI(API):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        resp = self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/update"
-        )
-        resp.raise_for_status()
-        return True
+        with self._opentelemetry_client.trace("FastAPI._update"):
+            batch = (ids, embeddings, metadatas, documents)
+            validate_batch(batch, {"max_batch_size": self.max_batch_size})
+            resp = self._submit_batch(
+                batch, "/collections/" + str(collection_id) + "/update"
+            )
+            resp.raise_for_status()
+            return True
 
     @override
     def _upsert(
@@ -375,13 +393,14 @@ class FastAPI(API):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
-        validate_batch(batch, {"max_batch_size": self.max_batch_size})
-        resp = self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/upsert"
-        )
-        resp.raise_for_status()
-        return True
+        with self._opentelemetry_client.trace("FastAPI._upsert"):
+            batch = (ids, embeddings, metadatas, documents)
+            validate_batch(batch, {"max_batch_size": self.max_batch_size})
+            resp = self._submit_batch(
+                batch, "/collections/" + str(collection_id) + "/upsert"
+            )
+            resp.raise_for_status()
+            return True
 
     @override
     def _query(
@@ -394,43 +413,46 @@ class FastAPI(API):
         include: Include = ["metadatas", "documents", "distances"],
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
-        resp = self._session.post(
-            self._api_url + "/collections/" + str(collection_id) + "/query",
-            data=json.dumps(
-                {
-                    "query_embeddings": query_embeddings,
-                    "n_results": n_results,
-                    "where": where,
-                    "where_document": where_document,
-                    "include": include,
-                }
-            ),
-        )
+        with self._opentelemetry_client.trace("FastAPI._query"):
+            resp = self._session.post(
+                self._api_url + "/collections/" + str(collection_id) + "/query",
+                data=json.dumps(
+                    {
+                        "query_embeddings": query_embeddings,
+                        "n_results": n_results,
+                        "where": where,
+                        "where_document": where_document,
+                        "include": include,
+                    }
+                ),
+            )
 
-        raise_chroma_error(resp)
-        body = resp.json()
+            raise_chroma_error(resp)
+            body = resp.json()
 
-        return QueryResult(
-            ids=body["ids"],
-            distances=body.get("distances", None),
-            embeddings=body.get("embeddings", None),
-            metadatas=body.get("metadatas", None),
-            documents=body.get("documents", None),
-        )
+            return QueryResult(
+                ids=body["ids"],
+                distances=body.get("distances", None),
+                embeddings=body.get("embeddings", None),
+                metadatas=body.get("metadatas", None),
+                documents=body.get("documents", None),
+            )
 
     @override
     def reset(self) -> bool:
         """Resets the database"""
-        resp = self._session.post(self._api_url + "/reset")
-        raise_chroma_error(resp)
-        return cast(bool, resp.json())
+        with self._opentelemetry_client.trace("FastAPI.reset"):
+            resp = self._session.post(self._api_url + "/reset")
+            raise_chroma_error(resp)
+            return cast(bool, resp.json())
 
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
-        resp = self._session.get(self._api_url + "/version")
-        raise_chroma_error(resp)
-        return cast(str, resp.json())
+        with self._opentelemetry_client.trace("FastAPI.get_version"):
+            resp = self._session.get(self._api_url + "/version")
+            raise_chroma_error(resp)
+            return cast(str, resp.json())
 
     @override
     def get_settings(self) -> Settings:
@@ -440,11 +462,12 @@ class FastAPI(API):
     @property
     @override
     def max_batch_size(self) -> int:
-        if self._max_batch_size == -1:
-            resp = self._session.get(self._api_url + "/pre-flight-checks")
-            raise_chroma_error(resp)
-            self._max_batch_size = cast(int, resp.json()["max_batch_size"])
-        return self._max_batch_size
+        with self._opentelemetry_client.trace("FastAPI.max_batch_size"):
+            if self._max_batch_size == -1:
+                resp = self._session.get(self._api_url + "/pre-flight-checks")
+                raise_chroma_error(resp)
+                self._max_batch_size = cast(int, resp.json()["max_batch_size"])
+            return self._max_batch_size
 
 
 def raise_chroma_error(resp: requests.Response) -> None:

@@ -152,12 +152,11 @@ def Client(settings: Settings = __settings) -> API:
 
     system = System(settings)
 
-    telemetry_client = system.instance(ProductTelemetryClient)
+    product_telemetry_client = system.instance(ProductTelemetryClient)
     api = system.instance(API)
 
     system.start()
 
-    # Submit event for client start
-    telemetry_client.capture(ClientStartEvent())
+    product_telemetry_client.capture(ClientStartEvent())
 
     return api

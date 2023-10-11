@@ -19,6 +19,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.utils import get_class
 
 T = TypeVar("T")
@@ -88,11 +89,14 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
 
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
-        _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
-        if "token" not in _creds:
-            logger.error("Returned credentials do not contain token")
-            return False
-        return _creds["token"].get_secret_value() == self._token.get_secret_value()
+        with self._system.require(OpenTelemetryClient).trace(
+            "TokenConfigServerAuthCredentialsProvider.validate_credentials"
+        ):
+            _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
+            if "token" not in _creds:
+                logger.error("Returned credentials do not contain token")
+                return False
+            return _creds["token"].get_secret_value() == self._token.get_secret_value()
 
 
 class TokenAuthCredentials(SecretStrAbstractCredentials):
@@ -152,18 +156,21 @@ class TokenAuthServerProvider(ServerAuthProvider):
 
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
-        try:
-            _auth_header = request.get_auth_info(
-                AuthInfoType.HEADER, self._token_transport_header.value
-            )
-            return self._credentials_provider.validate_credentials(
-                TokenAuthCredentials.from_header(
-                    _auth_header, self._token_transport_header
+        with self._system.require(OpenTelemetryClient).trace(
+            "TokenAuthServerProvider.authenticate"
+        ):
+            try:
+                _auth_header = request.get_auth_info(
+                    AuthInfoType.HEADER, self._token_transport_header.value
                 )
-            )
-        except Exception as e:
-            logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
-            return False
+                return self._credentials_provider.validate_credentials(
+                    TokenAuthCredentials.from_header(
+                        _auth_header, self._token_transport_header
+                    )
+                )
+            except Exception as e:
+                logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
+                return False
 
 
 @register_provider("token")
@@ -191,6 +198,9 @@ class TokenAuthClientProvider(ClientAuthProvider):
 
     @override
     def authenticate(self) -> ClientAuthResponse:
-        _token = self._credentials_provider.get_credentials()
+        with self._system.require(OpenTelemetryClient).trace(
+            "TokenAuthClientProvider.authenticate"
+        ):
+            _token = self._credentials_provider.get_credentials()
 
-        return TokenAuthClientAuthResponse(_token, self._token_transport_header)
+            return TokenAuthClientAuthResponse(_token, self._token_transport_header)

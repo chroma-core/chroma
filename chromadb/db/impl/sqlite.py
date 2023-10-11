@@ -4,6 +4,7 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
+from chromadb.telemetry.opentelemetry import OpenTelemetryClient
 from chromadb.utils.delete_file import delete_file
 import sqlite3
 from overrides import override
@@ -67,6 +68,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             files("chromadb.migrations.metadb"),
         ]
         self._is_persistent = self._settings.require("is_persistent")
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         if not self._is_persistent:
             # In order to allow sqlite to be shared between multiple threads, we need to use a
             # URI connection string with shared cache.
@@ -86,16 +88,18 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def start(self) -> None:
-        super().start()
-        with self.tx() as cur:
-            cur.execute("PRAGMA foreign_keys = ON")
-            cur.execute("PRAGMA case_sensitive_like = ON")
-        self.initialize_migrations()
+        with self._opentelemetry_client.trace("SqliteDB.start"):
+            super().start()
+            with self.tx() as cur:
+                cur.execute("PRAGMA foreign_keys = ON")
+                cur.execute("PRAGMA case_sensitive_like = ON")
+            self.initialize_migrations()
 
     @override
     def stop(self) -> None:
-        super().stop()
-        self._conn_pool.close()
+        with self._opentelemetry_client.trace("SqliteDB.stop"):
+            super().stop()
+            self._conn_pool.close()
 
     @staticmethod
     @override
@@ -124,103 +128,108 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def reset_state(self) -> None:
-        if not self._settings.require("allow_reset"):
-            raise ValueError(
-                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
-            )
-        with self.tx() as cur:
-            # Drop all tables
-            cur.execute(
-                """
-                SELECT name FROM sqlite_master
-                WHERE type='table'
-                """
-            )
-            for row in cur.fetchall():
-                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
-        self._conn_pool.close()
-        if self._is_persistent:
-            delete_file(self._db_file)
-        self.start()
-        super().reset_state()
+        with self._opentelemetry_client.trace("SqliteDB.reset_state"):
+            if not self._settings.require("allow_reset"):
+                raise ValueError(
+                    "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+                )
+            with self.tx() as cur:
+                # Drop all tables
+                cur.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type='table'
+                    """
+                )
+                for row in cur.fetchall():
+                    cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+            self._conn_pool.close()
+            if self._is_persistent:
+                delete_file(self._db_file)
+            self.start()
+            super().reset_state()
 
     @override
     def setup_migrations(self) -> None:
-        with self.tx() as cur:
-            cur.execute(
-                """
-                 CREATE TABLE IF NOT EXISTS migrations (
-                     dir TEXT NOT NULL,
-                     version INTEGER NOT NULL,
-                     filename TEXT NOT NULL,
-                     sql TEXT NOT NULL,
-                     hash TEXT NOT NULL,
-                     PRIMARY KEY (dir, version)
-                 )
-                 """
-            )
+        with self._opentelemetry_client.trace("SqliteDB.setup_migrations"):
+            with self.tx() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS migrations (
+                        dir TEXT NOT NULL,
+                        version INTEGER NOT NULL,
+                        filename TEXT NOT NULL,
+                        sql TEXT NOT NULL,
+                        hash TEXT NOT NULL,
+                        PRIMARY KEY (dir, version)
+                    )
+                    """
+                )
 
     @override
     def migrations_initialized(self) -> bool:
-        with self.tx() as cur:
-            cur.execute(
-                """SELECT count(*) FROM sqlite_master
-                   WHERE type='table' AND name='migrations'"""
-            )
+        with self._opentelemetry_client.trace("SqliteDB.migrations_initialized"):
+            with self.tx() as cur:
+                cur.execute(
+                    """SELECT count(*) FROM sqlite_master
+                    WHERE type='table' AND name='migrations'"""
+                )
 
-            if cur.fetchone()[0] == 0:
-                return False
-            else:
-                return True
+                if cur.fetchone()[0] == 0:
+                    return False
+                else:
+                    return True
 
     @override
     def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
-        with self.tx() as cur:
-            cur.execute(
-                """
-                SELECT dir, version, filename, sql, hash
-                FROM migrations
-                WHERE dir = ?
-                ORDER BY version ASC
-                """,
-                (dir.name,),
-            )
-
-            migrations = []
-            for row in cur.fetchall():
-                found_dir = cast(str, row[0])
-                found_version = cast(int, row[1])
-                found_filename = cast(str, row[2])
-                found_sql = cast(str, row[3])
-                found_hash = cast(str, row[4])
-                migrations.append(
-                    Migration(
-                        dir=found_dir,
-                        version=found_version,
-                        filename=found_filename,
-                        sql=found_sql,
-                        hash=found_hash,
-                        scope=self.migration_scope(),
-                    )
+        with self._opentelemetry_client.trace("SqliteDB.db_migrations"):
+            with self.tx() as cur:
+                cur.execute(
+                    """
+                    SELECT dir, version, filename, sql, hash
+                    FROM migrations
+                    WHERE dir = ?
+                    ORDER BY version ASC
+                    """,
+                    (dir.name,),
                 )
-            return migrations
+
+                migrations = []
+                for row in cur.fetchall():
+                    found_dir = cast(str, row[0])
+                    found_version = cast(int, row[1])
+                    found_filename = cast(str, row[2])
+                    found_sql = cast(str, row[3])
+                    found_hash = cast(str, row[4])
+                    migrations.append(
+                        Migration(
+                            dir=found_dir,
+                            version=found_version,
+                            filename=found_filename,
+                            sql=found_sql,
+                            hash=found_hash,
+                            scope=self.migration_scope(),
+                        )
+                    )
+                return migrations
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        cur.executescript(migration["sql"])
-        cur.execute(
-            """
-            INSERT INTO migrations (dir, version, filename, sql, hash)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                migration["dir"],
-                migration["version"],
-                migration["filename"],
-                migration["sql"],
-                migration["hash"],
-            ),
-        )
+        with self._opentelemetry_client.trace("SqliteDB.apply_migration"):
+            cur.executescript(migration["sql"])
+            cur.execute(
+                """
+                INSERT INTO migrations (dir, version, filename, sql, hash)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    migration["dir"],
+                    migration["version"],
+                    migration["filename"],
+                    migration["sql"],
+                    migration["hash"],
+                ),
+            )
 
     @staticmethod
     @override
