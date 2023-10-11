@@ -3,6 +3,8 @@ import shutil
 import tempfile
 import pytest
 from typing import Generator, List, Callable, Dict, Union
+from chromadb.db.impl.grpc.client import GrpcSysDB
+from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.config import System, Settings
@@ -35,8 +37,19 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
         shutil.rmtree(save_path)
 
 
+def grpc_with_mock_server() -> Generator[SysDB, None, None]:
+    """Fixture generator for sqlite DB that creates a mock grpc sysdb server
+    and a grpc client that connects to it."""
+    system = System(Settings(allow_reset=True))
+    system.instance(GrpcMockSysDB)
+    client = system.instance(GrpcSysDB)
+    system.start()
+    client.reset_and_wait_for_ready()
+    yield client
+
+
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
-    return [sqlite, sqlite_persistent]
+    return [sqlite, sqlite_persistent, grpc_with_mock_server]
 
 
 @pytest.fixture(scope="module", params=db_fixtures())

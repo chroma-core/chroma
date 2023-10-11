@@ -95,6 +95,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "worker-memberlist"
+    chroma_coordinator_host = "localhost"
 
     tenant_id: str = "default"
     topic_namespace: str = "default"

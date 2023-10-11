@@ -3,10 +3,44 @@ syntax = "proto3";
 package chroma;
 
 import "chromadb/proto/chroma.proto";
+import "google/protobuf/empty.proto";
 
-message Status {
-  string reason = 1;
-  int32 code = 2;
+message CreateSegmentRequest {
+  Segment segment = 1;
+}
+
+message DeleteSegmentRequest {
+  string id = 1;
+}
+
+message GetSegmentsRequest {
+  optional string id = 1;
+  optional string type = 2;
+  optional SegmentScope scope = 3;
+  optional string topic = 4;
+  optional string collection = 5;
+}
+
+message GetSegmentsResponse {
+  repeated Segment segments = 1;
+  Status status = 2;
+}
+
+
+message UpdateSegmentRequest {
+  string id = 1;
+  oneof topic_update {
+    string topic = 2;
+    bool reset_topic = 3;
+  }
+  oneof collection_update {
+    string collection = 4;
+    bool reset_collection = 5;
+  }
+  oneof metadata_update {
+    UpdateMetadata metadata = 6;
+    bool reset_metadata = 7;
+  }
 }
 
 message CreateCollectionRequest {
@@ -14,15 +48,13 @@ message CreateCollectionRequest {
   optional bool get_or_create = 2;
 }
 
-message Collection {
-  string id = 1;
-  string name = 2;
-  optional UpdateMetadata metadata = 3;
-}
-
 message CreateCollectionResponse {
   Collection collection = 1;
   Status status = 2;
+}
+
+message DeleteCollectionRequest {
+  string id = 1;
 }
 
 message GetCollectionsRequest {
@@ -36,7 +68,25 @@ message GetCollectionsResponse {
   Status status = 2;
 }
 
+message UpdateCollectionRequest {
+  string id = 1;
+  optional string topic = 2;
+  optional string name = 3;
+  optional int32 dimension = 4;
+  oneof metadata_update {
+    UpdateMetadata metadata = 5;
+    bool reset_metadata = 6;
+  }
+}
+
 service SysDB {
+  rpc CreateSegment(CreateSegmentRequest) returns (ChromaResponse) {}
+  rpc DeleteSegment(DeleteSegmentRequest) returns (ChromaResponse) {}
+  rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
+  rpc UpdateSegment(UpdateSegmentRequest) returns (ChromaResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
+  rpc DeleteCollection(DeleteCollectionRequest) returns (ChromaResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc UpdateCollection(UpdateCollectionRequest) returns (ChromaResponse) {}
+  rpc ResetState(google.protobuf.Empty) returns (ChromaResponse) {}
 }
