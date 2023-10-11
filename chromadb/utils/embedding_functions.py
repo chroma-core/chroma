@@ -479,6 +479,41 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         return embeddings
 
 
+class CLIPTextEmbeddingFunction(EmbeddingFunction):
+    def __init__(self, model_name: str = "ViT-B/32"):
+        try:
+            self.clip_module = importlib.import_module("clip")
+        except ImportError:
+            raise ValueError(
+                "The CLIP package is not installed. Please install it with `pip install git+https://github.com/openai/CLIP.git`"
+            )
+        try:
+            self.torch_module = importlib.import_module("torch")
+        except ImportError:
+            raise ValueError(
+                "The PyTorch package is not installed. Please install it with `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118` or `pip3 install torch torchvision torchaudio` for only CPU"
+            )
+
+        super().__init__()
+
+        # self.device = "cuda" if self.torch_module.cuda.is_available() else "cpu"
+        self.device = "cpu"
+        self.model, self.preprocess = self.clip_module.load(
+            model_name, device=self.device
+        )
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        text_inputs = self.torch_module.cat(
+            [self.clip_module.tokenize(f"a photo of {object}") for object in texts]
+        ).to(self.device)
+
+        with self.torch_module.no_grad():
+            response = self.model.encode_text(text_inputs).cpu().numpy()
+
+        embeddings = [embeds.tolist() for embeds in response]
+        return embeddings
+
+
 # List of all classes in this module
 _classes = [
     name
