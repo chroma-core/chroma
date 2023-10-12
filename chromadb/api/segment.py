@@ -47,6 +47,8 @@ import time
 import logging
 import re
 
+from chromadb.utils.locking import synchronized
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,7 @@ class SegmentAPI(API):
         self._topic_ns = system.settings.topic_namespace
         self._collection_cache = {}
 
+    @synchronized
     @override
     def heartbeat(self) -> int:
         return int(time.time_ns())
@@ -103,12 +106,14 @@ class SegmentAPI(API):
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
+    @synchronized
     @override
     def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
         get_or_create: bool = False,
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
@@ -120,7 +125,8 @@ class SegmentAPI(API):
             if get_or_create:
                 if metadata and existing[0]["metadata"] != metadata:
                     self._modify(id=existing[0]["id"], new_metadata=metadata)
-                    existing = self._sysdb.get_collections(id=existing[0]["id"])
+                    existing = self._sysdb.get_collections(
+                        id=existing[0]["id"])
                 return Collection(
                     client=self,
                     id=existing[0]["id"],
@@ -162,12 +168,14 @@ class SegmentAPI(API):
             embedding_function=embedding_function,
         )
 
+    @synchronized
     @override
     def get_or_create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
     ) -> Collection:
         return self.create_collection(
             name=name,
@@ -179,11 +187,13 @@ class SegmentAPI(API):
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings
+    @synchronized
     @override
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+        ),
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
@@ -198,6 +208,7 @@ class SegmentAPI(API):
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
+    @synchronized
     @override
     def list_collections(self) -> Sequence[Collection]:
         collections = []
@@ -213,6 +224,7 @@ class SegmentAPI(API):
             )
         return collections
 
+    @synchronized
     @override
     def _modify(
         self,
@@ -230,12 +242,14 @@ class SegmentAPI(API):
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
         if new_name and new_metadata:
-            self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+            self._sysdb.update_collection(
+                id, name=new_name, metadata=new_metadata)
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
 
+    @synchronized
     @override
     def delete_collection(self, name: str) -> None:
         existing = self._sysdb.get_collections(name=name)
@@ -250,6 +264,7 @@ class SegmentAPI(API):
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
+    @synchronized
     @override
     def _add(
         self,
@@ -287,6 +302,7 @@ class SegmentAPI(API):
         )
         return True
 
+    @synchronized
     @override
     def _update(
         self,
@@ -326,6 +342,7 @@ class SegmentAPI(API):
 
         return True
 
+    @synchronized
     @override
     def _upsert(
         self,
@@ -355,6 +372,7 @@ class SegmentAPI(API):
 
         return True
 
+    @synchronized
     @override
     def _get(
         self,
@@ -369,14 +387,16 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
-        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where = validate_where(where) if where is not None and len(
+            where) > 0 else None
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
             else None
         )
 
-        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+        metadata_segment = self._manager.get_segment(
+            collection_id, MetadataReader)
 
         if sort is not None:
             raise NotImplementedError("Sorting is not yet supported")
@@ -396,7 +416,8 @@ class SegmentAPI(API):
         vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
-            vector_segment = self._manager.get_segment(collection_id, VectorReader)
+            vector_segment = self._manager.get_segment(
+                collection_id, VectorReader)
             vectors = vector_segment.get_vectors(ids=vector_ids)
 
         # TODO: Fix type so we don't need to ignore
@@ -423,10 +444,12 @@ class SegmentAPI(API):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(
+                metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
 
+    @synchronized
     @override
     def _delete(
         self,
@@ -435,7 +458,8 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
-        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where = validate_where(where) if where is not None and len(
+            where) > 0 else None
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
@@ -464,7 +488,8 @@ class SegmentAPI(API):
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         if (where or where_document) or not ids:
-            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+            metadata_segment = self._manager.get_segment(
+                collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
                 where=where, where_document=where_document, ids=ids
             )
@@ -488,11 +513,14 @@ class SegmentAPI(API):
         )
         return ids_to_delete
 
+    @synchronized
     @override
     def _count(self, collection_id: UUID) -> int:
-        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+        metadata_segment = self._manager.get_segment(
+            collection_id, MetadataReader)
         return metadata_segment.count()
 
+    @synchronized
     @override
     def _query(
         self,
@@ -503,7 +531,8 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
-        where = validate_where(where) if where is not None and len(where) > 0 else where
+        where = validate_where(where) if where is not None and len(
+            where) > 0 else where
         where_document = (
             validate_where_document(where_document)
             if where_document is not None and len(where_document) > 0
@@ -516,7 +545,8 @@ class SegmentAPI(API):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
-        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
+        metadata_reader = self._manager.get_segment(
+            collection_id, MetadataReader)
 
         if where or where_document:
             records = metadata_reader.get_metadata(
@@ -546,7 +576,8 @@ class SegmentAPI(API):
             if "distances" in include:
                 distances.append([r["distance"] for r in result])
             if "embeddings" in include:
-                embeddings.append([cast(Embedding, r["embedding"]) for r in result])
+                embeddings.append([cast(Embedding, r["embedding"])
+                                  for r in result])
 
         if "documents" in include or "metadatas" in include:
             all_ids: Set[str] = set()
@@ -564,9 +595,11 @@ class SegmentAPI(API):
                 # queries the metadata segment. The metadata segment does not have
                 # the record. In this case we choose to return potentially
                 # incorrect data in the form of None.
-                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
+                metadata_list = [metadata_by_id.get(
+                    id, None) for id in id_list]
                 if "metadatas" in include:
-                    metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
+                    metadatas.append(_clean_metadatas(
+                        metadata_list))  # type: ignore
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
@@ -592,6 +625,7 @@ class SegmentAPI(API):
             documents=documents if documents else None,
         )
 
+    @synchronized
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(collection_id, limit=n)
@@ -604,6 +638,7 @@ class SegmentAPI(API):
     def reset_state(self) -> None:
         self._collection_cache = {}
 
+    @synchronized
     @override
     def reset(self) -> bool:
         self._system.reset_state()
@@ -630,7 +665,8 @@ class SegmentAPI(API):
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
         if record["embedding"]:
-            self._validate_dimension(collection, len(record["embedding"]), update=True)
+            self._validate_dimension(collection, len(
+                record["embedding"]), update=True)
 
     def _validate_dimension(
         self, collection: t.Collection, dim: int, update: bool

@@ -18,6 +18,7 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
 )
+from chromadb.utils.locking import synchronized
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -100,6 +101,7 @@ def EphemeralClient(settings: Settings = Settings()) -> API:
     return Client(settings)
 
 
+@synchronized
 def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) -> API:
     """
     Creates a persistent instance of Chroma that saves to disk. This is useful for
