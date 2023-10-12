@@ -194,7 +194,6 @@ def fastapi_persistent() -> Generator[System, None, None]:
 def basic_http_client() -> Generator[System, None, None]:
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_host="localhost",
         chroma_server_http_port="8000",
         allow_reset=True,
     )
