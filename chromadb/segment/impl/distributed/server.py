@@ -21,7 +21,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
 )
-from chromadb.config import System
 from chromadb.types import ScalarEncoding, Segment, SegmentScope
 import logging
 
