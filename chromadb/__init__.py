@@ -91,6 +91,7 @@ def get_settings() -> Settings:
     return __settings
 
 
+@synchronized
 def EphemeralClient(settings: Settings = Settings()) -> API:
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
