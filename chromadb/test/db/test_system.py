@@ -40,7 +40,7 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
 def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB that creates a mock grpc sysdb server
     and a grpc client that connects to it."""
-    system = System(Settings(allow_reset=True))
+    system = System(Settings(allow_reset=True, chroma_server_grpc_port=50051))
     system.instance(GrpcMockSysDB)
     client = system.instance(GrpcSysDB)
     system.start()

@@ -39,17 +39,19 @@ class GrpcMockSysDB(SysDBServicer, Component):
     state in simple python data structures instead of a database."""
 
     _server: grpc.Server
+    _server_port: int
     _segments: Dict[str, Segment] = {}
     _collections: Dict[str, Collection] = {}
 
     def __init__(self, system: System):
+        self._server_port = system.settings.require("chroma_server_grpc_port")
         return super().__init__(system)
 
     @overrides
     def start(self) -> None:
         self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         add_SysDBServicer_to_server(self, self._server)  # type: ignore
-        self._server.add_insecure_port("[::]:50051")  # TODO: make port configurable
+        self._server.add_insecure_port(f"[::]:{self._server_port}")
         self._server.start()
         return super().start()
 
@@ -81,7 +83,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._segments[segment["id"].hex] = segment
         return proto.ChromaResponse(
             status=proto.Status(code=200)
-        )  # TODO: how are these codes used?
+        )  # TODO: how are these codes used? Need to determine the standards for the code and reason.
 
     @overrides(check_signature=False)
     def DeleteSegment(
