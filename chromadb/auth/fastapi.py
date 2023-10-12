@@ -17,7 +17,10 @@ from chromadb.auth import (
     ChromaAuthMiddleware,
 )
 from chromadb.auth.registry import resolve_provider
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +81,8 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         self, request: ServerAuthenticationRequest[Any]
     ) -> Optional[ServerAuthenticationResponse]:
         with self._system.require(OpenTelemetryClient).trace(
-            "FastAPIChromaAuthMiddleware.authenticate"
+            "FastAPIChromaAuthMiddleware.authenticate",
+            OpenTelemetryGranularity.ALL,
         ):
             return FastAPIServerAuthenticationResponse(
                 self._auth_provider.authenticate(request)

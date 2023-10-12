@@ -7,6 +7,9 @@ importlib-resources
 numpy==1.21.6; python_version < '3.8'
 numpy>=1.22.4; python_version >= '3.8'
 onnxruntime>=1.14.1
+opentelemetry-api>=1.2.0
+opentelemetry-exporter-otlp-proto-grpc>=1.2.0
+opentelemetry-sdk>=1.2.0
 overrides==7.3.1
 posthog==2.4.0
 pulsar-client==3.1.0

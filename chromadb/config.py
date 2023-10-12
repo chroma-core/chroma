@@ -165,6 +165,11 @@ class Settings(BaseSettings):  # type: ignore
 
     anonymized_telemetry: bool = True
 
+    chroma_otel_collection_endpoint: Optional[str] = ""
+    chroma_otel_service_name: Optional[str] = "chromadb"
+    chroma_otel_collection_headers: Dict[str, str] = {}
+    chroma_otel_granularity: Optional[str] = "none"
+
     allow_reset: bool = False
 
     migrations: Literal["none", "validate", "apply"] = "apply"

@@ -9,6 +9,10 @@ from chromadb.proto.convert import (
 )
 from chromadb.segment import MetadataReader, VectorReader
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.types import (
     Metadata,
     ScalarEncoding,
@@ -30,6 +34,7 @@ import grpc
 class GrpcVectorSegment(VectorReader, EnforceOverrides):
     _vector_reader_stub: VectorReaderStub
     _segment: Segment
+    _opentelemetry_client: OpenTelemetryClient
 
     def __init__(self, system: System, segment: Segment):
         # TODO: move to start() method
@@ -40,41 +45,52 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         channel = grpc.insecure_channel(segment["metadata"]["grpc_url"])
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
     @override
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
     ) -> Sequence[VectorEmbeddingRecord]:
-        request = GetVectorsRequest(ids=ids, segment_id=self._segment["id"].hex)
-        response: GetVectorsResponse = self._vector_reader_stub.GetVectors(request)
-        results: List[VectorEmbeddingRecord] = []
-        for vector in response.records:
-            result = from_proto_vector_embedding_record(vector)
-            results.append(result)
-        return results
+        with self._opentelemetry_client.trace(
+            "GrpcVectorSegment.get_vectors",
+            OpenTelemetryGranularity.ALL,
+        ):
+            request = GetVectorsRequest(ids=ids, segment_id=self._segment["id"].hex)
+            response: GetVectorsResponse = self._vector_reader_stub.GetVectors(request)
+            results: List[VectorEmbeddingRecord] = []
+            for vector in response.records:
+                result = from_proto_vector_embedding_record(vector)
+                results.append(result)
+            return results
 
     @override
     def query_vectors(
         self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
-        request = QueryVectorsRequest(
-            vectors=[
-                to_proto_vector(vector=v, encoding=ScalarEncoding.FLOAT32)
-                for v in query["vectors"]
-            ],
-            k=query["k"],
-            allowed_ids=query["allowed_ids"],
-            include_embeddings=query["include_embeddings"],
-            segment_id=self._segment["id"].hex,
-        )
-        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(request)
-        results: List[List[VectorQueryResult]] = []
-        for result in response.results:
-            curr_result: List[VectorQueryResult] = []
-            for r in result.results:
-                curr_result.append(from_proto_vector_query_result(r))
-            results.append(curr_result)
-        return results
+        with self._opentelemetry_client.trace(
+            "GrpcVectorSegment.query_vectors",
+            OpenTelemetryGranularity.ALL,
+        ):
+            request = QueryVectorsRequest(
+                vectors=[
+                    to_proto_vector(vector=v, encoding=ScalarEncoding.FLOAT32)
+                    for v in query["vectors"]
+                ],
+                k=query["k"],
+                allowed_ids=query["allowed_ids"],
+                include_embeddings=query["include_embeddings"],
+                segment_id=self._segment["id"].hex,
+            )
+            response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
+                request
+            )
+            results: List[List[VectorQueryResult]] = []
+            for result in response.results:
+                curr_result: List[VectorQueryResult] = []
+                for r in result.results:
+                    curr_result.append(from_proto_vector_query_result(r))
+                results.append(curr_result)
+            return results
 
     @override
     def count(self) -> int:

@@ -19,7 +19,10 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.utils import get_class
 
 T = TypeVar("T")
@@ -90,7 +93,8 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         with self._system.require(OpenTelemetryClient).trace(
-            "TokenConfigServerAuthCredentialsProvider.validate_credentials"
+            "TokenConfigServerAuthCredentialsProvider.validate_credentials",
+            OpenTelemetryGranularity.ALL,
         ):
             _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
             if "token" not in _creds:
@@ -157,7 +161,8 @@ class TokenAuthServerProvider(ServerAuthProvider):
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
         with self._system.require(OpenTelemetryClient).trace(
-            "TokenAuthServerProvider.authenticate"
+            "TokenAuthServerProvider.authenticate",
+            OpenTelemetryGranularity.ALL,
         ):
             try:
                 _auth_header = request.get_auth_info(
@@ -199,7 +204,8 @@ class TokenAuthClientProvider(ClientAuthProvider):
     @override
     def authenticate(self) -> ClientAuthResponse:
         with self._system.require(OpenTelemetryClient).trace(
-            "TokenAuthClientProvider.authenticate"
+            "TokenAuthClientProvider.authenticate",
+            OpenTelemetryGranularity.ALL,
         ):
             _token = self._credentials_provider.get_credentials()
 

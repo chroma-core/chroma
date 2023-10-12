@@ -3,7 +3,10 @@ from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
@@ -115,7 +118,9 @@ class SegmentAPI(API):
         get_or_create: bool = False,
     ) -> Collection:
         with self._opentelemetry_client.trace(
-            "SegmentAPI.create_collection", attributes={"name": name}
+            "SegmentAPI.create_collection",
+            OpenTelemetryGranularity.OPERATION,
+            attributes={"collection_name": name},
         ):
             existing = self._sysdb.get_collections(name=name)
 
@@ -181,7 +186,9 @@ class SegmentAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         with self._opentelemetry_client.trace(
-            "SegmentAPI.get_or_create_collection", attributes={"name": name}
+            "SegmentAPI.get_or_create_collection",
+            OpenTelemetryGranularity.OPERATION,
+            attributes={"name": name},
         ):
             return self.create_collection(
                 name=name,
@@ -200,7 +207,9 @@ class SegmentAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         with self._opentelemetry_client.trace(
-            "SegmentAPI.get_collection", attributes={"name": name}
+            "SegmentAPI.get_collection",
+            OpenTelemetryGranularity.OPERATION,
+            attributes={"name": name},
         ):
             existing = self._sysdb.get_collections(name=name)
 
@@ -217,7 +226,10 @@ class SegmentAPI(API):
 
     @override
     def list_collections(self) -> Sequence[Collection]:
-        with self._opentelemetry_client.trace("SegmentAPI.list_collections"):
+        with self._opentelemetry_client.trace(
+            "SegmentAPI.list_collections",
+            OpenTelemetryGranularity.OPERATION,
+        ):
             collections = []
             db_collections = self._sysdb.get_collections()
             for db_collection in db_collections:
@@ -239,7 +251,7 @@ class SegmentAPI(API):
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         with self._opentelemetry_client.trace(
-            "SegmentAPI._modify", attributes={"id": id}
+            "SegmentAPI._modify", OpenTelemetryGranularity.ALL, attributes={"id": id}
         ):
             if new_name:
                 # backwards compatibility in naming requirements (for now)
@@ -260,7 +272,9 @@ class SegmentAPI(API):
     @override
     def delete_collection(self, name: str) -> None:
         with self._opentelemetry_client.trace(
-            "SegmentAPI.delete_collection", attributes={"name": name}
+            "SegmentAPI.delete_collection",
+            OpenTelemetryGranularity.OPERATION,
+            attributes={"name": name},
         ):
             existing = self._sysdb.get_collections(name=name)
 
@@ -285,6 +299,7 @@ class SegmentAPI(API):
     ) -> bool:
         with self._opentelemetry_client.trace(
             "SegmentAPI._add",
+            OpenTelemetryGranularity.ALL,
             attributes={"collection_id": collection_id, "ids_count": len(ids)},
         ):
             coll = self._get_collection(collection_id)
@@ -326,6 +341,7 @@ class SegmentAPI(API):
     ) -> bool:
         with self._opentelemetry_client.trace(
             "SegmentAPI._update",
+            OpenTelemetryGranularity.ALL,
             attributes={"collection_id": collection_id, "ids_count": len(ids)},
         ):
             coll = self._get_collection(collection_id)
@@ -369,6 +385,7 @@ class SegmentAPI(API):
     ) -> bool:
         with self._opentelemetry_client.trace(
             "SegmentAPI._upsert",
+            OpenTelemetryGranularity.ALL,
             attributes={"collection_id": collection_id, "ids_count": len(ids)},
         ):
             coll = self._get_collection(collection_id)
@@ -407,6 +424,7 @@ class SegmentAPI(API):
     ) -> GetResult:
         with self._opentelemetry_client.trace(
             "SegmentAPI._get",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": collection_id,
                 "ids_count": len(ids) if ids else 0,
@@ -482,6 +500,7 @@ class SegmentAPI(API):
     ) -> IDs:
         with self._opentelemetry_client.trace(
             "SegmentAPI._delete",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": collection_id,
                 "ids_count": len(ids) if ids else 0,
@@ -547,7 +566,9 @@ class SegmentAPI(API):
     @override
     def _count(self, collection_id: UUID) -> int:
         with self._opentelemetry_client.trace(
-            "SegmentAPI._count", attributes={"collection_id": collection_id}
+            "SegmentAPI._count",
+            OpenTelemetryGranularity.ALL,
+            attributes={"collection_id": collection_id},
         ):
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             return metadata_segment.count()
@@ -564,6 +585,7 @@ class SegmentAPI(API):
     ) -> QueryResult:
         with self._opentelemetry_client.trace(
             "SegmentAPI._query",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": collection_id,
                 "n_results": n_results,
@@ -664,7 +686,9 @@ class SegmentAPI(API):
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         with self._opentelemetry_client.trace(
-            "SegmentAPI._peek", attributes={"collection_id": collection_id}
+            "SegmentAPI._peek",
+            OpenTelemetryGranularity.ALL,
+            attributes={"collection_id": collection_id},
         ):
             return self._get(collection_id, limit=n)
 
@@ -703,6 +727,7 @@ class SegmentAPI(API):
         """Validate the dimension of an embedding record before submitting it to the system."""
         with self._opentelemetry_client.trace(
             "SegmentAPI._validate_embedding_record",
+            OpenTelemetryGranularity.ALL,
             attributes={"collection_id": collection["id"]},
         ):
             if record["embedding"]:
@@ -716,7 +741,10 @@ class SegmentAPI(API):
         """Validate that a collection supports records of the given dimension. If update
         is true, update the collection if the collection doesn't already have a
         dimension."""
-        with self._opentelemetry_client.trace("SegmentAPI._validate_dimension"):
+        with self._opentelemetry_client.trace(
+            "SegmentAPI._validate_dimension",
+            OpenTelemetryGranularity.ALL,
+        ):
             if collection["dimension"] is None:
                 if update:
                     id = collection["id"]
@@ -731,7 +759,10 @@ class SegmentAPI(API):
 
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         """Read-through cache for collection data"""
-        with self._opentelemetry_client.trace("SegmentAPI._get_collection"):
+        with self._opentelemetry_client.trace(
+            "SegmentAPI._get_collection",
+            OpenTelemetryGranularity.ALL,
+        ):
             if collection_id not in self._collection_cache:
                 collections = self._sysdb.get_collections(id=collection_id)
                 if not collections:

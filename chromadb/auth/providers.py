@@ -15,7 +15,10 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 
 T = TypeVar("T")
 
@@ -38,7 +41,8 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         with self._system.require(OpenTelemetryClient).trace(
-            "HtpasswdServerAuthCredentialsProvider.validate_credentials"
+            "HtpasswdServerAuthCredentialsProvider.validate_credentials",
+            OpenTelemetryGranularity.ALL,
         ):
             _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
             if len(_creds) != 2:

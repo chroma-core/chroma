@@ -14,7 +14,10 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.types import (
     OptionalArgument,
     Segment,
@@ -35,6 +38,7 @@ class SqlSysDB(SqlDB, SysDB):
     def create_segment(self, segment: Segment) -> None:
         with self._opentelemetry_client.trace(
             "SqlSysDB.create_segment",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "segment_id": str(segment["id"]),
                 "segment_type": segment["type"],
@@ -85,6 +89,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Create a new collection"""
         with self._opentelemetry_client.trace(
             "SqlSysDB.create_collection",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": str(collection["id"]),
                 "collection_topic": collection["topic"],
@@ -92,40 +97,40 @@ class SqlSysDB(SqlDB, SysDB):
                 "collection_dimension": collection["dimension"],
             },
         ):
-        with self.tx() as cur:
-            collections = Table("collections")
-            insert_collection = (
-                self.querybuilder()
-                .into(collections)
-                .columns(
-                    collections.id,
-                    collections.topic,
-                    collections.name,
-                    collections.dimension,
+            with self.tx() as cur:
+                collections = Table("collections")
+                insert_collection = (
+                    self.querybuilder()
+                    .into(collections)
+                    .columns(
+                        collections.id,
+                        collections.topic,
+                        collections.name,
+                        collections.dimension,
+                    )
+                    .insert(
+                        ParameterValue(self.uuid_to_db(collection["id"])),
+                        ParameterValue(collection["topic"]),
+                        ParameterValue(collection["name"]),
+                        ParameterValue(collection["dimension"]),
+                    )
                 )
-                .insert(
-                    ParameterValue(self.uuid_to_db(collection["id"])),
-                    ParameterValue(collection["topic"]),
-                    ParameterValue(collection["name"]),
-                    ParameterValue(collection["dimension"]),
-                )
-            )
-            sql, params = get_sql(insert_collection, self.parameter_format())
-            try:
-                cur.execute(sql, params)
-            except self.unique_constraint_error() as e:
-                raise UniqueConstraintError(
-                    f"Collection {collection['id']} already exists"
-                ) from e
-            metadata_t = Table("collection_metadata")
-            if collection["metadata"]:
-                self._insert_metadata(
-                    cur,
-                    metadata_t,
-                    metadata_t.collection_id,
-                    collection["id"],
-                    collection["metadata"],
-                )
+                sql, params = get_sql(insert_collection, self.parameter_format())
+                try:
+                    cur.execute(sql, params)
+                except self.unique_constraint_error() as e:
+                    raise UniqueConstraintError(
+                        f"Collection {collection['id']} already exists"
+                    ) from e
+                metadata_t = Table("collection_metadata")
+                if collection["metadata"]:
+                    self._insert_metadata(
+                        cur,
+                        metadata_t,
+                        metadata_t.collection_id,
+                        collection["id"],
+                        collection["metadata"],
+                    )
 
     @override
     def get_segments(
@@ -138,6 +143,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> Sequence[Segment]:
         with self._opentelemetry_client.trace(
             "SqlSysDB.get_segments",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "segment_id": str(id),
                 "segment_type": type,
@@ -145,7 +151,6 @@ class SqlSysDB(SqlDB, SysDB):
                 "segment_topic": topic,
                 "collection": str(collection),
             },
-        )
         ):
             segments_t = Table("segments")
             metadata_t = Table("segment_metadata")
@@ -216,6 +221,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Get collections by name, embedding function and/or metadata"""
         with self._opentelemetry_client.trace(
             "SqlSysDB.get_collections",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": str(id),
                 "collection_topic": topic,
@@ -277,6 +283,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Delete a segment from the SysDB"""
         with self._opentelemetry_client.trace(
             "SqlSysDB.delete_segment",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "segment_id": str(id),
             },
@@ -301,6 +308,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Delete a topic and all associated segments from the SysDB"""
         with self._opentelemetry_client.trace(
             "SqlSysDB.delete_collection",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": str(id),
             },
@@ -330,6 +338,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> None:
         with self._opentelemetry_client.trace(
             "SqlSysDB.update_segment",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "segment_id": str(id),
                 "segment_topic": topic,
@@ -363,7 +372,9 @@ class SqlSysDB(SqlDB, SysDB):
                     q = (
                         self.querybuilder()
                         .from_(metadata_t)
-                        .where(metadata_t.segment_id == ParameterValue(self.uuid_to_db(id)))
+                        .where(
+                            metadata_t.segment_id == ParameterValue(self.uuid_to_db(id))
+                        )
                         .delete()
                     )
                     sql, params = get_sql(q, self.parameter_format())
@@ -391,6 +402,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> None:
         with self._opentelemetry_client.trace(
             "SqlSysDB.update_collection",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "collection_id": str(id),
                 "collection_topic": topic,
@@ -430,7 +442,8 @@ class SqlSysDB(SqlDB, SysDB):
                         self.querybuilder()
                         .from_(metadata_t)
                         .where(
-                            metadata_t.collection_id == ParameterValue(self.uuid_to_db(id))
+                            metadata_t.collection_id
+                            == ParameterValue(self.uuid_to_db(id))
                         )
                         .delete()
                     )
@@ -454,6 +467,7 @@ class SqlSysDB(SqlDB, SysDB):
         are the key, str_value, int_value & float_value)"""
         with self._opentelemetry_client.trace(
             "SqlSysDB._metadata_from_rows",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "num_rows": len(rows),
             },
@@ -483,6 +497,7 @@ class SqlSysDB(SqlDB, SysDB):
         # completely different sytnax)
         with self._opentelemetry_client.trace(
             "SqlSysDB._insert_metadata",
+            OpenTelemetryGranularity.ALL,
             attributes={
                 "num_keys": len(metadata),
                 "clear_keys": clear_keys,
@@ -503,7 +518,11 @@ class SqlSysDB(SqlDB, SysDB):
                 self.querybuilder()
                 .into(table)
                 .columns(
-                    id_col, table.key, table.str_value, table.int_value, table.float_value
+                    id_col,
+                    table.key,
+                    table.str_value,
+                    table.int_value,
+                    table.float_value,
                 )
             )
             sql_id = self.uuid_to_db(id)

@@ -17,6 +17,10 @@ from chromadb.proto.convert import (
     to_proto_vector_embedding_record,
 )
 from chromadb.segment import SegmentImplementation, SegmentType, VectorReader
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.config import System
 from chromadb.types import ScalarEncoding, Segment, SegmentScope
 import logging
@@ -38,38 +42,44 @@ SEGMENT_TYPE_IMPLS = {
 class SegmentServer(SegmentServerServicer, VectorReaderServicer):
     _segment_cache: Dict[UUID, SegmentImplementation] = {}
     _system: System
+    _opentelemetry_client: OpenTelemetryClient
 
     def __init__(self, system: System) -> None:
         super().__init__()
         self._system = system
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
     def LoadSegment(
         self, request: proto.Segment, context: Any
     ) -> proto.SegmentServerResponse:
-        logging.info(f"LoadSegment scope {request.type}")
-        id = UUID(hex=request.id)
-        if id in self._segment_cache:
-            return proto.SegmentServerResponse(
-                success=True,
-            )
-        else:
-            if request.scope == proto.SegmentScope.METADATA:
-                context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                context.set_details("Metadata segments are not yet implemented")
-                return proto.SegmentServerResponse(success=False)
-            elif request.scope == proto.SegmentScope.VECTOR:
-                logging.info(f"Loading segment {request}")
-                if request.type == SegmentType.HNSW_DISTRIBUTED.value:
-                    self._create_instance(from_proto_segment(request))
-                    return proto.SegmentServerResponse(success=True)
+        with self._opentelemetry_client.trace(
+            "SegmentServer.LoadSegment",
+            OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+        ):
+            logging.info(f"LoadSegment scope {request.type}")
+            id = UUID(hex=request.id)
+            if id in self._segment_cache:
+                return proto.SegmentServerResponse(
+                    success=True,
+                )
+            else:
+                if request.scope == proto.SegmentScope.METADATA:
+                    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+                    context.set_details("Metadata segments are not yet implemented")
+                    return proto.SegmentServerResponse(success=False)
+                elif request.scope == proto.SegmentScope.VECTOR:
+                    logging.info(f"Loading segment {request}")
+                    if request.type == SegmentType.HNSW_DISTRIBUTED.value:
+                        self._create_instance(from_proto_segment(request))
+                        return proto.SegmentServerResponse(success=True)
+                    else:
+                        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+                        context.set_details("Segment type not implemented yet")
+                        return proto.SegmentServerResponse(success=False)
                 else:
                     context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                    context.set_details("Segment type not implemented yet")
+                    context.set_details("Segment scope not implemented")
                     return proto.SegmentServerResponse(success=False)
-            else:
-                context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                context.set_details("Segment scope not implemented")
-                return proto.SegmentServerResponse(success=False)
 
     def ReleaseSegment(
         self, request: proto.Segment, context: Any
@@ -88,24 +98,28 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
     def GetVectors(
         self, request: proto.GetVectorsRequest, context: Any
     ) -> proto.GetVectorsResponse:
-        segment_id = UUID(hex=request.segment_id)
-        if segment_id not in self._segment_cache:
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details("Segment not found")
-            return proto.GetVectorsResponse()
-        else:
-            segment = self._segment_cache[segment_id]
-            segment = cast(VectorReader, segment)
-            segment_results = segment.get_vectors(request.ids)
-            return_records = []
-            for record in segment_results:
-                # TODO: encoding should be based on stored encoding for segment
-                # For now we just assume float32
-                return_record = to_proto_vector_embedding_record(
-                    record, ScalarEncoding.FLOAT32
-                )
-                return_records.append(return_record)
-            return proto.GetVectorsResponse(records=return_records)
+        with self._opentelemetry_client.trace(
+            "SegmentServer.GetVectors",
+            OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+        ):
+            segment_id = UUID(hex=request.segment_id)
+            if segment_id not in self._segment_cache:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details("Segment not found")
+                return proto.GetVectorsResponse()
+            else:
+                segment = self._segment_cache[segment_id]
+                segment = cast(VectorReader, segment)
+                segment_results = segment.get_vectors(request.ids)
+                return_records = []
+                for record in segment_results:
+                    # TODO: encoding should be based on stored encoding for segment
+                    # For now we just assume float32
+                    return_record = to_proto_vector_embedding_record(
+                        record, ScalarEncoding.FLOAT32
+                    )
+                    return_records.append(return_record)
+                return proto.GetVectorsResponse(records=return_records)
 
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
         classname = SEGMENT_TYPE_IMPLS[SegmentType(segment["type"])]

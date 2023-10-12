@@ -10,6 +10,10 @@ from chromadb.db.base import (
     ParameterValue,
     get_sql,
 )
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.types import (
     Where,
     WhereDocument,
@@ -39,6 +43,7 @@ class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
+    _opentelemetry_client: OpenTelemetryClient
     _topic: Optional[str]
     _subscription: Optional[UUID]
 
@@ -46,54 +51,72 @@ class SqliteMetadataSegment(MetadataReader):
         self._db = system.instance(SqliteDB)
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._topic = segment["topic"]
 
     @override
     def start(self) -> None:
-        if self._topic:
-            seq_id = self.max_seqid()
-            self._subscription = self._consumer.subscribe(
-                self._topic, self._write_metadata, start=seq_id
-            )
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment.start",
+            OpenTelemetryGranularity.ALL,
+        ):
+            if self._topic:
+                seq_id = self.max_seqid()
+                self._subscription = self._consumer.subscribe(
+                    self._topic, self._write_metadata, start=seq_id
+                )
 
     @override
     def stop(self) -> None:
-        if self._subscription:
-            self._consumer.unsubscribe(self._subscription)
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment.stop",
+            OpenTelemetryGranularity.ALL,
+        ):
+            if self._subscription:
+                self._consumer.unsubscribe(self._subscription)
 
     @override
     def max_seqid(self) -> SeqId:
-        t = Table("max_seq_id")
-        q = (
-            self._db.querybuilder()
-            .from_(t)
-            .select(t.seq_id)
-            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-        )
-        sql, params = get_sql(q)
-        with self._db.tx() as cur:
-            result = cur.execute(sql, params).fetchone()
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment.max_seqid",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("max_seq_id")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .select(t.seq_id)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+            )
+            sql, params = get_sql(q)
+            with self._db.tx() as cur:
+                result = cur.execute(sql, params).fetchone()
 
-            if result is None:
-                return self._consumer.min_seqid()
-            else:
-                return _decode_seq_id(result[0])
+                if result is None:
+                    return self._consumer.min_seqid()
+                else:
+                    return _decode_seq_id(result[0])
 
     @override
     def count(self) -> int:
-        embeddings_t = Table("embeddings")
-        q = (
-            self._db.querybuilder()
-            .from_(embeddings_t)
-            .where(
-                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment.count",
+            OpenTelemetryGranularity.ALL,
+        ):
+            embeddings_t = Table("embeddings")
+            q = (
+                self._db.querybuilder()
+                .from_(embeddings_t)
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
+                .select(fn.Count(embeddings_t.id))
             )
-            .select(fn.Count(embeddings_t.id))
-        )
-        sql, params = get_sql(q)
-        with self._db.tx() as cur:
-            result = cur.execute(sql, params).fetchone()[0]
-            return cast(int, result)
+            sql, params = get_sql(q)
+            with self._db.tx() as cur:
+                result = cur.execute(sql, params).fetchone()[0]
+                return cast(int, result)
 
     @override
     def get_metadata(
@@ -105,47 +128,56 @@ class SqliteMetadataSegment(MetadataReader):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
-        embeddings_t, metadata_t, fulltext_t = Tables(
-            "embeddings", "embedding_metadata", "embedding_fulltext_search"
-        )
-
-        q = (
-            (
-                self._db.querybuilder()
-                .from_(embeddings_t)
-                .left_join(metadata_t)
-                .on(embeddings_t.id == metadata_t.id)
-            )
-            .select(
-                embeddings_t.id,
-                embeddings_t.embedding_id,
-                embeddings_t.seq_id,
-                metadata_t.key,
-                metadata_t.string_value,
-                metadata_t.int_value,
-                metadata_t.float_value,
-                metadata_t.bool_value,
-            )
-            .where(
-                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-            )
-            .orderby(embeddings_t.id)
-        )
-
-        if where:
-            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
-        if where_document:
-            q = q.where(
-                self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment.get_metadata",
+            OpenTelemetryGranularity.ALL,
+        ):
+            embeddings_t, metadata_t, fulltext_t = Tables(
+                "embeddings", "embedding_metadata", "embedding_fulltext_search"
             )
 
-        if ids:
-            q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
+            q = (
+                (
+                    self._db.querybuilder()
+                    .from_(embeddings_t)
+                    .left_join(metadata_t)
+                    .on(embeddings_t.id == metadata_t.id)
+                )
+                .select(
+                    embeddings_t.id,
+                    embeddings_t.embedding_id,
+                    embeddings_t.seq_id,
+                    metadata_t.key,
+                    metadata_t.string_value,
+                    metadata_t.int_value,
+                    metadata_t.float_value,
+                    metadata_t.bool_value,
+                )
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
+                .orderby(embeddings_t.id)
+            )
 
-        limit = limit or 2**63 - 1
-        offset = offset or 0
-        with self._db.tx() as cur:
-            return list(islice(self._records(cur, q), offset, offset + limit))
+            if where:
+                q = q.where(
+                    self._where_map_criterion(q, where, embeddings_t, metadata_t)
+                )
+            if where_document:
+                q = q.where(
+                    self._where_doc_criterion(
+                        q, where_document, embeddings_t, fulltext_t
+                    )
+                )
+
+            if ids:
+                q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
+
+            limit = limit or 2**63 - 1
+            offset = offset or 0
+            with self._db.tx() as cur:
+                return list(islice(self._records(cur, q), offset, offset + limit))
 
     def _records(
         self, cur: Cursor, q: QueryBuilder
@@ -165,267 +197,306 @@ class SqliteMetadataSegment(MetadataReader):
     def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
-        _, embedding_id, seq_id = rows[0][:3]
-        metadata = {}
-        for row in rows:
-            key, string_value, int_value, float_value, bool_value = row[3:]
-            if string_value is not None:
-                metadata[key] = string_value
-            elif int_value is not None:
-                metadata[key] = int_value
-            elif float_value is not None:
-                metadata[key] = float_value
-            elif bool_value is not None:
-                if bool_value == 1:
-                    metadata[key] = True
-                else:
-                    metadata[key] = False
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._record",
+            OpenTelemetryGranularity.ALL,
+        ):
+            _, embedding_id, seq_id = rows[0][:3]
+            metadata = {}
+            for row in rows:
+                key, string_value, int_value, float_value, bool_value = row[3:]
+                if string_value is not None:
+                    metadata[key] = string_value
+                elif int_value is not None:
+                    metadata[key] = int_value
+                elif float_value is not None:
+                    metadata[key] = float_value
+                elif bool_value is not None:
+                    if bool_value == 1:
+                        metadata[key] = True
+                    else:
+                        metadata[key] = False
 
-        return MetadataEmbeddingRecord(
-            id=embedding_id,
-            seq_id=_decode_seq_id(seq_id),
-            metadata=metadata or None,
-        )
+            return MetadataEmbeddingRecord(
+                id=embedding_id,
+                seq_id=_decode_seq_id(seq_id),
+                metadata=metadata or None,
+            )
 
     def _insert_record(
         self, cur: Cursor, record: EmbeddingRecord, upsert: bool
     ) -> None:
         """Add or update a single EmbeddingRecord into the DB"""
 
-        t = Table("embeddings")
-        q = (
-            self._db.querybuilder()
-            .into(t)
-            .columns(t.segment_id, t.embedding_id, t.seq_id)
-            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
-        ).insert(
-            ParameterValue(self._db.uuid_to_db(self._id)),
-            ParameterValue(record["id"]),
-            ParameterValue(_encode_seq_id(record["seq_id"])),
-        )
-        sql, params = get_sql(q)
-        sql = sql + "RETURNING id"
-        try:
-            id = cur.execute(sql, params).fetchone()[0]
-        except sqlite3.IntegrityError:
-            # Can't use INSERT OR REPLACE here because it changes the primary key.
-            if upsert:
-                return self._update_record(cur, record)
-            else:
-                logger.warning(f"Insert of existing embedding ID: {record['id']}")
-                # We are trying to add for a record that already exists. Fail the call.
-                # We don't throw an exception since this is in principal an async path
-                return
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._insert_record",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("embeddings")
+            q = (
+                self._db.querybuilder()
+                .into(t)
+                .columns(t.segment_id, t.embedding_id, t.seq_id)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .where(t.embedding_id == ParameterValue(record["id"]))
+            ).insert(
+                ParameterValue(self._db.uuid_to_db(self._id)),
+                ParameterValue(record["id"]),
+                ParameterValue(_encode_seq_id(record["seq_id"])),
+            )
+            sql, params = get_sql(q)
+            sql = sql + "RETURNING id"
+            try:
+                id = cur.execute(sql, params).fetchone()[0]
+            except sqlite3.IntegrityError:
+                # Can't use INSERT OR REPLACE here because it changes the primary key.
+                if upsert:
+                    return self._update_record(cur, record)
+                else:
+                    logger.warning(f"Insert of existing embedding ID: {record['id']}")
+                    # We are trying to add for a record that already exists. Fail the call.
+                    # We don't throw an exception since this is in principal an async path
+                    return
 
-        if record["metadata"]:
-            self._update_metadata(cur, id, record["metadata"])
+            if record["metadata"]:
+                self._update_metadata(cur, id, record["metadata"])
 
     def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Update the metadata for a single EmbeddingRecord"""
-        t = Table("embedding_metadata")
-        to_delete = [k for k, v in metadata.items() if v is None]
-        if to_delete:
-            q = (
-                self._db.querybuilder()
-                .from_(t)
-                .where(t.id == ParameterValue(id))
-                .where(t.key.isin(ParameterValue(to_delete)))
-                .delete()
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
-
-        self._insert_metadata(cur, id, metadata)
-
-    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
-        """Insert or update each metadata row for a single embedding record"""
-        t = Table("embedding_metadata")
-        q = (
-            self._db.querybuilder()
-            .into(t)
-            .columns(
-                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
-            )
-        )
-        for key, value in metadata.items():
-            if isinstance(value, str):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    ParameterValue(value),
-                    None,
-                    None,
-                    None,
-                )
-            # isinstance(True, int) evaluates to True, so we need to check for bools separately
-            elif isinstance(value, bool):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    None,
-                    None,
-                    None,
-                    ParameterValue(value),
-                )
-            elif isinstance(value, int):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    None,
-                    ParameterValue(value),
-                    None,
-                    None,
-                )
-            elif isinstance(value, float):
-                q = q.insert(
-                    ParameterValue(id),
-                    ParameterValue(key),
-                    None,
-                    None,
-                    ParameterValue(value),
-                    None,
-                )
-
-        sql, params = get_sql(q)
-        sql = sql.replace("INSERT", "INSERT OR REPLACE")
-        if sql:
-            cur.execute(sql, params)
-
-        if "chroma:document" in metadata:
-            t = Table("embedding_fulltext_search")
-
-            def insert_into_fulltext_search() -> None:
-                q = (
-                    self._db.querybuilder()
-                    .into(t)
-                    .columns(t.rowid, t.string_value)
-                    .insert(
-                        ParameterValue(id),
-                        ParameterValue(metadata["chroma:document"]),
-                    )
-                )
-                sql, params = get_sql(q)
-                cur.execute(sql, params)
-
-            try:
-                insert_into_fulltext_search()
-            except sqlite3.IntegrityError:
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._update_metadata",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("embedding_metadata")
+            to_delete = [k for k, v in metadata.items() if v is None]
+            if to_delete:
                 q = (
                     self._db.querybuilder()
                     .from_(t)
-                    .where(t.rowid == ParameterValue(id))
+                    .where(t.id == ParameterValue(id))
+                    .where(t.key.isin(ParameterValue(to_delete)))
                     .delete()
                 )
                 sql, params = get_sql(q)
                 cur.execute(sql, params)
-                insert_into_fulltext_search()
+
+            self._insert_metadata(cur, id, metadata)
+
+    def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
+        """Insert or update each metadata row for a single embedding record"""
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._insert_metadata",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("embedding_metadata")
+            q = (
+                self._db.querybuilder()
+                .into(t)
+                .columns(
+                    t.id,
+                    t.key,
+                    t.string_value,
+                    t.int_value,
+                    t.float_value,
+                    t.bool_value,
+                )
+            )
+            for key, value in metadata.items():
+                if isinstance(value, str):
+                    q = q.insert(
+                        ParameterValue(id),
+                        ParameterValue(key),
+                        ParameterValue(value),
+                        None,
+                        None,
+                        None,
+                    )
+                # isinstance(True, int) evaluates to True, so we need to check for bools separately
+                elif isinstance(value, bool):
+                    q = q.insert(
+                        ParameterValue(id),
+                        ParameterValue(key),
+                        None,
+                        None,
+                        None,
+                        ParameterValue(value),
+                    )
+                elif isinstance(value, int):
+                    q = q.insert(
+                        ParameterValue(id),
+                        ParameterValue(key),
+                        None,
+                        ParameterValue(value),
+                        None,
+                        None,
+                    )
+                elif isinstance(value, float):
+                    q = q.insert(
+                        ParameterValue(id),
+                        ParameterValue(key),
+                        None,
+                        None,
+                        ParameterValue(value),
+                        None,
+                    )
+
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            if sql:
+                cur.execute(sql, params)
+
+            if "chroma:document" in metadata:
+                t = Table("embedding_fulltext_search")
+
+                def insert_into_fulltext_search() -> None:
+                    q = (
+                        self._db.querybuilder()
+                        .into(t)
+                        .columns(t.rowid, t.string_value)
+                        .insert(
+                            ParameterValue(id),
+                            ParameterValue(metadata["chroma:document"]),
+                        )
+                    )
+                    sql, params = get_sql(q)
+                    cur.execute(sql, params)
+
+                try:
+                    insert_into_fulltext_search()
+                except sqlite3.IntegrityError:
+                    q = (
+                        self._db.querybuilder()
+                        .from_(t)
+                        .where(t.rowid == ParameterValue(id))
+                        .delete()
+                    )
+                    sql, params = get_sql(q)
+                    cur.execute(sql, params)
+                    insert_into_fulltext_search()
 
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
-        t = Table("embeddings")
-        q = (
-            self._db.querybuilder()
-            .from_(t)
-            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
-            .delete()
-        )
-        sql, params = get_sql(q)
-        sql = sql + " RETURNING id"
-        result = cur.execute(sql, params).fetchone()
-        if result is None:
-            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
-        else:
-            id = result[0]
-
-            # Manually delete metadata; cannot use cascade because
-            # that triggers on replace
-            metadata_t = Table("embedding_metadata")
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._delete_record",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("embeddings")
             q = (
                 self._db.querybuilder()
-                .from_(metadata_t)
-                .where(metadata_t.id == ParameterValue(id))
+                .from_(t)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .where(t.embedding_id == ParameterValue(record["id"]))
                 .delete()
             )
             sql, params = get_sql(q)
-            cur.execute(sql, params)
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if result is None:
+                logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
+            else:
+                id = result[0]
+
+                # Manually delete metadata; cannot use cascade because
+                # that triggers on replace
+                metadata_t = Table("embedding_metadata")
+                q = (
+                    self._db.querybuilder()
+                    .from_(metadata_t)
+                    .where(metadata_t.id == ParameterValue(id))
+                    .delete()
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
 
     def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Update a single EmbeddingRecord in the DB"""
-        t = Table("embeddings")
-        q = (
-            self._db.querybuilder()
-            .update(t)
-            .set(t.seq_id, ParameterValue(_encode_seq_id(record["seq_id"])))
-            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["id"]))
-        )
-        sql, params = get_sql(q)
-        sql = sql + " RETURNING id"
-        result = cur.execute(sql, params).fetchone()
-        if result is None:
-            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
-        else:
-            id = result[0]
-            if record["metadata"]:
-                self._update_metadata(cur, id, record["metadata"])
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._update_record",
+            OpenTelemetryGranularity.ALL,
+        ):
+            t = Table("embeddings")
+            q = (
+                self._db.querybuilder()
+                .update(t)
+                .set(t.seq_id, ParameterValue(_encode_seq_id(record["seq_id"])))
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .where(t.embedding_id == ParameterValue(record["id"]))
+            )
+            sql, params = get_sql(q)
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if result is None:
+                logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
+            else:
+                id = result[0]
+                if record["metadata"]:
+                    self._update_metadata(cur, id, record["metadata"])
 
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
-        with self._db.tx() as cur:
-            for record in records:
-                q = (
-                    self._db.querybuilder()
-                    .into(Table("max_seq_id"))
-                    .columns("segment_id", "seq_id")
-                    .insert(
-                        ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(_encode_seq_id(record["seq_id"])),
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._write_metadata",
+            OpenTelemetryGranularity.ALL,
+        ):
+            with self._db.tx() as cur:
+                for record in records:
+                    q = (
+                        self._db.querybuilder()
+                        .into(Table("max_seq_id"))
+                        .columns("segment_id", "seq_id")
+                        .insert(
+                            ParameterValue(self._db.uuid_to_db(self._id)),
+                            ParameterValue(_encode_seq_id(record["seq_id"])),
+                        )
                     )
-                )
-                sql, params = get_sql(q)
-                sql = sql.replace("INSERT", "INSERT OR REPLACE")
-                cur.execute(sql, params)
+                    sql, params = get_sql(q)
+                    sql = sql.replace("INSERT", "INSERT OR REPLACE")
+                    cur.execute(sql, params)
 
-                if record["operation"] == Operation.ADD:
-                    self._insert_record(cur, record, False)
-                elif record["operation"] == Operation.UPSERT:
-                    self._insert_record(cur, record, True)
-                elif record["operation"] == Operation.DELETE:
-                    self._delete_record(cur, record)
-                elif record["operation"] == Operation.UPDATE:
-                    self._update_record(cur, record)
+                    if record["operation"] == Operation.ADD:
+                        self._insert_record(cur, record, False)
+                    elif record["operation"] == Operation.UPSERT:
+                        self._insert_record(cur, record, True)
+                    elif record["operation"] == Operation.DELETE:
+                        self._delete_record(cur, record)
+                    elif record["operation"] == Operation.UPDATE:
+                        self._update_record(cur, record)
 
     def _where_map_criterion(
         self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
     ) -> Criterion:
-        clause: list[Criterion] = []
-        for k, v in where.items():
-            if k == "$and":
-                criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
-                    for w in cast(Sequence[Where], v)
-                ]
-                clause.append(reduce(lambda x, y: x & y, criteria))
-            elif k == "$or":
-                criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
-                    for w in cast(Sequence[Where], v)
-                ]
-                clause.append(reduce(lambda x, y: x | y, criteria))
-            else:
-                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key == ParameterValue(k))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(embeddings_t.id.isin(sq))
-        return reduce(lambda x, y: x & y, clause)
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._where_map_criterion",
+            OpenTelemetryGranularity.ALL,
+        ):
+            clause: list[Criterion] = []
+            for k, v in where.items():
+                if k == "$and":
+                    criteria = [
+                        self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                        for w in cast(Sequence[Where], v)
+                    ]
+                    clause.append(reduce(lambda x, y: x & y, criteria))
+                elif k == "$or":
+                    criteria = [
+                        self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                        for w in cast(Sequence[Where], v)
+                    ]
+                    clause.append(reduce(lambda x, y: x | y, criteria))
+                else:
+                    expr = cast(
+                        Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v
+                    )
+                    sq = (
+                        self._db.querybuilder()
+                        .from_(metadata_t)
+                        .select(metadata_t.id)
+                        .where(metadata_t.key == ParameterValue(k))
+                        .where(_where_clause(expr, metadata_t))
+                    )
+                    clause.append(embeddings_t.id.isin(sq))
+            return reduce(lambda x, y: x & y, clause)
 
     def _where_doc_criterion(
         self,
@@ -434,33 +505,39 @@ class SqliteMetadataSegment(MetadataReader):
         embeddings_t: Table,
         fulltext_t: Table,
     ) -> Criterion:
-        for k, v in where.items():
-            if k == "$and":
-                criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
-                    for w in cast(Sequence[WhereDocument], v)
-                ]
-                return reduce(lambda x, y: x & y, criteria)
-            elif k == "$or":
-                criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
-                    for w in cast(Sequence[WhereDocument], v)
-                ]
-                return reduce(lambda x, y: x | y, criteria)
-            elif k == "$contains":
-                v = cast(str, v)
-                search_term = f"%{v}%"
+        with self._opentelemetry_client.trace(
+            "SqliteMetadataSegment._where_doc_criterion",
+            OpenTelemetryGranularity.ALL,
+        ):
+            for k, v in where.items():
+                if k == "$and":
+                    criteria = [
+                        self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                        for w in cast(Sequence[WhereDocument], v)
+                    ]
+                    return reduce(lambda x, y: x & y, criteria)
+                elif k == "$or":
+                    criteria = [
+                        self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                        for w in cast(Sequence[WhereDocument], v)
+                    ]
+                    return reduce(lambda x, y: x | y, criteria)
+                elif k == "$contains":
+                    v = cast(str, v)
+                    search_term = f"%{v}%"
 
-                sq = (
-                    self._db.querybuilder()
-                    .from_(fulltext_t)
-                    .select(fulltext_t.rowid)
-                    .where(fulltext_t.string_value.like(ParameterValue(search_term)))
-                )
-                return embeddings_t.id.isin(sq)
-            else:
-                raise ValueError(f"Unknown where_doc operator {k}")
-        raise ValueError("Empty where_doc")
+                    sq = (
+                        self._db.querybuilder()
+                        .from_(fulltext_t)
+                        .select(fulltext_t.rowid)
+                        .where(
+                            fulltext_t.string_value.like(ParameterValue(search_term))
+                        )
+                    )
+                    return embeddings_t.id.isin(sq)
+                else:
+                    raise ValueError(f"Unknown where_doc operator {k}")
+            raise ValueError("Empty where_doc")
 
     @override
     def delete(self) -> None:

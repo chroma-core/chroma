@@ -4,7 +4,10 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
-from chromadb.telemetry.opentelemetry import OpenTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+)
 from chromadb.utils.delete_file import delete_file
 import sqlite3
 from overrides import override
@@ -88,7 +91,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def start(self) -> None:
-        with self._opentelemetry_client.trace("SqliteDB.start"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.start", OpenTelemetryGranularity.ALL
+        ):
             super().start()
             with self.tx() as cur:
                 cur.execute("PRAGMA foreign_keys = ON")
@@ -97,7 +102,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def stop(self) -> None:
-        with self._opentelemetry_client.trace("SqliteDB.stop"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.stop", OpenTelemetryGranularity.ALL
+        ):
             super().stop()
             self._conn_pool.close()
 
@@ -128,7 +135,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def reset_state(self) -> None:
-        with self._opentelemetry_client.trace("SqliteDB.reset_state"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.reset_state", OpenTelemetryGranularity.ALL
+        ):
             if not self._settings.require("allow_reset"):
                 raise ValueError(
                     "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
@@ -151,7 +160,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def setup_migrations(self) -> None:
-        with self._opentelemetry_client.trace("SqliteDB.setup_migrations"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.setup_migrations", OpenTelemetryGranularity.ALL
+        ):
             with self.tx() as cur:
                 cur.execute(
                     """
@@ -168,7 +179,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def migrations_initialized(self) -> bool:
-        with self._opentelemetry_client.trace("SqliteDB.migrations_initialized"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.migrations_initialized", OpenTelemetryGranularity.ALL
+        ):
             with self.tx() as cur:
                 cur.execute(
                     """SELECT count(*) FROM sqlite_master
@@ -182,7 +195,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
-        with self._opentelemetry_client.trace("SqliteDB.db_migrations"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.db_migrations", OpenTelemetryGranularity.ALL
+        ):
             with self.tx() as cur:
                 cur.execute(
                     """
@@ -215,7 +230,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        with self._opentelemetry_client.trace("SqliteDB.apply_migration"):
+        with self._opentelemetry_client.trace(
+            "SqliteDB.apply_migration", OpenTelemetryGranularity.ALL
+        ):
             cur.executescript(migration["sql"])
             cur.execute(
                 """
