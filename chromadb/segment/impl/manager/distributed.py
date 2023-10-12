@@ -1,7 +1,7 @@
 from threading import Lock
 
 import grpc
-from chromadb.proto.chroma_pb2_grpc import SegmentServerStub
+from chromadb.proto.chroma_pb2_grpc import SegmentServerStub  # type: ignore
 from chromadb.proto.convert import to_proto_segment
 from chromadb.segment import (
     SegmentImplementation,
@@ -19,6 +19,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
 )
+from chromadb.segment.distributed import SegmentDirectory
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
@@ -141,6 +142,13 @@ class DistributedSegmentManager(SegmentManager):
                     self._segment_server_stubs[grpc_url].LoadSegment(
                         to_proto_segment(segment)
                     )
+                  if grpc_url not in self._segment_server_stubs:
+                      channel = grpc.insecure_channel(grpc_url)
+                      self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
+
+                  self._segment_server_stubs[grpc_url].LoadSegment(
+                      to_proto_segment(segment)
+                  )
 
     # TODO: rethink duplication from local segment manager
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
