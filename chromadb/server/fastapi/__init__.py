@@ -109,7 +109,7 @@ class FastAPI(chromadb.server.Server):
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
         self._api: chromadb.api.API = chromadb.Client(settings)
-        self._opentelemetry_client = OpenTelemetryClient(settings)
+        self._opentelemetry_client = self._api.require(OpenTelemetryClient)
 
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
