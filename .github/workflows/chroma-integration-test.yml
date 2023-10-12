@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - '**'
+  workflow_dispatch:
 
 jobs:
   test:
@@ -16,8 +17,9 @@ jobs:
       matrix:
         python: ['3.7']
         platform: [ubuntu-latest, windows-latest]
-        testfile: ["--ignore-glob 'chromadb/test/property/*'",
+        testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py'",
                    "chromadb/test/property/test_add.py",
+                   "chromadb/test/test_cli.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",

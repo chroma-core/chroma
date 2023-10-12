@@ -1,9 +1,6 @@
 from typing import Dict
 import logging
-import sqlite3
 import chromadb.config
-from chromadb.telemetry.events import ClientStartEvent
-from chromadb.telemetry import Telemetry
 from chromadb.config import Settings, System
 from chromadb.api import API
 from chromadb.api.models.Collection import Collection
@@ -38,13 +35,15 @@ __all__ = [
     "QueryResult",
     "GetResult",
 ]
+from chromadb.telemetry.events import ClientStartEvent
+from chromadb.telemetry import Telemetry
 
 
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.9"
+__version__ = "0.4.14"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
@@ -54,22 +53,31 @@ try:
 except ImportError:
     IN_COLAB = False
 
-if sqlite3.sqlite_version_info < (3, 35, 0):
-    if IN_COLAB:
-        # In Colab, hotswap to pysqlite-binary if it's too old
-        import subprocess
-        import sys
+is_client = False
+try:
+    from chromadb.is_thin_client import is_thin_client  # type: ignore
+    is_client = is_thin_client
+except ImportError:
+    is_client = False
 
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
-        )
-        __import__("pysqlite3")
-        sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-    else:
-        raise RuntimeError(
-            "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
-            "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
-        )
+if not is_client:
+    import sqlite3
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        if IN_COLAB:
+            # In Colab, hotswap to pysqlite-binary if it's too old
+            import subprocess
+            import sys
+
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
+            )
+            __import__("pysqlite3")
+            sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+        else:
+            raise RuntimeError(
+                "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
+                "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
+            )
 
 
 def configure(**kwargs) -> None:  # type: ignore

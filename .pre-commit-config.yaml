@@ -1,3 +1,4 @@
+exclude: 'chromadb/proto/chroma_pb2\.(py|pyi|py_grpc\.py)' # Generated files
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
@@ -32,4 +33,4 @@ repos:
     hooks:
       - id: mypy
         args: [--strict, --ignore-missing-imports, --follow-imports=silent, --disable-error-code=type-abstract]
-        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy"]
+        additional_dependencies: ["types-requests", "pydantic", "overrides", "hypothesis", "pytest", "pypika", "numpy", "types-protobuf", "kubernetes"]

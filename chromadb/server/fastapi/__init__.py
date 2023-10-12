@@ -126,6 +126,9 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+        )
 
         self.router.add_api_route(
             "/api/v1/collections",
@@ -312,3 +315,8 @@ class FastAPI(chromadb.server.Server):
             include=query.include,
         )
         return nnresult
+
+    def pre_flight_checks(self) -> Dict[str, Any]:
+        return {
+            "max_batch_size": self._api.max_batch_size,
+        }

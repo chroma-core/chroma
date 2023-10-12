@@ -20,13 +20,15 @@ export type IDs = ID[];
 
 export type PositiveInteger = number;
 
-type LiteralValue = string | number;
+type LiteralValue = string | number | boolean;
+type ListLiteralValue = LiteralValue[];
 type LiteralNumber = number;
 type LogicalOperator = "$and" | "$or";
+type InclusionOperator = "$in" | "$nin";
 type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 
 type OperatorExpression = {
-  [key in WhereOperator | LogicalOperator]?: LiteralValue | LiteralNumber;
+  [key in WhereOperator | InclusionOperator | LogicalOperator ]?: LiteralValue | ListLiteralValue;
 };
 
 type BaseWhere = {

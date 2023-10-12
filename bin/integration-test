@@ -9,15 +9,38 @@ function cleanup {
   rm server.htpasswd .chroma_env
 }
 
-function setup_basic_auth {
-  # Generate htpasswd file
-  docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
-  # Create .chroma_env file
-  cat <<EOF > .chroma_env
+function setup_auth {
+  local auth_type="$1"
+  case "$auth_type" in
+    basic)
+      docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
+      cat <<EOF > .chroma_env
 CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider'
-CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.basic.BasicAuthServerProvider'
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 EOF
+      ;;
+    token)
+      cat <<EOF > .chroma_env
+CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
+CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
+EOF
+      ;;
+    xtoken)
+          cat <<EOF > .chroma_env
+CHROMA_SERVER_AUTH_CREDENTIALS="test-token"
+CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="X_CHROMA_TOKEN"
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
+EOF
+    ;;
+    *)
+      echo "Unknown auth type: $auth_type"
+      exit 1
+      ;;
+  esac
 }
 
 trap cleanup EXIT
@@ -37,10 +60,12 @@ yarn
 yarn test:run
 docker compose down
 cd ../..
-echo "Testing auth"
-setup_basic_auth #this is specific to the auth type, later on we'll have other auth types
-cd clients/js
-# Start docker compose - this should be auth agnostic
-docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
-yarn test:run-auth
-cd ../..
+for auth_type in basic token xtoken; do
+  echo "Testing $auth_type auth"
+  setup_auth "$auth_type"
+  cd clients/js
+  docker compose --env-file ../../.chroma_env -f ../../docker-compose.test-auth.yml up --build -d
+  yarn test:run-auth-"$auth_type"
+  cd ../..
+  docker compose down
+done

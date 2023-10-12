@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from dataclasses import asdict, dataclass
 import os
 from typing import Callable, ClassVar, Dict, Any
 import uuid
@@ -22,13 +21,30 @@ class ServerContext(Enum):
     FASTAPI = "FastAPI"
 
 
-@dataclass
 class TelemetryEvent:
-    name: ClassVar[str]
+    max_batch_size: ClassVar[int] = 1
+    batch_size: int
+
+    def __init__(self, batch_size: int = 1):
+        self.batch_size = batch_size
 
     @property
     def properties(self) -> Dict[str, Any]:
-        return asdict(self)
+        return self.__dict__
+
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+    # A batch key is used to determine whether two events can be batched together.
+    # If a TelemetryEvent's max_batch_size > 1, batch_key() and batch() MUST be implemented.
+    # Otherwise they are ignored.
+    @property
+    def batch_key(self) -> str:
+        return self.name
+
+    def batch(self, other: "TelemetryEvent") -> "TelemetryEvent":
+        raise NotImplementedError
 
 
 class RepeatedTelemetry:

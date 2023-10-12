@@ -207,7 +207,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
-
         with WriteRWLock(self._lock):
             for record in records:
                 if record["embedding"] is not None:
@@ -225,11 +224,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 exists_in_index = self._id_to_label.get(
                     id, None
                 ) is not None or self._brute_force_index.has_id(id)
+                exists_in_bf_index = self._brute_force_index.has_id(id)
 
                 if op == Operation.DELETE:
                     if exists_in_index:
                         self._curr_batch.apply(record)
-                        self._brute_force_index.delete([record])
+                        if exists_in_bf_index:
+                            self._brute_force_index.delete([record])
                     else:
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 

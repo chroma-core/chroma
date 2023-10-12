@@ -26,7 +26,7 @@ class ReadWriteLock:
         try:
             self._readers -= 1
             if not self._readers:
-                self._read_ready.notifyAll()
+                self._read_ready.notify_all()
         finally:
             self._read_ready.release()
 
