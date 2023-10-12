@@ -118,3 +118,12 @@ class Consumer(Component):
     def max_seqid(self) -> SeqId:
         """Return the maximum possible SeqID in this implementation."""
         pass
+
+
+class CollectionAssignmentPolicy(Component):
+    """Interface for assigning collections to topics"""
+
+    @abstractmethod
+    def assign_collection(self, collection_id: UUID) -> str:
+        """Return the topic that should be used for the given collection"""
+        pass

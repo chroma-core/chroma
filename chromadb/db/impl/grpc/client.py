@@ -4,6 +4,7 @@ from overrides import overrides
 from chromadb.config import System
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
+from chromadb.ingest import CollectionAssignmentPolicy
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,
@@ -26,6 +27,7 @@ from chromadb.proto.coordinator_pb2 import (
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.types import (
     Collection,
+    Metadata,
     OptionalArgument,
     Segment,
     SegmentScope,
@@ -42,6 +44,7 @@ class GrpcSysDB(SysDB):
     to call a remote SysDB (Coordinator) service."""
 
     _sys_db_stub: SysDBStub
+    _assignment_policy: CollectionAssignmentPolicy
     _channel: grpc.Channel
     _coordinator_url: str
     _coordinator_port: int
@@ -50,6 +53,7 @@ class GrpcSysDB(SysDB):
         self._coordinator_url = system.settings.require("chroma_coordinator_host")
         # TODO: break out coordinator_port into a separate setting?
         self._coordinator_port = system.settings.require("chroma_server_grpc_port")
+        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         return super().__init__(system)
 
     @overrides
@@ -156,8 +160,22 @@ class GrpcSysDB(SysDB):
         self._sys_db_stub.UpdateSegment(request)
 
     @overrides
-    def create_collection(self, collection: Collection) -> None:
+    def create_collection(
+        self,
+        id: UUID,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        dimension: Optional[int] = None,
+    ) -> Collection:
         # TODO: the get_or_create concept needs to be pushed down to the sysdb interface
+        topic = self._assignment_policy.assign_collection(id)
+        collection = Collection(
+            id=id,
+            name=name,
+            topic=topic,
+            metadata=metadata,
+            dimension=dimension,
+        )
         request = CreateCollectionRequest(
             collection=to_proto_collection(collection),
             get_or_create=False,
@@ -165,6 +183,7 @@ class GrpcSysDB(SysDB):
         response = self._sys_db_stub.CreateCollection(request)
         if response.status.code == 409:
             raise UniqueConstraintError()
+        return collection
 
     @overrides
     def delete_collection(self, id: UUID) -> None:

@@ -14,6 +14,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.ingest import CollectionAssignmentPolicy, Producer
 from chromadb.types import (
     OptionalArgument,
     Segment,
@@ -26,8 +27,19 @@ from chromadb.types import (
 
 
 class SqlSysDB(SqlDB, SysDB):
+    _assignment_policy: CollectionAssignmentPolicy
+    # Used only to delete topics on collection deletion.
+    # TODO: refactor to remove this dependency into a separate interface
+    _producer: Producer
+
     def __init__(self, system: System):
+        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         super().__init__(system)
+
+    @override
+    def start(self) -> None:
+        super().start()
+        self._producer = self._system.instance(Producer)
 
     @override
     def create_segment(self, segment: Segment) -> None:
@@ -69,8 +81,20 @@ class SqlSysDB(SqlDB, SysDB):
                 )
 
     @override
-    def create_collection(self, collection: Collection) -> None:
-        """Create a new collection"""
+    def create_collection(
+        self,
+        id: UUID,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        dimension: Optional[int] = None,
+    ) -> Collection:
+        """Create a new collection and the associate topic"""
+
+        topic = self._assignment_policy.assign_collection(id)
+        collection = Collection(
+            id=id, topic=topic, name=name, metadata=metadata, dimension=dimension
+        )
+
         with self.tx() as cur:
             collections = Table("collections")
             insert_collection = (
@@ -105,6 +129,7 @@ class SqlSysDB(SqlDB, SysDB):
                     collection["id"],
                     collection["metadata"],
                 )
+        return collection
 
     @override
     def get_segments(
@@ -263,10 +288,11 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
-            sql = sql + " RETURNING id"
+            sql = sql + " RETURNING id, topic"
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+        self._producer.delete_topic(result[1])
 
     @override
     def update_segment(
