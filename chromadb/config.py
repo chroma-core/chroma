@@ -82,6 +82,8 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
     chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
+    # Required for backwards compatibility
+    chroma_telemetry_impl: str = chroma_product_telemetry_impl
 
     # New architecture components
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
