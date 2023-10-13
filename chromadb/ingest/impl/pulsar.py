@@ -13,6 +13,7 @@ import chromadb.proto.chroma_pb2 as proto
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
@@ -58,81 +59,75 @@ class PulsarProducer(Producer, EnforceOverrides):
     def delete_topic(self, topic_name: str) -> None:
         self._admin.delete_topic(topic_name)
 
+    @trace_method("PulsarProducer.submit_embedding", OpenTelemetryGranularity.ALL)
     @overrides
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
     ) -> SeqId:
         """Add an embedding record to the given topic. Returns the SeqID of the record."""
-        with self._opentelemetry_client.trace(
-            "PulsarProducer.submit_embedding",
-            OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
-        ):
-            producer = self._get_or_create_producer(topic_name)
-            proto_submit: proto.SubmitEmbeddingRecord = to_proto_submit(embedding)
-            # TODO: batch performance / async
-            msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
-            return pulsar_to_int(msg_id)
+        producer = self._get_or_create_producer(topic_name)
+        proto_submit: proto.SubmitEmbeddingRecord = to_proto_submit(embedding)
+        # TODO: batch performance / async
+        msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
+        return pulsar_to_int(msg_id)
 
+    @trace_method("PulsarProducer.submit_embeddings", OpenTelemetryGranularity.ALL)
     @overrides
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
     ) -> Sequence[SeqId]:
-        with self._opentelemetry_client.trace(
-            "PulsarProducer.submit_embeddings",
-            OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
-        ):
-            if not self._running:
-                raise RuntimeError("Component not running")
+        if not self._running:
+            raise RuntimeError("Component not running")
 
-            if len(embeddings) == 0:
-                return []
+        if len(embeddings) == 0:
+            return []
 
-            if len(embeddings) > self.max_batch_size:
-                raise ValueError(
-                    f"""
+        if len(embeddings) > self.max_batch_size:
+            raise ValueError(
+                f"""
                     Cannot submit more than {self.max_batch_size:,} embeddings at once.
                     Please submit your embeddings in batches of size
                     {self.max_batch_size:,} or less.
                     """
-                )
+            )
 
-            producer = self._get_or_create_producer(topic_name)
-            protos_to_submit = [to_proto_submit(embedding) for embedding in embeddings]
+        producer = self._get_or_create_producer(topic_name)
+        protos_to_submit = [to_proto_submit(embedding) for embedding in embeddings]
 
-            def create_producer_callback(
-                future: Future[int],
-            ) -> Callable[[Any, pulsar.MessageId], None]:
-                def producer_callback(res: Any, msg_id: pulsar.MessageId) -> None:
-                    if msg_id:
-                        future.set_result(pulsar_to_int(msg_id))
-                    else:
-                        future.set_exception(
-                            Exception(
-                                "Unknown error while submitting embedding in producer_callback"
-                            )
+        def create_producer_callback(
+            future: Future[int],
+        ) -> Callable[[Any, pulsar.MessageId], None]:
+            def producer_callback(res: Any, msg_id: pulsar.MessageId) -> None:
+                if msg_id:
+                    future.set_result(pulsar_to_int(msg_id))
+                else:
+                    future.set_exception(
+                        Exception(
+                            "Unknown error while submitting embedding in producer_callback"
                         )
+                    )
 
-                return producer_callback
+            return producer_callback
 
-            futures = []
-            for proto_to_submit in protos_to_submit:
-                future: Future[int] = Future()
-                producer.send_async(
-                    proto_to_submit.SerializeToString(),
-                    callback=create_producer_callback(future),
-                )
-                futures.append(future)
+        futures = []
+        for proto_to_submit in protos_to_submit:
+            future: Future[int] = Future()
+            producer.send_async(
+                proto_to_submit.SerializeToString(),
+                callback=create_producer_callback(future),
+            )
+            futures.append(future)
 
-            wait(futures)
+        wait(futures)
 
-            results: List[SeqId] = []
-            for future in futures:
-                exception = future.exception()
-                if exception is not None:
-                    raise exception
-                results.append(future.result())
+        results: List[SeqId] = []
+        for future in futures:
+            exception = future.exception()
+            if exception is not None:
+                raise exception
+            results.append(future.result())
 
-            return results
+        return results
 
     @property
     @overrides
@@ -209,6 +204,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         self._client.close()
         super().stop()
 
+    @trace_method("PulsarConsumer.subscribe", OpenTelemetryGranularity.ALL)
     @overrides
     def subscribe(
         self,
@@ -233,50 +229,44 @@ class PulsarConsumer(Consumer, EnforceOverrides):
 
         Takes an optional UUID as a unique subscription ID. If no ID is provided, a new
         ID will be generated and returned."""
-        with self._opentelemetry_client.trace(
-            "PulsarConsumer.subscribe",
-            OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
-        ):
-            if not self._running:
-                raise RuntimeError("Consumer must be started before subscribing")
+        if not self._running:
+            raise RuntimeError("Consumer must be started before subscribing")
 
-            subscription_id = (
-                id or uuid.uuid4()
-            )  # TODO: this should really be created by the coordinator and stored in sysdb
+        subscription_id = (
+            id or uuid.uuid4()
+        )  # TODO: this should really be created by the coordinator and stored in sysdb
 
-            start, end = self._validate_range(start, end)
+        start, end = self._validate_range(start, end)
 
-            def wrap_callback(
-                consumer: pulsar.Consumer, message: pulsar.Message
-            ) -> None:
-                msg_data = message.data()
-                msg_id = pulsar_to_int(message.message_id())
-                submit_embedding_record = proto.SubmitEmbeddingRecord()
-                proto.SubmitEmbeddingRecord.ParseFromString(
-                    submit_embedding_record, msg_data
-                )
-                embedding_record = from_proto_submit(submit_embedding_record, msg_id)
-                consume_fn([embedding_record])
-                consumer.acknowledge(message)
-                if msg_id == end:
-                    self.unsubscribe(subscription_id)
-
-            consumer = self._client.subscribe(
-                topic_name,
-                subscription_id.hex,
-                message_listener=wrap_callback,
+        def wrap_callback(consumer: pulsar.Consumer, message: pulsar.Message) -> None:
+            msg_data = message.data()
+            msg_id = pulsar_to_int(message.message_id())
+            submit_embedding_record = proto.SubmitEmbeddingRecord()
+            proto.SubmitEmbeddingRecord.ParseFromString(
+                submit_embedding_record, msg_data
             )
+            embedding_record = from_proto_submit(submit_embedding_record, msg_id)
+            consume_fn([embedding_record])
+            consumer.acknowledge(message)
+            if msg_id == end:
+                self.unsubscribe(subscription_id)
 
-            subscription = self.PulsarSubscription(
-                subscription_id, topic_name, start, end, consume_fn, consumer
-            )
-            self._subscriptions[topic_name].add(subscription)
+        consumer = self._client.subscribe(
+            topic_name,
+            subscription_id.hex,
+            message_listener=wrap_callback,
+        )
 
-            # NOTE: For some reason the seek() method expects a shadowed MessageId type
-            # which resides in _msg_id.
-            consumer.seek(int_to_pulsar(start)._msg_id)
+        subscription = self.PulsarSubscription(
+            subscription_id, topic_name, start, end, consume_fn, consumer
+        )
+        self._subscriptions[topic_name].add(subscription)
 
-            return subscription_id
+        # NOTE: For some reason the seek() method expects a shadowed MessageId type
+        # which resides in _msg_id.
+        consumer.seek(int_to_pulsar(start)._msg_id)
+
+        return subscription_id
 
     def _validate_range(
         self, start: Optional[SeqId], end: Optional[SeqId]

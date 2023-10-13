@@ -7,6 +7,7 @@ from chromadb.db.mixins.sysdb import SqlSysDB
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 from chromadb.utils.delete_file import delete_file
 import sqlite3
@@ -89,24 +90,20 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         self._tx_stack = local()
         super().__init__(system)
 
+    @trace_method("SqliteDB.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.start", OpenTelemetryGranularity.ALL
-        ):
-            super().start()
-            with self.tx() as cur:
-                cur.execute("PRAGMA foreign_keys = ON")
-                cur.execute("PRAGMA case_sensitive_like = ON")
-            self.initialize_migrations()
+        super().start()
+        with self.tx() as cur:
+            cur.execute("PRAGMA foreign_keys = ON")
+            cur.execute("PRAGMA case_sensitive_like = ON")
+        self.initialize_migrations()
 
+    @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.stop", OpenTelemetryGranularity.ALL
-        ):
-            super().stop()
-            self._conn_pool.close()
+        super().stop()
+        self._conn_pool.close()
 
     @staticmethod
     @override
@@ -133,39 +130,35 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             self._tx_stack.stack = []
         return TxWrapper(self._conn_pool, stack=self._tx_stack)
 
+    @trace_method("SqliteDB.reset_state", OpenTelemetryGranularity.ALL)
     @override
     def reset_state(self) -> None:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.reset_state", OpenTelemetryGranularity.ALL
-        ):
-            if not self._settings.require("allow_reset"):
-                raise ValueError(
-                    "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
-                )
-            with self.tx() as cur:
-                # Drop all tables
-                cur.execute(
-                    """
+        if not self._settings.require("allow_reset"):
+            raise ValueError(
+                "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
+            )
+        with self.tx() as cur:
+            # Drop all tables
+            cur.execute(
+                """
                     SELECT name FROM sqlite_master
                     WHERE type='table'
                     """
-                )
-                for row in cur.fetchall():
-                    cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
-            self._conn_pool.close()
-            if self._is_persistent:
-                delete_file(self._db_file)
-            self.start()
-            super().reset_state()
+            )
+            for row in cur.fetchall():
+                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+        self._conn_pool.close()
+        if self._is_persistent:
+            delete_file(self._db_file)
+        self.start()
+        super().reset_state()
 
+    @trace_method("SqliteDB.setup_migrations", OpenTelemetryGranularity.ALL)
     @override
     def setup_migrations(self) -> None:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.setup_migrations", OpenTelemetryGranularity.ALL
-        ):
-            with self.tx() as cur:
-                cur.execute(
-                    """
+        with self.tx() as cur:
+            cur.execute(
+                """
                     CREATE TABLE IF NOT EXISTS migrations (
                         dir TEXT NOT NULL,
                         version INTEGER NOT NULL,
@@ -175,78 +168,71 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                         PRIMARY KEY (dir, version)
                     )
                     """
-                )
+            )
 
+    @trace_method("SqliteDB.migrations_initialized", OpenTelemetryGranularity.ALL)
     @override
     def migrations_initialized(self) -> bool:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.migrations_initialized", OpenTelemetryGranularity.ALL
-        ):
-            with self.tx() as cur:
-                cur.execute(
-                    """SELECT count(*) FROM sqlite_master
-                    WHERE type='table' AND name='migrations'"""
-                )
+        with self.tx() as cur:
+            cur.execute(
+                """SELECT count(*) FROM sqlite_master
+                WHERE type='table' AND name='migrations'"""
+            )
 
-                if cur.fetchone()[0] == 0:
-                    return False
-                else:
-                    return True
+            if cur.fetchone()[0] == 0:
+                return False
+            else:
+                return True
 
+    @trace_method("SqliteDB.db_migrations", OpenTelemetryGranularity.ALL)
     @override
     def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.db_migrations", OpenTelemetryGranularity.ALL
-        ):
-            with self.tx() as cur:
-                cur.execute(
-                    """
-                    SELECT dir, version, filename, sql, hash
-                    FROM migrations
-                    WHERE dir = ?
-                    ORDER BY version ASC
-                    """,
-                    (dir.name,),
-                )
+        with self.tx() as cur:
+            cur.execute(
+                """
+                SELECT dir, version, filename, sql, hash
+                FROM migrations
+                WHERE dir = ?
+                ORDER BY version ASC
+                """,
+                (dir.name,),
+            )
 
-                migrations = []
-                for row in cur.fetchall():
-                    found_dir = cast(str, row[0])
-                    found_version = cast(int, row[1])
-                    found_filename = cast(str, row[2])
-                    found_sql = cast(str, row[3])
-                    found_hash = cast(str, row[4])
-                    migrations.append(
-                        Migration(
-                            dir=found_dir,
-                            version=found_version,
-                            filename=found_filename,
-                            sql=found_sql,
-                            hash=found_hash,
-                            scope=self.migration_scope(),
-                        )
+            migrations = []
+            for row in cur.fetchall():
+                found_dir = cast(str, row[0])
+                found_version = cast(int, row[1])
+                found_filename = cast(str, row[2])
+                found_sql = cast(str, row[3])
+                found_hash = cast(str, row[4])
+                migrations.append(
+                    Migration(
+                        dir=found_dir,
+                        version=found_version,
+                        filename=found_filename,
+                        sql=found_sql,
+                        hash=found_hash,
+                        scope=self.migration_scope(),
                     )
-                return migrations
+                )
+            return migrations
 
     @override
     def apply_migration(self, cur: base.Cursor, migration: Migration) -> None:
-        with self._opentelemetry_client.trace(
-            "SqliteDB.apply_migration", OpenTelemetryGranularity.ALL
-        ):
-            cur.executescript(migration["sql"])
-            cur.execute(
-                """
-                INSERT INTO migrations (dir, version, filename, sql, hash)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    migration["dir"],
-                    migration["version"],
-                    migration["filename"],
-                    migration["sql"],
-                    migration["hash"],
-                ),
-            )
+        cur.executescript(migration["sql"])
+        cur.execute(
+            """
+            INSERT INTO migrations (dir, version, filename, sql, hash)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                migration["dir"],
+                migration["version"],
+                migration["filename"],
+                migration["sql"],
+                migration["hash"],
+            ),
+        )
 
     @staticmethod
     @override

@@ -39,6 +39,7 @@ from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 
 logger = logging.getLogger(__name__)
@@ -226,136 +227,112 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
+    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     def list_collections(self) -> Sequence[Collection]:
-        with self._opentelemetry_client.trace(
-            "FastAPI.list_collections", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api.list_collections()
+        return self._api.list_collections()
 
+    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     def create_collection(self, collection: CreateCollection) -> Collection:
-        with self._opentelemetry_client.trace(
-            "FastAPI.create_collection", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api.create_collection(
-                name=collection.name,
-                metadata=collection.metadata,
-                get_or_create=collection.get_or_create,
-            )
+        return self._api.create_collection(
+            name=collection.name,
+            metadata=collection.metadata,
+            get_or_create=collection.get_or_create,
+        )
 
+    @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     def get_collection(self, collection_name: str) -> Collection:
-        with self._opentelemetry_client.trace(
-            "FastAPI.get_collection", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api.get_collection(collection_name)
+        return self._api.get_collection(collection_name)
 
+    @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
     def update_collection(
         self, collection_id: str, collection: UpdateCollection
     ) -> None:
-        with self._opentelemetry_client.trace(
-            "FastAPI.update_collection", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._modify(
-                id=_uuid(collection_id),
-                new_name=collection.new_name,
-                new_metadata=collection.new_metadata,
-            )
+        return self._api._modify(
+            id=_uuid(collection_id),
+            new_name=collection.new_name,
+            new_metadata=collection.new_metadata,
+        )
 
+    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     def delete_collection(self, collection_name: str) -> None:
-        with self._opentelemetry_client.trace(
-            "FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api.delete_collection(collection_name)
+        return self._api.delete_collection(collection_name)
 
+    @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     def add(self, collection_id: str, add: AddEmbedding) -> None:
-        with self._opentelemetry_client.trace(
-            "FastAPI.add", OpenTelemetryGranularity.OPERATION
-        ):
-            try:
-                result = self._api._add(
-                    collection_id=_uuid(collection_id),
-                    embeddings=add.embeddings,
-                    metadatas=add.metadatas,
-                    documents=add.documents,
-                    ids=add.ids,
-                )
-            except InvalidDimensionException as e:
-                raise HTTPException(status_code=500, detail=str(e))
-            return result
-
-    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        with self._opentelemetry_client.trace(
-            "FastAPI.update", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._update(
-                ids=add.ids,
+        try:
+            result = self._api._add(
                 collection_id=_uuid(collection_id),
                 embeddings=add.embeddings,
-                documents=add.documents,
                 metadatas=add.metadatas,
+                documents=add.documents,
+                ids=add.ids,
             )
+        except InvalidDimensionException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return result
 
+    @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
+    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
+        return self._api._update(
+            ids=add.ids,
+            collection_id=_uuid(collection_id),
+            embeddings=add.embeddings,
+            documents=add.documents,
+            metadatas=add.metadatas,
+        )
+
+    @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        with self._opentelemetry_client.trace(
-            "FastAPI.upsert", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._upsert(
-                collection_id=_uuid(collection_id),
-                ids=upsert.ids,
-                embeddings=upsert.embeddings,
-                documents=upsert.documents,
-                metadatas=upsert.metadatas,
-            )
+        return self._api._upsert(
+            collection_id=_uuid(collection_id),
+            ids=upsert.ids,
+            embeddings=upsert.embeddings,
+            documents=upsert.documents,
+            metadatas=upsert.metadatas,
+        )
 
+    @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
-        with self._opentelemetry_client.trace(
-            "FastAPI.get", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._get(
-                collection_id=_uuid(collection_id),
-                ids=get.ids,
-                where=get.where,
-                where_document=get.where_document,
-                sort=get.sort,
-                limit=get.limit,
-                offset=get.offset,
-                include=get.include,
-            )
+        return self._api._get(
+            collection_id=_uuid(collection_id),
+            ids=get.ids,
+            where=get.where,
+            where_document=get.where_document,
+            sort=get.sort,
+            limit=get.limit,
+            offset=get.offset,
+            include=get.include,
+        )
 
+    @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
     def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
-        with self._opentelemetry_client.trace(
-            "FastAPI.delete", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._delete(
-                where=delete.where,
-                ids=delete.ids,
-                collection_id=_uuid(collection_id),
-                where_document=delete.where_document,
-            )
+        return self._api._delete(
+            where=delete.where,
+            ids=delete.ids,
+            collection_id=_uuid(collection_id),
+            where_document=delete.where_document,
+        )
 
+    @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
     def count(self, collection_id: str) -> int:
-        with self._opentelemetry_client.trace(
-            "FastAPI.count", OpenTelemetryGranularity.OPERATION
-        ):
-            return self._api._count(_uuid(collection_id))
+        return self._api._count(_uuid(collection_id))
 
     def reset(self) -> bool:
         return self._api.reset()
 
+    @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
     def get_nearest_neighbors(
         self, collection_id: str, query: QueryEmbedding
     ) -> QueryResult:
-        with self._opentelemetry_client.trace(
-            "FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION
-        ):
-            nnresult = self._api._query(
-                collection_id=_uuid(collection_id),
-                where=query.where,  # type: ignore
-                where_document=query.where_document,  # type: ignore
-                query_embeddings=query.query_embeddings,
-                n_results=query.n_results,
-                include=query.include,
-            )
-            return nnresult
+        nnresult = self._api._query(
+            collection_id=_uuid(collection_id),
+            where=query.where,  # type: ignore
+            where_document=query.where_document,  # type: ignore
+            query_embeddings=query.query_embeddings,
+            n_results=query.n_results,
+            include=query.include,
+        )
+        return nnresult
 
     def pre_flight_checks(self) -> Dict[str, Any]:
         return {

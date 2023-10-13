@@ -4,8 +4,10 @@ from chromadb.db.system import SysDB
 from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
@@ -45,7 +47,6 @@ from chromadb.telemetry.product.events import (
 import chromadb.types as t
 
 from typing import Optional, Sequence, Generator, List, cast, Set, Dict
-from opentelemetry import trace
 from overrides import override
 from uuid import UUID, uuid4
 import time
@@ -109,6 +110,7 @@ class SegmentAPI(API):
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
+    @trace_method("SegmentAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def create_collection(
         self,
@@ -117,103 +119,16 @@ class SegmentAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI.create_collection",
-            OpenTelemetryGranularity.OPERATION,
-            attributes={"collection_name": name},
-        ):
-            existing = self._sysdb.get_collections(name=name)
+        existing = self._sysdb.get_collections(name=name)
 
-            if metadata is not None:
-                validate_metadata(metadata)
+        if metadata is not None:
+            validate_metadata(metadata)
 
-            if existing:
-                if get_or_create:
-                    if metadata and existing[0]["metadata"] != metadata:
-                        self._modify(id=existing[0]["id"], new_metadata=metadata)
-                        existing = self._sysdb.get_collections(id=existing[0]["id"])
-                    return Collection(
-                        client=self,
-                        id=existing[0]["id"],
-                        name=existing[0]["name"],
-                        metadata=existing[0]["metadata"],  # type: ignore
-                        embedding_function=embedding_function,
-                    )
-                else:
-                    raise ValueError(f"Collection {name} already exists.")
-
-            # TODO: remove backwards compatibility in naming requirements
-            check_index_name(name)
-
-            id = uuid4()
-            coll = t.Collection(
-                id=id,
-                name=name,
-                metadata=metadata,
-                topic=self._topic(id),
-                dimension=None,
-            )
-            # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
-            # and the producer should just be responsible for publishing messages. Coordinator should
-            # be responsible for all management of topics.
-            self._producer.create_topic(coll["topic"])
-            segments = self._manager.create_segments(coll)
-            self._sysdb.create_collection(coll)
-            for segment in segments:
-                self._sysdb.create_segment(segment)
-
-            self._product_telemetry_client.capture(
-                ClientCreateCollectionEvent(
-                    collection_uuid=str(id),
-                    embedding_function=embedding_function.__class__.__name__,
-                )
-            )
-            trace.get_current_span().set_attribute("collection_uuid", str(id))
-
-            return Collection(
-                client=self,
-                id=id,
-                name=name,
-                metadata=metadata,
-                embedding_function=embedding_function,
-            )
-
-    @override
-    def get_or_create_collection(
-        self,
-        name: str,
-        metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-    ) -> Collection:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI.get_or_create_collection",
-            OpenTelemetryGranularity.OPERATION,
-            attributes={"name": name},
-        ):
-            return self.create_collection(
-                name=name,
-                metadata=metadata,
-                embedding_function=embedding_function,
-                get_or_create=True,
-            )
-
-    # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
-    # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
-    # causes the system to somehow convert all values to strings
-    @override
-    def get_collection(
-        self,
-        name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-    ) -> Collection:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI.get_collection",
-            OpenTelemetryGranularity.OPERATION,
-            attributes={"name": name},
-        ):
-            existing = self._sysdb.get_collections(name=name)
-
-            if existing:
+        if existing:
+            if get_or_create:
+                if metadata and existing[0]["metadata"] != metadata:
+                    self._modify(id=existing[0]["id"], new_metadata=metadata)
+                    existing = self._sysdb.get_collections(id=existing[0]["id"])
                 return Collection(
                     client=self,
                     id=existing[0]["id"],
@@ -222,27 +137,101 @@ class SegmentAPI(API):
                     embedding_function=embedding_function,
                 )
             else:
-                raise ValueError(f"Collection {name} does not exist.")
+                raise ValueError(f"Collection {name} already exists.")
 
+        # TODO: remove backwards compatibility in naming requirements
+        check_index_name(name)
+
+        id = uuid4()
+        coll = t.Collection(
+            id=id,
+            name=name,
+            metadata=metadata,
+            topic=self._topic(id),
+            dimension=None,
+        )
+        # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
+        # and the producer should just be responsible for publishing messages. Coordinator should
+        # be responsible for all management of topics.
+        self._producer.create_topic(coll["topic"])
+        segments = self._manager.create_segments(coll)
+        self._sysdb.create_collection(coll)
+        for segment in segments:
+            self._sysdb.create_segment(segment)
+
+        self._product_telemetry_client.capture(
+            ClientCreateCollectionEvent(
+                collection_uuid=str(id),
+                embedding_function=embedding_function.__class__.__name__,
+            )
+        )
+        add_attributes_to_current_span({"collection_uuid": str(id)})
+
+        return Collection(
+            client=self,
+            id=id,
+            name=name,
+            metadata=metadata,
+            embedding_function=embedding_function,
+        )
+
+    @trace_method(
+        "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        return self.create_collection(
+            name=name,
+            metadata=metadata,
+            embedding_function=embedding_function,
+            get_or_create=True,
+        )
+
+    # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
+    # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
+    # causes the system to somehow convert all values to strings
+    @trace_method("SegmentAPI.get_collection", OpenTelemetryGranularity.OPERATION)
+    @override
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        existing = self._sysdb.get_collections(name=name)
+
+        if existing:
+            return Collection(
+                client=self,
+                id=existing[0]["id"],
+                name=existing[0]["name"],
+                metadata=existing[0]["metadata"],  # type: ignore
+                embedding_function=embedding_function,
+            )
+        else:
+            raise ValueError(f"Collection {name} does not exist.")
+
+    @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def list_collections(self) -> Sequence[Collection]:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI.list_collections",
-            OpenTelemetryGranularity.OPERATION,
-        ):
-            collections = []
-            db_collections = self._sysdb.get_collections()
-            for db_collection in db_collections:
-                collections.append(
-                    Collection(
-                        client=self,
-                        id=db_collection["id"],
-                        name=db_collection["name"],
-                        metadata=db_collection["metadata"],  # type: ignore
-                    )
+        collections = []
+        db_collections = self._sysdb.get_collections()
+        for db_collection in db_collections:
+            collections.append(
+                Collection(
+                    client=self,
+                    id=db_collection["id"],
+                    name=db_collection["name"],
+                    metadata=db_collection["metadata"],  # type: ignore
                 )
-            return collections
+            )
+        return collections
 
+    @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
     def _modify(
         self,
@@ -250,44 +239,38 @@ class SegmentAPI(API):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._modify", OpenTelemetryGranularity.ALL, attributes={"id": id}
-        ):
-            if new_name:
-                # backwards compatibility in naming requirements (for now)
-                check_index_name(new_name)
+        if new_name:
+            # backwards compatibility in naming requirements (for now)
+            check_index_name(new_name)
 
-            if new_metadata:
-                validate_update_metadata(new_metadata)
+        if new_metadata:
+            validate_update_metadata(new_metadata)
 
-            # TODO eventually we'll want to use OptionalArgument and Unspecified in the
-            # signature of `_modify` but not changing the API right now.
-            if new_name and new_metadata:
-                self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
-            elif new_name:
-                self._sysdb.update_collection(id, name=new_name)
-            elif new_metadata:
-                self._sysdb.update_collection(id, metadata=new_metadata)
+        # TODO eventually we'll want to use OptionalArgument and Unspecified in the
+        # signature of `_modify` but not changing the API right now.
+        if new_name and new_metadata:
+            self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name:
+            self._sysdb.update_collection(id, name=new_name)
+        elif new_metadata:
+            self._sysdb.update_collection(id, metadata=new_metadata)
 
+    @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(self, name: str) -> None:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI.delete_collection",
-            OpenTelemetryGranularity.OPERATION,
-            attributes={"name": name},
-        ):
-            existing = self._sysdb.get_collections(name=name)
+        existing = self._sysdb.get_collections(name=name)
 
-            if existing:
-                self._sysdb.delete_collection(existing[0]["id"])
-                for s in self._manager.delete_segments(existing[0]["id"]):
-                    self._sysdb.delete_segment(s)
-                self._producer.delete_topic(existing[0]["topic"])
-                if existing and existing[0]["id"] in self._collection_cache:
-                    del self._collection_cache[existing[0]["id"]]
-            else:
-                raise ValueError(f"Collection {name} does not exist.")
+        if existing:
+            self._sysdb.delete_collection(existing[0]["id"])
+            for s in self._manager.delete_segments(existing[0]["id"]):
+                self._sysdb.delete_segment(s)
+            self._producer.delete_topic(existing[0]["topic"])
+            if existing and existing[0]["id"] in self._collection_cache:
+                del self._collection_cache[existing[0]["id"]]
+        else:
+            raise ValueError(f"Collection {name} does not exist.")
 
+    @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
     def _add(
         self,
@@ -297,39 +280,35 @@ class SegmentAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._add",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection_id, "ids_count": len(ids)},
+        coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.ADD)
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.ADD,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
         ):
-            coll = self._get_collection(collection_id)
-            self._manager.hint_use_collection(collection_id, t.Operation.ADD)
-            validate_batch(
-                (ids, embeddings, metadatas, documents),
-                {"max_batch_size": self.max_batch_size},
-            )
-            records_to_submit = []
-            for r in _records(
-                t.Operation.ADD,
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents,
-            ):
-                self._validate_embedding_record(coll, r)
-                records_to_submit.append(r)
-            self._producer.submit_embeddings(coll["topic"], records_to_submit)
+            self._validate_embedding_record(coll, r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-            self._product_telemetry_client.capture(
-                CollectionAddEvent(
-                    collection_uuid=str(collection_id),
-                    add_amount=len(ids),
-                    with_metadata=len(ids) if metadatas is not None else 0,
-                    with_documents=len(ids) if documents is not None else 0,
-                )
+        self._product_telemetry_client.capture(
+            CollectionAddEvent(
+                collection_uuid=str(collection_id),
+                add_amount=len(ids),
+                with_metadata=len(ids) if metadatas is not None else 0,
+                with_documents=len(ids) if documents is not None else 0,
             )
-            return True
+        )
+        return True
 
+    @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
     def _update(
         self,
@@ -339,41 +318,37 @@ class SegmentAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._update",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection_id, "ids_count": len(ids)},
+        coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.UPDATE,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
         ):
-            coll = self._get_collection(collection_id)
-            self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
-            validate_batch(
-                (ids, embeddings, metadatas, documents),
-                {"max_batch_size": self.max_batch_size},
+            self._validate_embedding_record(coll, r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
+
+        self._product_telemetry_client.capture(
+            CollectionUpdateEvent(
+                collection_uuid=str(collection_id),
+                update_amount=len(ids),
+                with_embeddings=len(embeddings) if embeddings else 0,
+                with_metadata=len(metadatas) if metadatas else 0,
+                with_documents=len(documents) if documents else 0,
             )
-            records_to_submit = []
-            for r in _records(
-                t.Operation.UPDATE,
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents,
-            ):
-                self._validate_embedding_record(coll, r)
-                records_to_submit.append(r)
-            self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        )
 
-            self._product_telemetry_client.capture(
-                CollectionUpdateEvent(
-                    collection_uuid=str(collection_id),
-                    update_amount=len(ids),
-                    with_embeddings=len(embeddings) if embeddings else 0,
-                    with_metadata=len(metadatas) if metadatas else 0,
-                    with_documents=len(documents) if documents else 0,
-                )
-            )
+        return True
 
-            return True
-
+    @trace_method("SegmentAPI._upsert", OpenTelemetryGranularity.OPERATION)
     @override
     def _upsert(
         self,
@@ -383,31 +358,27 @@ class SegmentAPI(API):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
     ) -> bool:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._upsert",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection_id, "ids_count": len(ids)},
+        coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
+        validate_batch(
+            (ids, embeddings, metadatas, documents),
+            {"max_batch_size": self.max_batch_size},
+        )
+        records_to_submit = []
+        for r in _records(
+            t.Operation.UPSERT,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
         ):
-            coll = self._get_collection(collection_id)
-            self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
-            validate_batch(
-                (ids, embeddings, metadatas, documents),
-                {"max_batch_size": self.max_batch_size},
-            )
-            records_to_submit = []
-            for r in _records(
-                t.Operation.UPSERT,
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents,
-            ):
-                self._validate_embedding_record(coll, r)
-                records_to_submit.append(r)
-            self._producer.submit_embeddings(coll["topic"], records_to_submit)
+            self._validate_embedding_record(coll, r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-            return True
+        return True
 
+    @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
     def _get(
         self,
@@ -422,74 +393,72 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._get",
-            OpenTelemetryGranularity.ALL,
-            attributes={
+        add_attributes_to_current_span(
+            {
                 "collection_id": collection_id,
                 "ids_count": len(ids) if ids else 0,
-            },
-        ):
-            where = (
-                validate_where(where) if where is not None and len(where) > 0 else None
+            }
+        )
+
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
+        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+
+        if sort is not None:
+            raise NotImplementedError("Sorting is not yet supported")
+
+        if page and page_size:
+            offset = (page - 1) * page_size
+            limit = page_size
+
+        records = metadata_segment.get_metadata(
+            where=where,
+            where_document=where_document,
+            ids=ids,
+            limit=limit,
+            offset=offset,
+        )
+
+        vectors: Sequence[t.VectorEmbeddingRecord] = []
+        if "embeddings" in include:
+            vector_ids = [r["id"] for r in records]
+            vector_segment = self._manager.get_segment(collection_id, VectorReader)
+            vectors = vector_segment.get_vectors(ids=vector_ids)
+
+        # TODO: Fix type so we don't need to ignore
+        # It is possible to have a set of records, some with metadata and some without
+        # Same with documents
+
+        metadatas = [r["metadata"] for r in records]
+
+        if "documents" in include:
+            documents = [_doc(m) for m in metadatas]
+
+        self._product_telemetry_client.capture(
+            CollectionGetEvent(
+                collection_uuid=str(collection_id),
+                ids_count=len(ids) if ids else 0,
+                limit=limit if limit else 0,
+                include_metadata="metadatas" in include,
+                include_documents="documents" in include,
             )
-            where_document = (
-                validate_where_document(where_document)
-                if where_document is not None and len(where_document) > 0
-                else None
-            )
+        )
 
-            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+        return GetResult(
+            ids=[r["id"] for r in records],
+            embeddings=[r["embedding"] for r in vectors]
+            if "embeddings" in include
+            else None,
+            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            documents=documents if "documents" in include else None,  # type: ignore
+        )
 
-            if sort is not None:
-                raise NotImplementedError("Sorting is not yet supported")
-
-            if page and page_size:
-                offset = (page - 1) * page_size
-                limit = page_size
-
-            records = metadata_segment.get_metadata(
-                where=where,
-                where_document=where_document,
-                ids=ids,
-                limit=limit,
-                offset=offset,
-            )
-
-            vectors: Sequence[t.VectorEmbeddingRecord] = []
-            if "embeddings" in include:
-                vector_ids = [r["id"] for r in records]
-                vector_segment = self._manager.get_segment(collection_id, VectorReader)
-                vectors = vector_segment.get_vectors(ids=vector_ids)
-
-            # TODO: Fix type so we don't need to ignore
-            # It is possible to have a set of records, some with metadata and some without
-            # Same with documents
-
-            metadatas = [r["metadata"] for r in records]
-
-            if "documents" in include:
-                documents = [_doc(m) for m in metadatas]
-
-            self._product_telemetry_client.capture(
-                CollectionGetEvent(
-                    collection_uuid=str(collection_id),
-                    ids_count=len(ids) if ids else 0,
-                    limit=limit if limit else 0,
-                    include_metadata="metadatas" in include,
-                    include_documents="documents" in include,
-                )
-            )
-
-            return GetResult(
-                ids=[r["id"] for r in records],
-                embeddings=[r["embedding"] for r in vectors]
-                if "embeddings" in include
-                else None,
-                metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
-                documents=documents if "documents" in include else None,  # type: ignore
-            )
-
+    @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
     def _delete(
         self,
@@ -498,81 +467,74 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._delete",
-            OpenTelemetryGranularity.ALL,
-            attributes={
+        add_attributes_to_current_span(
+            {
                 "collection_id": collection_id,
                 "ids_count": len(ids) if ids else 0,
-            },
+            }
+        )
+
+        where = validate_where(where) if where is not None and len(where) > 0 else None
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else None
+        )
+
+        # You must have at least one of non-empty ids, where, or where_document.
+        if (
+            (ids is None or (ids is not None and len(ids) == 0))
+            and (where is None or (where is not None and len(where) == 0))
+            and (
+                where_document is None
+                or (where_document is not None and len(where_document) == 0)
+            )
         ):
-            where = (
-                validate_where(where) if where is not None and len(where) > 0 else None
+            raise ValueError(
+                """
+                You must provide either ids, where, or where_document to delete. If
+                you want to delete all data in a collection you can delete the
+                collection itself using the delete_collection method. Or alternatively,
+                you can get() all the relevant ids and then delete them.
+                """
             )
-            where_document = (
-                validate_where_document(where_document)
-                if where_document is not None and len(where_document) > 0
-                else None
+
+        coll = self._get_collection(collection_id)
+        self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
+
+        if (where or where_document) or not ids:
+            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+            records = metadata_segment.get_metadata(
+                where=where, where_document=where_document, ids=ids
             )
+            ids_to_delete = [r["id"] for r in records]
+        else:
+            ids_to_delete = ids
 
-            # You must have at least one of non-empty ids, where, or where_document.
-            if (
-                (ids is None or (ids is not None and len(ids) == 0))
-                and (where is None or (where is not None and len(where) == 0))
-                and (
-                    where_document is None
-                    or (where_document is not None and len(where_document) == 0)
-                )
-            ):
-                raise ValueError(
-                    """
-                    You must provide either ids, where, or where_document to delete. If
-                    you want to delete all data in a collection you can delete the
-                    collection itself using the delete_collection method. Or alternatively,
-                    you can get() all the relevant ids and then delete them.
-                    """
-                )
+        if len(ids_to_delete) == 0:
+            return []
 
-            coll = self._get_collection(collection_id)
-            self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
+        records_to_submit = []
+        for r in _records(t.Operation.DELETE, ids_to_delete):
+            self._validate_embedding_record(coll, r)
+            records_to_submit.append(r)
+        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-            if (where or where_document) or not ids:
-                metadata_segment = self._manager.get_segment(
-                    collection_id, MetadataReader
-                )
-                records = metadata_segment.get_metadata(
-                    where=where, where_document=where_document, ids=ids
-                )
-                ids_to_delete = [r["id"] for r in records]
-            else:
-                ids_to_delete = ids
-
-            if len(ids_to_delete) == 0:
-                return []
-
-            records_to_submit = []
-            for r in _records(t.Operation.DELETE, ids_to_delete):
-                self._validate_embedding_record(coll, r)
-                records_to_submit.append(r)
-            self._producer.submit_embeddings(coll["topic"], records_to_submit)
-
-            self._product_telemetry_client.capture(
-                CollectionDeleteEvent(
-                    collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
-                )
+        self._product_telemetry_client.capture(
+            CollectionDeleteEvent(
+                collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
             )
-            return ids_to_delete
+        )
+        return ids_to_delete
 
+    @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @override
     def _count(self, collection_id: UUID) -> int:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._count",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection_id},
-        ):
-            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-            return metadata_segment.count()
+        add_attributes_to_current_span({"collection_id": collection_id})
+        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
+        return metadata_segment.count()
 
+    @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     @override
     def _query(
         self,
@@ -583,114 +545,107 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._query",
-            OpenTelemetryGranularity.ALL,
-            attributes={
+        add_attributes_to_current_span(
+            {
                 "collection_id": collection_id,
                 "n_results": n_results,
                 "where": where,
-            },
-        ):
-            where = (
-                validate_where(where) if where is not None and len(where) > 0 else where
+            }
+        )
+        where = validate_where(where) if where is not None and len(where) > 0 else where
+        where_document = (
+            validate_where_document(where_document)
+            if where_document is not None and len(where_document) > 0
+            else where_document
+        )
+
+        allowed_ids = None
+
+        coll = self._get_collection(collection_id)
+        for embedding in query_embeddings:
+            self._validate_dimension(coll, len(embedding), update=False)
+
+        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
+
+        if where or where_document:
+            records = metadata_reader.get_metadata(
+                where=where, where_document=where_document
             )
-            where_document = (
-                validate_where_document(where_document)
-                if where_document is not None and len(where_document) > 0
-                else where_document
+            allowed_ids = [r["id"] for r in records]
+
+        query = t.VectorQuery(
+            vectors=query_embeddings,
+            k=n_results,
+            allowed_ids=allowed_ids,
+            include_embeddings="embeddings" in include,
+            options=None,
+        )
+
+        vector_reader = self._manager.get_segment(collection_id, VectorReader)
+        results = vector_reader.query_vectors(query)
+
+        ids: List[List[str]] = []
+        distances: List[List[float]] = []
+        embeddings: List[List[Embedding]] = []
+        documents: List[List[str]] = []
+        metadatas: List[List[t.Metadata]] = []
+
+        for result in results:
+            ids.append([r["id"] for r in result])
+            if "distances" in include:
+                distances.append([r["distance"] for r in result])
+            if "embeddings" in include:
+                embeddings.append([cast(Embedding, r["embedding"]) for r in result])
+
+        if "documents" in include or "metadatas" in include:
+            all_ids: Set[str] = set()
+            for id_list in ids:
+                all_ids.update(id_list)
+            records = metadata_reader.get_metadata(ids=list(all_ids))
+            metadata_by_id = {r["id"]: r["metadata"] for r in records}
+            for id_list in ids:
+                # In the segment based architecture, it is possible for one segment
+                # to have a record that another segment does not have. This results in
+                # data inconsistency. For the case of the local segments and the
+                # local segment manager, there is a case where a thread writes
+                # a record to the vector segment but not the metadata segment.
+                # Then a query'ing thread reads from the vector segment and
+                # queries the metadata segment. The metadata segment does not have
+                # the record. In this case we choose to return potentially
+                # incorrect data in the form of None.
+                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
+                if "metadatas" in include:
+                    metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
+                if "documents" in include:
+                    doc_list = [_doc(m) for m in metadata_list]
+                    documents.append(doc_list)  # type: ignore
+
+        self._product_telemetry_client.capture(
+            CollectionQueryEvent(
+                collection_uuid=str(collection_id),
+                query_amount=len(query_embeddings),
+                n_results=n_results,
+                with_metadata_filter=where is not None,
+                with_document_filter=where_document is not None,
+                include_metadatas="metadatas" in include,
+                include_documents="documents" in include,
+                include_distances="distances" in include,
             )
+        )
 
-            allowed_ids = None
+        return QueryResult(
+            ids=ids,
+            distances=distances if distances else None,
+            metadatas=metadatas if metadatas else None,
+            embeddings=embeddings if embeddings else None,
+            documents=documents if documents else None,
+        )
 
-            coll = self._get_collection(collection_id)
-            for embedding in query_embeddings:
-                self._validate_dimension(coll, len(embedding), update=False)
-
-            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
-
-            if where or where_document:
-                records = metadata_reader.get_metadata(
-                    where=where, where_document=where_document
-                )
-                allowed_ids = [r["id"] for r in records]
-
-            query = t.VectorQuery(
-                vectors=query_embeddings,
-                k=n_results,
-                allowed_ids=allowed_ids,
-                include_embeddings="embeddings" in include,
-                options=None,
-            )
-
-            vector_reader = self._manager.get_segment(collection_id, VectorReader)
-            results = vector_reader.query_vectors(query)
-
-            ids: List[List[str]] = []
-            distances: List[List[float]] = []
-            embeddings: List[List[Embedding]] = []
-            documents: List[List[str]] = []
-            metadatas: List[List[t.Metadata]] = []
-
-            for result in results:
-                ids.append([r["id"] for r in result])
-                if "distances" in include:
-                    distances.append([r["distance"] for r in result])
-                if "embeddings" in include:
-                    embeddings.append([cast(Embedding, r["embedding"]) for r in result])
-
-            if "documents" in include or "metadatas" in include:
-                all_ids: Set[str] = set()
-                for id_list in ids:
-                    all_ids.update(id_list)
-                records = metadata_reader.get_metadata(ids=list(all_ids))
-                metadata_by_id = {r["id"]: r["metadata"] for r in records}
-                for id_list in ids:
-                    # In the segment based architecture, it is possible for one segment
-                    # to have a record that another segment does not have. This results in
-                    # data inconsistency. For the case of the local segments and the
-                    # local segment manager, there is a case where a thread writes
-                    # a record to the vector segment but not the metadata segment.
-                    # Then a query'ing thread reads from the vector segment and
-                    # queries the metadata segment. The metadata segment does not have
-                    # the record. In this case we choose to return potentially
-                    # incorrect data in the form of None.
-                    metadata_list = [metadata_by_id.get(id, None) for id in id_list]
-                    if "metadatas" in include:
-                        metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
-                    if "documents" in include:
-                        doc_list = [_doc(m) for m in metadata_list]
-                        documents.append(doc_list)  # type: ignore
-
-            self._product_telemetry_client.capture(
-                CollectionQueryEvent(
-                    collection_uuid=str(collection_id),
-                    query_amount=len(query_embeddings),
-                    n_results=n_results,
-                    with_metadata_filter=where is not None,
-                    with_document_filter=where_document is not None,
-                    include_metadatas="metadatas" in include,
-                    include_documents="documents" in include,
-                    include_distances="distances" in include,
-                )
-            )
-
-            return QueryResult(
-                ids=ids,
-                distances=distances if distances else None,
-                metadatas=metadatas if metadatas else None,
-                embeddings=embeddings if embeddings else None,
-                documents=documents if documents else None,
-            )
-
+    @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._peek",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection_id},
-        ):
-            return self._get(collection_id, limit=n)
+        add_attributes_to_current_span({"collection_id": collection_id})
+        return self._get(collection_id, limit=n)
 
     @override
     def get_version(self) -> str:
@@ -721,56 +676,45 @@ class SegmentAPI(API):
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
     # used for channel assignment in the distributed version of the system.
+    @trace_method("SegmentAPI._validate_embedding_record", OpenTelemetryGranularity.ALL)
     def _validate_embedding_record(
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._validate_embedding_record",
-            OpenTelemetryGranularity.ALL,
-            attributes={"collection_id": collection["id"]},
-        ):
-            if record["embedding"]:
-                self._validate_dimension(
-                    collection, len(record["embedding"]), update=True
-                )
+        add_attributes_to_current_span({"collection_id": collection["id"]})
+        if record["embedding"]:
+            self._validate_dimension(collection, len(record["embedding"]), update=True)
 
+    @trace_method("SegmentAPI._validate_dimension", OpenTelemetryGranularity.ALL)
     def _validate_dimension(
         self, collection: t.Collection, dim: int, update: bool
     ) -> None:
         """Validate that a collection supports records of the given dimension. If update
         is true, update the collection if the collection doesn't already have a
         dimension."""
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._validate_dimension",
-            OpenTelemetryGranularity.ALL,
-        ):
-            if collection["dimension"] is None:
-                if update:
-                    id = collection["id"]
-                    self._sysdb.update_collection(id=id, dimension=dim)
-                    self._collection_cache[id]["dimension"] = dim
-            elif collection["dimension"] != dim:
-                raise InvalidDimensionException(
-                    f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
-                )
-            else:
-                return  # all is well
+        if collection["dimension"] is None:
+            if update:
+                id = collection["id"]
+                self._sysdb.update_collection(id=id, dimension=dim)
+                self._collection_cache[id]["dimension"] = dim
+        elif collection["dimension"] != dim:
+            raise InvalidDimensionException(
+                f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
+            )
+        else:
+            return  # all is well
 
+    @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         """Read-through cache for collection data"""
-        with self._opentelemetry_client.trace(
-            "SegmentAPI._get_collection",
-            OpenTelemetryGranularity.ALL,
-        ):
-            if collection_id not in self._collection_cache:
-                collections = self._sysdb.get_collections(id=collection_id)
-                if not collections:
-                    raise InvalidCollectionException(
-                        f"Collection {collection_id} does not exist."
-                    )
-                self._collection_cache[collection_id] = collections[0]
-            return self._collection_cache[collection_id]
+        if collection_id not in self._collection_cache:
+            collections = self._sysdb.get_collections(id=collection_id)
+            if not collections:
+                raise InvalidCollectionException(
+                    f"Collection {collection_id} does not exist."
+                )
+            self._collection_cache[collection_id] = collections[0]
+        return self._collection_cache[collection_id]
 
 
 def _records(

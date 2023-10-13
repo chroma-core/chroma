@@ -20,6 +20,7 @@ from chromadb.auth.registry import resolve_provider
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,17 +77,16 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
             )
             self._auth_provider = cast(ServerAuthProvider, self.require(_cls))
 
+    @trace_method(
+        "FastAPIChromaAuthMiddleware.authenticate", OpenTelemetryGranularity.ALL
+    )
     @override
     def authenticate(
         self, request: ServerAuthenticationRequest[Any]
     ) -> Optional[ServerAuthenticationResponse]:
-        with self._system.require(OpenTelemetryClient).trace(
-            "FastAPIChromaAuthMiddleware.authenticate",
-            OpenTelemetryGranularity.ALL,
-        ):
-            return FastAPIServerAuthenticationResponse(
-                self._auth_provider.authenticate(request)
-            )
+        return FastAPIServerAuthenticationResponse(
+            self._auth_provider.authenticate(request)
+        )
 
     @override
     def ignore_operation(self, verb: str, path: str) -> bool:

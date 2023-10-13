@@ -1,6 +1,6 @@
-from contextlib import contextmanager
+from functools import wraps
 from enum import Enum
-from typing import Any, Dict, Generator
+from typing import Any, Callable, Dict
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -29,6 +29,8 @@ class OpenTelemetryGranularity(Enum):
     ALL = "all"
     """Spans are emitted for almost every method call."""
 
+    # Greater is more restrictive. So "all" < "operation" (and everything else),
+    # "none" > everything.
     def __lt__(self, other: Any) -> bool:
         """Compare two granularities."""
         order = [
@@ -43,44 +45,86 @@ class OpenTelemetryGranularity(Enum):
 class OpenTelemetryClient(Component):
     def __init__(self, system: System):
         super().__init__(system)
-        resource = Resource(
-            attributes={SERVICE_NAME: str(system.settings.chroma_otel_service_name)}
+        otel_init(
+            system.settings.chroma_otel_service_name,
+            system.settings.chroma_otel_collection_endpoint,
+            system.settings.chroma_otel_collection_headers,
+            OpenTelemetryGranularity(system.settings.chroma_otel_granularity),
         )
-        provider = TracerProvider(resource=resource)
-        provider.add_span_processor(
-            BatchSpanProcessor(
-                OTLPSpanExporter(
-                    endpoint=str(system.settings.chroma_otel_collection_endpoint),
-                    headers=system.settings.chroma_otel_collection_headers,
-                )
+
+
+tracer: trace.Tracer | None = None
+granularity: OpenTelemetryGranularity = OpenTelemetryGranularity("none")
+
+
+def otel_init(
+    otel_service_name: str | None,
+    otel_collection_endpoint: str | None,
+    otel_collection_headers: Dict[str, str] | None,
+    otel_granularity: OpenTelemetryGranularity,
+) -> None:
+    """Initializes module-level state for OpenTelemetry."""
+    if otel_granularity == OpenTelemetryGranularity.NONE:
+        return
+    resource = Resource(attributes={SERVICE_NAME: str(otel_service_name)})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            # TODO: we may eventually want to make this configurable.
+            OTLPSpanExporter(
+                endpoint=str(otel_collection_endpoint),
+                headers=otel_collection_headers,
             )
         )
-        trace.set_tracer_provider(provider)
-        self.tracer = trace.get_tracer(__name__)
-        self.trace_granularity = OpenTelemetryGranularity(
-            system.settings.chroma_otel_granularity or OpenTelemetryGranularity.NONE
-        )
+    )
+    trace.set_tracer_provider(provider)
 
-    @contextmanager
-    def trace(
-        self, name: str, granularity: OpenTelemetryGranularity, **kwargs: Dict[Any, Any]
-    ) -> Generator[Any, Any, Any]:
-        if self.trace_granularity > granularity:
-            yield
-            return
-        if "attributes" not in kwargs:
-            kwargs["attributes"] = {}
-        if "granularity" not in kwargs["attributes"]:
-            kwargs["attributes"]["granularity"] = granularity.value
-        kwargs["attributes"] = self._transform_attributes(kwargs["attributes"])
-        with self.tracer.start_as_current_span(name, **kwargs):  # type: ignore
-            yield
+    global tracer, granularity
+    tracer = trace.get_tracer(__name__)
+    granularity = otel_granularity
 
-    def _transform_attributes(self, attributes: Dict[str, Any]) -> Dict[str, str]:
-        """Make an attributes dict suitable for passing to opentelemetry."""
-        transformed = {}
-        for k, v in attributes.items():
-            if v is not None:
-                # We may want to record values of 0
-                transformed[k] = str(v)
-        return transformed
+
+def trace_method(
+    trace_name: str,
+    trace_granularity: OpenTelemetryGranularity,
+    attributes: Dict[str, Any] = {},
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """A decorator that traces a method."""
+
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(f)
+        def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+            global tracer, granularity, _transform_attributes
+            if trace_granularity < granularity:
+                return f(*args, **kwargs)
+            if not tracer:
+                return
+            with tracer.start_as_current_span(
+                trace_name, attributes=_transform_attributes(attributes)
+            ):
+                return f(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def add_attributes_to_current_span(attributes: Dict[str, Any]) -> None:
+    """Add attributes to the current span."""
+    global tracer, granularity, _transform_attributes
+    if granularity == OpenTelemetryGranularity.NONE:
+        return
+    if not tracer:
+        return
+    span = trace.get_current_span()
+    span.set_attributes(_transform_attributes(attributes))  # type: ignore
+
+
+def _transform_attributes(attributes: Dict[str, Any]) -> Dict[str, str]:
+    """Make an attributes dict suitable for passing to opentelemetry."""
+    transformed = {}
+    for k, v in attributes.items():
+        if v is not None:
+            # We may want to record values of 0
+            transformed[k] = str(v)
+    return transformed

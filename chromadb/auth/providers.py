@@ -18,6 +18,7 @@ from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    trace_method,
 )
 
 T = TypeVar("T")
@@ -38,29 +39,29 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
                 "The bcrypt python package is not installed. Please install it with `pip install bcrypt`"
             )
 
+    @trace_method(
+        "HtpasswdServerAuthCredentialsProvider.validate_credentials",
+        OpenTelemetryGranularity.ALL,
+    )
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
-        with self._system.require(OpenTelemetryClient).trace(
-            "HtpasswdServerAuthCredentialsProvider.validate_credentials",
-            OpenTelemetryGranularity.ALL,
-        ):
-            _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
-            if len(_creds) != 2:
-                logger.error(
-                    "Returned credentials did match expected format: dict[username:SecretStr, password: SecretStr]"
-                )
-                return False
-            if "username" not in _creds or "password" not in _creds:
-                logger.error("Returned credentials do not contain username or password")
-                return False
-            _usr_check = bool(
-                _creds["username"].get_secret_value()
-                == self._creds["username"].get_secret_value()
+        _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
+        if len(_creds) != 2:
+            logger.error(
+                "Returned credentials did match expected format: dict[username:SecretStr, password: SecretStr]"
             )
-            return _usr_check and self.bc.checkpw(
-                _creds["password"].get_secret_value().encode("utf-8"),
-                self._creds["password"].get_secret_value().encode("utf-8"),
-            )
+            return False
+        if "username" not in _creds or "password" not in _creds:
+            logger.error("Returned credentials do not contain username or password")
+            return False
+        _usr_check = bool(
+            _creds["username"].get_secret_value()
+            == self._creds["username"].get_secret_value()
+        )
+        return _usr_check and self.bc.checkpw(
+            _creds["password"].get_secret_value().encode("utf-8"),
+            self._creds["password"].get_secret_value().encode("utf-8"),
+        )
 
 
 @register_provider("htpasswd_file")
