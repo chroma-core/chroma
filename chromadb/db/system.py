@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 from uuid import UUID
 from chromadb.types import (
     Collection,
@@ -59,9 +59,17 @@ class SysDB(Component):
         name: str,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
-    ) -> Collection:
+        get_or_create: bool = False,
+    ) -> Tuple[Collection, bool]:
         """Create a new collection any associated resources
-        (Such as the necessary topics) in the SysDB."""
+        (Such as the necessary topics) in the SysDB. If get_or_create is True, the
+        collectionwill be created if one with the same name does not exist.
+        The metadata will be updated using the same protocol as update_collection. If get_or_create
+        is False and the collection already exists, a error will be raised.
+
+        Returns a tuple of the created collection and a boolean indicating whether the
+        collection was created or not.
+        """
         pass
 
     @abstractmethod

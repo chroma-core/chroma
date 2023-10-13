@@ -105,39 +105,28 @@ class SegmentAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        existing = self._sysdb.get_collections(name=name)
-
         if metadata is not None:
             validate_metadata(metadata)
-
-        if existing:
-            if get_or_create:
-                if metadata and existing[0]["metadata"] != metadata:
-                    self._modify(id=existing[0]["id"], new_metadata=metadata)
-                    existing = self._sysdb.get_collections(id=existing[0]["id"])
-                return Collection(
-                    client=self,
-                    id=existing[0]["id"],
-                    name=existing[0]["name"],
-                    metadata=existing[0]["metadata"],  # type: ignore
-                    embedding_function=embedding_function,
-                )
-            else:
-                raise ValueError(f"Collection {name} already exists.")
 
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
         id = uuid4()
 
-        coll = self._sysdb.create_collection(
-            id=id, name=name, metadata=metadata, dimension=None
+        coll, created = self._sysdb.create_collection(
+            id=id,
+            name=name,
+            metadata=metadata,
+            dimension=None,
+            get_or_create=get_or_create,
         )
-        segments = self._manager.create_segments(coll)
 
-        for segment in segments:
-            self._sysdb.create_segment(segment)
+        if created:
+            segments = self._manager.create_segments(coll)
+            for segment in segments:
+                self._sysdb.create_segment(segment)
 
+        # TODO: This event doesn't capture the get_or_create case appropriately
         self._telemetry_client.capture(
             ClientCreateCollectionEvent(
                 collection_uuid=str(id),
@@ -147,9 +136,9 @@ class SegmentAPI(API):
 
         return Collection(
             client=self,
-            id=id,
+            id=coll["id"],
             name=name,
-            metadata=metadata,
+            metadata=coll["metadata"],  # type: ignore
             embedding_function=embedding_function,
         )
 

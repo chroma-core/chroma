@@ -60,20 +60,28 @@ class UpdateSegmentRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., reset_topic: bool = ..., collection: _Optional[str] = ..., reset_collection: bool = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class CreateCollectionRequest(_message.Message):
-    __slots__ = ["collection", "get_or_create"]
-    COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ["id", "name", "metadata", "dimension", "get_or_create"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    DIMENSION_FIELD_NUMBER: _ClassVar[int]
     GET_OR_CREATE_FIELD_NUMBER: _ClassVar[int]
-    collection: _chroma_pb2.Collection
+    id: str
+    name: str
+    metadata: _chroma_pb2.UpdateMetadata
+    dimension: int
     get_or_create: bool
-    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., get_or_create: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ...) -> None: ...
 
 class CreateCollectionResponse(_message.Message):
-    __slots__ = ["collection", "status"]
+    __slots__ = ["collection", "created", "status"]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    CREATED_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     collection: _chroma_pb2.Collection
+    created: bool
     status: _chroma_pb2.Status
-    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class DeleteCollectionRequest(_message.Message):
     __slots__ = ["id"]

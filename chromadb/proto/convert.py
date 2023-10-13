@@ -197,7 +197,9 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
-        dimension=collection.dimension if collection.HasField("dimension") else None,
+        dimension=collection.dimension
+        if collection.HasField("dimension") and collection.dimension
+        else None,
     )
 
 

@@ -220,6 +220,82 @@ def test_update_collections(sysdb: SysDB) -> None:
     assert result == [coll]
 
 
+def test_get_or_create_collection(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # get_or_create = True returns existing collection
+    collection = sample_collections[0]
+
+    sysdb.create_collection(
+        id=collection["id"],
+        name=collection["name"],
+        metadata=collection["metadata"],
+        dimension=collection["dimension"],
+    )
+
+    result, created = sysdb.create_collection(
+        name=collection["name"],
+        id=uuid.uuid4(),
+        get_or_create=True,
+        metadata=collection["metadata"],
+    )
+    assert result == collection
+
+    # Only one collection with the same name exists
+    get_result = sysdb.get_collections(name=collection["name"])
+    assert get_result == [collection]
+
+    # get_or_create = True creates new collection
+    result, created = sysdb.create_collection(
+        name=sample_collections[1]["name"],
+        id=sample_collections[1]["id"],
+        get_or_create=True,
+        metadata=sample_collections[1]["metadata"],
+    )
+    assert result == sample_collections[1]
+
+    # get_or_create = False creates new collection
+    result, created = sysdb.create_collection(
+        name=sample_collections[2]["name"],
+        id=sample_collections[2]["id"],
+        get_or_create=False,
+        metadata=sample_collections[2]["metadata"],
+    )
+    assert result == sample_collections[2]
+
+    # get_or_create = False fails if collection already exists
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_collection(
+            name=sample_collections[2]["name"],
+            id=sample_collections[2]["id"],
+            get_or_create=False,
+            metadata=collection["metadata"],
+        )
+
+    # get_or_create = True overwrites metadata
+    overlayed_metadata: Dict[str, Union[str, int, float]] = {
+        "test_new_str": "new_str",
+        "test_int": 1,
+    }
+    result, created = sysdb.create_collection(
+        name=sample_collections[2]["name"],
+        id=sample_collections[2]["id"],
+        get_or_create=True,
+        metadata=overlayed_metadata,
+    )
+
+    assert result["metadata"] == overlayed_metadata
+
+    # get_or_create = False with None metadata does not overwrite metadata
+    result, created = sysdb.create_collection(
+        name=sample_collections[2]["name"],
+        id=sample_collections[2]["id"],
+        get_or_create=True,
+        metadata=None,
+    )
+    assert result["metadata"] == overlayed_metadata
+
+
 sample_segments = [
     Segment(
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
