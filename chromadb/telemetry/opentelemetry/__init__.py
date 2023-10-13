@@ -1,6 +1,6 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -53,14 +53,14 @@ class OpenTelemetryClient(Component):
         )
 
 
-tracer: trace.Tracer | None = None
+tracer: Optional[trace.Tracer] = None
 granularity: OpenTelemetryGranularity = OpenTelemetryGranularity("none")
 
 
 def otel_init(
-    otel_service_name: str | None,
-    otel_collection_endpoint: str | None,
-    otel_collection_headers: Dict[str, str] | None,
+    otel_service_name: Optional[str],
+    otel_collection_endpoint: Optional[str],
+    otel_collection_headers: Optional[Dict[str, str]],
     otel_granularity: OpenTelemetryGranularity,
 ) -> None:
     """Initializes module-level state for OpenTelemetry."""
