@@ -1,5 +1,5 @@
-from chromadb.api import API
-from chromadb.config import Settings, System
+from chromadb.api import ServerAPI
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
@@ -71,7 +71,7 @@ def check_index_name(index_name: str) -> None:
         raise ValueError(msg)
 
 
-class SegmentAPI(API):
+class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
 
     _settings: Settings
@@ -104,6 +104,8 @@ class SegmentAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         if metadata is not None:
             validate_metadata(metadata)
@@ -148,6 +150,8 @@ class SegmentAPI(API):
         name: str,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self.create_collection(
             name=name,
@@ -164,6 +168,8 @@ class SegmentAPI(API):
         self,
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
@@ -179,7 +185,11 @@ class SegmentAPI(API):
             raise ValueError(f"Collection {name} does not exist.")
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[Collection]:
         collections = []
         db_collections = self._sysdb.get_collections()
         for db_collection in db_collections:
@@ -199,6 +209,8 @@ class SegmentAPI(API):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
@@ -217,7 +229,12 @@ class SegmentAPI(API):
             self._sysdb.update_collection(id, metadata=new_metadata)
 
     @override
-    def delete_collection(self, name: str) -> None:
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
         existing = self._sysdb.get_collections(name=name)
 
         if existing:
@@ -237,6 +254,8 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
@@ -274,6 +293,8 @@ class SegmentAPI(API):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
@@ -313,6 +334,8 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
@@ -347,6 +370,8 @@ class SegmentAPI(API):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
@@ -414,6 +439,8 @@ class SegmentAPI(API):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> IDs:
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
@@ -469,7 +496,12 @@ class SegmentAPI(API):
         return ids_to_delete
 
     @override
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
@@ -482,6 +514,8 @@ class SegmentAPI(API):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         where = validate_where(where) if where is not None and len(where) > 0 else where
         where_document = (
@@ -574,7 +608,13 @@ class SegmentAPI(API):
         )
 
     @override
-    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
         return self._get(collection_id, limit=n)
 
     @override

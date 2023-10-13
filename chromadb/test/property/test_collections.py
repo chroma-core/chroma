@@ -2,7 +2,7 @@ import pytest
 import logging
 import hypothesis.strategies as st
 import chromadb.test.property.strategies as strategies
-from chromadb.api import API
+from chromadb.api import ClientAPI
 import chromadb.api.types as types
 from hypothesis.stateful import (
     Bundle,
@@ -23,7 +23,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
     collections = Bundle("collections")
 
-    def __init__(self, api: API):
+    def __init__(self, api: ClientAPI):
         super().__init__()
         self.model = {}
         self.api = api
@@ -203,6 +203,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return multiple(coll)
 
 
-def test_collections(caplog: pytest.LogCaptureFixture, api: API) -> None:
+def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore

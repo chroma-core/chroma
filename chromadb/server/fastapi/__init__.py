@@ -15,9 +15,10 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
 )
-from chromadb.config import Settings
+from chromadb.config import Settings, System
 import chromadb.server
 import chromadb.api
+from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
@@ -99,12 +100,15 @@ class ChromaAPIRouter(fastapi.APIRouter):
         super().add_api_route(path, *args, **kwargs)
 
 
+# TODO: add tenant/namespace to all routes
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
         Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
-        self._api: chromadb.api.API = chromadb.Client(settings)
+        self._system = System(settings)
+        self._api: ServerAPI = self._system.instance(ServerAPI)
+        self._system.start()
 
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(

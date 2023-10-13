@@ -63,7 +63,8 @@ _legacy_config_values = {
 
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
-    "chromadb.api.API": "chroma_api_impl",
+    "chromadb.api.API": "chroma_api_impl",  # NOTE: this is to support legacy api construction. Use ServerAPI instead
+    "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
@@ -73,6 +74,9 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
 }
+
+DEFAULT_TENANT = "default"
+DEFAULT_DATABASE = "default"
 
 
 class Settings(BaseSettings):  # type: ignore

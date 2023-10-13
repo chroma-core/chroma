@@ -33,19 +33,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from chromadb.api import API
+    from chromadb.api import ServerAPI
 
 
 class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
-    _client: "API" = PrivateAttr()
+    _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
+
+    # TODO: STORE THE TENANT AND NAMESPACE IN THE COLLECTION OBJECT
 
     def __init__(
         self,
-        client: "API",
+        client: "ServerAPI",
         name: str,
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),

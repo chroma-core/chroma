@@ -1,11 +1,11 @@
 from typing import List
 import numpy as np
 
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 
 
-def test_many_collections(api: API) -> None:
+def test_many_collections(api: ServerAPI) -> None:
     """Test that we can create a large number of collections and that the system
     # remains responsive."""
     api.reset()

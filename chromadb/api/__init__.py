@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Sequence, Optional
 from uuid import UUID
+
+from overrides import override
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
@@ -19,7 +22,7 @@ from chromadb.config import Component, Settings
 import chromadb.utils.embedding_functions as ef
 
 
-class API(Component, ABC):
+class BaseAPI(ABC):
     @abstractmethod
     def heartbeat(self) -> int:
         """Get the current time in nanoseconds since epoch.
@@ -371,10 +374,10 @@ class API(Component, ABC):
 
     @abstractmethod
     def get_settings(self) -> Settings:
-        """Get the settings used to initialize the client.
+        """Get the settings used to initialize.
 
         Returns:
-            Settings: The settings used to initialize the client.
+            Settings: The settings used to initialize.
 
         """
         pass
@@ -384,4 +387,217 @@ class API(Component, ABC):
     def max_batch_size(self) -> int:
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
+        pass
+
+
+class ClientAPI(BaseAPI, ABC):
+    @abstractmethod
+    def set_database(self, database: str) -> None:
+        """Set the database for the client.
+
+        Args:
+            database: The database to set.
+
+        """
+        pass
+
+    @abstractmethod
+    def set_tenant(self, tenant: str) -> None:
+        """Set the tenant for the client.
+
+        Args:
+            tenant: The tenant to set.
+
+        """
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def clear_system_cache() -> None:
+        """Clear the system cache so that new systems can be created for an existing path.
+        This should only be used for testing purposes."""
+        pass
+
+
+class ServerAPI(BaseAPI, Component):
+    """An API instance that extends the relevant Base API methods by passing
+    in a tenant and database. This is the root component of the Chroma System"""
+
+    @abstractmethod
+    @override
+    def list_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> Sequence[Collection]:
+        pass
+
+    @abstractmethod
+    @override
+    def create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        pass
+
+    @abstractmethod
+    @override
+    def get_collection(
+        self,
+        name: str,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        pass
+
+    @abstractmethod
+    @override
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: Optional[CollectionMetadata] = None,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        pass
+
+    @abstractmethod
+    @override
+    def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    #
+    # ITEM METHODS
+    #
+
+    @abstractmethod
+    @override
+    def _add(
+        self,
+        ids: IDs,
+        collection_id: UUID,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _update(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["embeddings", "metadatas", "documents"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    def _delete(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs],
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> IDs:
+        pass
+
+    @abstractmethod
+    @override
+    def _query(
+        self,
+        collection_id: UUID,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> QueryResult:
         pass

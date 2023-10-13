@@ -9,7 +9,7 @@ from overrides import override
 
 import chromadb.errors as errors
 import chromadb.utils.embedding_functions as ef
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
@@ -30,14 +30,14 @@ from chromadb.auth import (
 )
 from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
-from chromadb.config import Settings, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry import Telemetry
 from urllib.parse import urlparse, urlunparse, quote
 
 logger = logging.getLogger(__name__)
 
 
-class FastAPI(API):
+class FastAPI(ServerAPI):
     _settings: Settings
     _max_batch_size: int = -1
 
@@ -135,7 +135,9 @@ class FastAPI(API):
         return int(resp.json()["nanosecond heartbeat"])
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = self._session.get(self._api_url + "/collections")
         raise_chroma_error(resp)
@@ -153,6 +155,8 @@ class FastAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Creates a collection"""
         resp = self._session.post(
@@ -176,6 +180,8 @@ class FastAPI(API):
         self,
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
         resp = self._session.get(self._api_url + "/collections/" + name)
@@ -195,6 +201,8 @@ class FastAPI(API):
         name: str,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
@@ -206,6 +214,8 @@ class FastAPI(API):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         """Updates a collection"""
         resp = self._session.put(
@@ -215,13 +225,23 @@ class FastAPI(API):
         raise_chroma_error(resp)
 
     @override
-    def delete_collection(self, name: str) -> None:
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
         """Deletes a collection"""
         resp = self._session.delete(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
 
     @override
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         """Returns the number of embeddings in the database"""
         resp = self._session.get(
             self._api_url + "/collections/" + str(collection_id) + "/count"
@@ -230,7 +250,13 @@ class FastAPI(API):
         return cast(int, resp.json())
 
     @override
-    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
         return self._get(
             collection_id,
             limit=n,
@@ -250,6 +276,8 @@ class FastAPI(API):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -286,6 +314,8 @@ class FastAPI(API):
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> IDs:
         """Deletes embeddings from the database"""
         resp = self._session.post(
@@ -329,6 +359,8 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
@@ -348,6 +380,8 @@ class FastAPI(API):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Updates a batch of embeddings in the database
@@ -369,6 +403,8 @@ class FastAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
@@ -391,6 +427,8 @@ class FastAPI(API):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
         resp = self._session.post(
