@@ -621,12 +621,8 @@ class SegmentAPI(API):
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
 
-<<<<<<< HEAD
-        self._product_telemetry_client.capture(
-=======
         query_amount = len(query_embeddings)
-        self._telemetry_client.capture(
->>>>>>> 734b133909f4d2e0e159c02c9447efbd627facbd
+        self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,

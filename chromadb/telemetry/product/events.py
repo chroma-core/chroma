@@ -25,7 +25,7 @@ class ClientCreateCollectionEvent(ProductTelemetryEvent):
         )
 
 
-class CollectionAddEvent(TelemetryEvent):
+class CollectionAddEvent(ProductTelemetryEvent):
     max_batch_size: ClassVar[int] = 100
     batch_size: int
     collection_uuid: str
@@ -89,13 +89,9 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         self.with_documents = with_documents
 
 
-<<<<<<< HEAD:chromadb/telemetry/product/events.py
 class CollectionQueryEvent(ProductTelemetryEvent):
-=======
-class CollectionQueryEvent(TelemetryEvent):
     max_batch_size: ClassVar[int] = 20
     batch_size: int
->>>>>>> 734b133909f4d2e0e159c02c9447efbd627facbd:chromadb/telemetry/events.py
     collection_uuid: str
     query_amount: int
     with_metadata_filter: int
@@ -132,7 +128,7 @@ class CollectionQueryEvent(TelemetryEvent):
     def batch_key(self) -> str:
         return self.collection_uuid + self.name
 
-    def batch(self, other: "TelemetryEvent") -> "CollectionQueryEvent":
+    def batch(self, other: "ProductTelemetryEvent") -> "CollectionQueryEvent":
         if not self.batch_key == other.batch_key:
             raise ValueError("Cannot batch events")
         other = cast(CollectionQueryEvent, other)
