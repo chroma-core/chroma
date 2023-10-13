@@ -439,8 +439,8 @@ class SegmentAPI(API):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
-        self._product_telemetry_client.capture(
         ids_amount = len(ids) if ids else 0
+        self._product_telemetry_client.capture(
             CollectionGetEvent(
                 collection_uuid=str(collection_id),
                 ids_count=ids_amount,
