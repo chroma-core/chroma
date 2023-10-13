@@ -408,13 +408,14 @@ class SegmentAPI(API):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
+        ids_amount = len(ids) if ids else 0
         self._telemetry_client.capture(
             CollectionGetEvent(
                 collection_uuid=str(collection_id),
-                ids_count=len(ids) if ids else 0,
+                ids_count=ids_amount,
                 limit=limit if limit else 0,
-                include_metadata="metadatas" in include,
-                include_documents="documents" in include,
+                include_metadata=ids_amount if "metadatas" in include else 0,
+                include_documents=ids_amount if "documents" in include else 0,
             )
         )
 
@@ -571,16 +572,17 @@ class SegmentAPI(API):
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
 
+        query_amount = len(query_embeddings)
         self._telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
-                query_amount=len(query_embeddings),
+                query_amount=query_amount,
                 n_results=n_results,
-                with_metadata_filter=where is not None,
-                with_document_filter=where_document is not None,
-                include_metadatas="metadatas" in include,
-                include_documents="documents" in include,
-                include_distances="distances" in include,
+                with_metadata_filter=query_amount if where is not None else 0,
+                with_document_filter=query_amount if where_document is not None else 0,
+                include_metadatas=query_amount if "metadatas" in include else 0,
+                include_documents=query_amount if "documents" in include else 0,
+                include_distances=query_amount if "distances" in include else 0,
             )
         )
 
