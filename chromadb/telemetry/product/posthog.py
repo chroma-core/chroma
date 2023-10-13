@@ -53,7 +53,7 @@ class Posthog(ProductTelemetryClient):
             posthog.capture(
                 self.user_id,
                 event.name,
-                {**(event.properties), "chroma_context": self.context},
+                {**event.properties, **self.context},
             )
         except Exception as e:
             logger.error(f"Failed to send telemetry event {event.name}: {e}")
