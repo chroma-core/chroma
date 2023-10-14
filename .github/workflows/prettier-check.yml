@@ -1,0 +1,21 @@
+name: Prettier Check
+
+on:
+  pull_request:
+    paths:
+      - "clients/js/**"
+
+jobs:
+  Prettier-Check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+      - name: Use Node.js
+        uses: actions/setup-node@v2
+      - name: Change to Project Directory
+        run: cd clients/js
+      - name: Install Dependencies
+        run: npm install
+      - name: Check Formatting
+        run: npx prettier --check .
