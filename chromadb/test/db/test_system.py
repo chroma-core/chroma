@@ -7,16 +7,55 @@ from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.config import System, Settings
+from chromadb.config import Component, System, Settings
 from chromadb.db.system import SysDB
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
+sample_collections = [
+    Collection(
+        id=uuid.UUID("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+        name="test_collection_1",
+        topic="test_topic_1",
+        metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+        dimension=128,
+    ),
+    Collection(
+        id=uuid.UUID("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+        name="test_collection_2",
+        topic="test_topic_2",
+        metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
+        dimension=None,
+    ),
+    Collection(
+        id=uuid.UUID("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+        name="test_collection_3",
+        topic="test_topic_3",
+        metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
+        dimension=None,
+    ),
+]
+
+
+class MockAssignmentPolicy(Component):
+    def assign_collection(self, collection_id: uuid.UUID) -> str:
+        for collection in sample_collections:
+            if collection["id"] == collection_id:
+                return collection["topic"]
+        raise ValueError(f"Unknown collection ID: {collection_id}")
+
 
 def sqlite() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB"""
-    db = SqliteDB(System(Settings(allow_reset=True)))
+    db = SqliteDB(
+        System(
+            Settings(
+                allow_reset=True,
+                chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+            )
+        )
+    )
     db.start()
     yield db
     db.stop()
@@ -27,7 +66,12 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
     save_path = tempfile.mkdtemp()
     db = SqliteDB(
         System(
-            Settings(allow_reset=True, is_persistent=True, persist_directory=save_path)
+            Settings(
+                allow_reset=True,
+                is_persistent=True,
+                persist_directory=save_path,
+                chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+            )
         )
     )
     db.start()
@@ -40,7 +84,13 @@ def sqlite_persistent() -> Generator[SysDB, None, None]:
 def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     """Fixture generator for sqlite DB that creates a mock grpc sysdb server
     and a grpc client that connects to it."""
-    system = System(Settings(allow_reset=True, chroma_server_grpc_port=50051))
+    system = System(
+        Settings(
+            allow_reset=True,
+            chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+            chroma_server_grpc_port=50051,
+        )
+    )
     system.instance(GrpcMockSysDB)
     client = system.instance(GrpcSysDB)
     system.start()
@@ -57,36 +107,16 @@ def sysdb(request: FixtureRequest) -> Generator[SysDB, None, None]:
     yield next(request.param())
 
 
-sample_collections = [
-    Collection(
-        id=uuid.uuid4(),
-        name="test_collection_1",
-        topic="test_topic_1",
-        metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
-        dimension=128,
-    ),
-    Collection(
-        id=uuid.uuid4(),
-        name="test_collection_2",
-        topic="test_topic_2",
-        metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
-        dimension=None,
-    ),
-    Collection(
-        id=uuid.uuid4(),
-        name="test_collection_3",
-        topic="test_topic_3",
-        metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
-        dimension=None,
-    ),
-]
-
-
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
     for collection in sample_collections:
-        sysdb.create_collection(collection)
+        sysdb.create_collection(
+            id=collection["id"],
+            name=collection["name"],
+            metadata=collection["metadata"],
+            dimension=collection["dimension"],
+        )
 
     results = sysdb.get_collections()
     results = sorted(results, key=lambda c: c["name"])
@@ -95,7 +125,9 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Duplicate create fails
     with pytest.raises(UniqueConstraintError):
-        sysdb.create_collection(sample_collections[0])
+        sysdb.create_collection(
+            name=sample_collections[0]["name"], id=sample_collections[0]["id"]
+        )
 
     # Find by name
     for collection in sample_collections:
@@ -140,22 +172,22 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
 
 def test_update_collections(sysdb: SysDB) -> None:
-    metadata: Dict[str, Union[str, int, float]] = {
-        "test_str": "str1",
-        "test_int": 1,
-        "test_float": 1.3,
-    }
     coll = Collection(
-        id=uuid.uuid4(),
-        name="test_collection_1",
-        topic="test_topic_1",
-        metadata=metadata,
-        dimension=None,
+        name=sample_collections[0]["name"],
+        id=sample_collections[0]["id"],
+        topic=sample_collections[0]["topic"],
+        metadata=sample_collections[0]["metadata"],
+        dimension=sample_collections[0]["dimension"],
     )
 
     sysdb.reset_state()
 
-    sysdb.create_collection(coll)
+    sysdb.create_collection(
+        id=coll["id"],
+        name=coll["name"],
+        metadata=coll["metadata"],
+        dimension=coll["dimension"],
+    )
 
     # Update name
     coll["name"] = "new_name"
@@ -220,7 +252,12 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
     for collection in sample_collections:
-        sysdb.create_collection(collection)
+        sysdb.create_collection(
+            id=collection["id"],
+            name=collection["name"],
+            metadata=collection["metadata"],
+            dimension=collection["dimension"],
+        )
 
     for segment in sample_segments:
         sysdb.create_segment(segment)
@@ -293,7 +330,9 @@ def test_update_segment(sysdb: SysDB) -> None:
 
     sysdb.reset_state()
     for c in sample_collections:
-        sysdb.create_collection(c)
+        sysdb.create_collection(
+            id=c["id"], name=c["name"], metadata=c["metadata"], dimension=c["dimension"]
+        )
 
     sysdb.create_segment(segment)
 

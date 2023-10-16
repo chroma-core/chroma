@@ -1,7 +1,6 @@
 from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
-from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry import Telemetry
 from chromadb.ingest import Producer
@@ -79,10 +78,7 @@ class SegmentAPI(API):
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
-    # TODO: fire telemetry events
     _telemetry_client: Telemetry
-    _tenant_id: str
-    _topic_ns: str
     _collection_cache: Dict[UUID, t.Collection]
 
     def __init__(self, system: System):
@@ -92,8 +88,6 @@ class SegmentAPI(API):
         self._manager = self.require(SegmentManager)
         self._telemetry_client = self.require(Telemetry)
         self._producer = self.require(Producer)
-        self._tenant_id = system.settings.tenant_id
-        self._topic_ns = system.settings.topic_namespace
         self._collection_cache = {}
 
     @override
@@ -135,15 +129,12 @@ class SegmentAPI(API):
         check_index_name(name)
 
         id = uuid4()
-        coll = t.Collection(
-            id=id, name=name, metadata=metadata, topic=self._topic(id), dimension=None
+
+        coll = self._sysdb.create_collection(
+            id=id, name=name, metadata=metadata, dimension=None
         )
-        # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
-        # and the producer should just be responsible for publishing messages. Coordinator should
-        # be responsible for all management of topics.
-        self._producer.create_topic(coll["topic"])
         segments = self._manager.create_segments(coll)
-        self._sysdb.create_collection(coll)
+
         for segment in segments:
             self._sysdb.create_segment(segment)
 
@@ -244,7 +235,6 @@ class SegmentAPI(API):
             self._sysdb.delete_collection(existing[0]["id"])
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
-            self._producer.delete_topic(existing[0]["topic"])
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
         else:
@@ -620,13 +610,8 @@ class SegmentAPI(API):
     def max_batch_size(self) -> int:
         return self._producer.max_batch_size
 
-    def _topic(self, collection_id: UUID) -> str:
-        return create_topic_name(self._tenant_id, self._topic_ns, str(collection_id))
-
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
-    # TODO: promote collection -> topic to a base class method so that it can be
-    # used for channel assignment in the distributed version of the system.
     def _validate_embedding_record(
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:
