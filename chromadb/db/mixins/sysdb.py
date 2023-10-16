@@ -87,8 +87,23 @@ class SqlSysDB(SqlDB, SysDB):
         name: str,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
-    ) -> Collection:
-        """Create a new collection and the associate topic"""
+        get_or_create: bool = False,
+    ) -> Tuple[Collection, bool]:
+        if id is None and not get_or_create:
+            raise ValueError("id must be specified if get_or_create is False")
+
+        existing = self.get_collections(name=name)
+        if existing:
+            if get_or_create:
+                collection = existing[0]
+                if metadata is not None and collection["metadata"] != metadata:
+                    self.update_collection(
+                        collection["id"],
+                        metadata=metadata,
+                    )
+                return self.get_collections(id=collection["id"])[0], False
+            else:
+                raise UniqueConstraintError(f"Collection {name} already exists")
 
         topic = self._assignment_policy.assign_collection(id)
         collection = Collection(
@@ -129,7 +144,7 @@ class SqlSysDB(SqlDB, SysDB):
                     collection["id"],
                     collection["metadata"],
                 )
-        return collection
+        return collection, True
 
     @override
     def get_segments(

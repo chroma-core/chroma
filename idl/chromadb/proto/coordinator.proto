@@ -44,13 +44,17 @@ message UpdateSegmentRequest {
 }
 
 message CreateCollectionRequest {
-  Collection collection = 1;
-  optional bool get_or_create = 2;
+  string id = 1;
+  string name = 2;
+  optional UpdateMetadata metadata = 3;
+  optional int32 dimension = 4;
+  optional bool get_or_create = 5;
 }
 
 message CreateCollectionResponse {
   Collection collection = 1;
-  Status status = 2;
+  bool created = 2;
+  Status status = 3;
 }
 
 message DeleteCollectionRequest {

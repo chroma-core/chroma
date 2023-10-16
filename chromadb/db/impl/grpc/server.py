@@ -2,9 +2,10 @@ from concurrent import futures
 from typing import Any, Dict, cast
 from uuid import UUID
 from overrides import overrides
+from chromadb.ingest import CollectionAssignmentPolicy
 from chromadb.config import Component, System
 from chromadb.proto.convert import (
-    from_proto_collection,
+    from_proto_metadata,
     from_proto_update_metadata,
     from_proto_segment,
     from_proto_segment_scope,
@@ -40,11 +41,13 @@ class GrpcMockSysDB(SysDBServicer, Component):
 
     _server: grpc.Server
     _server_port: int
+    _assignment_policy: CollectionAssignmentPolicy
     _segments: Dict[str, Segment] = {}
     _collections: Dict[str, Collection] = {}
 
     def __init__(self, system: System):
         self._server_port = system.settings.require("chroma_server_grpc_port")
+        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         return super().__init__(system)
 
     @overrides
@@ -167,18 +170,42 @@ class GrpcMockSysDB(SysDBServicer, Component):
     def CreateCollection(
         self, request: CreateCollectionRequest, context: grpc.ServicerContext
     ) -> CreateCollectionResponse:
-        collection = from_proto_collection(request.collection)
-        if collection["id"].hex in self._collections:
+        collection_name = request.name
+        matches = [
+            c for c in self._collections.values() if c["name"] == collection_name
+        ]
+        assert len(matches) <= 1
+        if len(matches) > 0:
+            if request.get_or_create:
+                existing_collection = matches[0]
+                if request.HasField("metadata"):
+                    existing_collection["metadata"] = from_proto_metadata(
+                        request.metadata
+                    )
+                return CreateCollectionResponse(
+                    status=proto.Status(code=200),
+                    collection=to_proto_collection(existing_collection),
+                    created=False,
+                )
             return CreateCollectionResponse(
                 status=proto.Status(
-                    code=409, reason=f"Collection {collection['id']} already exists"
+                    code=409, reason=f"Collection {request.name} already exists"
                 )
             )
 
-        self._collections[collection["id"].hex] = collection
+        id = UUID(hex=request.id)
+        new_collection = Collection(
+            id=id,
+            name=request.name,
+            metadata=from_proto_metadata(request.metadata),
+            dimension=request.dimension,
+            topic=self._assignment_policy.assign_collection(id),
+        )
+        self._collections[request.id] = new_collection
         return CreateCollectionResponse(
             status=proto.Status(code=200),
-            collection=to_proto_collection(collection),
+            collection=to_proto_collection(new_collection),
+            created=True,
         )
 
     @overrides(check_signature=False)
