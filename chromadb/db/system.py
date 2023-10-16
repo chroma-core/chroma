@@ -53,7 +53,7 @@ class SysDB(Component):
 
     @abstractmethod
     def create_collection(self, collection: Collection) -> None:
-        """Create a new topic"""
+        """Create a new collection any associated resources in the SysDB."""
         pass
 
     @abstractmethod
