@@ -19,7 +19,7 @@ class Posthog(ProductTelemetryClient):
         else:
             logger.info(
                 "Anonymized telemetry enabled. See \
-                    https://docs.trychroma.com/product-telemetry for more information."
+                    https://docs.trychroma.com/telemetry for more information."
             )
 
         posthog.project_api_key = "phc_YeUxaojbKk5KPi8hNlx1bBKHzuZ4FDtl67kH1blv8Bh"
