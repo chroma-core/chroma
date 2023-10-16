@@ -109,16 +109,14 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
             raise ValueError("id must be specified if get_or_create is False")
-          
+
         add_attributes_to_current_span(
             {
-                "collection_id": str(collection["id"]),
-                "collection_topic": collection["topic"],
-                "collection_name": collection["name"],
-                "collection_dimension": collection["dimension"],
+                "collection_id": id,
+                "collection_name": name,
             }
         )
-        
+
         existing = self.get_collections(name=name)
         if existing:
             if get_or_create:
