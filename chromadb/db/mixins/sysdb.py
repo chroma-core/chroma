@@ -20,6 +20,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.ingest import CollectionAssignmentPolicy, Producer
 from chromadb.types import (
     OptionalArgument,
     Segment,
@@ -32,11 +33,22 @@ from chromadb.types import (
 
 
 class SqlSysDB(SqlDB, SysDB):
+    _assignment_policy: CollectionAssignmentPolicy
+    # Used only to delete topics on collection deletion.
+    # TODO: refactor to remove this dependency into a separate interface
+    _producer: Producer
+
     def __init__(self, system: System):
+        self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         super().__init__(system)
         self._opentelemetry_client = system.require(OpenTelemetryClient)
 
     @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
+    @override
+    def start(self) -> None:
+        super().start()
+        self._producer = self._system.instance(Producer)
+
     @override
     def create_segment(self, segment: Segment) -> None:
         add_attributes_to_current_span(
@@ -87,8 +99,17 @@ class SqlSysDB(SqlDB, SysDB):
 
     @trace_method("SqlSysDB.create_collection", OpenTelemetryGranularity.ALL)
     @override
-    def create_collection(self, collection: Collection) -> None:
-        """Create a new collection"""
+    def create_collection(
+        self,
+        id: UUID,
+        name: str,
+        metadata: Optional[Metadata] = None,
+        dimension: Optional[int] = None,
+        get_or_create: bool = False,
+    ) -> Tuple[Collection, bool]:
+        if id is None and not get_or_create:
+            raise ValueError("id must be specified if get_or_create is False")
+          
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection["id"]),
@@ -97,6 +118,25 @@ class SqlSysDB(SqlDB, SysDB):
                 "collection_dimension": collection["dimension"],
             }
         )
+        
+        existing = self.get_collections(name=name)
+        if existing:
+            if get_or_create:
+                collection = existing[0]
+                if metadata is not None and collection["metadata"] != metadata:
+                    self.update_collection(
+                        collection["id"],
+                        metadata=metadata,
+                    )
+                return self.get_collections(id=collection["id"])[0], False
+            else:
+                raise UniqueConstraintError(f"Collection {name} already exists")
+
+        topic = self._assignment_policy.assign_collection(id)
+        collection = Collection(
+            id=id, topic=topic, name=name, metadata=metadata, dimension=dimension
+        )
+
         with self.tx() as cur:
             collections = Table("collections")
             insert_collection = (
@@ -131,6 +171,7 @@ class SqlSysDB(SqlDB, SysDB):
                     collection["id"],
                     collection["metadata"],
                 )
+        return collection, True
 
     @trace_method("SqlSysDB.get_segments", OpenTelemetryGranularity.ALL)
     @override
@@ -319,10 +360,11 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
-            sql = sql + " RETURNING id"
+            sql = sql + " RETURNING id, topic"
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+        self._producer.delete_topic(result[1])
 
     @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)
     @override

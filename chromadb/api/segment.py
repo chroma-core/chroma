@@ -1,7 +1,6 @@
 from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
-from chromadb.ingest.impl.utils import create_topic_name
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -99,8 +98,6 @@ class SegmentAPI(API):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
-        self._tenant_id = system.settings.tenant_id
-        self._topic_ns = system.settings.topic_namespace
         self._collection_cache = {}
 
     @override
@@ -119,46 +116,28 @@ class SegmentAPI(API):
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
-        existing = self._sysdb.get_collections(name=name)
-
         if metadata is not None:
             validate_metadata(metadata)
-
-        if existing:
-            if get_or_create:
-                if metadata and existing[0]["metadata"] != metadata:
-                    self._modify(id=existing[0]["id"], new_metadata=metadata)
-                    existing = self._sysdb.get_collections(id=existing[0]["id"])
-                return Collection(
-                    client=self,
-                    id=existing[0]["id"],
-                    name=existing[0]["name"],
-                    metadata=existing[0]["metadata"],  # type: ignore
-                    embedding_function=embedding_function,
-                )
-            else:
-                raise ValueError(f"Collection {name} already exists.")
 
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
         id = uuid4()
-        coll = t.Collection(
+
+        coll, created = self._sysdb.create_collection(
             id=id,
             name=name,
             metadata=metadata,
-            topic=self._topic(id),
             dimension=None,
+            get_or_create=get_or_create,
         )
-        # TODO: Topic creation right now lives in the producer but it should be moved to the coordinator,
-        # and the producer should just be responsible for publishing messages. Coordinator should
-        # be responsible for all management of topics.
-        self._producer.create_topic(coll["topic"])
-        segments = self._manager.create_segments(coll)
-        self._sysdb.create_collection(coll)
-        for segment in segments:
-            self._sysdb.create_segment(segment)
 
+        if created:
+            segments = self._manager.create_segments(coll)
+            for segment in segments:
+                self._sysdb.create_segment(segment)
+
+        # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
             ClientCreateCollectionEvent(
                 collection_uuid=str(id),
@@ -169,9 +148,9 @@ class SegmentAPI(API):
 
         return Collection(
             client=self,
-            id=id,
+            id=coll["id"],
             name=name,
-            metadata=metadata,
+            metadata=coll["metadata"],  # type: ignore
             embedding_function=embedding_function,
         )
 
@@ -264,7 +243,6 @@ class SegmentAPI(API):
             self._sysdb.delete_collection(existing[0]["id"])
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
-            self._producer.delete_topic(existing[0]["topic"])
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
         else:
@@ -670,9 +648,6 @@ class SegmentAPI(API):
     @override
     def max_batch_size(self) -> int:
         return self._producer.max_batch_size
-
-    def _topic(self, collection_id: UUID) -> str:
-        return create_topic_name(self._tenant_id, self._topic_ns, str(collection_id))
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
