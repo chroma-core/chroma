@@ -14,13 +14,12 @@ from chromadb.segment import (
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
-from chromadb.segment import SegmentDirectory
+from chromadb.segment.distributed import SegmentDirectory
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.segment.distributed import SegmentDirectory
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
