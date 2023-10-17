@@ -1,0 +1,9 @@
+apiVersion: v2
+name: chromadb
+description: The AI-native open-source vector embedding database.
+
+type: application
+
+version: 0.1.0
+
+appVersion: "0.4.14"

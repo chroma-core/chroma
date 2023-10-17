@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-server
+  namespace: chroma
+spec:
+  ports:
+    - name: frontend-server
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: frontend-server
+  type: LoadBalancer
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-server
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-server
+  template:
+    metadata:
+      labels:
+        app: frontend-server
+    spec:
+      containers:
+        - name: frontend-server
+          image: "{{ .Values.imageUrl }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: chroma
+              mountPath: /test
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: CHROMA_PRODUCER_IMPL
+              value: "chromadb.ingest.impl.pulsar.PulsarProducer"
+            - name: CHROMA_CONSUMER_IMPL
+              value: "chromadb.ingest.impl.pulsar.PulsarConsumer"
+            - name: CHROMA_SEGMENT_MANAGER_IMPL
+              value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
+            - name: PULSAR_BROKER_URL
+              value: "pulsar.chroma"
+            - name: PULSAR_BROKER_PORT
+              value: "6650"
+            - name: PULSAR_ADMIN_PORT
+              value: "8080"
+          # readinessProbe:
+          #   httpGet:
+          #     path: /healthz
+          #     port: 8000
+          #   initialDelaySeconds: 10
+          #   periodSeconds: 5
+          # livenessProbe:
+          #   httpGet:
+          #     path: /healthz
+          #     port: 8000
+          #   initialDelaySeconds: 20
+          #   periodSeconds: 10
+      # Ephemeral for now
+      volumes:
+        - name: chroma
+          emptyDir: {}
