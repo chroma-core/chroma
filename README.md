@@ -66,7 +66,7 @@ results = collection.query(
 
 ## Features
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
-- __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
+- __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040), [`💙 Haystack`](https://haystack.deepset.ai/integrations/chroma-documentstore) and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, density estimation and more
 - __Free & Open Source__: Apache 2.0 Licensed
