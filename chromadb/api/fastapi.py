@@ -31,7 +31,12 @@ from chromadb.auth import (
 from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
 from chromadb.auth.registry import resolve_provider
 from chromadb.config import Settings, System
-from chromadb.telemetry import Telemetry
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
+from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
 
 logger = logging.getLogger(__name__)
@@ -51,7 +56,8 @@ class FastAPI(API):
         if "/" in host and (not host.startswith("http")):
             raise ValueError(
                 "Invalid URL. "
-                "Seems that you are trying to pass URL as a host but without specifying the protocol. "
+                "Seems that you are trying to pass URL as a host but without \
+                    specifying the protocol. "
                 "Please add http:// or https:// to the host."
             )
 
@@ -92,7 +98,8 @@ class FastAPI(API):
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
 
-        self._telemetry_client = self.require(Telemetry)
+        self._opentelemetry_client = self.require(OpenTelemetryClient)
+        self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
 
         self._api_url = FastAPI.resolve_url(
@@ -127,6 +134,7 @@ class FastAPI(API):
         if self._header is not None:
             self._session.headers.update(self._header)
 
+    @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
@@ -134,6 +142,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return int(resp.json()["nanosecond heartbeat"])
 
+    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @override
     def list_collections(self) -> Sequence[Collection]:
         """Returns a list of all collections"""
@@ -146,6 +155,7 @@ class FastAPI(API):
 
         return collections
 
+    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def create_collection(
         self,
@@ -171,6 +181,7 @@ class FastAPI(API):
             metadata=resp_json["metadata"],
         )
 
+    @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def get_collection(
         self,
@@ -189,6 +200,9 @@ class FastAPI(API):
             metadata=resp_json["metadata"],
         )
 
+    @trace_method(
+        "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
+    )
     @override
     def get_or_create_collection(
         self,
@@ -200,6 +214,7 @@ class FastAPI(API):
             name, metadata, embedding_function, get_or_create=True
         )
 
+    @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
     def _modify(
         self,
@@ -214,12 +229,14 @@ class FastAPI(API):
         )
         raise_chroma_error(resp)
 
+    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(self, name: str) -> None:
         """Deletes a collection"""
         resp = self._session.delete(self._api_url + "/collections/" + name)
         raise_chroma_error(resp)
 
+    @trace_method("FastAPI._count", OpenTelemetryGranularity.OPERATION)
     @override
     def _count(self, collection_id: UUID) -> int:
         """Returns the number of embeddings in the database"""
@@ -229,6 +246,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(int, resp.json())
 
+    @trace_method("FastAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._get(
@@ -237,6 +255,7 @@ class FastAPI(API):
             include=["embeddings", "documents", "metadatas"],
         )
 
+    @trace_method("FastAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
     def _get(
         self,
@@ -279,6 +298,7 @@ class FastAPI(API):
             documents=body.get("documents", None),
         )
 
+    @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
     def _delete(
         self,
@@ -298,6 +318,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(IDs, resp.json())
 
+    @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     def _submit_batch(
         self,
         batch: Tuple[
@@ -321,6 +342,7 @@ class FastAPI(API):
         )
         return resp
 
+    @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
     @override
     def _add(
         self,
@@ -340,6 +362,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return True
 
+    @trace_method("FastAPI._update", OpenTelemetryGranularity.ALL)
     @override
     def _update(
         self,
@@ -361,6 +384,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
+    @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
     @override
     def _upsert(
         self,
@@ -382,6 +406,7 @@ class FastAPI(API):
         resp.raise_for_status()
         return True
 
+    @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)
     @override
     def _query(
         self,
@@ -417,6 +442,7 @@ class FastAPI(API):
             documents=body.get("documents", None),
         )
 
+    @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     def reset(self) -> bool:
         """Resets the database"""
@@ -424,6 +450,7 @@ class FastAPI(API):
         raise_chroma_error(resp)
         return cast(bool, resp.json())
 
+    @trace_method("FastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
@@ -437,6 +464,7 @@ class FastAPI(API):
         return self._settings
 
     @property
+    @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     def max_batch_size(self) -> int:
         if self._max_batch_size == -1:

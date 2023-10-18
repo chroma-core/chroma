@@ -35,8 +35,8 @@ __all__ = [
     "QueryResult",
     "GetResult",
 ]
-from chromadb.telemetry.events import ClientStartEvent
-from chromadb.telemetry import Telemetry
+from chromadb.telemetry.product.events import ClientStartEvent
+from chromadb.telemetry.product import ProductTelemetryClient
 
 
 logger = logging.getLogger(__name__)
@@ -56,12 +56,14 @@ except ImportError:
 is_client = False
 try:
     from chromadb.is_thin_client import is_thin_client  # type: ignore
+
     is_client = is_thin_client
 except ImportError:
     is_client = False
 
 if not is_client:
     import sqlite3
+
     if sqlite3.sqlite_version_info < (3, 35, 0):
         if IN_COLAB:
             # In Colab, hotswap to pysqlite-binary if it's too old
@@ -75,8 +77,11 @@ if not is_client:
             sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
         else:
             raise RuntimeError(
-                "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
-                "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
+                "\033[91mYour system has an unsupported version of sqlite3. Chroma \
+                    requires sqlite3 >= 3.35.0.\033[0m\n"
+                "\033[94mPlease visit \
+                    https://docs.trychroma.com/troubleshooting#sqlite to learn how \
+                    to upgrade.\033[0m"
             )
 
 
@@ -147,12 +152,11 @@ def Client(settings: Settings = __settings) -> API:
 
     system = System(settings)
 
-    telemetry_client = system.instance(Telemetry)
+    product_telemetry_client = system.instance(ProductTelemetryClient)
     api = system.instance(API)
 
     system.start()
 
-    # Submit event for client start
-    telemetry_client.capture(ClientStartEvent())
+    product_telemetry_client.capture(ClientStartEvent())
 
     return api

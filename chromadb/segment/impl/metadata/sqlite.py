@@ -10,6 +10,11 @@ from chromadb.db.base import (
     ParameterValue,
     get_sql,
 )
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     Where,
     WhereDocument,
@@ -39,6 +44,7 @@ class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
+    _opentelemetry_client: OpenTelemetryClient
     _topic: Optional[str]
     _subscription: Optional[UUID]
 
@@ -46,8 +52,10 @@ class SqliteMetadataSegment(MetadataReader):
         self._db = system.instance(SqliteDB)
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._topic = segment["topic"]
 
+    @trace_method("SqliteMetadataSegment.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
         if self._topic:
@@ -56,11 +64,13 @@ class SqliteMetadataSegment(MetadataReader):
                 self._topic, self._write_metadata, start=seq_id
             )
 
+    @trace_method("SqliteMetadataSegment.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:
         if self._subscription:
             self._consumer.unsubscribe(self._subscription)
 
+    @trace_method("SqliteMetadataSegment.max_seqid", OpenTelemetryGranularity.ALL)
     @override
     def max_seqid(self) -> SeqId:
         t = Table("max_seq_id")
@@ -79,6 +89,7 @@ class SqliteMetadataSegment(MetadataReader):
             else:
                 return _decode_seq_id(result[0])
 
+    @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
     def count(self) -> int:
         embeddings_t = Table("embeddings")
@@ -95,6 +106,7 @@ class SqliteMetadataSegment(MetadataReader):
             result = cur.execute(sql, params).fetchone()[0]
             return cast(int, result)
 
+    @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
     @override
     def get_metadata(
         self,
@@ -162,6 +174,7 @@ class SqliteMetadataSegment(MetadataReader):
         for _, group in group_iterator:
             yield self._record(list(group))
 
+    @trace_method("SqliteMetadataSegment._record", OpenTelemetryGranularity.ALL)
     def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
@@ -187,6 +200,7 @@ class SqliteMetadataSegment(MetadataReader):
             metadata=metadata or None,
         )
 
+    @trace_method("SqliteMetadataSegment._insert_record", OpenTelemetryGranularity.ALL)
     def _insert_record(
         self, cur: Cursor, record: EmbeddingRecord, upsert: bool
     ) -> None:
@@ -221,6 +235,9 @@ class SqliteMetadataSegment(MetadataReader):
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])
 
+    @trace_method(
+        "SqliteMetadataSegment._update_metadata", OpenTelemetryGranularity.ALL
+    )
     def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
@@ -238,6 +255,9 @@ class SqliteMetadataSegment(MetadataReader):
 
         self._insert_metadata(cur, id, metadata)
 
+    @trace_method(
+        "SqliteMetadataSegment._insert_metadata", OpenTelemetryGranularity.ALL
+    )
     def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Insert or update each metadata row for a single embedding record"""
         t = Table("embedding_metadata")
@@ -245,7 +265,12 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .into(t)
             .columns(
-                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+                t.id,
+                t.key,
+                t.string_value,
+                t.int_value,
+                t.float_value,
+                t.bool_value,
             )
         )
         for key, value in metadata.items():
@@ -321,6 +346,7 @@ class SqliteMetadataSegment(MetadataReader):
                 cur.execute(sql, params)
                 insert_into_fulltext_search()
 
+    @trace_method("SqliteMetadataSegment._delete_record", OpenTelemetryGranularity.ALL)
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
         t = Table("embeddings")
@@ -351,6 +377,7 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
+    @trace_method("SqliteMetadataSegment._update_record", OpenTelemetryGranularity.ALL)
     def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Update a single EmbeddingRecord in the DB"""
         t = Table("embeddings")
@@ -371,6 +398,7 @@ class SqliteMetadataSegment(MetadataReader):
             if record["metadata"]:
                 self._update_metadata(cur, id, record["metadata"])
 
+    @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
@@ -398,6 +426,9 @@ class SqliteMetadataSegment(MetadataReader):
                 elif record["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
+    @trace_method(
+        "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
+    )
     def _where_map_criterion(
         self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
     ) -> Criterion:
@@ -427,6 +458,9 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(embeddings_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
+    @trace_method(
+        "SqliteMetadataSegment._where_doc_criterion", OpenTelemetryGranularity.ALL
+    )
     def _where_doc_criterion(
         self,
         q: QueryBuilder,
