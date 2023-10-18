@@ -1,6 +1,6 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -95,7 +95,7 @@ def otel_init(
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
-    attributes: Dict[str, str | bool | float | int] = {},
+    attributes: Dict[str, Union[str, bool, float, int]] = {},
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """A decorator that traces a method."""
 
@@ -116,7 +116,7 @@ def trace_method(
 
 
 def add_attributes_to_current_span(
-    attributes: Dict[str, str | bool | float | int]
+    attributes: Dict[str, Union[str, bool, float, int]]
 ) -> None:
     """Add attributes to the current span."""
     global tracer, granularity, _transform_attributes
