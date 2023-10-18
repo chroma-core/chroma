@@ -1,4 +1,4 @@
-from typing import Optional, Union, Sequence, TypeVar, List, Dict, Any, Tuple
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -17,23 +17,77 @@ from chromadb.types import (
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
+T = TypeVar("T")
+OneOrMany = Union[T, List[T]]
+
 ID = str
 IDs = List[ID]
 
+
+def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
+    if isinstance(target, str):
+        # One ID
+        return cast(IDs, [target])
+    # Already a sequence
+    return cast(IDs, target)
+
+
+# Embeddings
 Embedding = Vector
 Embeddings = List[Embedding]
 
+
+def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:
+    if isinstance(target, List):
+        # One Embedding
+        if isinstance(target[0], (int, float)):
+            return cast(Embeddings, [target])
+    # Already a sequence
+    return cast(Embeddings, target)
+
+
+# Metadatas
 Metadatas = List[Metadata]
+
+
+def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
+    if isinstance(target, List):
+        # One Metadata dict
+        if isinstance(target, dict):
+            return cast(Metadatas, [target])
+    # Already a sequence
+    return cast(Metadatas, target)
+
 
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+# Documents
 Document = str
 Documents = List[Document]
 
-Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
-T = TypeVar("T")
-OneOrMany = Union[T, List[T]]
+
+def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
+    # One Document
+    if isinstance(target, str):
+        return cast(Documents, [target])
+    # Already a sequence
+    return cast(Documents, target)
+
+
+# Images
+Image = List[List[float]]
+Images = List[Image]
+
+
+def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
+    if isinstance(target[0][0], float):
+        return cast(Images, [target])
+    # Already a sequence
+    return cast(Images, target)
+
+
+Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
@@ -81,28 +135,12 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-class EmbeddingFunction(Protocol):
-    def __call__(self, texts: Documents) -> Embeddings:
+D = TypeVar("D", contravariant=True)
+
+
+class EmbeddingFunction(Protocol[D]):
+    def __call__(self, input: D) -> Embeddings:
         ...
-
-
-def maybe_cast_one_to_many(
-    target: OneOrMany[Parameter],
-) -> List[Parameter]:
-    """Infers if target is Embedding, Metadata, or Document and casts it to a many object if its one"""
-
-    if isinstance(target, Sequence):
-        # One Document or ID
-        if isinstance(target, str) and target is not None:
-            return [target]
-        # One Embedding
-        if isinstance(target[0], (int, float)):
-            return [target]  # type: ignore
-    # One Metadata dict
-    if isinstance(target, dict):
-        return [target]
-    # Already a sequence
-    return target  # type: ignore
 
 
 def validate_ids(ids: IDs) -> IDs:

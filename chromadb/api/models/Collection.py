@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, cast, List
+from typing import TYPE_CHECKING, Optional, Tuple, cast, List, Any
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
@@ -10,6 +10,7 @@ from chromadb.api.types import (
     Include,
     Metadata,
     Document,
+    Image,
     Where,
     IDs,
     EmbeddingFunction,
@@ -18,7 +19,11 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
-    maybe_cast_one_to_many,
+    maybe_cast_one_to_many_ids,
+    maybe_cast_one_to_many_embedding,
+    maybe_cast_one_to_many_metadata,
+    maybe_cast_one_to_many_document,
+    maybe_cast_one_to_many_image,
     validate_ids,
     validate_include,
     validate_metadata,
@@ -41,14 +46,16 @@ class Collection(BaseModel):
     id: UUID
     metadata: Optional[CollectionMetadata] = None
     _client: "API" = PrivateAttr()
-    _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
+    _embedding_function: Optional[EmbeddingFunction[Any]] = PrivateAttr()
 
     def __init__(
         self,
         client: "API",
         name: str,
         id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Any]
+        ] = ef.DefaultEmbeddingFunction(),
         metadata: Optional[CollectionMetadata] = None,
     ):
         super().__init__(name=name, metadata=metadata, id=id)
@@ -73,13 +80,15 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
     ) -> None:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
-            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
+            images: The images to associate with the embeddings. Optional.
 
         Returns:
             None
@@ -93,8 +102,8 @@ class Collection(BaseModel):
 
         """
 
-        ids, embeddings, metadatas, documents = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents
+        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images
         )
 
         self._client._add(ids, self.id, embeddings, metadatas, documents)
@@ -127,7 +136,7 @@ class Collection(BaseModel):
         where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
+        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
         include = validate_include(include, allow_distances=False)
         return self._client._get(
             self.id,
@@ -183,12 +192,14 @@ class Collection(BaseModel):
             validate_where_document(where_document) if where_document else None
         )
         query_embeddings = (
-            validate_embeddings(maybe_cast_one_to_many(query_embeddings))
+            validate_embeddings(maybe_cast_one_to_many_embedding(query_embeddings))
             if query_embeddings is not None
             else None
         )
         query_texts = (
-            maybe_cast_one_to_many(query_texts) if query_texts is not None else None
+            maybe_cast_one_to_many_document(query_texts)
+            if query_texts is not None
+            else None
         )
         include = validate_include(include, allow_distances=True)
         n_results = validate_n_results(n_results)
@@ -267,8 +278,8 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, require_embeddings_or_documents=False
+        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, require_embeddings_or_data=False
         )
 
         self._client._update(self.id, ids, embeddings, metadatas, documents)
@@ -292,7 +303,7 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents = self._validate_embedding_set(
+        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
             ids, embeddings, metadatas, documents
         )
 
@@ -323,7 +334,7 @@ class Collection(BaseModel):
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
         """
-        ids = validate_ids(maybe_cast_one_to_many(ids)) if ids else None
+        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
         where = validate_where(where) if where else None
         where_document = (
             validate_where_document(where_document) if where_document else None
@@ -337,32 +348,41 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]],
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
-        require_embeddings_or_documents: bool = True,
+        images: Optional[OneOrMany[Image]] = None,
+        require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
         List[Embedding],
         Optional[List[Metadata]],
         Optional[List[Document]],
+        Optional[List[Image]],
     ]:
-        ids = validate_ids(maybe_cast_one_to_many(ids))
+        ids = validate_ids(maybe_cast_one_to_many_ids(ids))
         embeddings = (
-            validate_embeddings(maybe_cast_one_to_many(embeddings))
+            validate_embeddings(maybe_cast_one_to_many_embedding(embeddings))
             if embeddings is not None
             else None
         )
         metadatas = (
-            validate_metadatas(maybe_cast_one_to_many(metadatas))
+            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
             if metadatas is not None
             else None
         )
-        documents = maybe_cast_one_to_many(documents) if documents is not None else None
+        documents = (
+            maybe_cast_one_to_many_document(documents)
+            if documents is not None
+            else None
+        )
+        images = maybe_cast_one_to_many_image(images) if images is not None else None
 
-        # Check that one of embeddings or documents is provided
-        if require_embeddings_or_documents:
-            if embeddings is None and documents is None:
-                raise ValueError(
-                    "You must provide either embeddings or documents, or both"
-                )
+        # Check that one of embeddings or ducuments or images is provided
+        if require_embeddings_or_data:
+            if embeddings is None and documents is None and images is None:
+                raise ValueError("You must provide embeddings, documents, or images.")
+
+        # Only one of documents or images can be provided
+        if documents is not None and images is not None:
+            raise ValueError("You can only provide documents or images, not both.")
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
         if embeddings is not None and len(embeddings) != len(ids):
@@ -391,4 +411,4 @@ class Collection(BaseModel):
         #         "Something went wrong. Embeddings should be computed at this point"
         #     )
 
-        return ids, embeddings, metadatas, documents  # type: ignore
+        return ids, embeddings, metadatas, documents, images  # type: ignore
