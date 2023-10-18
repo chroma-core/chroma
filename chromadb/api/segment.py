@@ -164,7 +164,7 @@ class SegmentAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        return self.create_collection(
+        return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
@@ -373,7 +373,7 @@ class SegmentAPI(API):
     ) -> GetResult:
         add_attributes_to_current_span(
             {
-                "collection_id": collection_id,
+                "collection_id": str(collection_id),
                 "ids_count": len(ids) if ids else 0,
             }
         )
@@ -448,7 +448,7 @@ class SegmentAPI(API):
     ) -> IDs:
         add_attributes_to_current_span(
             {
-                "collection_id": collection_id,
+                "collection_id": str(collection_id),
                 "ids_count": len(ids) if ids else 0,
             }
         )
@@ -509,7 +509,7 @@ class SegmentAPI(API):
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @override
     def _count(self, collection_id: UUID) -> int:
-        add_attributes_to_current_span({"collection_id": collection_id})
+        add_attributes_to_current_span({"collection_id": str(collection_id)})
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
@@ -526,9 +526,9 @@ class SegmentAPI(API):
     ) -> QueryResult:
         add_attributes_to_current_span(
             {
-                "collection_id": collection_id,
+                "collection_id": str(collection_id),
                 "n_results": n_results,
-                "where": where,
+                "where": str(where),
             }
         )
         where = validate_where(where) if where is not None and len(where) > 0 else where
@@ -624,8 +624,8 @@ class SegmentAPI(API):
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
-        add_attributes_to_current_span({"collection_id": collection_id})
-        return self._get(collection_id, limit=n)
+        add_attributes_to_current_span({"collection_id": str(collection_id)})
+        return self._get(collection_id, limit=n)  # type: ignore
 
     @override
     def get_version(self) -> str:
@@ -658,7 +658,7 @@ class SegmentAPI(API):
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
-        add_attributes_to_current_span({"collection_id": collection["id"]})
+        add_attributes_to_current_span({"collection_id": str(collection["id"])})
         if record["embedding"]:
             self._validate_dimension(collection, len(record["embedding"]), update=True)
 

@@ -56,7 +56,7 @@ class SqlSysDB(SqlDB, SysDB):
                 "segment_id": str(segment["id"]),
                 "segment_type": segment["type"],
                 "segment_scope": segment["scope"].value,
-                "segment_topic": segment["topic"],
+                "segment_topic": str(segment["topic"]),
                 "collection": str(segment["collection"]),
             }
         )
@@ -112,7 +112,7 @@ class SqlSysDB(SqlDB, SysDB):
 
         add_attributes_to_current_span(
             {
-                "collection_id": id,
+                "collection_id": str(id),
                 "collection_name": name,
             }
         )
@@ -184,9 +184,9 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "segment_id": str(id),
-                "segment_type": type,
-                "segment_scope": scope.value if scope else None,
-                "segment_topic": topic,
+                "segment_type": type if type else "",
+                "segment_scope": scope.value if scope else "",
+                "segment_topic": topic if topic else "",
                 "collection": str(collection),
             }
         )
@@ -261,8 +261,8 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "collection_id": str(id),
-                "collection_topic": topic,
-                "collection_name": name,
+                "collection_topic": topic if topic else "",
+                "collection_name": name if name else "",
             }
         )
         collections_t = Table("collections")
@@ -376,7 +376,6 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "segment_id": str(id),
-                "segment_topic": topic,
                 "collection": str(collection),
             }
         )
@@ -437,9 +436,6 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "collection_id": str(id),
-                "collection_topic": topic,
-                "collection_name": name,
-                "collection_dimension": dimension,
             }
         )
         collections_t = Table("collections")
@@ -529,7 +525,6 @@ class SqlSysDB(SqlDB, SysDB):
         add_attributes_to_current_span(
             {
                 "num_keys": len(metadata),
-                "clear_keys": clear_keys,
             }
         )
         if clear_keys:

@@ -63,7 +63,15 @@ def otel_init(
     otel_collection_headers: Optional[Dict[str, str]],
     otel_granularity: OpenTelemetryGranularity,
 ) -> None:
-    """Initializes module-level state for OpenTelemetry."""
+    """Initializes module-level state for OpenTelemetry.
+
+    Parameters match the environment variables which configure OTel as documented
+    at https://docs.trychroma.com/observability.
+    - otel_service_name: The name of the service for OTel tagging and aggregation.
+    - otel_collection_endpoint: The endpoint to which OTel spans are sent (e.g. api.honeycomb.com).
+    - otel_collection_headers: The headers to send with OTel spans (e.g. {"x-honeycomb-team": "abc123"}).
+    - otel_granularity: The granularity of the spans to emit.
+    """
     if otel_granularity == OpenTelemetryGranularity.NONE:
         return
     resource = Resource(attributes={SERVICE_NAME: str(otel_service_name)})
@@ -87,7 +95,7 @@ def otel_init(
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
-    attributes: Dict[str, Any] = {},
+    attributes: Dict[str, str | bool | float | int] = {},
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """A decorator that traces a method."""
 
@@ -99,9 +107,7 @@ def trace_method(
                 return f(*args, **kwargs)
             if not tracer:
                 return
-            with tracer.start_as_current_span(
-                trace_name, attributes=_transform_attributes(attributes)
-            ):
+            with tracer.start_as_current_span(trace_name, attributes=attributes):
                 return f(*args, **kwargs)
 
         return wrapper
@@ -109,7 +115,9 @@ def trace_method(
     return decorator
 
 
-def add_attributes_to_current_span(attributes: Dict[str, Any]) -> None:
+def add_attributes_to_current_span(
+    attributes: Dict[str, str | bool | float | int]
+) -> None:
     """Add attributes to the current span."""
     global tracer, granularity, _transform_attributes
     if granularity == OpenTelemetryGranularity.NONE:
@@ -118,13 +126,3 @@ def add_attributes_to_current_span(attributes: Dict[str, Any]) -> None:
         return
     span = trace.get_current_span()
     span.set_attributes(_transform_attributes(attributes))  # type: ignore
-
-
-def _transform_attributes(attributes: Dict[str, Any]) -> Dict[str, str]:
-    """Make an attributes dict suitable for passing to opentelemetry."""
-    transformed = {}
-    for k, v in attributes.items():
-        if v is not None:
-            # We may want to record values of 0
-            transformed[k] = str(v)
-    return transformed
