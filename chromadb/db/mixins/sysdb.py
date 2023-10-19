@@ -4,7 +4,7 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
-from chromadb.config import System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
     Cursor,
     SqlDB,
@@ -40,6 +40,38 @@ class SqlSysDB(SqlDB, SysDB):
     def start(self) -> None:
         super().start()
         self._producer = self._system.instance(Producer)
+
+    @override
+    def create_database(
+        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        with self.tx() as cur:
+            # Get the tenant id for the tenant name and then insert the database with the id, name and tenant id
+            databases = Table("databases")
+            tenants = Table("tenants")
+            insert_database = (
+                self.querybuilder()
+                .into(databases)
+                .columns(databases.id, databases.name, databases.tenant_id)
+                .insert(
+                    ParameterValue(self.uuid_to_db(id)),
+                    ParameterValue(name),
+                    self.querybuilder()
+                    .select(tenants.id)
+                    .from_(tenants)
+                    .where(tenants.id == ParameterValue(tenant)),
+                )
+            )
+            sql, params = get_sql(insert_database, self.parameter_format())
+            try:
+                cur.execute(sql, params)
+            # TODO: database doesn't exist
+            # TODO: tenant doesn't exist
+            # TODO: implement unique constraint error lol...
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(
+                    f"Database {name} already exists for tenant {tenant}"
+                ) from e
 
     @override
     def create_segment(self, segment: Segment) -> None:
@@ -88,11 +120,13 @@ class SqlSysDB(SqlDB, SysDB):
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
             raise ValueError("id must be specified if get_or_create is False")
 
-        existing = self.get_collections(name=name)
+        existing = self.get_collections(name=name, tenant=tenant, database=database)
         if existing:
             if get_or_create:
                 collection = existing[0]
@@ -101,7 +135,12 @@ class SqlSysDB(SqlDB, SysDB):
                         collection["id"],
                         metadata=metadata,
                     )
-                return self.get_collections(id=collection["id"])[0], False
+                return (
+                    self.get_collections(
+                        id=collection["id"], tenant=tenant, database=database
+                    )[0],
+                    False,
+                )
             else:
                 raise UniqueConstraintError(f"Collection {name} already exists")
 
@@ -112,6 +151,8 @@ class SqlSysDB(SqlDB, SysDB):
 
         with self.tx() as cur:
             collections = Table("collections")
+            databases = Table("databases")
+
             insert_collection = (
                 self.querybuilder()
                 .into(collections)
@@ -120,12 +161,19 @@ class SqlSysDB(SqlDB, SysDB):
                     collections.topic,
                     collections.name,
                     collections.dimension,
+                    collections.database_id,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["topic"]),
                     ParameterValue(collection["name"]),
                     ParameterValue(collection["dimension"]),
+                    # Get the database id for the database with the given name and tenant
+                    self.querybuilder()
+                    .select(databases.id)
+                    .from_(databases)
+                    .where(databases.name == ParameterValue(database))
+                    .where(databases.tenant_id == ParameterValue(tenant)),
                 )
             )
             sql, params = get_sql(insert_collection, self.parameter_format())
@@ -220,8 +268,16 @@ class SqlSysDB(SqlDB, SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
+
+        if name is not None and (tenant is None or database is None):
+            raise ValueError(
+                "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+            )
+
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
         q = (
@@ -247,6 +303,17 @@ class SqlSysDB(SqlDB, SysDB):
             q = q.where(collections_t.topic == ParameterValue(topic))
         if name:
             q = q.where(collections_t.name == ParameterValue(name))
+
+        if tenant and database:
+            databases_t = Table("databases")
+            q = q.where(
+                collections_t.database_id
+                == self.querybuilder()
+                .select(databases_t.id)
+                .from_(databases_t)
+                .where(databases_t.name == ParameterValue(database))
+                .where(databases_t.tenant_id == ParameterValue(tenant))
+            )
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
@@ -291,13 +358,27 @@ class SqlSysDB(SqlDB, SysDB):
                 raise NotFoundError(f"Segment {id} not found")
 
     @override
-    def delete_collection(self, id: UUID) -> None:
+    def delete_collection(
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
         """Delete a topic and all associated segments from the SysDB"""
         t = Table("collections")
+        databases_t = Table("databases")
         q = (
             self.querybuilder()
             .from_(t)
             .where(t.id == ParameterValue(self.uuid_to_db(id)))
+            .where(
+                t.database_id
+                == self.querybuilder()
+                .select(databases_t.id)
+                .from_(databases_t)
+                .where(databases_t.name == ParameterValue(database))
+                .where(databases_t.tenant_id == ParameterValue(tenant))
+            )
             .delete()
         )
         with self.tx() as cur:
@@ -391,7 +472,10 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
             if sql:  # pypika emits a blank string if nothing to do
-                cur.execute(sql, params)
+                sql = sql + " RETURNING id"
+                result = cur.execute(sql, params)
+                if not result.fetchone():
+                    raise NotFoundError(f"Collection {id} not found")
 
             # TODO: Update to use better semantics where it's possible to update
             # individual keys without wiping all the existing metadata.

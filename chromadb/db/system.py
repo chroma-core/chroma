@@ -10,11 +10,19 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
-from chromadb.config import Component
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component
 
 
 class SysDB(Component):
     """Data interface for Chroma's System database"""
+
+    @abstractmethod
+    def create_database(
+        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        """Create a new database in the System database. Raises DuplicateError if the Database
+        already exists."""
+        pass
 
     @abstractmethod
     def create_segment(self, segment: Segment) -> None:
@@ -60,6 +68,8 @@ class SysDB(Component):
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         """Create a new collection any associated resources
         (Such as the necessary topics) in the SysDB. If get_or_create is True, the
@@ -73,7 +83,9 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def delete_collection(self, id: UUID) -> None:
+    def delete_collection(
+        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> None:
         """Delete a collection, topic, all associated segments and any associate resources
         from the SysDB and the system at large."""
         pass
@@ -84,8 +96,10 @@ class SysDB(Component):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        """Find collections by id, topic or name"""
+        """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
         pass
 
     @abstractmethod

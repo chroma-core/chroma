@@ -135,6 +135,19 @@ class FastAPI(ServerAPI):
         return int(resp.json()["nanosecond heartbeat"])
 
     @override
+    def create_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> None:
+        """Creates a database"""
+        resp = self._session.post(
+            self._api_url + "/databases",
+            data=json.dumps({"name": name, "tenant": tenant}),
+        )
+        raise_chroma_error(resp)
+
+    @override
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> Sequence[Collection]:
@@ -205,7 +218,12 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self.create_collection(
-            name, metadata, embedding_function, get_or_create=True
+            name,
+            metadata,
+            embedding_function,
+            get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     @override
@@ -214,8 +232,6 @@ class FastAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> None:
         """Updates a collection"""
         resp = self._session.put(
@@ -239,8 +255,6 @@ class FastAPI(ServerAPI):
     def _count(
         self,
         collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp = self._session.get(
@@ -254,8 +268,6 @@ class FastAPI(ServerAPI):
         self,
         collection_id: UUID,
         n: int = 10,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         return self._get(
             collection_id,
@@ -276,8 +288,6 @@ class FastAPI(ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -314,8 +324,6 @@ class FastAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> IDs:
         """Deletes embeddings from the database"""
         resp = self._session.post(
@@ -359,8 +367,6 @@ class FastAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
@@ -380,8 +386,6 @@ class FastAPI(ServerAPI):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Updates a batch of embeddings in the database
@@ -403,8 +407,6 @@ class FastAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
@@ -427,8 +429,6 @@ class FastAPI(ServerAPI):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
         resp = self._session.post(

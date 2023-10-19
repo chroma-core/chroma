@@ -2,7 +2,7 @@ from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 
 from overrides import override
-from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -23,51 +23,17 @@ from chromadb.types import Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
 
-class Client(ClientAPI):
-    """A client for Chroma. This is the main entrypoint for interacting with Chroma.
-    A client internally stores its tenant and database and proxies calls to a
-    Server API instance of Chroma. It treats the Server API and corresponding System
-    as a singleton, so multiple clients connecting to the same resource will share the
-    same API instance.
-
-    Client implementations should be implement their own API-caching strategies.
-    """
-
-    tenant: str = DEFAULT_TENANT
-    database: str = DEFAULT_DATABASE
-
+class SharedSystemClient:
     _identifer_to_system: ClassVar[Dict[str, System]] = {}
     _identifier: str
-    _server: ServerAPI
 
     # region Initialization
-    def __new__(
-        cls,
-        tenant: str = "default",
-        database: str = "default",
-        settings: Settings = Settings(),
-    ) -> "Client":
-        identifier = cls._get_identifier_from_settings(settings)
-        cls._create_system_if_not_exists(identifier, settings)
-        instance = super().__new__(cls)
-        return instance
-
     def __init__(
         self,
-        tenant: str = "default",
-        database: str = "default",
         settings: Settings = Settings(),
     ) -> None:
-        self.tenant = tenant
-        self.database = database
-        self._identifier = self._get_identifier_from_settings(settings)
-
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(ServerAPI)
-
-        # Submit event for a client start
-        telemetry_client = self._system.instance(Telemetry)
-        telemetry_client.capture(ClientStartEvent())
+        self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
+        SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
 
     @classmethod
     def _create_system_if_not_exists(
@@ -116,13 +82,48 @@ class Client(ClientAPI):
         return identifier
 
     @staticmethod
-    @override
     def clear_system_cache() -> None:
-        Client._identifer_to_system = {}
+        SharedSystemClient._identifer_to_system = {}
 
     @property
     def _system(self) -> System:
-        return self._identifer_to_system[self._identifier]
+        return SharedSystemClient._identifer_to_system[self._identifier]
+
+    # endregion
+
+
+class Client(SharedSystemClient, ClientAPI):
+    """A client for Chroma. This is the main entrypoint for interacting with Chroma.
+    A client internally stores its tenant and database and proxies calls to a
+    Server API instance of Chroma. It treats the Server API and corresponding System
+    as a singleton, so multiple clients connecting to the same resource will share the
+    same API instance.
+
+    Client implementations should be implement their own API-caching strategies.
+    """
+
+    tenant: str = DEFAULT_TENANT
+    database: str = DEFAULT_DATABASE
+
+    _server: ServerAPI
+
+    # region Initialization
+    def __init__(
+        self,
+        tenant: str = "default",
+        database: str = "default",
+        settings: Settings = Settings(),
+    ) -> None:
+        super().__init__(settings=settings)
+        self.tenant = tenant
+        self.database = database
+
+        # Get the root system component we want to interact with
+        self._server = self._system.instance(ServerAPI)
+
+        # Submit event for a client start
+        telemetry_client = self._system.instance(Telemetry)
+        telemetry_client.capture(ClientStartEvent())
 
     # endregion
 
@@ -150,6 +151,7 @@ class Client(ClientAPI):
             embedding_function=embedding_function,
             tenant=self.tenant,
             database=self.database,
+            get_or_create=get_or_create,
         )
 
     @override
@@ -191,8 +193,6 @@ class Client(ClientAPI):
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -225,8 +225,6 @@ class Client(ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -244,8 +242,6 @@ class Client(ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -263,16 +259,12 @@ class Client(ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
     def _count(self, collection_id: UUID) -> int:
         return self._server._count(
             collection_id=collection_id,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -280,8 +272,6 @@ class Client(ClientAPI):
         return self._server._peek(
             collection_id=collection_id,
             n=n,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -309,8 +299,6 @@ class Client(ClientAPI):
             page_size=page_size,
             where_document=where_document,
             include=include,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     def _delete(
@@ -325,8 +313,6 @@ class Client(ClientAPI):
             ids=ids,
             where=where,
             where_document=where_document,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -346,8 +332,6 @@ class Client(ClientAPI):
             where=where,
             where_document=where_document,
             include=include,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -380,3 +364,15 @@ class Client(ClientAPI):
         self.tenant = tenant
 
     # endregion
+
+
+class AdminClient(AdminAPI, SharedSystemClient):
+    _server: ServerAPI
+
+    def __init__(self, settings: Settings = Settings()) -> None:
+        super().__init__(settings)
+        self._server = self._system.instance(ServerAPI)
+
+    @override
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        return self._server.create_database(name=name, tenant=tenant)

@@ -7,6 +7,16 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class CreateDatabaseRequest(_message.Message):
+    __slots__ = ["id", "name", "tenant"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    tenant: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
+
 class CreateSegmentRequest(_message.Message):
     __slots__ = ["segment"]
     SEGMENT_FIELD_NUMBER: _ClassVar[int]
@@ -60,18 +70,22 @@ class UpdateSegmentRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., reset_topic: bool = ..., collection: _Optional[str] = ..., reset_collection: bool = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class CreateCollectionRequest(_message.Message):
-    __slots__ = ["id", "name", "metadata", "dimension", "get_or_create"]
+    __slots__ = ["id", "name", "metadata", "dimension", "get_or_create", "tenant", "database"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     GET_OR_CREATE_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    DATABASE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     metadata: _chroma_pb2.UpdateMetadata
     dimension: int
     get_or_create: bool
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ...) -> None: ...
+    tenant: str
+    database: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class CreateCollectionResponse(_message.Message):
     __slots__ = ["collection", "created", "status"]
@@ -84,20 +98,28 @@ class CreateCollectionResponse(_message.Message):
     def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class DeleteCollectionRequest(_message.Message):
-    __slots__ = ["id"]
+    __slots__ = ["id", "tenant", "database"]
     ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    DATABASE_FIELD_NUMBER: _ClassVar[int]
     id: str
-    def __init__(self, id: _Optional[str] = ...) -> None: ...
+    tenant: str
+    database: str
+    def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class GetCollectionsRequest(_message.Message):
-    __slots__ = ["id", "name", "topic"]
+    __slots__ = ["id", "name", "topic", "tenant", "database"]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     TOPIC_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    DATABASE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     topic: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ...) -> None: ...
+    tenant: str
+    database: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class GetCollectionsResponse(_message.Message):
     __slots__ = ["collections", "status"]

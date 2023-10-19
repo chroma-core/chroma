@@ -43,8 +43,6 @@ class Collection(BaseModel):
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
-    # TODO: STORE THE TENANT AND NAMESPACE IN THE COLLECTION OBJECT
-
     def __init__(
         self,
         client: "ServerAPI",

@@ -419,7 +419,19 @@ class ClientAPI(BaseAPI, ABC):
         pass
 
 
-class ServerAPI(BaseAPI, Component):
+class AdminAPI(ABC):
+    @abstractmethod
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Create a new database.
+
+        Args:
+            database: The name of the database to create.
+
+        """
+        pass
+
+
+class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
 
@@ -473,8 +485,6 @@ class ServerAPI(BaseAPI, Component):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> None:
         pass
 
@@ -486,118 +496,4 @@ class ServerAPI(BaseAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        pass
-
-    #
-    # ITEM METHODS
-    #
-
-    @abstractmethod
-    @override
-    def _add(
-        self,
-        ids: IDs,
-        collection_id: UUID,
-        embeddings: Embeddings,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> bool:
-        pass
-
-    @abstractmethod
-    @override
-    def _update(
-        self,
-        collection_id: UUID,
-        ids: IDs,
-        embeddings: Optional[Embeddings] = None,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> bool:
-        pass
-
-    @abstractmethod
-    @override
-    def _upsert(
-        self,
-        collection_id: UUID,
-        ids: IDs,
-        embeddings: Embeddings,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> bool:
-        pass
-
-    @abstractmethod
-    @override
-    def _count(
-        self,
-        collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> int:
-        pass
-
-    @abstractmethod
-    @override
-    def _peek(
-        self,
-        collection_id: UUID,
-        n: int = 10,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> GetResult:
-        pass
-
-    @abstractmethod
-    @override
-    def _get(
-        self,
-        collection_id: UUID,
-        ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        sort: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> GetResult:
-        pass
-
-    @abstractmethod
-    @override
-    def _delete(
-        self,
-        collection_id: UUID,
-        ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> IDs:
-        pass
-
-    @abstractmethod
-    @override
-    def _query(
-        self,
-        collection_id: UUID,
-        query_embeddings: Embeddings,
-        n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> QueryResult:
         pass

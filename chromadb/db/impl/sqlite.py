@@ -4,7 +4,6 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
-from chromadb.utils.delete_file import delete_file
 import sqlite3
 from overrides import override
 import pypika
@@ -139,8 +138,9 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             for row in cur.fetchall():
                 cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
-        if self._is_persistent:
-            delete_file(self._db_file)
+        # TODO: clean this up ---- I don't think its correct or needed
+        # if self._is_persistent:
+        #     delete_file(self._db_file)
         self.start()
         super().reset_state()
 

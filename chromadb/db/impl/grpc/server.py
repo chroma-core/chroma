@@ -16,6 +16,7 @@ import chromadb.proto.chroma_pb2 as proto
 from chromadb.proto.coordinator_pb2 import (
     CreateCollectionRequest,
     CreateCollectionResponse,
+    CreateDatabaseRequest,
     CreateSegmentRequest,
     DeleteCollectionRequest,
     DeleteSegmentRequest,
@@ -43,7 +44,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
     _server_port: int
     _assignment_policy: CollectionAssignmentPolicy
     _segments: Dict[str, Segment] = {}
-    _collections: Dict[str, Collection] = {}
+    _tenants_to_databases_to_collections: Dict[
+        str, Dict[str, Dict[str, Collection]]
+    ] = {}
 
     def __init__(self, system: System):
         self._server_port = system.settings.require("chroma_server_grpc_port")
@@ -66,8 +69,30 @@ class GrpcMockSysDB(SysDBServicer, Component):
     @overrides
     def reset_state(self) -> None:
         self._segments = {}
-        self._collections = {}
+        self._tenants_to_databases_to_collections = {}
+        # Create defaults
+        self._tenants_to_databases_to_collections["default"] = {}
+        self._tenants_to_databases_to_collections["default"]["default"] = {}
         return super().reset_state()
+
+    @overrides(check_signature=False)
+    def CreateDatabase(
+        self, request: CreateDatabaseRequest, context: grpc.ServicerContext
+    ) -> proto.ChromaResponse:
+        tenant = request.tenant
+        database = request.name
+        if tenant not in self._tenants_to_databases_to_collections:
+            return proto.ChromaResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        if database in self._tenants_to_databases_to_collections[tenant]:
+            return proto.ChromaResponse(
+                status=proto.Status(
+                    code=409, reason=f"Database {database} already exists"
+                )
+            )
+        self._tenants_to_databases_to_collections[tenant][database] = {}
+        return proto.ChromaResponse(status=proto.Status(code=200))
 
     # We are forced to use check_signature=False because the generated proto code
     # does not have type annotations for the request and response objects.
@@ -171,9 +196,47 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: CreateCollectionRequest, context: grpc.ServicerContext
     ) -> CreateCollectionResponse:
         collection_name = request.name
-        matches = [
-            c for c in self._collections.values() if c["name"] == collection_name
-        ]
+        tenant = request.tenant
+        database = request.database
+        if tenant not in self._tenants_to_databases_to_collections:
+            return CreateCollectionResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        if database not in self._tenants_to_databases_to_collections[tenant]:
+            return CreateCollectionResponse(
+                status=proto.Status(code=404, reason=f"Database {database} not found")
+            )
+
+        # Check if the collection already exists globally by id
+        for (
+            search_tenant,
+            databases,
+        ) in self._tenants_to_databases_to_collections.items():
+            for search_database, search_collections in databases.items():
+                if request.id in search_collections:
+                    if (
+                        search_tenant != request.tenant
+                        or search_database != request.database
+                    ):
+                        return CreateCollectionResponse(
+                            status=proto.Status(
+                                code=409,
+                                reason=f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
+                            )
+                        )
+                    elif not request.get_or_create:
+                        # If the id exists for this tenant and database, and we are not doing a get_or_create, then
+                        # we should return a 409
+                        return CreateCollectionResponse(
+                            status=proto.Status(
+                                code=409,
+                                reason=f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
+                            )
+                        )
+
+        # Check if the collection already exists in this database by name
+        collections = self._tenants_to_databases_to_collections[tenant][database]
+        matches = [c for c in collections.values() if c["name"] == collection_name]
         assert len(matches) <= 1
         if len(matches) > 0:
             if request.get_or_create:
@@ -201,7 +264,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             dimension=request.dimension,
             topic=self._assignment_policy.assign_collection(id),
         )
-        self._collections[request.id] = new_collection
+        collections[request.id] = new_collection
         return CreateCollectionResponse(
             status=proto.Status(code=200),
             collection=to_proto_collection(new_collection),
@@ -213,8 +276,19 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: DeleteCollectionRequest, context: grpc.ServicerContext
     ) -> proto.ChromaResponse:
         collection_id = request.id
-        if collection_id in self._collections:
-            del self._collections[collection_id]
+        tenant = request.tenant
+        database = request.database
+        if tenant not in self._tenants_to_databases_to_collections:
+            return proto.ChromaResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        if database not in self._tenants_to_databases_to_collections[tenant]:
+            return proto.ChromaResponse(
+                status=proto.Status(code=404, reason=f"Database {database} not found")
+            )
+        collections = self._tenants_to_databases_to_collections[tenant][database]
+        if collection_id in collections:
+            del collections[collection_id]
             return proto.ChromaResponse(status=proto.Status(code=200))
         else:
             return proto.ChromaResponse(
@@ -231,8 +305,20 @@ class GrpcMockSysDB(SysDBServicer, Component):
         target_topic = request.topic if request.HasField("topic") else None
         target_name = request.name if request.HasField("name") else None
 
+        tenant = request.tenant
+        database = request.database
+        if tenant not in self._tenants_to_databases_to_collections:
+            return GetCollectionsResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        if database not in self._tenants_to_databases_to_collections[tenant]:
+            return GetCollectionsResponse(
+                status=proto.Status(code=404, reason=f"Database {database} not found")
+            )
+        collections = self._tenants_to_databases_to_collections[tenant][database]
+
         found_collections = []
-        for collection in self._collections.values():
+        for collection in collections.values():
             if target_id and collection["id"] != target_id:
                 continue
             if target_topic and collection["topic"] != target_topic:
@@ -251,14 +337,21 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: UpdateCollectionRequest, context: grpc.ServicerContext
     ) -> proto.ChromaResponse:
         id_to_update = UUID(request.id)
-        if id_to_update.hex not in self._collections:
+        # Find the collection with this id
+        collections = {}
+        for tenant, databases in self._tenants_to_databases_to_collections.items():
+            for database, maybe_collections in databases.items():
+                if id_to_update.hex in maybe_collections:
+                    collections = maybe_collections
+
+        if id_to_update.hex not in collections:
             return proto.ChromaResponse(
                 status=proto.Status(
                     code=404, reason=f"Collection {id_to_update} not found"
                 )
             )
         else:
-            collection = self._collections[id_to_update.hex]
+            collection = collections[id_to_update.hex]
             if request.HasField("topic"):
                 collection["topic"] = request.topic
             if request.HasField("name"):

@@ -16,6 +16,11 @@ class SysDBStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.CreateDatabase = channel.unary_unary(
+            "/chroma.SysDB/CreateDatabase",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.CreateSegment = channel.unary_unary(
             "/chroma.SysDB/CreateSegment",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
@@ -65,6 +70,12 @@ class SysDBStub(object):
 
 class SysDBServicer(object):
     """Missing associated documentation comment in .proto file."""
+
+    def CreateDatabase(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def CreateSegment(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -123,6 +134,11 @@ class SysDBServicer(object):
 
 def add_SysDBServicer_to_server(servicer, server):
     rpc_method_handlers = {
+        "CreateDatabase": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateDatabase,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
         "CreateSegment": grpc.unary_unary_rpc_method_handler(
             servicer.CreateSegment,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.FromString,
@@ -178,6 +194,35 @@ def add_SysDBServicer_to_server(servicer, server):
 # This class is part of an EXPERIMENTAL API.
 class SysDB(object):
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CreateDatabase(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.SysDB/CreateDatabase",
+            chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
+            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
     def CreateSegment(

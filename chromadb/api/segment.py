@@ -94,6 +94,14 @@ class SegmentAPI(ServerAPI):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @override
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._sysdb.create_database(
+            id=uuid4(),
+            name=name,
+            tenant=tenant,
+        )
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
@@ -121,6 +129,8 @@ class SegmentAPI(ServerAPI):
             metadata=metadata,
             dimension=None,
             get_or_create=get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
         if created:
@@ -158,6 +168,8 @@ class SegmentAPI(ServerAPI):
             metadata=metadata,
             embedding_function=embedding_function,
             get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
@@ -171,7 +183,9 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        existing = self._sysdb.get_collections(name=name)
+        existing = self._sysdb.get_collections(
+            name=name, tenant=tenant, database=database
+        )
 
         if existing:
             return Collection(
@@ -191,7 +205,7 @@ class SegmentAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections()
+        db_collections = self._sysdb.get_collections(tenant=tenant, database=database)
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -209,8 +223,6 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
@@ -235,7 +247,9 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        existing = self._sysdb.get_collections(name=name)
+        existing = self._sysdb.get_collections(
+            name=name, tenant=tenant, database=database
+        )
 
         if existing:
             self._sysdb.delete_collection(existing[0]["id"])
@@ -254,8 +268,6 @@ class SegmentAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
@@ -293,8 +305,6 @@ class SegmentAPI(ServerAPI):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
@@ -334,8 +344,6 @@ class SegmentAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
@@ -370,8 +378,6 @@ class SegmentAPI(ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
@@ -439,8 +445,6 @@ class SegmentAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> IDs:
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
@@ -499,8 +503,6 @@ class SegmentAPI(ServerAPI):
     def _count(
         self,
         collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> int:
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
@@ -514,8 +516,6 @@ class SegmentAPI(ServerAPI):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         where = validate_where(where) if where is not None and len(where) > 0 else where
         where_document = (
@@ -612,8 +612,6 @@ class SegmentAPI(ServerAPI):
         self,
         collection_id: UUID,
         n: int = 10,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         return self._get(collection_id, limit=n)
 

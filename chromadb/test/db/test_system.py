@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import pytest
 from typing import Generator, List, Callable, Dict, Union
+
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.types import Collection, Segment, SegmentScope
@@ -107,6 +108,7 @@ def sysdb(request: FixtureRequest) -> Generator[SysDB, None, None]:
     yield next(request.param())
 
 
+# region Collection tests
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
@@ -296,6 +298,171 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
     assert result["metadata"] == overlayed_metadata
 
 
+def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # Create a new database
+    sysdb.create_database(id=uuid.uuid4(), name="new_database")
+
+    # Create a new collection in the new database
+    sysdb.create_collection(
+        id=sample_collections[0]["id"],
+        name=sample_collections[0]["name"],
+        metadata=sample_collections[0]["metadata"],
+        dimension=sample_collections[0]["dimension"],
+        database="new_database",
+    )
+
+    # Create a new collection with the same id but different name in the new database
+    # and expect an error
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_collection(
+            id=sample_collections[0]["id"],
+            name="new_name",
+            metadata=sample_collections[0]["metadata"],
+            dimension=sample_collections[0]["dimension"],
+            database="new_database",
+            get_or_create=False,
+        )
+
+    # Create a new collection in the default database
+    sysdb.create_collection(
+        id=sample_collections[1]["id"],
+        name=sample_collections[1]["name"],
+        metadata=sample_collections[1]["metadata"],
+        dimension=sample_collections[1]["dimension"],
+    )
+
+    # Check that the new database and collections exist
+    result = sysdb.get_collections(
+        name=sample_collections[0]["name"], database="new_database"
+    )
+    assert len(result) == 1
+    assert result[0] == sample_collections[0]
+
+    # Check that the collection in the default database exists
+    result = sysdb.get_collections(name=sample_collections[1]["name"])
+    assert len(result) == 1
+    assert result[0] == sample_collections[1]
+
+    # Get for a database that doesn't exist with a name that exists in the new database and expect no results
+    assert (
+        len(
+            sysdb.get_collections(
+                name=sample_collections[0]["name"], database="fake_db"
+            )
+        )
+        == 0
+    )
+
+    # Delete the collection in the new database
+    sysdb.delete_collection(id=sample_collections[0]["id"], database="new_database")
+
+    # Check that the collection in the new database was deleted
+    result = sysdb.get_collections(database="new_database")
+    assert len(result) == 0
+
+    # Check that the collection in the default database still exists
+    result = sysdb.get_collections(name=sample_collections[1]["name"])
+    assert len(result) == 1
+    assert result[0] == sample_collections[1]
+
+    # Delete the deleted collection in the default database and expect an error
+    with pytest.raises(NotFoundError):
+        sysdb.delete_collection(id=sample_collections[0]["id"])
+
+    # Delete the existing collection in the new database and expect an error
+    with pytest.raises(NotFoundError):
+        sysdb.delete_collection(id=sample_collections[1]["id"], database="new_database")
+
+
+def test_create_update_with_database(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # Create a new database
+    sysdb.create_database(id=uuid.uuid4(), name="new_database")
+
+    # Create a new collection in the new database
+    sysdb.create_collection(
+        id=sample_collections[0]["id"],
+        name=sample_collections[0]["name"],
+        metadata=sample_collections[0]["metadata"],
+        dimension=sample_collections[0]["dimension"],
+        database="new_database",
+    )
+
+    # Create a new collection in the default database
+    sysdb.create_collection(
+        id=sample_collections[1]["id"],
+        name=sample_collections[1]["name"],
+        metadata=sample_collections[1]["metadata"],
+        dimension=sample_collections[1]["dimension"],
+    )
+
+    # Update the collection in the default database
+    sysdb.update_collection(
+        id=sample_collections[1]["id"],
+        name="new_name_1",
+    )
+
+    # Check that the collection in the default database was updated
+    result = sysdb.get_collections(id=sample_collections[1]["id"])
+    assert len(result) == 1
+    assert result[0]["name"] == "new_name_1"
+
+    # Update the collection in the new database
+    sysdb.update_collection(
+        id=sample_collections[0]["id"],
+        name="new_name_0",
+    )
+
+    # Check that the collection in the new database was updated
+    result = sysdb.get_collections(
+        id=sample_collections[0]["id"], database="new_database"
+    )
+    assert len(result) == 1
+    assert result[0]["name"] == "new_name_0"
+
+    # Try to create the collection in the default database in the new database and expect an error
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_collection(
+            id=sample_collections[1]["id"],
+            name=sample_collections[1]["name"],
+            metadata=sample_collections[1]["metadata"],
+            dimension=sample_collections[1]["dimension"],
+            database="new_database",
+        )
+
+
+def test_get_multiple_with_database(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # Create a new database
+    sysdb.create_database(id=uuid.uuid4(), name="new_database")
+
+    # Create sample collections in the new database
+    for collection in sample_collections:
+        sysdb.create_collection(
+            id=collection["id"],
+            name=collection["name"],
+            metadata=collection["metadata"],
+            dimension=collection["dimension"],
+            database="new_database",
+        )
+
+    # Get all collections in the new database
+    result = sysdb.get_collections(database="new_database")
+    assert len(result) == len(sample_collections)
+    assert sorted(result, key=lambda c: c["name"]) == sample_collections
+
+    # Get all collections in the default database
+    result = sysdb.get_collections()
+    assert len(result) == 0
+
+
+# endregion
+
+# region Segment tests
 sample_segments = [
     Segment(
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
@@ -459,3 +626,6 @@ def test_update_segment(sysdb: SysDB) -> None:
     sysdb.update_segment(segment["id"], metadata=None)
     result = sysdb.get_segments(id=segment["id"])
     assert result == [segment]
+
+
+# endregion
