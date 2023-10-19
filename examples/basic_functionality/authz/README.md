@@ -124,6 +124,7 @@ users:
 
 ```bash
 IS_PERSISTENT=1 \
+CHROMA_SERVER_AUTHZ_PROVIDER="chromadb.auth.authz.SimpleRBACAuthorizationProvider" \
 CHROMA_SERVER_AUTH_CREDENTIALS_FILE=examples/basic_functionality/authz/authz.yaml \
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="user_token_config" \
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider" \
