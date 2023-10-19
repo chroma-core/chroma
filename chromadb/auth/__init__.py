@@ -2,16 +2,21 @@
 Contains only Auth abstractions, no implementations.
 """
 import base64
+from functools import partial
 import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
+    Any,
+    Callable,
     Optional,
     Dict,
     TypeVar,
     Tuple,
     Generic,
+    Union,
 )
+from attr import dataclass
 
 from overrides import EnforceOverrides, override
 from pydantic import SecretStr
@@ -33,6 +38,21 @@ class AuthInfoType(Enum):
     HEADER = "header"
     URL = "url"
     METADATA = "metadata"  # gRPC
+
+
+class UserIdentity(EnforceOverrides, ABC):
+    @abstractmethod
+    def get_user_id(self) -> str:
+        ...
+
+
+class SimpleUserIdentity(UserIdentity):
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
+
+    @override
+    def get_user_id(self) -> str:
+        return self._user_id
 
 
 class ClientAuthResponse(EnforceOverrides, ABC):
@@ -87,11 +107,12 @@ class ClientAuthProtocolAdapter(Component, Generic[T]):
 class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
     @abstractmethod
     def get_auth_info(
-        self, auth_info_type: AuthInfoType, auth_info_id: Optional[str] = None
+        self, auth_info_type: AuthInfoType, auth_info_id: str
     ) -> T:
         """
-        This method should return the necessary auth info based on the type of authentication (e.g. header, cookie, url)
-         and a given id for the respective auth type (e.g. name of the header, cookie, url param).
+        This method should return the necessary auth info based on the type of
+        authentication (e.g. header, cookie, url) and a given id for the respective 
+        auth type (e.g. name of the header, cookie, url param).
 
         :param auth_info_type: The type of auth info to return
         :param auth_info_id: The id of the auth info to return
@@ -101,8 +122,32 @@ class ServerAuthenticationRequest(EnforceOverrides, ABC, Generic[T]):
 
 
 class ServerAuthenticationResponse(EnforceOverrides, ABC):
+    @abstractmethod
     def success(self) -> bool:
-        raise NotImplementedError()
+        ...
+
+    @abstractmethod
+    def get_user_identity(self) -> Optional[UserIdentity]:
+        ...
+
+
+class SimpleServerAuthenticationResponse(ServerAuthenticationResponse):
+    """ Simple implementation of ServerAuthenticationResponse"""
+    _auth_success: bool
+    _user_identity: Optional[UserIdentity]
+
+    def __init__(self, auth_success: bool, user_identity: Optional[UserIdentity]) \
+            -> None:
+        self._auth_success = auth_success
+        self._user_identity = user_identity
+
+    @override
+    def success(self) -> bool:
+        return self._auth_success
+
+    @override
+    def get_user_identity(self) -> Optional[UserIdentity]:
+        return self._user_identity
 
 
 class ServerAuthProvider(Component):
@@ -110,7 +155,8 @@ class ServerAuthProvider(Component):
         super().__init__(system)
 
     @abstractmethod
-    def authenticate(self, request: ServerAuthenticationRequest[T]) -> bool:
+    def authenticate(self, request: ServerAuthenticationRequest[T]) \
+            -> ServerAuthenticationResponse:
         pass
 
 
@@ -121,7 +167,7 @@ class ChromaAuthMiddleware(Component):
     @abstractmethod
     def authenticate(
         self, request: ServerAuthenticationRequest[T]
-    ) -> Optional[ServerAuthenticationResponse]:
+    ) -> ServerAuthenticationResponse:
         ...
 
     @abstractmethod
@@ -155,8 +201,8 @@ class AuthenticationError(ChromaError):
 
 class AbstractCredentials(EnforceOverrides, ABC, Generic[T]):
     """
-    The class is used by Auth Providers to encapsulate credentials received from the server
-    and pass them to a ServerAuthCredentialsProvider.
+    The class is used by Auth Providers to encapsulate credentials received 
+    from the server and pass them to a ServerAuthCredentialsProvider.
     """
 
     @abstractmethod
@@ -204,4 +250,145 @@ class ServerAuthCredentialsProvider(Component):
 
     @abstractmethod
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
+        ...
+
+    @abstractmethod
+    def get_user_identity(self, credentials: AbstractCredentials[T]) \
+            -> Optional[UserIdentity]:
+        ...
+
+
+# --- AuthZ ---#
+
+# TODO move this to basic impl
+
+@dataclass
+class AuthzUser:
+    id: Optional[str]
+    attributes: Optional[Dict[str, Any]] = None
+    claims: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class AuthzResource:
+    id: Optional[str]
+    type: Optional[str]
+    namespace: Optional[str]
+    attributes: Optional[Dict[str, Any]] = None
+
+
+class DynamicAuthzResource:
+    id: Optional[Union[str, Callable[..., str]]]
+    namespace: Optional[Union[str, Callable[..., str]]]
+    type: Optional[Union[str, Callable[..., str]]]
+    attributes: Optional[Union[Dict[str, Any], Callable[..., Dict[str, Any]]]]
+
+    def __init__(self, id: Optional[Union[str, Callable[..., str]]] = None,
+                 namespace: Optional[Union[str, Callable[..., str]
+                                           ]] = "default_database",
+                 attributes: Optional[Union[Dict[str, Any],
+                                            Callable[..., Dict[str, Any]]]]
+                 = lambda **kwargs: {},
+                 type: Optional[Union[str, Callable[..., str]]
+                                ] = "default_database",
+                 ) -> None:
+        self.id = id
+        self.namespace = namespace
+        self.attributes = attributes
+        self.type = type
+
+    def to_authz_resource(self, **kwargs):
+        return AuthzResource(
+            id=self.id(**kwargs) if callable(self.id) else self.id,
+            namespace=self.namespace(**kwargs) if callable(
+                self.namespace) else self.namespace,
+            type=self.type(**kwargs) if callable(
+                self.type) else self.type,
+            attributes=self.attributes(**kwargs) if callable(
+                self.attributes) else self.attributes,
+        )
+
+
+class AuthzDynamicParams:
+    @staticmethod
+    def from_function_name(**kwargs):
+        return partial(lambda **kwargs: kwargs['function'].__name__,
+                       **kwargs)
+
+    @staticmethod
+    def from_function_args(**kwargs):
+        return partial(lambda **kwargs: kwargs['function_args'][kwargs['arg_num']],
+                       **kwargs)
+
+    @staticmethod
+    def from_function_kwargs(**kwargs):
+        return partial(lambda **kwargs: kwargs['function_kwargs'][kwargs['arg_name']],
+                       **kwargs)
+
+
+@dataclass
+class AuthzAction:
+    id: str
+    attributes: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class AuthorizationContext:
+    user: AuthzUser
+    resource: AuthzResource
+    action: AuthzAction
+
+
+class ServerAuthorizationProvider(Component):
+    def __init__(self, system: System) -> None:
+        super().__init__(system)
+
+    @abstractmethod
+    def authorize(self, context: AuthorizationContext) \
+            -> bool:
         pass
+
+
+class AuthorizationRequestContext(EnforceOverrides, ABC, Generic[T]):
+    @abstractmethod
+    def get_request(self) -> T:
+        ...
+
+
+class ChromaAuthzMiddleware(Component, Generic[T]):
+    def __init__(self, system: System) -> None:
+        super().__init__(system)
+
+    @abstractmethod
+    def pre_process(
+        self, request: AuthorizationRequestContext
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def ignore_operation(self, verb: str, path: str) -> bool:
+        ...
+
+    @abstractmethod
+    def instrument_server(self, app: T) -> None:
+        ...
+
+
+class ServerAuthorizationConfigurationProvider(Component, Generic[T]):
+    def __init__(self, system: System) -> None:
+        super().__init__(system)
+
+    @abstractmethod
+    def get_configuration(self) -> T:
+        pass
+
+
+class AuthorizationError(ChromaError):
+    @override
+    def code(self) -> int:
+        return 403
+
+    @classmethod
+    @override
+    def name(cls) -> str:
+        return "AuthorizationError"

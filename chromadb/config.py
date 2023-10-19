@@ -82,7 +82,8 @@ class Settings(BaseSettings):  # type: ignore
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
 
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
     chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
 
     # New architecture components
@@ -114,7 +115,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     chroma_server_grpc_port: Optional[str] = None
-    chroma_server_cors_allow_origins: List[str] = []  # eg ["http://localhost:3000"]
+    # eg ["http://localhost:3000"]
+    chroma_server_cors_allow_origins: List[str] = []
 
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[str] = "8080"
@@ -171,6 +173,34 @@ class Settings(BaseSettings):  # type: ignore
     chroma_client_auth_credentials: Optional[str] = None
     chroma_client_auth_token_transport_header: Optional[str] = None
     chroma_server_auth_token_transport_header: Optional[str] = None
+
+    chroma_server_authz_provider: Optional[str] = None
+
+    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
+        "/api/v1": ["GET"],
+        "/api/v1/heartbeat": ["GET"],
+        "/api/v1/version": ["GET"],
+    }
+    chroma_server_authz_config_file: Optional[str] = None
+
+    @validator(
+        "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
+    )
+    def chroma_server_authz_config_file_non_empty_file_exists(
+        cls: Type["Settings"], v: str  # type: ignore
+    ) -> Optional[str]:
+        if v and not v.strip():
+            raise ValueError(
+                "chroma_server_authz_config_file cannot be empty or just whitespace"
+            )
+        if v and not os.path.isfile(os.path.join(v)):
+            raise ValueError(
+                f"chroma_server_authz_config_file [{v}] does not exist"
+            )
+        return v
+
+    chroma_server_authz_config_provider: Optional[str] = \
+        "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
     anonymized_telemetry: bool = True
 

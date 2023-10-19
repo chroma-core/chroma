@@ -1,0 +1,94 @@
+resource_type_action: # This is here just for reference
+  - db:list_collections
+  - db:get_collection
+  - db:create_collection
+  - db:get_or_create_collection
+  - db:delete_collection
+  - db:update_collection
+  - collection:add
+  - collection:delete
+  - collection:get
+  - collection:query
+  - collection:peek
+  - collection:count
+  - collection:update
+  - collection:upsert
+
+roles_mapping:
+  admin:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+        collection:add,
+        collection:delete,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:update,
+        collection:upsert,
+        collection:count,
+      ]
+  write:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+        collection:add,
+        collection:delete,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:update,
+        collection:upsert,
+        collection:count,
+      ]
+  db_read:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+      ]
+  collection_read:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:count,
+      ]
+  collection_x_read:
+    actions:
+      [
+        db:get_collection,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:count,
+      ]
+    resources: ["<UUID>"] #not yet supported
+users:
+  - id: user@example.com
+    role: db_read
+    tokens:
+      - token: test-token-admin
+        secret: my_api_secret # not yet supported
+  - id: Anonymous
+    role: db_read
+    tokens:
+      - token: my_api_token
+        secret: my_api_secret

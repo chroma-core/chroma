@@ -22,31 +22,65 @@ The diagram below illustrates the levels of abstractions we introduce:
 
 ![Server-Side Authorization Workflow](assets/CIP-10112023_Authorization_Workflow.png)
 
+- (1) Client Sends Request to Chroma Server
+- (2) Authentication Middleware intercepts the request
+- (3a) Authentication Provider attempts to authenticate the user
+- (3b) Authentication Provider returns success (with user identity) or failure
+- (3c) Authentication Middleware returns success or failure to server
+- (4) Server passes the request with user identity to the Authorization Middleware
+- (5) Authorization Middleware creates Authorization Request Context
+- (6) Authorization Context Decorator (at API endpoint) intercepts the call and using Authorization Request Context creates an Authorization Context that is then passed to the Authorization Provider
+- (7)Authorization Context Decorator raises and error if the Authorization Provider returns a failure or passes the request to the API endpoint if the Authorization Provider returns success
+- (8a) Request is passed to the API endpoint for execution
+- (8b) Response is returned to the client
+
 In the above diagram we highlight the new abstractions we introduce in this CIP and we also demonstrate the interop with the existing Authentication
 
 ### Concepts
 
-#### ServerAuthorizationProvider
+#### Basic Authorization Terms
+
+##### User
+
+A user is an entity that can perform actions on resources. A user can be a human or a machine.
+
+##### Resource
+
+A resource is an entity that can be acted upon. A resource can be a database, a collection, a document.
+
+> Note: In this release we do not support document as a resource.
+
+##### Action
+
+An action is an operation that can be performed on a resource. An action can be `read`, `write`, `delete`, `update`, `create`, `list`, `count`, `query`, `peek`, `get`, `add`, `upsert`, `get_or_create`. Actions are resource specific.
+
+##### Role
+
+A role is a collection of actions that a user can perform on a resource. This pertains to RBAC or Role Based Access Control.
+
+#### Chroma Authorization Terms
+
+##### ServerAuthorizationProvider
 
 The `ServerAuthorizationProvider` is a class that abstracts a provider that will authorize requests to the Chroma server (FastAPI). In practical terms the provider will integrate with an external authorization service (e.g. Auth0, Okta, Permit.io etc.) and will be responsible for allowing or denying the user request.
 
-In our baseline implementation we will provide a simple file-based authorization provider that will read authorization configuration from a YAML file.
+In our baseline implementation we will provide a simple file-based RBAC authorization provider that will read authorization configuration from a YAML file.
 
-#### ServerAuthzConfigurationProvider
+##### ServerAuthzConfigurationProvider
 
 The `ServerAuthzConfigurationProvider` is a class that abstracts a the configuration needed for authorization provider to work. In practice that implies, reading secrets from environment variables, reading configuration from a file, or reading configuration from a database or secrets file, or even KMS.
 
-In our baseline implementation the AuthzConfigurationProvider will read configuration from a YAML file.
+In our baseline implementation the AuthzConfigurationProvider will read configuration from a YAML file that contains the authorization configuration.
 
-#### ServerAuthorizationRequest
+##### ServerAuthorizationRequest
 
 The `ServerAuthorizationRequest` encapsulates the authorization context.
 
-#### ServerAuthorizationResponse
+##### ServerAuthorizationResponse
 
 Authorization response provides authorization provider evaluation response. It returns a boolean response indicating whether the request is allowed or denied.
 
-#### ChromaAuthzMiddleware
+##### ChromaAuthzMiddleware
 
 The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At the time of writing we only support FastAPI. The  middleware interface supports several methods:
 
@@ -54,20 +88,25 @@ The `ChromaAuthzMiddleware` is an abstraction for the server-side middleware. At
 - `ignore_operation` - determines whether or not the operation should be ignored by the middleware
 - `instrument_server` - an optional method for additional server instrumentation. For example, header injection.
 
-#### AuthorizationError
+##### AuthorizationError
 
 Error thrown when an authorization request is disallowed/denied by the authorization provider. Depending on authorization provider's implementation such error may also be thrown when the authorization provider is not available or an internal error ocurred.
 
 Client semantics of this error is a 403 Unauthorized error being returned over HTTP interface.
 
-#### AuthorizationContext
+##### AuthorizationContext
 
-The AuthorizationContext provides the necessary information to the authorization provider to make a decision whether to allow or deny the request. The context contains the following information:
+The AuthorizationContext is composed of three components as defined in #Basic Authorization Terms:
+
+- User
+- Resource
+- Action
+
 
 ```json
 {
 "user": {"id": "API Token or User Id"},
-"resource": {"namespace": "database", "id": "collection_id"},
+"resource": {"namespace": "*", "id": "collection_id","type": "database"},
 "action": {"id":"get_or_create"},
 }
 ```
@@ -77,65 +116,161 @@ We intentionally want to keep this as minimal as possible to avoid any unnecessa
 We propose the following classes to represent the above:
 
 ```python
-from typing import TypeVar, Generic
-
-# Below three classes are from Chroma's baseline AuthZ implementation
-class User:
+@dataclass
+class AuthzUser:
     id: Optional[str]
+    attributes: Optional[Dict[str, Any]] = None
+    claims: Optional[Dict[str, Any]] = None
 
-class Resource:
-    id: str
+
+@dataclass
+class AuthzResource:
+    id: Optional[str]
+    type: Optional[str]
     namespace: Optional[str]
+    attributes: Optional[Dict[str, Any]] = None
 
-class Action:
+
+@dataclass
+class AuthzAction:
     id: str
+    attributes: Optional[Dict[str, Any]] = None
 
-TUser = TypeVar("TUser")
-TResource = TypeVar("TResource")
-TAction = TypeVar("TAction")
 
-class AbstractAuthZContext(Generic[TUser, TResource, TAction]):
-    user: TUser
-    resource: TResource
-    action: TAction
+@dataclass
+class AuthorizationContext:
+    user: AuthzUser
+    resource: AuthzResource
+    action: AuthzAction
 
-# Example of a concrete implementation from Chroma's baseline AuthZ implementation
+```
 
-class SimpleAuthZContext(AbstractAuthZContext[User, Resource, Action]):
-    pass
+##### User Identity
+
+In this CIP we also introduce a handover or bridge mechanism from authentication to authorization which we term `User Identity`. The object is meant to encapsulate the user identity and possibly also claims, roles and attributes in the future.
+
+```python
+class UserIdentity(EnforceOverrides, ABC):
+    @abstractmethod
+    def get_user_id(self) -> str:
+        ...
 ```
 
 ### Baseline Implementation
 
 In this section we propose a minimal implementation example of the authorization framework which will also ship in Chroma as a default authorization provider and a reference implementation. Our reference implementation relies on static configuration files in YAML format.
 
+We introduce the following implementations:
+
+- `LocalUserConfigAuthorizationConfigurationProvider` - a simple authz configuration to read the yaml configuration file.
+- `SimpleRBACAuthorizationProvider` - a simple RBAC authorization provider that reads the configuration from the configuration provider, creates a list of tuples for every user and his role action mappings (e.g. `('user@example.com', 'db', 'list_collections')`) and evaluates the authorization request against the list of tuples.
+
 #### Authentication and Authorization Config Scheme
 
+In our baseline implementation we propose the following configuration scheme:
+
 ```yaml
+resource_type_action: # This is here just for reference
+  - db:list_collections
+  - db:get_collection
+  - db:create_collection
+  - db:get_or_create_collection
+  - db:delete_collection
+  - db:update_collection
+  - collection:add
+  - collection:delete
+  - collection:get
+  - collection:query
+  - collection:peek
+  - collection:count
+  - collection:update
+  - collection:upsert
+
+roles_mapping:
+  admin:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+        collection:add,
+        collection:delete,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:update,
+        collection:upsert,
+        collection:count,
+      ]
+  write:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+        collection:add,
+        collection:delete,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:update,
+        collection:upsert,
+        collection:count,
+      ]
+  db_read:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        db:create_collection,
+        db:get_or_create_collection,
+        db:delete_collection,
+        db:update_collection,
+      ]
+  collection_read:
+    actions:
+      [
+        db:list_collections,
+        db:get_collection,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:count,
+      ]
+  collection_x_read:
+    actions:
+      [
+        db:get_collection,
+        collection:get,
+        collection:query,
+        collection:peek,
+        collection:count,
+      ]
+    resources: ["<UUID>"] #not yet supported
+
 users:
-    - id: user@example.com
-      tokens:
-        - my_api_token
-actions:
-    - list_collections
-    - get_collection
-    - create_collection
-    - get_or_create_collection
-    - delete_collection
-    - update_collection
-    - add
-    - delete
-    - get
-    - query
-    - peek
-    - update
-    - upsert
+  - id: user@example.com
+    role: admin
+    tokens:
+      - token: test-token-admin
+        secret: my_api_secret # not yet supported
+  - id: Anonymous
+    role: db_read
+    tokens:
+      - token: my_api_token
+        secret: my_api_secret # not yet supported
 
 ```
 
 ## **Compatibility, Deprecation, and Migration Plan**
 
-This CIP is not backwards for Chroma clients.
+This CIP is backwards compatible with older versions of Chroma clients.
 
 ## **Test Plan**
 
@@ -143,6 +278,4 @@ Property and Integration tests.
 
 ## **Rejected Alternatives**
 
-TBD
-
-## **References**
+We considered several alternatives that are more vendor specific (such az Auth0, Okta, Permit.io etc.) but we decided to go with a more generic approach that will allow users to be able to extend the authorization framework to support additional features and providers.

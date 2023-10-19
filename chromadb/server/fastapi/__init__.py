@@ -11,9 +11,14 @@ from uuid import UUID
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
+from chromadb.auth import (AuthzDynamicParams,
+                           DynamicAuthzResource)
 from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
+    FastAPIChromaAuthzMiddleware,
+    FastAPIChromaAuthzMiddlewareWrapper,
+    authz_context,
 )
 from chromadb.config import Settings
 import chromadb.server
@@ -113,19 +118,30 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
+
+        if settings.chroma_server_authz_provider:
+            self._app.add_middleware(
+                FastAPIChromaAuthzMiddlewareWrapper,
+                authz_middleware=self._api.require(
+                    FastAPIChromaAuthzMiddleware),
+            )
+
         if settings.chroma_server_auth_provider:
-            self._auth_middleware = self._api.require(FastAPIChromaAuthMiddleware)
             self._app.add_middleware(
                 FastAPIChromaAuthMiddlewareWrapper,
-                auth_middleware=self._auth_middleware,
+                auth_middleware=self._api.require(
+                    FastAPIChromaAuthMiddleware),
             )
 
         self.router = ChromaAPIRouter()
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
-        self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
-        self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/reset", self.reset, methods=["POST"])
+        self.router.add_api_route(
+            "/api/v1/version", self.version, methods=["GET"])
+        self.router.add_api_route(
+            "/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
         )
@@ -221,9 +237,18 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
+    @authz_context(action="list_collections",
+                   resource=DynamicAuthzResource(
+                       id="*",
+                       type="db"))
     def list_collections(self) -> Sequence[Collection]:
         return self._api.list_collections()
 
+    @authz_context(action="create_collection",
+                   resource=DynamicAuthzResource(
+                       id="*",
+                       type="db"
+                   ))
     def create_collection(self, collection: CreateCollection) -> Collection:
         return self._api.create_collection(
             name=collection.name,
@@ -231,9 +256,21 @@ class FastAPI(chromadb.server.Server):
             get_or_create=collection.get_or_create,
         )
 
+    @authz_context(action="get_collection",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_name"),
+                       type="db",
+                   ))
     def get_collection(self, collection_name: str) -> Collection:
         return self._api.get_collection(collection_name)
 
+    @authz_context(action="update_collection",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_name"),
+                       type="db",
+                   ))
     def update_collection(
         self, collection_id: str, collection: UpdateCollection
     ) -> None:
@@ -243,9 +280,21 @@ class FastAPI(chromadb.server.Server):
             new_metadata=collection.new_metadata,
         )
 
+    @authz_context(action="delete_collection",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_name"),
+                       type="db",
+                   ))
     def delete_collection(self, collection_name: str) -> None:
         return self._api.delete_collection(collection_name)
 
+    @authz_context(action="add",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:
             result = self._api._add(
@@ -259,6 +308,12 @@ class FastAPI(chromadb.server.Server):
             raise HTTPException(status_code=500, detail=str(e))
         return result
 
+    @authz_context(action="update",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
         return self._api._update(
             ids=add.ids,
@@ -268,6 +323,12 @@ class FastAPI(chromadb.server.Server):
             metadatas=add.metadatas,
         )
 
+    @authz_context(action="upsert",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
         return self._api._upsert(
             collection_id=_uuid(collection_id),
@@ -277,6 +338,12 @@ class FastAPI(chromadb.server.Server):
             metadatas=upsert.metadatas,
         )
 
+    @authz_context(action="get",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
         return self._api._get(
             collection_id=_uuid(collection_id),
@@ -289,6 +356,12 @@ class FastAPI(chromadb.server.Server):
             include=get.include,
         )
 
+    @authz_context(action="delete",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
         return self._api._delete(
             where=delete.where,
@@ -297,12 +370,24 @@ class FastAPI(chromadb.server.Server):
             where_document=delete.where_document,
         )
 
+    @authz_context(action="count",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
 
     def reset(self) -> bool:
         return self._api.reset()
 
+    @authz_context(action="query",
+                   resource=DynamicAuthzResource(
+                       id=AuthzDynamicParams.from_function_kwargs(
+                           arg_name="collection_id"),
+                       type="collection",
+                   ))
     def get_nearest_neighbors(
         self, collection_id: str, query: QueryEmbedding
     ) -> QueryResult:

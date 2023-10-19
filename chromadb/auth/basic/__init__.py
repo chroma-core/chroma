@@ -14,6 +14,7 @@ from chromadb.auth import (
     BasicAuthCredentials,
     ClientAuthCredentialsProvider,
     ClientAuthResponse,
+    SimpleServerAuthenticationResponse,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
@@ -85,12 +86,33 @@ class BasicAuthServerProvider(ServerAuthProvider):
         )
 
     @override
-    def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
+    def authenticate(self, request: ServerAuthenticationRequest[Any]) \
+            -> SimpleServerAuthenticationResponse:
         try:
-            _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
-            return self._credentials_provider.validate_credentials(
+            _auth_header = request.get_auth_info(
+                AuthInfoType.HEADER, "Authorization")
+            _validation = self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
             )
+            return SimpleServerAuthenticationResponse(
+                _validation,
+                self._credentials_provider.get_user_identity(
+                    BasicAuthCredentials.from_header(_auth_header)
+                ),
+            )
         except Exception as e:
-            logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
-            return False
+            logger.error(
+                f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
+            return SimpleServerAuthenticationResponse(
+                False, None
+            )
+
+    # @override
+    # def get_auth_info_type(self, request: ServerAuthenticationRequest[Any]) \
+    #    -> UserIdentity:
+    #     _auth_header = request.get_auth_info(
+    #         AuthInfoType.HEADER, "Authorization")
+    #     _creds = BasicAuthCredentials.from_header(_auth_header)
+    #     return SimpleUserIdentity(
+    #         _creds.get_credentials()["username"].get_secret_value()
+    #     )

@@ -1,6 +1,6 @@
 import importlib
 import logging
-from typing import cast, Dict, TypeVar, Any
+from typing import Optional, cast, Dict, TypeVar, Any
 
 import requests
 from overrides import override
@@ -12,6 +12,7 @@ from chromadb.auth import (
     AuthInfoType,
     ClientAuthProvider,
     ClientAuthProtocolAdapter,
+    SimpleUserIdentity,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
@@ -31,7 +32,8 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
             self.bc = importlib.import_module("bcrypt")
         except ImportError:
             raise ValueError(
-                "The bcrypt python package is not installed. Please install it with `pip install bcrypt`"
+                "The bcrypt python package is not installed. "
+                "Please install it with `pip install bcrypt`"
             )
 
     @override
@@ -39,11 +41,13 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if len(_creds) != 2:
             logger.error(
-                "Returned credentials did match expected format: dict[username:SecretStr, password: SecretStr]"
+                "Returned credentials did match expected format: "
+                "dict[username:SecretStr, password: SecretStr]"
             )
             return False
         if "username" not in _creds or "password" not in _creds:
-            logger.error("Returned credentials do not contain username or password")
+            logger.error(
+                "Returned credentials do not contain username or password")
             return False
         _usr_check = bool(
             _creds["username"].get_secret_value()
@@ -54,6 +58,12 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
             self._creds["password"].get_secret_value().encode("utf-8"),
         )
 
+    @override
+    def get_user_identity(self, credentials: AbstractCredentials[T]) \
+            -> Optional[SimpleUserIdentity]:
+        _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
+        return SimpleUserIdentity(_creds["username"].get_secret_value())
+
 
 @register_provider("htpasswd_file")
 class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsProvider):
@@ -61,7 +71,7 @@ class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsPro
         super().__init__(system)
         system.settings.require("chroma_server_auth_credentials_file")
         _file = str(system.settings.chroma_server_auth_credentials_file)
-        with open(_file) as f:
+        with open(_file, "r") as f:
             _raw_creds = [v for v in f.readline().strip().split(":")]
             self._creds = {
                 "username": SecretStr(_raw_creds[0]),
@@ -73,7 +83,8 @@ class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsPro
             or "password" not in self._creds
         ):
             raise ValueError(
-                "Invalid Htpasswd credentials found in [chroma_server_auth_credentials]. "
+                "Invalid Htpasswd credentials found in "
+                "[chroma_server_auth_credentials]. "
                 "Must be <username>:<bcrypt passwd>."
             )
 
@@ -97,7 +108,8 @@ class HtpasswdConfigurationServerAuthCredentialsProvider(
             or "password" not in self._creds
         ):
             raise ValueError(
-                "Invalid Htpasswd credentials found in [chroma_server_auth_credentials]. "
+                "Invalid Htpasswd credentials found in "
+                "[chroma_server_auth_credentials]. "
                 "Must be <username>:<bcrypt passwd>."
             )
 
@@ -163,7 +175,8 @@ class ConfigurationClientAuthCredentialsProvider(
     def __init__(self, system: System) -> None:
         super().__init__(system)
         system.settings.require("chroma_client_auth_credentials")
-        self._creds = SecretStr(str(system.settings.chroma_client_auth_credentials))
+        self._creds = SecretStr(
+            str(system.settings.chroma_client_auth_credentials))
 
     @override
     def get_credentials(self) -> SecretStr:
