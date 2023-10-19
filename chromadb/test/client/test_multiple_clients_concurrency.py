@@ -4,6 +4,7 @@ from chromadb.api.client import AdminClient, Client
 
 def test_multiple_clients_concurrently(client: Client) -> None:
     """Tests running multiple clients, each against their own database, concurrently."""
+    client.reset()
     admin_client = AdminClient.from_system(client._system)
     admin_client.create_database("test_db")
 

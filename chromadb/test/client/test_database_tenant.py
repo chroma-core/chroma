@@ -2,6 +2,7 @@ from chromadb.api.client import AdminClient, Client
 
 
 def test_database_tenant_collections(client: Client) -> None:
+    client.reset()
     # Create a new database in the default tenant
     admin_client = AdminClient.from_system(client._system)
     admin_client.create_database("test_db")
