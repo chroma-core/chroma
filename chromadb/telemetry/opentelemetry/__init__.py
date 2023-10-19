@@ -49,7 +49,11 @@ class OpenTelemetryClient(Component):
             system.settings.chroma_otel_service_name,
             system.settings.chroma_otel_collection_endpoint,
             system.settings.chroma_otel_collection_headers,
-            OpenTelemetryGranularity(system.settings.chroma_otel_granularity),
+            OpenTelemetryGranularity(
+                system.settings.chroma_otel_granularity
+                if system.settings.chroma_otel_granularity
+                else "none"
+            ),
         )
 
 
