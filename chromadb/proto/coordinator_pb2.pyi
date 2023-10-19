@@ -17,6 +17,12 @@ class CreateDatabaseRequest(_message.Message):
     tenant: str
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
 
+class CreateTenantRequest(_message.Message):
+    __slots__ = ["name"]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
 class CreateSegmentRequest(_message.Message):
     __slots__ = ["segment"]
     SEGMENT_FIELD_NUMBER: _ClassVar[int]

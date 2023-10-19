@@ -433,6 +433,16 @@ class AdminAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    def create_tenant(self, name: str) -> None:
+        """Create a new tenant.
+
+        Args:
+            tenant: The name of the tenant to create.
+
+        """
+        pass
+
 
 class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing

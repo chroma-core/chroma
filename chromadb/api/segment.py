@@ -102,6 +102,12 @@ class SegmentAPI(ServerAPI):
             tenant=tenant,
         )
 
+    @override
+    def create_tenant(self, name: str) -> None:
+        self._sysdb.create_tenant(
+            name=name,
+        )
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.

@@ -65,13 +65,28 @@ class SqlSysDB(SqlDB, SysDB):
             sql, params = get_sql(insert_database, self.parameter_format())
             try:
                 cur.execute(sql, params)
-            # TODO: database doesn't exist
-            # TODO: tenant doesn't exist
+            # TODO: tenant doesn't exist test
             # TODO: implement unique constraint error lol...
             except self.unique_constraint_error() as e:
                 raise UniqueConstraintError(
                     f"Database {name} already exists for tenant {tenant}"
                 ) from e
+
+    @override
+    def create_tenant(self, name: str) -> None:
+        with self.tx() as cur:
+            tenants = Table("tenants")
+            insert_tenant = (
+                self.querybuilder()
+                .into(tenants)
+                .columns(tenants.id)
+                .insert(ParameterValue(name))
+            )
+            sql, params = get_sql(insert_tenant, self.parameter_format())
+            try:
+                cur.execute(sql, params)
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(f"Tenant {name} already exists") from e
 
     @override
     def create_segment(self, segment: Segment) -> None:

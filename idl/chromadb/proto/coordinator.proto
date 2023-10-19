@@ -11,6 +11,10 @@ message CreateDatabaseRequest {
   string tenant = 3;
 }
 
+message CreateTenantRequest {
+  string name = 2; // Names are globally unique
+}
+
 message CreateSegmentRequest {
   Segment segment = 1;
 }
@@ -97,6 +101,7 @@ message UpdateCollectionRequest {
 
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (ChromaResponse) {}
+  rpc CreateTenant(CreateTenantRequest) returns (ChromaResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (ChromaResponse) {}
   rpc DeleteSegment(DeleteSegmentRequest) returns (ChromaResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}

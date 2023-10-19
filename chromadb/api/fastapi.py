@@ -149,6 +149,14 @@ class FastAPI(ServerAPI):
         raise_chroma_error(resp)
 
     @override
+    def create_tenant(self, name: str) -> None:
+        resp = self._session.post(
+            self._api_url + "/tenants",
+            data=json.dumps({"name": name}),
+        )
+        raise_chroma_error(resp)
+
+    @override
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> Sequence[Collection]:

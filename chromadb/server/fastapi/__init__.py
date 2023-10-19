@@ -142,6 +142,13 @@ class FastAPI(chromadb.server.Server):
         )
 
         self.router.add_api_route(
+            "/api/v1/tenants",
+            self.create_tenant,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
             "/api/v1/collections",
             self.list_collections,
             methods=["GET"],
@@ -236,6 +243,9 @@ class FastAPI(chromadb.server.Server):
         self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
     ) -> None:
         return self._api.create_database(database.name, tenant)
+
+    def create_tenant(self, name: str) -> None:
+        return self._api.create_tenant(name)
 
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE

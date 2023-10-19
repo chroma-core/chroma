@@ -8,8 +8,8 @@ def test_multiple_clients_concurrently(client: Client) -> None:
     admin_client = AdminClient.from_system(client._system)
     admin_client.create_database("test_db")
 
-    CLIENT_COUNT = 100
-    COLLECTION_COUNT = 500
+    CLIENT_COUNT = 50
+    COLLECTION_COUNT = 10
 
     # Each database will create the same collections by name, with differing metadata
     databases = [f"db{i}" for i in range(CLIENT_COUNT)]

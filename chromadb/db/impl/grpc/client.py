@@ -15,6 +15,7 @@ from chromadb.proto.coordinator_pb2 import (
     CreateCollectionRequest,
     CreateDatabaseRequest,
     CreateSegmentRequest,
+    CreateTenantRequest,
     DeleteCollectionRequest,
     DeleteSegmentRequest,
     GetCollectionsRequest,
@@ -78,6 +79,13 @@ class GrpcSysDB(SysDB):
     ) -> None:
         request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
         response = self._sys_db_stub.CreateDatabase(request)
+        if response.status.code == 409:
+            raise UniqueConstraintError()
+
+    @overrides
+    def create_tenant(self, name: str) -> None:
+        request = CreateTenantRequest(name=name)
+        response = self._sys_db_stub.CreateTenant(request)
         if response.status.code == 409:
             raise UniqueConstraintError()
 

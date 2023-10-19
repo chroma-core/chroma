@@ -8,7 +8,7 @@ from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.config import Component, System, Settings
+from chromadb.config import DEFAULT_TENANT, Component, System, Settings
 from chromadb.db.system import SysDB
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
@@ -457,6 +457,78 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
 
     # Get all collections in the default database
     result = sysdb.get_collections()
+    assert len(result) == 0
+
+
+def test_create_database_with_tenants(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # Create a new tenant
+    sysdb.create_tenant(name="tenant1")
+
+    # Create tenant that already exits and expect an error
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_tenant(name="tenant1")
+
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_tenant(name=DEFAULT_TENANT)
+
+    # Create a new database within this tenant and also in the default tenant
+    sysdb.create_database(id=uuid.uuid4(), name="new_database", tenant="tenant1")
+    sysdb.create_database(id=uuid.uuid4(), name="new_database")
+
+    # Create a new collection in the new tenant
+    sysdb.create_collection(
+        id=sample_collections[0]["id"],
+        name=sample_collections[0]["name"],
+        metadata=sample_collections[0]["metadata"],
+        dimension=sample_collections[0]["dimension"],
+        database="new_database",
+        tenant="tenant1",
+    )
+
+    # Create a new collection in the default tenant
+    sysdb.create_collection(
+        id=sample_collections[1]["id"],
+        name=sample_collections[1]["name"],
+        metadata=sample_collections[1]["metadata"],
+        dimension=sample_collections[1]["dimension"],
+        database="new_database",
+    )
+
+    # Check that both tenants have the correct collections
+    result = sysdb.get_collections(database="new_database", tenant="tenant1")
+    assert len(result) == 1
+    assert result[0] == sample_collections[0]
+
+    result = sysdb.get_collections(database="new_database")
+    assert len(result) == 1
+    assert result[0] == sample_collections[1]
+
+    # Creating a collection id that already exists in a tenant that does not have it
+    # should error
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_collection(
+            id=sample_collections[0]["id"],
+            name=sample_collections[0]["name"],
+            metadata=sample_collections[0]["metadata"],
+            dimension=sample_collections[0]["dimension"],
+            database="new_database",
+        )
+
+    with pytest.raises(UniqueConstraintError):
+        sysdb.create_collection(
+            id=sample_collections[1]["id"],
+            name=sample_collections[1]["name"],
+            metadata=sample_collections[1]["metadata"],
+            dimension=sample_collections[1]["dimension"],
+            database="new_database",
+            tenant="tenant1",
+        )
+
+    # A new tenant DOES NOT have a default database. This does not error, instead 0
+    # results are returned
+    result = sysdb.get_collections(database="default", tenant="tenant1")
     assert len(result) == 0
 
 

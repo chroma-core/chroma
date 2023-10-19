@@ -21,6 +21,11 @@ class SysDBStub(object):
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
             response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
         )
+        self.CreateTenant = channel.unary_unary(
+            "/chroma.SysDB/CreateTenant",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.CreateSegment = channel.unary_unary(
             "/chroma.SysDB/CreateSegment",
             request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
@@ -72,6 +77,12 @@ class SysDBServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def CreateDatabase(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def CreateTenant(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -137,6 +148,11 @@ def add_SysDBServicer_to_server(servicer, server):
         "CreateDatabase": grpc.unary_unary_rpc_method_handler(
             servicer.CreateDatabase,
             request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "CreateTenant": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateTenant,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.FromString,
             response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
         ),
         "CreateSegment": grpc.unary_unary_rpc_method_handler(
@@ -213,6 +229,35 @@ class SysDB(object):
             target,
             "/chroma.SysDB/CreateDatabase",
             chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
+            chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
+
+    @staticmethod
+    def CreateTenant(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/chroma.SysDB/CreateTenant",
+            chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
             options,
             channel_credentials,

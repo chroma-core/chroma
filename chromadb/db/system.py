@@ -20,13 +20,19 @@ class SysDB(Component):
     def create_database(
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
     ) -> None:
-        """Create a new database in the System database. Raises DuplicateError if the Database
+        """Create a new database in the System database. Raises an Error if the Database
         already exists."""
         pass
 
     @abstractmethod
+    def create_tenant(self, name: str) -> None:
+        """Create a new tenant in the System database. The name must be unique.
+        Raises an Error if the Tenant already exists."""
+        pass
+
+    @abstractmethod
     def create_segment(self, segment: Segment) -> None:
-        """Create a new segment in the System database. Raises DuplicateError if the ID
+        """Create a new segment in the System database. Raises an Error if the ID
         already exists."""
         pass
 

@@ -94,6 +94,18 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._tenants_to_databases_to_collections[tenant][database] = {}
         return proto.ChromaResponse(status=proto.Status(code=200))
 
+    @overrides(check_signature=False)
+    def CreateTenant(
+        self, request: CreateDatabaseRequest, context: grpc.ServicerContext
+    ) -> proto.ChromaResponse:
+        tenant = request.name
+        if tenant in self._tenants_to_databases_to_collections:
+            return proto.ChromaResponse(
+                status=proto.Status(code=409, reason=f"Tenant {tenant} already exists")
+            )
+        self._tenants_to_databases_to_collections[tenant] = {}
+        return proto.ChromaResponse(status=proto.Status(code=200))
+
     # We are forced to use check_signature=False because the generated proto code
     # does not have type annotations for the request and response objects.
     # TODO: investigate generating types for the request and response objects

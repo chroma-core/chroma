@@ -405,6 +405,10 @@ class AdminClient(SharedSystemClient, AdminAPI):
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         return self._server.create_database(name=name, tenant=tenant)
 
+    @override
+    def create_tenant(self, name: str) -> None:
+        return self._server.create_tenant(name=name)
+
     @classmethod
     @override
     def from_system(
