@@ -18,6 +18,7 @@ roles_mapping:
   admin:
     actions:
       [
+        db:reset,
         db:list_collections,
         db:get_collection,
         db:create_collection,
@@ -83,7 +84,7 @@ roles_mapping:
     resources: ["<UUID>"] #not yet supported
 users:
   - id: user@example.com
-    role: db_read
+    role: admin
     tokens:
       - token: test-token-admin
         secret: my_api_secret # not yet supported

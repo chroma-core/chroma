@@ -16,7 +16,7 @@ from typing import (
     Generic,
     Union,
 )
-from attr import dataclass
+from dataclasses import dataclass
 
 from overrides import EnforceOverrides, override
 from pydantic import SecretStr
@@ -260,7 +260,28 @@ class ServerAuthCredentialsProvider(Component):
 
 # --- AuthZ ---#
 
-# TODO move this to basic impl
+class AuthzResourceTypes(str, Enum):
+    DB = "db"
+    COLLECTION = "collection"
+
+
+class AuthzResourceActions(str, Enum):
+    LIST_COLLECTIONS = "list_collections"
+    GET_COLLECTION = "get_collection"
+    CREATE_COLLECTION = "create_collection"
+    GET_OR_CREATE_COLLECTION = "get_or_create_collection"
+    DELETE_COLLECTION = "delete_collection"
+    UPDATE_COLLECTION = "update_collection"
+    ADD = "add"
+    DELETE = "delete"
+    GET = "get"
+    QUERY = "query"
+    PEEK = "peek"
+    COUNT = "count"
+    UPDATE = "update"
+    UPSERT = "upsert"
+    RESET = "reset"
+
 
 @dataclass
 class AuthzUser:

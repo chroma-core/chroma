@@ -67,7 +67,6 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
                         context.resource.type,
                         context.action.id)
 
-        print(_authz_tuple)
         policy_decision = False
         if _authz_tuple in self._authz_tuples:
             policy_decision = True
