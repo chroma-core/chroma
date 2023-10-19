@@ -1,3 +1,4 @@
+from typing import Annotated, Optional
 import typer
 import uvicorn
 import os
@@ -26,8 +27,11 @@ def run(
     path: str = typer.Option(
         "./chroma_data", help="The path to the file or directory."
     ),
+    host: Annotated[Optional[str], typer.Option(
+        help="The host to listen to. Default: localhost")] = "localhost",
     port: int = typer.Option(8000, help="The port to run the server on."),
-    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
+    test: bool = typer.Option(False, help="Test mode.",
+                              show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
 
@@ -39,7 +43,7 @@ def run(
 
     typer.echo(f"\033[1mSaving data to\033[0m: \033[32m{path}\033[0m")
     typer.echo(
-        f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://localhost:{port}\033[0m"
+        f"\033[1mConnect to chroma at\033[0m: \033[32mhttp://{host}:{port}\033[0m"
     )
     typer.echo(
         "\033[1mGetting started guide\033[0m: https://docs.trychroma.com/getting-started\n\n"
@@ -57,7 +61,7 @@ def run(
 
     config = {
         "app": "chromadb.app:app",
-        "host": "0.0.0.0",
+        "host": host,
         "port": port,
         "workers": 1,
         "log_config": f"{chromadb_path}/log_config.yml",
