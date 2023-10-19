@@ -22,6 +22,11 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.utils import get_class
 
 T = TypeVar("T")
@@ -91,6 +96,10 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         check_token(token_str)
         self._token = SecretStr(token_str)
 
+    @trace_method(
+        "TokenConfigServerAuthCredentialsProvider.validate_credentials",
+        OpenTelemetryGranularity.ALL,
+    )
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
@@ -202,6 +211,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
                 str(system.settings.chroma_server_auth_token_transport_header)
             ]
 
+    @trace_method("TokenAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) \
             -> SimpleServerAuthenticationResponse:
@@ -244,6 +254,7 @@ class TokenAuthClientProvider(ClientAuthProvider):
                 str(system.settings.chroma_client_auth_token_transport_header)
             ]
 
+    @trace_method("TokenAuthClientProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self) -> ClientAuthResponse:
         _token = self._credentials_provider.get_credentials()

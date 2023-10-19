@@ -64,7 +64,7 @@ _legacy_config_values = {
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
     "chromadb.api.API": "chroma_api_impl",
-    "chromadb.telemetry.Telemetry": "chroma_telemetry_impl",
+    "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.CollectionAssignmentPolicy": "chroma_collection_assignment_policy_impl",  # noqa
@@ -82,9 +82,11 @@ class Settings(BaseSettings):  # type: ignore
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
-    chroma_telemetry_impl: str = "chromadb.telemetry.posthog.Posthog"
+
+    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
+    # Required for backwards compatibility
+    chroma_telemetry_impl: str = chroma_product_telemetry_impl
 
     # New architecture components
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
@@ -203,6 +205,11 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
     anonymized_telemetry: bool = True
+
+    chroma_otel_collection_endpoint: Optional[str] = ""
+    chroma_otel_service_name: Optional[str] = "chromadb"
+    chroma_otel_collection_headers: Dict[str, str] = {}
+    chroma_otel_granularity: Optional[str] = "none"
 
     allow_reset: bool = False
 

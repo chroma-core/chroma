@@ -9,6 +9,11 @@ from chromadb.proto.convert import (
 )
 from chromadb.segment import MetadataReader, VectorReader
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     Metadata,
     ScalarEncoding,
@@ -30,6 +35,7 @@ import grpc
 class GrpcVectorSegment(VectorReader, EnforceOverrides):
     _vector_reader_stub: VectorReaderStub
     _segment: Segment
+    _opentelemetry_client: OpenTelemetryClient
 
     def __init__(self, system: System, segment: Segment):
         # TODO: move to start() method
@@ -40,7 +46,9 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         channel = grpc.insecure_channel(segment["metadata"]["grpc_url"])
         self._vector_reader_stub = VectorReaderStub(channel)  # type: ignore
         self._segment = segment
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
+    @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
@@ -53,6 +61,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             results.append(result)
         return results
 
+    @trace_method("GrpcVectorSegment.query_vectors", OpenTelemetryGranularity.ALL)
     @override
     def query_vectors(
         self, query: VectorQuery

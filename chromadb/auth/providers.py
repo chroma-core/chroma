@@ -16,6 +16,11 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 
 T = TypeVar("T")
 
@@ -36,6 +41,10 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
                 "Please install it with `pip install bcrypt`"
             )
 
+    @trace_method(
+        "HtpasswdServerAuthCredentialsProvider.validate_credentials",
+        OpenTelemetryGranularity.ALL,
+    )
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())

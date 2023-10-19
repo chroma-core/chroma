@@ -2,7 +2,13 @@ from chromadb.api import API
 from chromadb.config import Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
-from chromadb.telemetry import Telemetry
+from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
+from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.api.models.Collection import Collection
 from chromadb import __version__
@@ -28,7 +34,7 @@ from chromadb.api.types import (
     validate_where_document,
     validate_batch,
 )
-from chromadb.telemetry.events import (
+from chromadb.telemetry.product.events import (
     CollectionAddEvent,
     CollectionDeleteEvent,
     CollectionGetEvent,
@@ -78,7 +84,10 @@ class SegmentAPI(API):
     _sysdb: SysDB
     _manager: SegmentManager
     _producer: Producer
-    _telemetry_client: Telemetry
+    _product_telemetry_client: ProductTelemetryClient
+    _opentelemetry_client: OpenTelemetryClient
+    _tenant_id: str
+    _topic_ns: str
     _collection_cache: Dict[UUID, t.Collection]
 
     def __init__(self, system: System):
@@ -86,7 +95,8 @@ class SegmentAPI(API):
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
-        self._telemetry_client = self.require(Telemetry)
+        self._product_telemetry_client = self.require(ProductTelemetryClient)
+        self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
         self._collection_cache = {}
 
@@ -97,6 +107,7 @@ class SegmentAPI(API):
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
+    @trace_method("SegmentAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def create_collection(
         self,
@@ -127,12 +138,13 @@ class SegmentAPI(API):
                 self._sysdb.create_segment(segment)
 
         # TODO: This event doesn't capture the get_or_create case appropriately
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             ClientCreateCollectionEvent(
                 collection_uuid=str(id),
                 embedding_function=embedding_function.__class__.__name__,
             )
         )
+        add_attributes_to_current_span({"collection_uuid": str(id)})
 
         return Collection(
             client=self,
@@ -142,6 +154,9 @@ class SegmentAPI(API):
             embedding_function=embedding_function,
         )
 
+    @trace_method(
+        "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
+    )
     @override
     def get_or_create_collection(
         self,
@@ -149,7 +164,7 @@ class SegmentAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
-        return self.create_collection(
+        return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
@@ -159,6 +174,7 @@ class SegmentAPI(API):
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings
+    @trace_method("SegmentAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def get_collection(
         self,
@@ -178,6 +194,7 @@ class SegmentAPI(API):
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
+    @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def list_collections(self) -> Sequence[Collection]:
         collections = []
@@ -193,6 +210,7 @@ class SegmentAPI(API):
             )
         return collections
 
+    @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
     def _modify(
         self,
@@ -216,6 +234,7 @@ class SegmentAPI(API):
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
 
+    @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(self, name: str) -> None:
         existing = self._sysdb.get_collections(name=name)
@@ -229,6 +248,7 @@ class SegmentAPI(API):
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
+    @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
     def _add(
         self,
@@ -256,7 +276,7 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionAddEvent(
                 collection_uuid=str(collection_id),
                 add_amount=len(ids),
@@ -266,6 +286,7 @@ class SegmentAPI(API):
         )
         return True
 
+    @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
     def _update(
         self,
@@ -293,7 +314,7 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionUpdateEvent(
                 collection_uuid=str(collection_id),
                 update_amount=len(ids),
@@ -305,6 +326,7 @@ class SegmentAPI(API):
 
         return True
 
+    @trace_method("SegmentAPI._upsert", OpenTelemetryGranularity.OPERATION)
     @override
     def _upsert(
         self,
@@ -334,6 +356,7 @@ class SegmentAPI(API):
 
         return True
 
+    @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
     def _get(
         self,
@@ -348,6 +371,13 @@ class SegmentAPI(API):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(collection_id),
+                "ids_count": len(ids) if ids else 0,
+            }
+        )
+
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
             validate_where_document(where_document)
@@ -388,7 +418,7 @@ class SegmentAPI(API):
             documents = [_doc(m) for m in metadatas]
 
         ids_amount = len(ids) if ids else 0
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionGetEvent(
                 collection_uuid=str(collection_id),
                 ids_count=ids_amount,
@@ -407,6 +437,7 @@ class SegmentAPI(API):
             documents=documents if "documents" in include else None,  # type: ignore
         )
 
+    @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
     def _delete(
         self,
@@ -415,6 +446,13 @@ class SegmentAPI(API):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> IDs:
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(collection_id),
+                "ids_count": len(ids) if ids else 0,
+            }
+        )
+
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
             validate_where_document(where_document)
@@ -461,18 +499,21 @@ class SegmentAPI(API):
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionDeleteEvent(
                 collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
             )
         )
         return ids_to_delete
 
+    @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @override
     def _count(self, collection_id: UUID) -> int:
+        add_attributes_to_current_span({"collection_id": str(collection_id)})
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
+    @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     @override
     def _query(
         self,
@@ -483,6 +524,13 @@ class SegmentAPI(API):
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],
     ) -> QueryResult:
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(collection_id),
+                "n_results": n_results,
+                "where": str(where),
+            }
+        )
         where = validate_where(where) if where is not None and len(where) > 0 else where
         where_document = (
             validate_where_document(where_document)
@@ -552,7 +600,7 @@ class SegmentAPI(API):
                     documents.append(doc_list)  # type: ignore
 
         query_amount = len(query_embeddings)
-        self._telemetry_client.capture(
+        self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,
@@ -573,9 +621,11 @@ class SegmentAPI(API):
             documents=documents if documents else None,
         )
 
+    @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
-        return self._get(collection_id, limit=n)
+        add_attributes_to_current_span({"collection_id": str(collection_id)})
+        return self._get(collection_id, limit=n)  # type: ignore
 
     @override
     def get_version(self) -> str:
@@ -601,20 +651,24 @@ class SegmentAPI(API):
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
+    # TODO: promote collection -> topic to a base class method so that it can be
+    # used for channel assignment in the distributed version of the system.
+    @trace_method("SegmentAPI._validate_embedding_record", OpenTelemetryGranularity.ALL)
     def _validate_embedding_record(
         self, collection: t.Collection, record: t.SubmitEmbeddingRecord
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
+        add_attributes_to_current_span({"collection_id": str(collection["id"])})
         if record["embedding"]:
             self._validate_dimension(collection, len(record["embedding"]), update=True)
 
+    @trace_method("SegmentAPI._validate_dimension", OpenTelemetryGranularity.ALL)
     def _validate_dimension(
         self, collection: t.Collection, dim: int, update: bool
     ) -> None:
         """Validate that a collection supports records of the given dimension. If update
         is true, update the collection if the collection doesn't already have a
         dimension."""
-
         if collection["dimension"] is None:
             if update:
                 id = collection["id"]
@@ -627,6 +681,7 @@ class SegmentAPI(API):
         else:
             return  # all is well
 
+    @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         """Read-through cache for collection data"""
         if collection_id not in self._collection_cache:

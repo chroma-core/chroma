@@ -14,6 +14,12 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.ingest import CollectionAssignmentPolicy, Producer
 from chromadb.types import (
     OptionalArgument,
@@ -35,7 +41,9 @@ class SqlSysDB(SqlDB, SysDB):
     def __init__(self, system: System):
         self._assignment_policy = system.instance(CollectionAssignmentPolicy)
         super().__init__(system)
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
+    @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
         super().start()
@@ -43,6 +51,15 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def create_segment(self, segment: Segment) -> None:
+        add_attributes_to_current_span(
+            {
+                "segment_id": str(segment["id"]),
+                "segment_type": segment["type"],
+                "segment_scope": segment["scope"].value,
+                "segment_topic": str(segment["topic"]),
+                "collection": str(segment["collection"]),
+            }
+        )
         with self.tx() as cur:
             segments = Table("segments")
             insert_segment = (
@@ -80,6 +97,7 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["metadata"],
                 )
 
+    @trace_method("SqlSysDB.create_collection", OpenTelemetryGranularity.ALL)
     @override
     def create_collection(
         self,
@@ -91,6 +109,13 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
             raise ValueError("id must be specified if get_or_create is False")
+
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(id),
+                "collection_name": name,
+            }
+        )
 
         existing = self.get_collections(name=name)
         if existing:
@@ -146,6 +171,7 @@ class SqlSysDB(SqlDB, SysDB):
                 )
         return collection, True
 
+    @trace_method("SqlSysDB.get_segments", OpenTelemetryGranularity.ALL)
     @override
     def get_segments(
         self,
@@ -155,6 +181,15 @@ class SqlSysDB(SqlDB, SysDB):
         topic: Optional[str] = None,
         collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
+        add_attributes_to_current_span(
+            {
+                "segment_id": str(id),
+                "segment_type": type if type else "",
+                "segment_scope": scope.value if scope else "",
+                "segment_topic": topic if topic else "",
+                "collection": str(collection),
+            }
+        )
         segments_t = Table("segments")
         metadata_t = Table("segment_metadata")
         q = (
@@ -214,6 +249,7 @@ class SqlSysDB(SqlDB, SysDB):
 
             return segments
 
+    @trace_method("SqlSysDB.get_collections", OpenTelemetryGranularity.ALL)
     @override
     def get_collections(
         self,
@@ -222,6 +258,13 @@ class SqlSysDB(SqlDB, SysDB):
         name: Optional[str] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(id),
+                "collection_topic": topic if topic else "",
+                "collection_name": name if name else "",
+            }
+        )
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
         q = (
@@ -272,9 +315,15 @@ class SqlSysDB(SqlDB, SysDB):
 
             return collections
 
+    @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
     def delete_segment(self, id: UUID) -> None:
         """Delete a segment from the SysDB"""
+        add_attributes_to_current_span(
+            {
+                "segment_id": str(id),
+            }
+        )
         t = Table("segments")
         q = (
             self.querybuilder()
@@ -290,9 +339,15 @@ class SqlSysDB(SqlDB, SysDB):
             if not result:
                 raise NotFoundError(f"Segment {id} not found")
 
+    @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
     def delete_collection(self, id: UUID) -> None:
         """Delete a topic and all associated segments from the SysDB"""
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(id),
+            }
+        )
         t = Table("collections")
         q = (
             self.querybuilder()
@@ -309,6 +364,7 @@ class SqlSysDB(SqlDB, SysDB):
                 raise NotFoundError(f"Collection {id} not found")
         self._producer.delete_topic(result[1])
 
+    @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)
     @override
     def update_segment(
         self,
@@ -317,6 +373,12 @@ class SqlSysDB(SqlDB, SysDB):
         collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
+        add_attributes_to_current_span(
+            {
+                "segment_id": str(id),
+                "collection": str(collection),
+            }
+        )
         segments_t = Table("segments")
         metadata_t = Table("segment_metadata")
 
@@ -361,6 +423,7 @@ class SqlSysDB(SqlDB, SysDB):
                     set(metadata.keys()),
                 )
 
+    @trace_method("SqlSysDB.update_collection", OpenTelemetryGranularity.ALL)
     @override
     def update_collection(
         self,
@@ -370,6 +433,11 @@ class SqlSysDB(SqlDB, SysDB):
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
+        add_attributes_to_current_span(
+            {
+                "collection_id": str(id),
+            }
+        )
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
 
@@ -419,11 +487,17 @@ class SqlSysDB(SqlDB, SysDB):
                         set(metadata.keys()),
                     )
 
+    @trace_method("SqlSysDB._metadata_from_rows", OpenTelemetryGranularity.ALL)
     def _metadata_from_rows(
         self, rows: Sequence[Tuple[Any, ...]]
     ) -> Optional[Metadata]:
         """Given SQL rows, return a metadata map (assuming that the last four columns
         are the key, str_value, int_value & float_value)"""
+        add_attributes_to_current_span(
+            {
+                "num_rows": len(rows),
+            }
+        )
         metadata: Dict[str, Union[str, int, float]] = {}
         for row in rows:
             key = str(row[-4])
@@ -435,6 +509,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata[key] = float(row[-1])
         return metadata or None
 
+    @trace_method("SqlSysDB._insert_metadata", OpenTelemetryGranularity.ALL)
     def _insert_metadata(
         self,
         cur: Cursor,
@@ -447,6 +522,11 @@ class SqlSysDB(SqlDB, SysDB):
         # It would be cleaner to use something like ON CONFLICT UPDATE here But that is
         # very difficult to do in a portable way (e.g sqlite and postgres have
         # completely different sytnax)
+        add_attributes_to_current_span(
+            {
+                "num_keys": len(metadata),
+            }
+        )
         if clear_keys:
             q = (
                 self.querybuilder()
@@ -462,7 +542,11 @@ class SqlSysDB(SqlDB, SysDB):
             self.querybuilder()
             .into(table)
             .columns(
-                id_col, table.key, table.str_value, table.int_value, table.float_value
+                id_col,
+                table.key,
+                table.str_value,
+                table.int_value,
+                table.float_value,
             )
         )
         sql_id = self.uuid_to_db(id)
