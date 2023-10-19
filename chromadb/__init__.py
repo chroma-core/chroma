@@ -18,6 +18,8 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
 )
+from chromadb.utils import once
+
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -94,7 +96,7 @@ def configure(**kwargs) -> None:  # type: ignore
 def get_settings() -> Settings:
     return __settings
 
-
+@once
 def EphemeralClient(settings: Settings = Settings()) -> API:
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
@@ -104,7 +106,7 @@ def EphemeralClient(settings: Settings = Settings()) -> API:
 
     return Client(settings)
 
-
+@once
 def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) -> API:
     """
     Creates a persistent instance of Chroma that saves to disk. This is useful for
