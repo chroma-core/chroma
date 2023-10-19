@@ -391,6 +391,9 @@ class BaseAPI(ABC):
 
 
 class ClientAPI(BaseAPI, ABC):
+    tenant: str
+    database: str
+
     @abstractmethod
     def set_database(self, database: str) -> None:
         """Set the database for the client.

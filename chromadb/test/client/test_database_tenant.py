@@ -1,0 +1,60 @@
+from chromadb.api.client import AdminClient, Client
+
+
+def test_database_tenant_collections(client: Client) -> None:
+    # Create a new database in the default tenant
+    admin_client = AdminClient.from_system(client._system)
+    admin_client.create_database("test_db")
+
+    # Create collections in this new database
+    client.set_database("test_db")
+    client.create_collection("collection", metadata={"database": "test_db"})
+
+    # Create collections in the default database
+    client.set_database("default")
+    client.create_collection("collection", metadata={"database": "default"})
+
+    # List collections in the default database
+    collections = client.list_collections()
+    assert len(collections) == 1
+    assert collections[0].name == "collection"
+    assert collections[0].metadata == {"database": "default"}
+
+    # List collections in the new database
+    client.set_database("test_db")
+    collections = client.list_collections()
+    assert len(collections) == 1
+    assert collections[0].metadata == {"database": "test_db"}
+
+    # Update the metadata in both databases to different values
+    client.set_database("default")
+    client.list_collections()[0].modify(metadata={"database": "default2"})
+
+    client.set_database("test_db")
+    client.list_collections()[0].modify(metadata={"database": "test_db2"})
+
+    # Validate that the metadata was updated
+    client.set_database("default")
+    collections = client.list_collections()
+    assert len(collections) == 1
+    assert collections[0].metadata == {"database": "default2"}
+
+    client.set_database("test_db")
+    collections = client.list_collections()
+    assert len(collections) == 1
+    assert collections[0].metadata == {"database": "test_db2"}
+
+    # Delete the collections and make sure databases are isolated
+    client.set_database("default")
+    client.delete_collection("collection")
+
+    collections = client.list_collections()
+    assert len(collections) == 0
+
+    client.set_database("test_db")
+    collections = client.list_collections()
+    assert len(collections) == 1
+
+    client.delete_collection("collection")
+    collections = client.list_collections()
+    assert len(collections) == 0

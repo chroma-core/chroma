@@ -22,11 +22,12 @@ from requests.exceptions import ConnectionError
 from typing_extensions import Protocol
 
 import chromadb.server.fastapi
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -382,6 +383,13 @@ def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
     api = system.instance(ServerAPI)
     yield api
+
+
+@pytest.fixture(scope="function")
+def client(system: System) -> Generator[ClientAPI, None, None]:
+    system.reset_state()
+    client = ClientCreator.from_system(system)
+    yield client
 
 
 @pytest.fixture(scope="function")

@@ -15,7 +15,7 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
 )
-from chromadb.config import Settings, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 import chromadb.server
 import chromadb.api
 from chromadb.api import ServerAPI
@@ -26,6 +26,7 @@ from chromadb.errors import (
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
+    CreateDatabase,
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
@@ -100,7 +101,6 @@ class ChromaAPIRouter(fastapi.APIRouter):
         super().add_api_route(path, *args, **kwargs)
 
 
-# TODO: add tenant/namespace to all routes
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
@@ -132,6 +132,13 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+        )
+
+        self.router.add_api_route(
+            "/api/v1/databases",
+            self.create_database,
+            methods=["POST"],
+            response_model=None,
         )
 
         self.router.add_api_route(
@@ -225,18 +232,39 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
-    def list_collections(self) -> Sequence[Collection]:
-        return self._api.list_collections()
+    def create_database(
+        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        return self._api.create_database(database.name, tenant)
 
-    def create_collection(self, collection: CreateCollection) -> Collection:
+    def list_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> Sequence[Collection]:
+        return self._api.list_collections(tenant=tenant, database=database)
+
+    def create_collection(
+        self,
+        collection: CreateCollection,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
-    def get_collection(self, collection_name: str) -> Collection:
-        return self._api.get_collection(collection_name)
+    def get_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        return self._api.get_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
     def update_collection(
         self, collection_id: str, collection: UpdateCollection
@@ -247,8 +275,15 @@ class FastAPI(chromadb.server.Server):
             new_metadata=collection.new_metadata,
         )
 
-    def delete_collection(self, collection_name: str) -> None:
-        return self._api.delete_collection(collection_name)
+    def delete_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        return self._api.delete_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
     def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:

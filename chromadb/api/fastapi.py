@@ -143,7 +143,8 @@ class FastAPI(ServerAPI):
         """Creates a database"""
         resp = self._session.post(
             self._api_url + "/databases",
-            data=json.dumps({"name": name, "tenant": tenant}),
+            data=json.dumps({"name": name}),
+            params={"tenant": tenant},
         )
         raise_chroma_error(resp)
 
@@ -152,7 +153,10 @@ class FastAPI(ServerAPI):
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> Sequence[Collection]:
         """Returns a list of all collections"""
-        resp = self._session.get(self._api_url + "/collections")
+        resp = self._session.get(
+            self._api_url + "/collections",
+            params={"tenant": tenant, "database": database},
+        )
         raise_chroma_error(resp)
         json_collections = resp.json()
         collections = []
@@ -175,8 +179,13 @@ class FastAPI(ServerAPI):
         resp = self._session.post(
             self._api_url + "/collections",
             data=json.dumps(
-                {"name": name, "metadata": metadata, "get_or_create": get_or_create}
+                {
+                    "name": name,
+                    "metadata": metadata,
+                    "get_or_create": get_or_create,
+                }
             ),
+            params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
@@ -197,7 +206,10 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
-        resp = self._session.get(self._api_url + "/collections/" + name)
+        resp = self._session.get(
+            self._api_url + "/collections/" + name,
+            params={"tenant": tenant, "database": database},
+        )
         raise_chroma_error(resp)
         resp_json = resp.json()
         return Collection(
@@ -248,7 +260,10 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Deletes a collection"""
-        resp = self._session.delete(self._api_url + "/collections/" + name)
+        resp = self._session.delete(
+            self._api_url + "/collections/" + name,
+            params={"tenant": tenant, "database": database},
+        )
         raise_chroma_error(resp)
 
     @override

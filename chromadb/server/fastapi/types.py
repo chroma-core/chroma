@@ -59,3 +59,7 @@ class CreateCollection(BaseModel):  # type: ignore
 class UpdateCollection(BaseModel):  # type: ignore
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
+
+
+class CreateDatabase(BaseModel):
+    name: str

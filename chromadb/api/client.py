@@ -1,4 +1,4 @@
-from typing import ClassVar, Dict, Optional, Sequence
+from typing import ClassVar, Dict, Optional, Sequence, TypeVar
 from uuid import UUID
 
 from overrides import override
@@ -21,6 +21,8 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.types import Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
+
+C = TypeVar("C", "SharedSystemClient", "Client", "AdminClient")
 
 
 class SharedSystemClient:
@@ -82,6 +84,20 @@ class SharedSystemClient:
         return identifier
 
     @staticmethod
+    def _populate_data_from_system(system: System) -> str:
+        identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
+        SharedSystemClient._identifer_to_system[identifier] = system
+        return identifier
+
+    @classmethod
+    def from_system(cls, system: System) -> "SharedSystemClient":
+        """Create a client from an existing system. This is useful for testing and debugging."""
+
+        SharedSystemClient._populate_data_from_system(system)
+        instance = cls(system.settings)
+        return instance
+
+    @staticmethod
     def clear_system_cache() -> None:
         SharedSystemClient._identifer_to_system = {}
 
@@ -124,6 +140,18 @@ class Client(SharedSystemClient, ClientAPI):
         # Submit event for a client start
         telemetry_client = self._system.instance(Telemetry)
         telemetry_client.capture(ClientStartEvent())
+
+    @classmethod
+    @override
+    def from_system(
+        cls,
+        system: System,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "Client":
+        SharedSystemClient._populate_data_from_system(system)
+        instance = cls(tenant=tenant, database=database, settings=system.settings)
+        return instance
 
     # endregion
 
@@ -366,7 +394,7 @@ class Client(SharedSystemClient, ClientAPI):
     # endregion
 
 
-class AdminClient(AdminAPI, SharedSystemClient):
+class AdminClient(SharedSystemClient, AdminAPI):
     _server: ServerAPI
 
     def __init__(self, settings: Settings = Settings()) -> None:
@@ -376,3 +404,13 @@ class AdminClient(AdminAPI, SharedSystemClient):
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         return self._server.create_database(name=name, tenant=tenant)
+
+    @classmethod
+    @override
+    def from_system(
+        cls,
+        system: System,
+    ) -> "AdminClient":
+        SharedSystemClient._populate_data_from_system(system)
+        instance = cls(settings=system.settings)
+        return instance
