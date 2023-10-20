@@ -96,6 +96,9 @@ class SegmentAPI(ServerAPI):
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        if len(name) < 3:
+            raise ValueError("Database name must be at least 3 characters long")
+
         self._sysdb.create_database(
             id=uuid4(),
             name=name,
@@ -104,6 +107,9 @@ class SegmentAPI(ServerAPI):
 
     @override
     def create_tenant(self, name: str) -> None:
+        if len(name) < 3:
+            raise ValueError("Tenant name must be at least 3 characters long")
+
         self._sysdb.create_tenant(
             name=name,
         )

@@ -63,3 +63,7 @@ class UpdateCollection(BaseModel):  # type: ignore
 
 class CreateDatabase(BaseModel):
     name: str
+
+
+class CreateTenant(BaseModel):
+    name: str

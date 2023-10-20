@@ -20,7 +20,7 @@ CREATE TABLE collections_tmp (
 );
 
 -- Create default tenant and database
-INSERT INTO tenants (id) VALUES ('default'); -- should ids be uuids?
+INSERT INTO tenants (id) VALUES ('default'); -- The default tenant id is 'default' others are UUIDs
 INSERT INTO databases (id, name, tenant_id) VALUES ('default', 'default', 'default');
 
 INSERT INTO collections_tmp (id, name, topic, dimension, database_id)

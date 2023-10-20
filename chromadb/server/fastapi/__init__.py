@@ -27,6 +27,7 @@ from chromadb.errors import (
 from chromadb.server.fastapi.types import (
     AddEmbedding,
     CreateDatabase,
+    CreateTenant,
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
@@ -244,8 +245,8 @@ class FastAPI(chromadb.server.Server):
     ) -> None:
         return self._api.create_database(database.name, tenant)
 
-    def create_tenant(self, name: str) -> None:
-        return self._api.create_tenant(name)
+    def create_tenant(self, tenant: CreateTenant) -> None:
+        return self._api.create_tenant(tenant.name)
 
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
