@@ -35,5 +35,10 @@
     "--no-pretty",
     "--strict",
     "--disable-error-code=type-abstract"
-  ]
+  ],
+  "protoc": {
+    "options": [
+      "--proto_path=idl/",
+    ]
+  }
 }

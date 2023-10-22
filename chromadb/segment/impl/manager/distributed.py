@@ -1,7 +1,7 @@
 from threading import Lock
 
 import grpc
-from chromadb.proto.chroma_pb2_grpc import SegmentServerStub
+from chromadb.proto.chroma_pb2_grpc import SegmentServerStub  # type: ignore
 from chromadb.proto.convert import to_proto_segment
 from chromadb.segment import (
     SegmentImplementation,
@@ -14,10 +14,14 @@ from chromadb.segment import (
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
-from enum import Enum
-from chromadb.segment import SegmentDirectory
+from chromadb.segment.distributed import SegmentDirectory
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Dict, List, Type, Sequence, Optional, cast
+from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
 
@@ -36,6 +40,7 @@ SEGMENT_TYPE_IMPLS = {
 class DistributedSegmentManager(SegmentManager):
     _sysdb: SysDB
     _system: System
+    _opentelemetry_client: OpenTelemetryClient
     _instances: Dict[UUID, SegmentImplementation]
     _segment_cache: Dict[
         UUID, Dict[SegmentScope, Segment]
@@ -49,11 +54,16 @@ class DistributedSegmentManager(SegmentManager):
         self._sysdb = self.require(SysDB)
         self._segment_directory = self.require(SegmentDirectory)
         self._system = system
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
         self._segment_cache = defaultdict(dict)
         self._segment_server_stubs = {}
         self._lock = Lock()
 
+    @trace_method(
+        "DistributedSegmentManager.create_segments",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
@@ -68,6 +78,10 @@ class DistributedSegmentManager(SegmentManager):
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         raise NotImplementedError()
 
+    @trace_method(
+        "DistributedSegmentManager.get_segment",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def get_segment(self, collection_id: UUID, type: type[S]) -> S:
         if type == MetadataReader:
@@ -97,6 +111,10 @@ class DistributedSegmentManager(SegmentManager):
             instance = self._instance(self._segment_cache[collection_id][scope])
         return cast(S, instance)
 
+    @trace_method(
+        "DistributedSegmentManager.hint_use_collection",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
         # TODO: this should call load/release on the target node, node should be stored in metadata
@@ -118,6 +136,13 @@ class DistributedSegmentManager(SegmentManager):
                 if grpc_url not in self._segment_server_stubs:
                     channel = grpc.insecure_channel(grpc_url)
                     self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
+
+                self._segment_server_stubs[grpc_url].LoadSegment(
+                    to_proto_segment(segment)
+                )
+                if grpc_url not in self._segment_server_stubs:
+                    channel = grpc.insecure_channel(grpc_url)
+                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
 
                 self._segment_server_stubs[grpc_url].LoadSegment(
                     to_proto_segment(segment)

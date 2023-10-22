@@ -31,6 +31,20 @@ INT32: ScalarEncoding
 VECTOR: SegmentScope
 METADATA: SegmentScope
 
+class Status(_message.Message):
+    __slots__ = ["reason", "code"]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    reason: str
+    code: int
+    def __init__(self, reason: _Optional[str] = ..., code: _Optional[int] = ...) -> None: ...
+
+class ChromaResponse(_message.Message):
+    __slots__ = ["status"]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    status: Status
+    def __init__(self, status: _Optional[_Union[Status, _Mapping]] = ...) -> None: ...
+
 class Vector(_message.Message):
     __slots__ = ["dimension", "vector", "encoding"]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
@@ -56,6 +70,20 @@ class Segment(_message.Message):
     collection: str
     metadata: UpdateMetadata
     def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., topic: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
+
+class Collection(_message.Message):
+    __slots__ = ["id", "name", "topic", "metadata", "dimension"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TOPIC_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    DIMENSION_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    topic: str
+    metadata: UpdateMetadata
+    dimension: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ...) -> None: ...
 
 class UpdateMetadataValue(_message.Message):
     __slots__ = ["string_value", "int_value", "float_value"]
