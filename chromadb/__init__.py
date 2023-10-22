@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 import logging
 import chromadb.config
 from chromadb.config import Settings, System
@@ -55,7 +55,7 @@ except ImportError:
 
 is_client = False
 try:
-    from chromadb.is_thin_client import is_thin_client  # type: ignore
+    from chromadb.is_thin_client import is_thin_client
 
     is_client = is_thin_client
 except ImportError:
@@ -95,17 +95,21 @@ def get_settings() -> Settings:
     return __settings
 
 
-def EphemeralClient(settings: Settings = Settings()) -> API:
+def EphemeralClient(settings: Optional[Settings] = None) -> API:
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
     development, but not recommended for production use.
     """
+    if settings is None:
+        settings = Settings()
     settings.is_persistent = False
 
     return Client(settings)
 
 
-def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) -> API:
+def PersistentClient(
+    path: str = "./chroma", settings: Optional[Settings] = None
+) -> API:
     """
     Creates a persistent instance of Chroma that saves to disk. This is useful for
     testing and development, but not recommended for production use.
@@ -113,6 +117,8 @@ def PersistentClient(path: str = "./chroma", settings: Settings = Settings()) ->
     Args:
         path: The directory to save Chroma's data to. Defaults to "./chroma".
     """
+    if settings is None:
+        settings = Settings()
     settings.persist_directory = path
     settings.is_persistent = True
 
@@ -123,8 +129,8 @@ def HttpClient(
     host: str = "localhost",
     port: str = "8000",
     ssl: bool = False,
-    headers: Dict[str, str] = {},
-    settings: Settings = Settings(),
+    headers: Optional[Dict[str, str]] = None,
+    settings: Optional[Settings] = None,
 ) -> API:
     """
     Creates a client that connects to a remote Chroma server. This supports
@@ -137,6 +143,11 @@ def HttpClient(
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
     """
+
+    if headers is None:
+        headers = {}
+    if settings is None:
+        settings = Settings()
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = host
