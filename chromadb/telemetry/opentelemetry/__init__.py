@@ -1,8 +1,9 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union, cast
 
 from opentelemetry import trace
+from opentelemetry.util import types
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -61,6 +62,13 @@ tracer: Optional[trace.Tracer] = None
 granularity: OpenTelemetryGranularity = OpenTelemetryGranularity("none")
 
 
+def _transform_attributes(
+    attributes: Dict[str, Any]
+) -> Dict[str, types.AttributeValue]:
+    """Transform attributes to the format expected by OpenTelemetry."""
+    return {k: cast(types.AttributeValue, v) for k, v in attributes.items()}
+
+
 def otel_init(
     otel_service_name: Optional[str],
     otel_collection_endpoint: Optional[str],
@@ -72,8 +80,10 @@ def otel_init(
     Parameters match the environment variables which configure OTel as documented
     at https://docs.trychroma.com/observability.
     - otel_service_name: The name of the service for OTel tagging and aggregation.
-    - otel_collection_endpoint: The endpoint to which OTel spans are sent (e.g. api.honeycomb.com).
-    - otel_collection_headers: The headers to send with OTel spans (e.g. {"x-honeycomb-team": "abc123"}).
+    - otel_collection_endpoint: The endpoint to which OTel spans are sent
+        (e.g. api.honeycomb.com).
+    - otel_collection_headers: The headers to send with OTel spans
+        (e.g. {"x-honeycomb-team": "abc123"}).
     - otel_granularity: The granularity of the spans to emit.
     """
     if otel_granularity == OpenTelemetryGranularity.NONE:
@@ -110,7 +120,7 @@ def trace_method(
             if trace_granularity < granularity:
                 return f(*args, **kwargs)
             if not tracer:
-                return
+                return f(*args, **kwargs)
             with tracer.start_as_current_span(trace_name, attributes=attributes):
                 return f(*args, **kwargs)
 
@@ -129,4 +139,4 @@ def add_attributes_to_current_span(
     if not tracer:
         return
     span = trace.get_current_span()
-    span.set_attributes(_transform_attributes(attributes))  # type: ignore
+    span.set_attributes(_transform_attributes(attributes))
