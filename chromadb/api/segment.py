@@ -113,13 +113,12 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         if metadata is not None:
             validate_metadata(metadata)
-        
+
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
@@ -163,8 +162,7 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         return self.create_collection(  # type: ignore
             name=name,
@@ -181,8 +179,7 @@ class SegmentAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
 
@@ -231,8 +228,7 @@ class SegmentAPI(API):
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
         if new_name and new_metadata:
-            self._sysdb.update_collection(
-                id, name=new_name, metadata=new_metadata)
+            self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
@@ -389,8 +385,7 @@ class SegmentAPI(API):
             else None
         )
 
-        metadata_segment = self._manager.get_segment(
-            collection_id, MetadataReader)
+        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
 
         if sort is not None:
             raise NotImplementedError("Sorting is not yet supported")
@@ -410,8 +405,7 @@ class SegmentAPI(API):
         vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
-            vector_segment = self._manager.get_segment(
-                collection_id, VectorReader)
+            vector_segment = self._manager.get_segment(collection_id, VectorReader)
             vectors = vector_segment.get_vectors(ids=vector_ids)
 
         # TODO: Fix type so we don't need to ignore
@@ -439,8 +433,9 @@ class SegmentAPI(API):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(
-                metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas)
+            if "metadatas" in include
+            else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
 
@@ -489,8 +484,7 @@ class SegmentAPI(API):
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         if (where or where_document) or not ids:
-            metadata_segment = self._manager.get_segment(
-                collection_id, MetadataReader)
+            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
                 where=where, where_document=where_document, ids=ids
             )
@@ -525,7 +519,7 @@ class SegmentAPI(API):
     @override
     def _dimensions(self, collection_id: UUID) -> int:
         coll = self._get_collection(collection_id)
-        return coll["dimension"] if coll["dimension"] is not None else -1
+        return cast(int, coll["dimension"]) if coll["dimension"] is not None else -1
 
     @override
     def _query(
@@ -557,8 +551,7 @@ class SegmentAPI(API):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
-        metadata_reader = self._manager.get_segment(
-            collection_id, MetadataReader)
+        metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
 
         if where or where_document:
             records = metadata_reader.get_metadata(
@@ -588,8 +581,7 @@ class SegmentAPI(API):
             if "distances" in include:
                 distances.append([r["distance"] for r in result])
             if "embeddings" in include:
-                embeddings.append([cast(Embedding, r["embedding"])
-                                  for r in result])
+                embeddings.append([cast(Embedding, r["embedding"]) for r in result])
 
         if "documents" in include or "metadatas" in include:
             all_ids: Set[str] = set()
@@ -607,11 +599,9 @@ class SegmentAPI(API):
                 # queries the metadata segment. The metadata segment does not have
                 # the record. In this case we choose to return potentially
                 # incorrect data in the form of None.
-                metadata_list = [metadata_by_id.get(
-                    id, None) for id in id_list]
+                metadata_list = [metadata_by_id.get(id, None) for id in id_list]
                 if "metadatas" in include:
-                    metadatas.append(_clean_metadatas(
-                        metadata_list))  # type: ignore
+                    metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
@@ -677,8 +667,7 @@ class SegmentAPI(API):
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
         if record["embedding"]:
-            self._validate_dimension(collection, len(
-                record["embedding"]), update=True)
+            self._validate_dimension(collection, len(record["embedding"]), update=True)
 
     @trace_method("SegmentAPI._validate_dimension", OpenTelemetryGranularity.ALL)
     def _validate_dimension(

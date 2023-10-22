@@ -30,4 +30,3 @@ Older clients will be compatible with newer server versions.
 New tests will be added to the `chromadb.api` module.
 
 ## **Rejected Alternatives**
-

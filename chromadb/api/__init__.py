@@ -54,8 +54,7 @@ class API(Component, ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -88,8 +87,7 @@ class API(Component, ABC):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -116,8 +114,7 @@ class API(Component, ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -264,11 +261,11 @@ class API(Component, ABC):
         specified by UUID.
 
         Args:
-            collection_id: The UUID of the collection to get the dimensions of the 
+            collection_id: The UUID of the collection to get the dimensions of the
             embeddings in.
 
         Returns:
-            int: The number of dimensions of the embeddings in the collection. If the 
+            int: The number of dimensions of the embeddings in the collection. If the
             collection has no embeddings, returns -1.
 
         """
@@ -351,8 +348,7 @@ class API(Component, ABC):
         n_results: int = 10,
         where: Where = {},
         where_document: WhereDocument = {},
-        include: Include = ["embeddings",
-                            "metadatas", "documents", "distances"],
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 

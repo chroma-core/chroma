@@ -36,11 +36,9 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
             isinstance(embedding, list) for embedding in record_set["embeddings"]
         ):
             if all(isinstance(e, (int, float)) for e in record_set["embeddings"]):
-                embedding_list = cast(
-                    types.Embeddings, [record_set["embeddings"]])
+                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
             else:
-                raise InvalidArgument(
-                    "an embedding must be a list of floats or ints")
+                raise InvalidArgument("an embedding must be a list of floats or ints")
         else:
             embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
@@ -71,8 +69,10 @@ def dimensions(collection: Collection, record_set: RecordSet) -> None:
     """The given collection dimensions is equal to the number of dimensions"""
     dimensions = collection.dimensions()
     normalized_record_set = wrap_all(record_set)
-    if normalized_record_set["embeddings"] and \
-            len(normalized_record_set["embeddings"]) > 0:
+    if (
+        normalized_record_set["embeddings"]
+        and len(normalized_record_set["embeddings"]) > 0
+    ):
         assert dimensions == len(normalized_record_set["embeddings"][0])
     else:
         assert dimensions == -1
@@ -89,12 +89,10 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    result = collection.get(
-        ids=normalized_record_set["ids"], include=[field_name])
+    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
-    embedding_id_to_index = {id: i for i,
-                             id in enumerate(normalized_record_set["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
 
     if len(normalized_record_set["ids"]) == 0:
@@ -116,8 +114,7 @@ def _field_matches(
     if expected_field is None:
         # Since an RecordSet is the user input, we need to convert the documents to
         # a List since thats what the API returns -> none per entry
-        expected_field = [None] * \
-            len(normalized_record_set["ids"])  # type: ignore
+        expected_field = [None] * len(normalized_record_set["ids"])  # type: ignore
     if field_name == "embeddings":
         assert np.allclose(np.array(field_values), np.array(expected_field))
     else:
@@ -127,12 +124,10 @@ def _field_matches(
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding ids is equal to the expected ids"""
     normalized_record_set = wrap_all(record_set)
-    actual_ids = collection.get(
-        ids=normalized_record_set["ids"], include=[])["ids"]
+    actual_ids = collection.get(ids=normalized_record_set["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
-    embedding_id_to_index = {id: i for i,
-                             id in enumerate(normalized_record_set["ids"])}
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
     assert actual_ids == normalized_record_set["ids"]
 
@@ -223,8 +218,7 @@ def ann_accuracy(
         # This means that higher dimensions will have more noise, and thus more error.
         assert all(isinstance(e, list) for e in embeddings)
         dim = len(embeddings[0])
-        accuracy_threshold = accuracy_threshold * \
-            math.pow(10, int(math.log10(dim)))
+        accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
         if space == "cosine":
             distance_function = distance_functions.cosine
@@ -233,8 +227,7 @@ def ann_accuracy(
 
     # Perform exact distance computation
     query_embeddings = (
-        embeddings if query_indices is None else [
-            embeddings[i] for i in query_indices]
+        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
     )
     query_documents = normalized_record_set["documents"]
     if query_indices is not None and query_documents is not None:
@@ -260,8 +253,7 @@ def ann_accuracy(
     id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     missing = 0
     for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
-        expected_ids = np.array(normalized_record_set["ids"])[
-            indices_i[:n_results]]
+        expected_ids = np.array(normalized_record_set["ids"])[indices_i[:n_results]]
         missing += len(set(expected_ids) - set(query_results["ids"][i]))
 
         # For each id in the query results, find the index in the embeddings set
@@ -286,8 +278,7 @@ def ann_accuracy(
             else:
                 assert correct_distance
 
-            assert np.allclose(embeddings[index],
-                               query_results["embeddings"][i][j])
+            assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
             if normalized_record_set["documents"] is not None:
                 assert (
                     normalized_record_set["documents"][index]

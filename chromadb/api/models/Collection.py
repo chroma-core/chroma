@@ -48,8 +48,7 @@ class Collection(BaseModel):
         client: "API",
         name: str,
         id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-        ),
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         metadata: Optional[CollectionMetadata] = None,
     ):
         super().__init__(name=name, metadata=metadata, id=id)
@@ -66,8 +65,7 @@ class Collection(BaseModel):
             int: The total number of embeddings added to the database
 
         """
-        return self._client._count(collection_id=self.id)\
-
+        return self._client._count(collection_id=self.id)
 
     def dimensions(self) -> int:
         """The number of dimensions of the embeddings
@@ -199,8 +197,7 @@ class Collection(BaseModel):
             else None
         )
         query_texts = (
-            maybe_cast_one_to_many(
-                query_texts) if query_texts is not None else None
+            maybe_cast_one_to_many(query_texts) if query_texts is not None else None
         )
         include = validate_include(include, allow_distances=True)
         n_results = validate_n_results(n_results)
@@ -367,8 +364,7 @@ class Collection(BaseModel):
             if metadatas is not None
             else None
         )
-        documents = maybe_cast_one_to_many(
-            documents) if documents is not None else None
+        documents = maybe_cast_one_to_many(documents) if documents is not None else None
 
         # Check that one of embeddings or documents is provided
         if require_embeddings_or_documents:
