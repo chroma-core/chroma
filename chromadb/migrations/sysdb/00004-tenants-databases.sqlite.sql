@@ -24,6 +24,6 @@ INSERT INTO tenants (id) VALUES ('default'); -- The default tenant id is 'defaul
 INSERT INTO databases (id, name, tenant_id) VALUES ('00000000-0000-0000-0000-000000000000', 'default', 'default');
 
 INSERT INTO collections_tmp (id, name, topic, dimension, database_id)
-    SELECT id, name, topic, dimension, 'default' FROM collections;
+    SELECT id, name, topic, dimension, '00000000-0000-0000-0000-000000000000' FROM collections;
 DROP TABLE collections;
 ALTER TABLE collections_tmp RENAME TO collections;
