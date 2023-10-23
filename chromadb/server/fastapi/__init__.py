@@ -39,6 +39,7 @@ from starlette.requests import Request
 
 import logging
 from chromadb.telemetry import ServerContext, Telemetry
+from chromadb.types import Database, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -143,9 +144,23 @@ class FastAPI(chromadb.server.Server):
         )
 
         self.router.add_api_route(
+            "/api/v1/databases/{database}",
+            self.get_database,
+            methods=["GET"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
             "/api/v1/tenants",
             self.create_tenant,
             methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/tenants/{tenant}",
+            self.get_tenant,
+            methods=["GET"],
             response_model=None,
         )
 
@@ -245,8 +260,14 @@ class FastAPI(chromadb.server.Server):
     ) -> None:
         return self._api.create_database(database.name, tenant)
 
+    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
+        return self._api.get_database(database, tenant)
+
     def create_tenant(self, tenant: CreateTenant) -> None:
         return self._api.create_tenant(tenant.name)
+
+    def get_tenant(self, tenant: str) -> Tenant:
+        return self._api.get_tenant(tenant)
 
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE

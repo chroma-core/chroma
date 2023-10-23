@@ -390,11 +390,11 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def set_tenant_and_database(self, tenant: str, database: str) -> None:
-        self._validate_tenant_database(database, self.tenant)
+        self._validate_tenant_database(tenant=tenant, database=database)
         self.tenant = tenant
         self.database = database
 
-    def _validate_tenant_database(self, database: str, tenant: str) -> None:
+    def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
         except Exception:
