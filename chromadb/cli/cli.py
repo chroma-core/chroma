@@ -1,4 +1,5 @@
-from typing import Annotated, Optional
+from typing import Optional
+from typing_extensions import Annotated
 import typer
 import uvicorn
 import os
