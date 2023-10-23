@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// IMeta is an interface that defines methods for the cache of the catalog.
 type IMeta interface {
 	ResetState(ctx context.Context) error
 	AddCollection(ctx context.Context, coll *model.CreateCollection) (*model.Collection, error)
@@ -24,6 +25,11 @@ type IMeta interface {
 	UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
 }
 
+// MetaTable is an implementation of IMeta. It loads the system catalog during startup
+// and caches in memory. The implmentation needs to make sure that the in memory cache
+// is consistent with the system catalog.
+//
+// Operations of MetaTable are protected by a read write lock and are thread safe.
 type MetaTable struct {
 	ddLock           sync.RWMutex
 	ctx              context.Context

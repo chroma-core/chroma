@@ -7,7 +7,9 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 )
 
+// Catalog defines methods for system catalog
 //go:generate mockery --name=Catalog
+
 type Catalog interface {
 	ResetState(ctx context.Context) error
 	CreateCollection(ctx context.Context, collectionInfo *model.CreateCollection, ts types.Timestamp) (*model.Collection, error)

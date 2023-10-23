@@ -627,28 +627,30 @@ func TestUpdateSegment(t *testing.T) {
 	assert.Equal(t, []*model.Segment{segment}, result)
 
 	// Add a new metadata key
-	metadata.Set("test_str2", &model.SegmentMetadataValueStringType{Value: "str2"})
+	segment.Metadata.Set("test_str2", &model.SegmentMetadataValueStringType{Value: "str2"})
 	c.UpdateSegment(ctx, &model.UpdateSegment{
 		ID:       segment.ID,
-		Metadata: metadata})
+		Metadata: segment.Metadata})
 	result, err = c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Segment{segment}, result)
 
 	// Update a metadata key
-	metadata.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str3"})
+	segment.Metadata.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str3"})
 	c.UpdateSegment(ctx, &model.UpdateSegment{
 		ID:       segment.ID,
-		Metadata: metadata})
+		Metadata: segment.Metadata})
 	result, err = c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Segment{segment}, result)
 
 	// Delete a metadata key
-	metadata.Remove("test_str")
+	segment.Metadata.Remove("test_str")
+	newMetadata := model.NewSegmentMetadata[model.SegmentMetadataValueType]()
+	newMetadata.Set("test_str", nil)
 	c.UpdateSegment(ctx, &model.UpdateSegment{
 		ID:       segment.ID,
-		Metadata: metadata})
+		Metadata: newMetadata})
 	result, err = c.GetSegments(ctx, segment.ID, nil, nil, nil, types.NilUniqueID())
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Segment{segment}, result)

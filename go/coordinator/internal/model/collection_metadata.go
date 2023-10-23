@@ -43,3 +43,7 @@ func (m *CollectionMetadata[T]) Get(key string) T {
 func (m *CollectionMetadata[T]) Remove(key string) {
 	delete(m.Metadata, key)
 }
+
+func (m *CollectionMetadata[T]) Empty() bool {
+	return len(m.Metadata) == 0
+}

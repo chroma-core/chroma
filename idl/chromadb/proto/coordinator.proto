@@ -3,7 +3,7 @@ syntax = "proto3";
 package chroma;
 option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
 
-import "chroma.proto";
+import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
 
 message CreateDatabaseRequest {

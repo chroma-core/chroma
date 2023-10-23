@@ -51,3 +51,7 @@ func (m *SegmentMetadata[T]) Keys() []string {
 	}
 	return keys
 }
+
+func (m *SegmentMetadata[T]) Empty() bool {
+	return len(m.Metadata) == 0
+}

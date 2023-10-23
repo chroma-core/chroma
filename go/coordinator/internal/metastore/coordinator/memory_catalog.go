@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// MemoryCatalog is a reference implementation of Catalog interface to ensure the
+// application logic is correctly implemented.
 type MemoryCatalog struct {
 	Collections map[types.UniqueID]*model.Collection
 	Segments    map[types.UniqueID]*model.Segment
@@ -93,7 +95,7 @@ func (mc *MemoryCatalog) UpdateCollection(ctx context.Context, coll *model.Updat
 		}
 	}
 	mc.Collections[coll.ID] = oldCollection
-	// Better to return a copy of the collection
+	// Better to return a copy of the collection to avoid being modified by others.
 	log.Debug("collection metadata", zap.Any("metadata", oldCollection.Metadata))
 	return oldCollection, nil
 }

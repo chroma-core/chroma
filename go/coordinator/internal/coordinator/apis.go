@@ -9,8 +9,11 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 )
 
+// ICoordinator is an interface that defines the methods for interacting with the
+// Chroma Coordinator. It is designed in a way that can be run standalone without
+// spinning off the GRPC service.
 type ICoordinator interface {
-	Component
+	common.Component
 	ResetState(ctx context.Context) error
 	CreateCollection(ctx context.Context, collection *model.CreateCollection) (*model.Collection, error)
 	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string) ([]*model.Collection, error)
