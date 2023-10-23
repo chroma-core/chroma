@@ -1,6 +1,6 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Union, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Union, cast
 
 from opentelemetry import trace
 from opentelemetry.util import types
@@ -109,14 +109,28 @@ def otel_init(
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
-    attributes: Dict[str, Union[str, bool, float, int]] = {},
+    attributes: Optional[
+        Dict[
+            str,
+            Union[
+                str,
+                bool,
+                float,
+                int,
+                Sequence[str],
+                Sequence[bool],
+                Sequence[float],
+                Sequence[int],
+            ],
+        ]
+    ] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """A decorator that traces a method."""
 
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
-            global tracer, granularity, _transform_attributes
+            global tracer, granularity
             if trace_granularity < granularity:
                 return f(*args, **kwargs)
             if not tracer:
@@ -130,13 +144,25 @@ def trace_method(
 
 
 def add_attributes_to_current_span(
-    attributes: Dict[str, Union[str, bool, float, int]]
+    attributes: Dict[
+        str,
+        Union[
+            str,
+            bool,
+            float,
+            int,
+            Sequence[str],
+            Sequence[bool],
+            Sequence[float],
+            Sequence[int],
+        ],
+    ]
 ) -> None:
     """Add attributes to the current span."""
-    global tracer, granularity, _transform_attributes
+    global tracer, granularity
     if granularity == OpenTelemetryGranularity.NONE:
         return
     if not tracer:
         return
     span = trace.get_current_span()
-    span.set_attributes(_transform_attributes(attributes))
+    span.set_attributes(attributes)
