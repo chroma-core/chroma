@@ -1,0 +1,12 @@
+apiVersion: v2
+name: chroma-coordinator
+description: Chroma Coorindator
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+home: https://www.trychroma.com/
+sources:
+- https://github.com/chroma-core/chroma
+maintainers:
+- name: Chroma Support
+  email: support@trychroma.com

@@ -304,4 +304,7 @@ class GrpcSysDB(SysDB):
             raise NotFoundError()
 
     def reset_and_wait_for_ready(self) -> None:
-        self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)
+        try:
+            self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)
+        except Exception:
+            pass 

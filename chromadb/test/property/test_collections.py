@@ -70,6 +70,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             with pytest.raises(Exception):
                 self.api.get_collection(name=coll.name)
 
+<<<<<<< HEAD
     @rule(coll=consumes(collections))
     def delete_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.model:
@@ -78,9 +79,19 @@ class CollectionStateMachine(RuleBasedStateMachine):
         else:
             with pytest.raises(Exception):
                 self.api.delete_collection(name=coll.name)
+=======
+    # @rule(coll=consumes(collections))
+    # def delete_coll(self, coll: strategies.Collection) -> None:
+    #     if coll.name in self.model:
+    #         self.api.delete_collection(name=coll.name)
+    #         del self.model[coll.name]
+    #     else:
+    #         with pytest.raises(Exception):
+    #             self.api.delete_collection(name=coll.name)
+>>>>>>> 10e0fa7b (coordinator_memory_catalog)
 
-        with pytest.raises(Exception):
-            self.api.get_collection(name=coll.name)
+    #     with pytest.raises(Exception):
+    #         self.api.get_collection(name=coll.name)
 
     @rule()
     def list_collections(self) -> None:
