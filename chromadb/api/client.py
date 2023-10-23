@@ -389,9 +389,14 @@ class Client(SharedSystemClient, ClientAPI):
     # region ClientAPI Methods
 
     @override
-    def set_tenant_and_database(self, tenant: str, database: str) -> None:
+    def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         self._validate_tenant_database(tenant=tenant, database=database)
         self.tenant = tenant
+        self.database = database
+
+    @override
+    def set_database(self, database: str) -> None:
+        self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
     def _validate_tenant_database(self, tenant: str, database: str) -> None:

@@ -396,12 +396,22 @@ class ClientAPI(BaseAPI, ABC):
     database: str
 
     @abstractmethod
-    def set_tenant_and_database(self, tenant: str, database: str) -> None:
+    def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         """Set the tenant and database for the client. Raises an error if the tenant or
         database does not exist.
 
         Args:
             tenant: The tenant to set.
+            database: The database to set.
+
+        """
+        pass
+
+    @abstractmethod
+    def set_database(self, database: str) -> None:
+        """Set the database for the client. Raises an error if the database does not exist.
+
+        Args:
             database: The database to set.
 
         """
