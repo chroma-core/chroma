@@ -1,4 +1,4 @@
-from typing import ClassVar, Dict, Optional, Sequence, TypeVar
+from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 
 from overrides import override
@@ -21,8 +21,6 @@ from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
-
-C = TypeVar("C", "SharedSystemClient", "Client", "AdminClient")
 
 
 class SharedSystemClient:
@@ -135,6 +133,9 @@ class Client(SharedSystemClient, ClientAPI):
         super().__init__(settings=settings)
         self.tenant = tenant
         self.database = database
+        # Create an admin client for verifying that databases and tenants exist
+        self._admin_client = AdminClient.from_system(self._system)
+        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
@@ -142,9 +143,6 @@ class Client(SharedSystemClient, ClientAPI):
         # Submit event for a client start
         telemetry_client = self._system.instance(Telemetry)
         telemetry_client.capture(ClientStartEvent())
-
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
 
     @classmethod
     @override
