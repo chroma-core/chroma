@@ -166,6 +166,11 @@ def HttpClient(
 
 
 def AdminClient(settings: Settings = Settings()) -> AdminAPI:
+    """
+
+    Creates an admin client that can be used to create tenants and databases.
+
+    """
     return AdminClientCreator(settings=settings)
 
 

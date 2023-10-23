@@ -1,4 +1,5 @@
 from typing import Generator
+from unittest.mock import patch
 import chromadb
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
@@ -24,9 +25,10 @@ def persistent_api() -> Generator[ClientAPI, None, None]:
 
 @pytest.fixture
 def http_api() -> Generator[ClientAPI, None, None]:
-    client = chromadb.HttpClient()
-    yield client
-    client.clear_system_cache()
+    with patch("chromadb.api.client.Client._validate_tenant_database"):
+        client = chromadb.HttpClient()
+        yield client
+        client.clear_system_cache()
 
 
 def test_ephemeral_client(ephemeral_api: ClientAPI) -> None:
