@@ -479,6 +479,38 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
         return embeddings
 
 
+class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction):
+    # Follow API Quickstart for Cloudflare Workers AI
+    # https://developers.cloudflare.com/workers-ai/
+    # Information about the text embedding modules in Google Vertex AI
+    # https://developers.cloudflare.com/workers-ai/models/embedding/
+    def __init__(
+        self,
+        api_token: str,
+        account_id: str = None,
+        model_name: str = "@cf/baai/bge-base-en-v1.5",
+        gateway_url: str = None, # use Cloudflare AI Gateway instead of the usual endpoint
+    ):
+        self._api_base_url = gateway_url ? gateway_url : f"https://api.cloudflare.com/client/v4/accounts/{account_id}}/ai/run/"
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Bearer {api_token}"})
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        processed = []
+        # Endpoint accepts up to 100 items at a time
+        for i in range(0, len(texts), 100):
+            batch = texts[i:i+100]
+            response = self._session.post(
+                f"{self._api_base_url}{self._model_name}", json={"text":batch}
+            ).json()
+
+            if 'result' in response:
+                if 'data' in response["result"]
+                    embeddings.append(response["result"]["data"])
+
+        return embeddings
+
+
 # List of all classes in this module
 _classes = [
     name
