@@ -138,9 +138,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             for row in cur.fetchall():
                 cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
-        # TODO: clean this up ---- I don't think its correct or needed
-        # if self._is_persistent:
-        #     delete_file(self._db_file)
         self.start()
         super().reset_state()
 
