@@ -46,7 +46,9 @@ def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _patch_boolean_metadata(
-    collection: strategies.Collection, embeddings: strategies.RecordSet
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
 ) -> None:
     # Since the old version does not support boolean value metadata, we will convert
     # boolean value metadata to int
@@ -64,15 +66,29 @@ def _patch_boolean_metadata(
             _bool_to_int(metadata)
 
 
+def _patch_telemetry_client(
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
+) -> None:
+    # chroma 0.4.14 added OpenTelemetry, distinct from ProductTelemetry. Before 0.4.14
+    # ProductTelemetry was simply called Telemetry.
+    settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
+
+
 version_patches: List[
-    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
+    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet, Settings], None]]
 ] = [
     ("0.4.3", _patch_boolean_metadata),
+    ("0.4.14", _patch_telemetry_client),
 ]
 
 
 def patch_for_version(
-    version: str, collection: strategies.Collection, embeddings: strategies.RecordSet
+    version: str,
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
 ) -> None:
     """Override aspects of the collection and embeddings, before testing, to account for
     breaking changes in old versions."""
@@ -81,7 +97,7 @@ def patch_for_version(
         if packaging_version.Version(version) <= packaging_version.Version(
             patch_version
         ):
-            patch(collection, embeddings)
+            patch(collection, embeddings, settings)
 
 
 def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
@@ -267,7 +283,7 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
-    patch_for_version(version, collection_strategy, embeddings_strategy)
+    patch_for_version(version, collection_strategy, embeddings_strategy, settings)
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None

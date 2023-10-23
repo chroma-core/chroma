@@ -38,7 +38,6 @@ __all__ = [
     "GetResult",
 ]
 
-
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
@@ -77,8 +76,11 @@ if not is_client:
             sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
         else:
             raise RuntimeError(
-                "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
-                "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
+                "\033[91mYour system has an unsupported version of sqlite3. Chroma \
+                    requires sqlite3 >= 3.35.0.\033[0m\n"
+                "\033[94mPlease visit \
+                    https://docs.trychroma.com/troubleshooting#sqlite to learn how \
+                    to upgrade.\033[0m"
             )
 
 

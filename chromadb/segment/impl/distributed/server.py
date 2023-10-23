@@ -17,7 +17,11 @@ from chromadb.proto.convert import (
     to_proto_vector_embedding_record,
 )
 from chromadb.segment import SegmentImplementation, SegmentType, VectorReader
-from chromadb.config import System
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import ScalarEncoding, Segment, SegmentScope
 import logging
 
@@ -38,11 +42,16 @@ SEGMENT_TYPE_IMPLS = {
 class SegmentServer(SegmentServerServicer, VectorReaderServicer):
     _segment_cache: Dict[UUID, SegmentImplementation] = {}
     _system: System
+    _opentelemetry_client: OpenTelemetryClient
 
     def __init__(self, system: System) -> None:
         super().__init__()
         self._system = system
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
 
+    @trace_method(
+        "SegmentServer.LoadSegment", OpenTelemetryGranularity.OPERATION_AND_SEGMENT
+    )
     def LoadSegment(
         self, request: proto.Segment, context: Any
     ) -> proto.SegmentServerResponse:
@@ -85,6 +94,9 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
         context.set_details("Query segment not implemented yet")
         return proto.QueryVectorsResponse()
 
+    @trace_method(
+        "SegmentServer.GetVectors", OpenTelemetryGranularity.OPERATION_AND_SEGMENT
+    )
     def GetVectors(
         self, request: proto.GetVectorsRequest, context: Any
     ) -> proto.GetVectorsResponse:

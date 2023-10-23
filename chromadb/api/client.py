@@ -15,10 +15,10 @@ from chromadb.api.types import (
     QueryResult,
 )
 from chromadb.config import Settings, System
-from chromadb.telemetry import Telemetry
-from chromadb.telemetry.events import ClientStartEvent
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
+from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
@@ -43,7 +43,7 @@ class SharedSystemClient:
             new_system = System(settings)
             cls._identifer_to_system[identifier] = new_system
 
-            new_system.instance(Telemetry)
+            new_system.instance(ProductTelemetryClient)
             new_system.instance(ServerAPI)
 
             new_system.start()
@@ -141,7 +141,7 @@ class Client(SharedSystemClient, ClientAPI):
         self._server = self._system.instance(ServerAPI)
 
         # Submit event for a client start
-        telemetry_client = self._system.instance(Telemetry)
+        telemetry_client = self._system.instance(ProductTelemetryClient)
         telemetry_client.capture(ClientStartEvent())
 
     @classmethod

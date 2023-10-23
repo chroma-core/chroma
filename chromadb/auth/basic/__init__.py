@@ -17,6 +17,11 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.utils import get_class
 
 logger = logging.getLogger(__name__)
@@ -84,6 +89,7 @@ class BasicAuthServerProvider(ServerAuthProvider):
             ),
         )
 
+    @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
     def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
         try:
