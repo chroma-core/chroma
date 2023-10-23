@@ -75,8 +75,8 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
 }
 
-DEFAULT_TENANT = "default"
-DEFAULT_DATABASE = "default"
+DEFAULT_TENANT = "default_tenant"
+DEFAULT_DATABASE = "default_database"
 
 
 class Settings(BaseSettings):  # type: ignore
