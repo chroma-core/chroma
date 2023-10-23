@@ -517,16 +517,6 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
     @abstractmethod
     @override
-    def _modify(
-        self,
-        id: UUID,
-        new_name: Optional[str] = None,
-        new_metadata: Optional[CollectionMetadata] = None,
-    ) -> None:
-        pass
-
-    @abstractmethod
-    @override
     def delete_collection(
         self,
         name: str,

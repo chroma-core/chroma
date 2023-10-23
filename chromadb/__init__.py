@@ -100,6 +100,10 @@ def EphemeralClient(
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
     development, but not recommended for production use.
+
+    Args:
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
     """
     settings.is_persistent = False
 
@@ -118,6 +122,8 @@ def PersistentClient(
 
     Args:
         path: The directory to save Chroma's data to. Defaults to "./chroma".
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
     """
     settings.persist_directory = path
     settings.is_persistent = True
@@ -144,6 +150,8 @@ def HttpClient(
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
     """
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
@@ -164,6 +172,12 @@ def Client(
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
-    """Return a running chroma.API instance"""
+    """
+    Return a running chroma.API instance
+
+    tenant: The tenant to use for this client. Defaults to the default tenant.
+    database: The database to use for this client. Defaults to the default database.
+
+    """
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
