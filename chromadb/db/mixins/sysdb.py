@@ -67,8 +67,6 @@ class SqlSysDB(SqlDB, SysDB):
             sql, params = get_sql(insert_database, self.parameter_format())
             try:
                 cur.execute(sql, params)
-            # TODO: tenant doesn't exist test
-            # TODO: implement unique constraint error lol...
             except self.unique_constraint_error() as e:
                 raise UniqueConstraintError(
                     f"Database {name} already exists for tenant {tenant}"
