@@ -8,7 +8,13 @@ from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.config import DEFAULT_TENANT, Component, System, Settings
+from chromadb.config import (
+    DEFAULT_DATABASE,
+    DEFAULT_TENANT,
+    Component,
+    System,
+    Settings,
+)
 from chromadb.db.system import SysDB
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
@@ -528,7 +534,7 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
 
     # A new tenant DOES NOT have a default database. This does not error, instead 0
     # results are returned
-    result = sysdb.get_collections(database="default", tenant="tenant1")
+    result = sysdb.get_collections(database=DEFAULT_DATABASE, tenant="tenant1")
     assert len(result) == 0
 
 

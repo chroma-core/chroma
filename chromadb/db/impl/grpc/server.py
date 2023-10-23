@@ -3,7 +3,7 @@ from typing import Any, Dict, cast
 from uuid import UUID
 from overrides import overrides
 from chromadb.ingest import CollectionAssignmentPolicy
-from chromadb.config import Component, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
     from_proto_update_metadata,
@@ -76,10 +76,10 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self._segments = {}
         self._tenants_to_databases_to_collections = {}
         # Create defaults
-        self._tenants_to_databases_to_collections["default"] = {}
-        self._tenants_to_databases_to_collections["default"]["default"] = {}
-        self._tenants_to_database_to_id["default"] = {}
-        self._tenants_to_database_to_id["default"]["default"] = UUID(int=0)
+        self._tenants_to_databases_to_collections[DEFAULT_TENANT] = {}
+        self._tenants_to_databases_to_collections[DEFAULT_TENANT][DEFAULT_DATABASE] = {}
+        self._tenants_to_database_to_id[DEFAULT_TENANT] = {}
+        self._tenants_to_database_to_id[DEFAULT_TENANT][DEFAULT_DATABASE] = UUID(int=0)
         return super().reset_state()
 
     @overrides(check_signature=False)

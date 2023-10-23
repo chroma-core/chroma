@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from chromadb.api.client import AdminClient, Client
+from chromadb.config import DEFAULT_TENANT
 
 
 def test_multiple_clients_concurrently(client: Client) -> None:
@@ -21,7 +22,9 @@ def test_multiple_clients_concurrently(client: Client) -> None:
     # Create N clients, each on a seperate thread, each with their own database
     def run_target(n: int) -> None:
         thread_client = Client(
-            tenant="default", database=databases[n], settings=client._system.settings
+            tenant=DEFAULT_TENANT,
+            database=databases[n],
+            settings=client._system.settings,
         )
         for collection in collections:
             thread_client.create_collection(

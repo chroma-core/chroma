@@ -126,8 +126,8 @@ class Client(SharedSystemClient, ClientAPI):
     # region Initialization
     def __init__(
         self,
-        tenant: str = "default",
-        database: str = "default",
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
