@@ -122,6 +122,8 @@ class Client(SharedSystemClient, ClientAPI):
     database: str = DEFAULT_DATABASE
 
     _server: ServerAPI
+    # An internal admin client for verifying that databases and tenants exist
+    _admin_client: AdminAPI
 
     # region Initialization
     def __init__(
@@ -140,6 +142,9 @@ class Client(SharedSystemClient, ClientAPI):
         # Submit event for a client start
         telemetry_client = self._system.instance(Telemetry)
         telemetry_client.capture(ClientStartEvent())
+
+        # Create an admin client for verifying that databases and tenants exist
+        self._admin_client = AdminClient.from_system(self._system)
 
     @classmethod
     @override
@@ -384,12 +389,25 @@ class Client(SharedSystemClient, ClientAPI):
     # region ClientAPI Methods
 
     @override
-    def set_database(self, database: str) -> None:
+    def set_tenant_and_database(self, tenant: str, database: str) -> None:
+        self._validate_tenant_database(database, self.tenant)
+        self.tenant = tenant
         self.database = database
 
-    @override
-    def set_tenant(self, tenant: str) -> None:
-        self.tenant = tenant
+    def _validate_tenant_database(self, database: str, tenant: str) -> None:
+        try:
+            self._admin_client.get_tenant(name=tenant)
+        except Exception:
+            raise ValueError(
+                f"Could not connect to tenant {tenant}. Are you sure it exists?"
+            )
+
+        try:
+            self._admin_client.get_database(name=database, tenant=tenant)
+        except Exception:
+            raise ValueError(
+                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
+            )
 
     # endregion
 

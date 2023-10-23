@@ -44,8 +44,7 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.tenant_to_database_to_model = {}
         self.curr_tenant = DEFAULT_TENANT
         self.curr_database = DEFAULT_DATABASE
-        self.api.set_tenant(DEFAULT_TENANT)
-        self.api.set_database(DEFAULT_DATABASE)
+        self.api.set_tenant_and_database(DEFAULT_TENANT, DEFAULT_DATABASE)
         self.tenant_to_database_to_model[self.curr_tenant] = {}
         self.tenant_to_database_to_model[self.curr_tenant][self.curr_database] = {}
 
@@ -81,17 +80,15 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
     @rule(database=databases)
     def set_database_and_tenant(self, database: Dict[str, str]) -> None:
         # Get a database and switch to the database and the tenant it belongs to
-        database_name = database[0]
-        tenant_name = database[1]
-        self.api.set_tenant(tenant_name)
-        self.api.set_database(database_name)
+        database_name = database[0]  # type: ignore
+        tenant_name = database[1]  # type: ignore
+        self.api.set_tenant_and_database(tenant_name, database_name)
         self.curr_database = database_name
         self.curr_tenant = tenant_name
 
     @rule(tenant=tenants)
     def set_tenant(self, tenant: str) -> None:
-        self.api.set_tenant(tenant)
-        self.api.set_database(DEFAULT_DATABASE)
+        self.api.set_tenant_and_database(tenant, DEFAULT_DATABASE)
         self.curr_tenant = tenant
         self.curr_database = DEFAULT_DATABASE
 
