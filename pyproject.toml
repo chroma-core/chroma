@@ -8,7 +8,7 @@ authors = [
 ]
 description = "Chroma."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Apache Software License",
@@ -45,7 +45,7 @@ dependencies = [
 [tool.black]
 line-length = 88
 required-version = "23.3.0" # Black will refuse to run if it's not this version.
-target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+target-version = ['py38', 'py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        python: ['3.7', '3.8', '3.9', '3.10']
+        python: ['3.8', '3.9', '3.10', '3.11']
         platform: [ubuntu-latest, windows-latest]
         testfile: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*'",
                    "chromadb/test/property/test_add.py",
@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        python: ['3.7']
+        python: ['3.8']
         platform: ['16core-64gb-ubuntu-latest', '16core-64gb-windows-latest']
         testfile: ["'chromadb/test/stress/'"]
     runs-on: ${{ matrix.platform }}
