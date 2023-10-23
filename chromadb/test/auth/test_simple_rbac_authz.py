@@ -2,7 +2,7 @@ import os
 import random
 import shutil
 import string
-from typing import IO, Dict, Any, Generator
+from typing import IO, Dict, Any, Generator, Tuple
 import uuid
 import hypothesis.strategies as st
 import pytest
@@ -72,7 +72,7 @@ unique_tokens = st.lists(
 
 
 @st.composite
-def user_role_config(draw: st.DrawFn) -> tuple[Dict[str, Any], Dict[str, Any]]:
+def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     role = draw(role_name)
     user = draw(user_name)
     actions_list = draw(actions)
