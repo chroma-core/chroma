@@ -1,9 +1,8 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Sequence, Union, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 from opentelemetry import trace
-from opentelemetry.util import types
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -60,13 +59,6 @@ class OpenTelemetryClient(Component):
 
 tracer: Optional[trace.Tracer] = None
 granularity: OpenTelemetryGranularity = OpenTelemetryGranularity("none")
-
-
-def _transform_attributes(
-    attributes: Dict[str, Any]
-) -> Dict[str, types.AttributeValue]:
-    """Transform attributes to the format expected by OpenTelemetry."""
-    return {k: cast(types.AttributeValue, v) for k, v in attributes.items()}
 
 
 def otel_init(
