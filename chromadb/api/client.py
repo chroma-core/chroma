@@ -19,7 +19,7 @@ from chromadb.telemetry import Telemetry
 from chromadb.telemetry.events import ClientStartEvent
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
-from chromadb.types import Where, WhereDocument
+from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
 C = TypeVar("C", "SharedSystemClient", "Client", "AdminClient")
@@ -406,8 +406,16 @@ class AdminClient(SharedSystemClient, AdminAPI):
         return self._server.create_database(name=name, tenant=tenant)
 
     @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        return self._server.get_database(name=name, tenant=tenant)
+
+    @override
     def create_tenant(self, name: str) -> None:
         return self._server.create_tenant(name=name)
+
+    @override
+    def get_tenant(self, name: str) -> Tenant:
+        return self._server.get_tenant(name=name)
 
     @classmethod
     @override

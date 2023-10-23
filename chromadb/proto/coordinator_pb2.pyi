@@ -17,11 +17,41 @@ class CreateDatabaseRequest(_message.Message):
     tenant: str
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
 
+class GetDatabaseRequest(_message.Message):
+    __slots__ = ["name", "tenant"]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    tenant: str
+    def __init__(self, name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
+
+class GetDatabaseResponse(_message.Message):
+    __slots__ = ["database", "status"]
+    DATABASE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    database: _chroma_pb2.Database
+    status: _chroma_pb2.Status
+    def __init__(self, database: _Optional[_Union[_chroma_pb2.Database, _Mapping]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+
 class CreateTenantRequest(_message.Message):
     __slots__ = ["name"]
     NAME_FIELD_NUMBER: _ClassVar[int]
     name: str
     def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class GetTenantRequest(_message.Message):
+    __slots__ = ["name"]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class GetTenantResponse(_message.Message):
+    __slots__ = ["tenant", "status"]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    tenant: _chroma_pb2.Tenant
+    status: _chroma_pb2.Status
+    def __init__(self, tenant: _Optional[_Union[_chroma_pb2.Tenant, _Mapping]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class CreateSegmentRequest(_message.Message):
     __slots__ = ["segment"]

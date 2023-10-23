@@ -106,6 +106,10 @@ class SegmentAPI(ServerAPI):
         )
 
     @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
+        return self._sysdb.get_database(name=name, tenant=tenant)
+
+    @override
     def create_tenant(self, name: str) -> None:
         if len(name) < 3:
             raise ValueError("Tenant name must be at least 3 characters long")
@@ -113,6 +117,10 @@ class SegmentAPI(ServerAPI):
         self._sysdb.create_tenant(
             name=name,
         )
+
+    @override
+    def get_tenant(self, name: str) -> t.Tenant:
+        return self._sysdb.get_tenant(name=name)
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`

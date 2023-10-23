@@ -16,11 +16,13 @@ from chromadb.db.base import (
 from chromadb.db.system import SysDB
 from chromadb.ingest import CollectionAssignmentPolicy, Producer
 from chromadb.types import (
+    Database,
     OptionalArgument,
     Segment,
     Metadata,
     Collection,
     SegmentScope,
+    Tenant,
     Unspecified,
     UpdateMetadata,
 )
@@ -73,6 +75,30 @@ class SqlSysDB(SqlDB, SysDB):
                 ) from e
 
     @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .select(databases.id, databases.name)
+                .where(databases.name == ParameterValue(name))
+                .where(databases.tenant_id == ParameterValue(tenant))
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            row = cur.execute(sql, params).fetchone()
+            if not row:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+            if row[0] is None:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+            id: UUID = cast(UUID, self.uuid_from_db(row[0]))
+            return Database(
+                id=id,
+                name=row[1],
+                tenant=tenant,
+            )
+
+    @override
     def create_tenant(self, name: str) -> None:
         with self.tx() as cur:
             tenants = Table("tenants")
@@ -87,6 +113,22 @@ class SqlSysDB(SqlDB, SysDB):
                 cur.execute(sql, params)
             except self.unique_constraint_error() as e:
                 raise UniqueConstraintError(f"Tenant {name} already exists") from e
+
+    @override
+    def get_tenant(self, name: str) -> Tenant:
+        with self.tx() as cur:
+            tenants = Table("tenants")
+            q = (
+                self.querybuilder()
+                .from_(tenants)
+                .select(tenants.id)
+                .where(tenants.id == ParameterValue(name))
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            row = cur.execute(sql, params).fetchone()
+            if not row:
+                raise NotFoundError(f"Tenant {name} not found")
+            return Tenant(name=name)
 
     @override
     def create_segment(self, segment: Segment) -> None:

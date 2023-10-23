@@ -8,6 +8,7 @@ import requests
 from overrides import override
 
 import chromadb.errors as errors
+from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -149,12 +150,38 @@ class FastAPI(ServerAPI):
         raise_chroma_error(resp)
 
     @override
+    def get_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Database:
+        """Returns a database"""
+        resp = self._session.get(
+            self._api_url + "/databases/" + name,
+            params={"tenant": tenant},
+        )
+        raise_chroma_error(resp)
+        resp_json = resp.json()
+        return Database(
+            id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
+        )
+
+    @override
     def create_tenant(self, name: str) -> None:
         resp = self._session.post(
             self._api_url + "/tenants",
             data=json.dumps({"name": name}),
         )
         raise_chroma_error(resp)
+
+    @override
+    def get_tenant(self, name: str) -> Tenant:
+        resp = self._session.get(
+            self._api_url + "/tenants/" + name,
+        )
+        raise_chroma_error(resp)
+        resp_json = resp.json()
+        return Tenant(name=resp_json["name"])
 
     @override
     def list_collections(

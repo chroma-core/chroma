@@ -1,9 +1,10 @@
 from typing import Dict
 import logging
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api.client import AdminClient as AdminClientCreator
 import chromadb.config
-from chromadb.config import Settings
-from chromadb.api import ClientAPI
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
+from chromadb.api import AdminAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
@@ -91,21 +92,25 @@ def get_settings() -> Settings:
     return __settings
 
 
-def EphemeralClient(settings: Settings = Settings()) -> ClientAPI:
+def EphemeralClient(
+    settings: Settings = Settings(),
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> ClientAPI:
     """
     Creates an in-memory instance of Chroma. This is useful for testing and
     development, but not recommended for production use.
     """
     settings.is_persistent = False
 
-    return Client(settings)
+    return ClientCreator(settings=settings, tenant=tenant, database=database)
 
 
 def PersistentClient(
     path: str = "./chroma",
-    tenant: str = "default",
-    database: str = "default",
     settings: Settings = Settings(),
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
     """
     Creates a persistent instance of Chroma that saves to disk. This is useful for
@@ -125,9 +130,9 @@ def HttpClient(
     port: str = "8000",
     ssl: bool = False,
     headers: Dict[str, str] = {},
-    tenant: str = "default",
-    database: str = "default",
     settings: Settings = Settings(),
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
     """
     Creates a client that connects to a remote Chroma server. This supports
@@ -150,44 +155,15 @@ def HttpClient(
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
 
-# TODO: replace default tenant and database strings with constants
+def AdminClient(settings: Settings = Settings()) -> AdminAPI:
+    return AdminClientCreator(settings=settings)
+
+
 def Client(
-    settings: Settings = __settings, tenant: str = "default", database: str = "default"
+    settings: Settings = __settings,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
     """Return a running chroma.API instance"""
-
-    # Change this to actually check if an "API" instance already exists, wrap it in a
-    # tenant/database aware "Client", and return it
-    # this way we can support multiple clients in the same process but using the same
-    # chroma instance
-
-    # API is thread safe, so we can just return the same instance
-    # This way a "Client" will just be a wrapper around an API instance that is
-    # tenant/database aware
-
-    # To do this we will
-    # 1. Have a global dict of API instances, keyed by path
-    # 2. When a client is requested, check if one exists in the dict, and if so check if its
-    # settings match the requested settings
-    # 3. If the settings match, construct a new Client that wraps the existing API instance with
-    # the tenant/database
-    # 4. If the settings don't match, error out because we don't support changing the settings
-    # got a given database
-    # 5. If no client exists in the dict, create a new API instance, wrap it in a Client, and
-    # add it to the dict
-
-    # The hierarchy then becomes
-    # For local
-    # Path -> Tenant -> Namespace -> API
-    # For remote
-    # Host -> Tenant -> Namespace -> API
-
-    # A given API for a path is a singleton, and is shared between all tenants and namespaces
-    # for that path
-
-    # A DB exists at a path or host, and has tenants and namespaces
-
-    # All our tests currently use system.instance(API) assuming thats the root object
-    # This is likely fine,
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)

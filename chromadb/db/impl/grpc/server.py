@@ -22,8 +22,12 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetDatabaseRequest,
+    GetDatabaseResponse,
     GetSegmentsRequest,
     GetSegmentsResponse,
+    GetTenantRequest,
+    GetTenantResponse,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
 )
@@ -47,6 +51,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
     _tenants_to_databases_to_collections: Dict[
         str, Dict[str, Dict[str, Collection]]
     ] = {}
+    _tenants_to_database_to_id: Dict[str, Dict[str, UUID]] = {}
 
     def __init__(self, system: System):
         self._server_port = system.settings.require("chroma_server_grpc_port")
@@ -73,6 +78,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
         # Create defaults
         self._tenants_to_databases_to_collections["default"] = {}
         self._tenants_to_databases_to_collections["default"]["default"] = {}
+        self._tenants_to_database_to_id["default"] = {}
+        self._tenants_to_database_to_id["default"]["default"] = UUID(int=0)
         return super().reset_state()
 
     @overrides(check_signature=False)
@@ -92,7 +99,28 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 )
             )
         self._tenants_to_databases_to_collections[tenant][database] = {}
+        self._tenants_to_database_to_id[tenant][database] = UUID(hex=request.id)
         return proto.ChromaResponse(status=proto.Status(code=200))
+
+    @overrides(check_signature=False)
+    def GetDatabase(
+        self, request: GetDatabaseRequest, context: grpc.ServicerContext
+    ) -> GetDatabaseResponse:
+        tenant = request.tenant
+        database = request.name
+        if tenant not in self._tenants_to_databases_to_collections:
+            return GetDatabaseResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        if database not in self._tenants_to_databases_to_collections[tenant]:
+            return GetDatabaseResponse(
+                status=proto.Status(code=404, reason=f"Database {database} not found")
+            )
+        id = self._tenants_to_database_to_id[tenant][database]
+        return GetDatabaseResponse(
+            status=proto.Status(code=200),
+            database=proto.Database(id=id.hex, name=database, tenant=tenant),
+        )
 
     @overrides(check_signature=False)
     def CreateTenant(
@@ -104,7 +132,22 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 status=proto.Status(code=409, reason=f"Tenant {tenant} already exists")
             )
         self._tenants_to_databases_to_collections[tenant] = {}
+        self._tenants_to_database_to_id[tenant] = {}
         return proto.ChromaResponse(status=proto.Status(code=200))
+
+    @overrides(check_signature=False)
+    def GetTenant(
+        self, request: GetTenantRequest, context: grpc.ServicerContext
+    ) -> GetTenantResponse:
+        tenant = request.name
+        if tenant not in self._tenants_to_databases_to_collections:
+            return GetTenantResponse(
+                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
+            )
+        return GetTenantResponse(
+            status=proto.Status(code=200),
+            tenant=proto.Tenant(name=tenant),
+        )
 
     # We are forced to use check_signature=False because the generated proto code
     # does not have type annotations for the request and response objects.

@@ -3,6 +3,8 @@ from typing import Optional, Sequence, Tuple
 from uuid import UUID
 from chromadb.types import (
     Collection,
+    Database,
+    Tenant,
     Metadata,
     Segment,
     SegmentScope,
@@ -25,9 +27,20 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        """Get a database by name and tenant. Raises an Error if the Database does not
+        exist."""
+        pass
+
+    @abstractmethod
     def create_tenant(self, name: str) -> None:
         """Create a new tenant in the System database. The name must be unique.
         Raises an Error if the Tenant already exists."""
+        pass
+
+    @abstractmethod
+    def get_tenant(self, name: str) -> Tenant:
+        """Get a tenant by name. Raises an Error if the Tenant does not exist."""
         pass
 
     @abstractmethod

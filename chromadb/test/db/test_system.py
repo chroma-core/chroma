@@ -532,6 +532,38 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
     assert len(result) == 0
 
 
+def test_get_database_with_tenants(sysdb: SysDB) -> None:
+    sysdb.reset_state()
+
+    # Create a new tenant
+    sysdb.create_tenant(name="tenant1")
+
+    # Get the tenant and check that it exists
+    result = sysdb.get_tenant(name="tenant1")
+    assert result["name"] == "tenant1"
+
+    # Get a tenant that does not exist and expect an error
+    with pytest.raises(NotFoundError):
+        sysdb.get_tenant(name="tenant2")
+
+    # Create a new database within this tenant
+    sysdb.create_database(id=uuid.uuid4(), name="new_database", tenant="tenant1")
+
+    # Get the database and check that it exists
+    result = sysdb.get_database(name="new_database", tenant="tenant1")
+    assert result["name"] == "new_database"
+    assert result["tenant"] == "tenant1"
+
+    # Get a database that does not exist in a tenant that does exist and expect an error
+    with pytest.raises(NotFoundError):
+        sysdb.get_database(name="new_database1", tenant="tenant1")
+
+    # Get a database that does not exist in a tenant that does not exist and expect an
+    # error
+    with pytest.raises(NotFoundError):
+        sysdb.get_database(name="new_database1", tenant="tenant2")
+
+
 # endregion
 
 # region Segment tests

@@ -1,16 +1,16 @@
-CREATE TABLE tenants ( -- todo: make this idempotent by checking if table exists by using CREATE TABLE IF NOT EXISTS
+CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY,
-    UNIQUE (id) -- Maybe not needed since we want to support slug ids
+    UNIQUE (id)
 );
 
-CREATE TABLE databases (
+CREATE TABLE IF NOT EXISTS databases (
     id TEXT PRIMARY KEY, -- unique globally
     name TEXT NOT NULL, -- unique per tenant
     tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     UNIQUE (tenant_id, name) -- Ensure that a tenant has only one database with a given name
 );
 
-CREATE TABLE collections_tmp (
+CREATE TABLE IF NOT EXISTS collections_tmp (
     id TEXT PRIMARY KEY, -- unique globally
     name TEXT NOT NULL, -- unique per database
     topic TEXT NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE collections_tmp (
 
 -- Create default tenant and database
 INSERT INTO tenants (id) VALUES ('default'); -- The default tenant id is 'default' others are UUIDs
-INSERT INTO databases (id, name, tenant_id) VALUES ('default', 'default', 'default');
+INSERT INTO databases (id, name, tenant_id) VALUES ('00000000-0000-0000-0000-000000000000', 'default', 'default');
 
 INSERT INTO collections_tmp (id, name, topic, dimension, database_id)
     SELECT id, name, topic, dimension, 'default' FROM collections;

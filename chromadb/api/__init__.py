@@ -19,6 +19,7 @@ from chromadb.api.types import (
     WhereDocument,
 )
 from chromadb.config import Component, Settings
+from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 
 
@@ -425,7 +426,7 @@ class ClientAPI(BaseAPI, ABC):
 class AdminAPI(ABC):
     @abstractmethod
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        """Create a new database.
+        """Create a new database. Raises an error if the database already exists.
 
         Args:
             database: The name of the database to create.
@@ -434,11 +435,32 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        """Get a database. Raises an error if the database does not exist.
+
+        Args:
+            database: The name of the database to get.
+            tenant: The tenant of the database to get.
+
+        """
+        pass
+
+    @abstractmethod
     def create_tenant(self, name: str) -> None:
-        """Create a new tenant.
+        """Create a new tenant. Raises an error if the tenant already exists.
 
         Args:
             tenant: The name of the tenant to create.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_tenant(self, name: str) -> Tenant:
+        """Get a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            tenant: The name of the tenant to get.
 
         """
         pass

@@ -20,17 +20,21 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetDatabaseRequest,
     GetSegmentsRequest,
+    GetTenantRequest,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.types import (
     Collection,
+    Database,
     Metadata,
     OptionalArgument,
     Segment,
     SegmentScope,
+    Tenant,
     Unspecified,
     UpdateMetadata,
 )
@@ -83,11 +87,33 @@ class GrpcSysDB(SysDB):
             raise UniqueConstraintError()
 
     @overrides
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        request = GetDatabaseRequest(name=name, tenant=tenant)
+        response = self._sys_db_stub.GetDatabase(request)
+        if response.status.code == 404:
+            raise NotFoundError()
+        return Database(
+            id=UUID(hex=response.database.id),
+            name=response.database.name,
+            tenant=response.database.tenant,
+        )
+
+    @overrides
     def create_tenant(self, name: str) -> None:
         request = CreateTenantRequest(name=name)
         response = self._sys_db_stub.CreateTenant(request)
         if response.status.code == 409:
             raise UniqueConstraintError()
+
+    @overrides
+    def get_tenant(self, name: str) -> Tenant:
+        request = GetTenantRequest(name=name)
+        response = self._sys_db_stub.GetTenant(request)
+        if response.status.code == 404:
+            raise NotFoundError()
+        return Tenant(
+            name=response.tenant.name,
+        )
 
     @overrides
     def create_segment(self, segment: Segment) -> None:
