@@ -278,4 +278,4 @@ Property and Integration tests.
 
 ## **Rejected Alternatives**
 
-We considered several alternatives that are more vendor specific (such az Auth0, Okta, Permit.io etc.) but we decided to go with a more generic approach that will allow users to be able to extend the authorization framework to support additional features and providers.
+We considered several alternatives that are more vendor specific (such az Auth0, Okta, Permit.io etc.), but we decided to go with a more generic approach that will allow users to be able to extend the authorization framework to support additional features and providers.

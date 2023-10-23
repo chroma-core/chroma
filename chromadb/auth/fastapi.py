@@ -3,7 +3,6 @@ from contextvars import ContextVar
 from functools import wraps
 import logging
 from typing import Callable, Optional, Dict, List, Union, cast, Any
-
 from overrides import override
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -17,6 +16,7 @@ from chromadb.auth import (
     AuthorizationRequestContext,
     AuthzAction,
     AuthzResource,
+    AuthzResourceActions,
     AuthzUser,
     DynamicAuthzResource,
     ServerAuthenticationRequest,
@@ -29,7 +29,6 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import resolve_provider
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -97,6 +96,9 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
     ) -> ServerAuthenticationResponse:
         return self._auth_provider.authenticate(request)
 
+    @trace_method(
+        "FastAPIChromaAuthMiddleware.ignore_operation", OpenTelemetryGranularity.ALL
+    )
     @override
     def ignore_operation(self, verb: str, path: str) -> bool:
         if (
@@ -122,6 +124,9 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
         self._middleware = auth_middleware
         self._middleware.instrument_server(app)
 
+    @trace_method(
+        "FastAPIChromaAuthMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL
+    )
     @override
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -139,46 +144,64 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
         request.state.user_identity = response.get_user_identity()
         return await call_next(request)
 
+
 # AuthZ
 
 
 request_var: ContextVar[Optional[Request]] = ContextVar(
     "request_var", default=None)
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
-    "authz_provider", default=None)
+    "authz_provider", default=None
+)
 
 
-def authz_context(action: Union[str, AuthzAction],
-                  resource: Union[AuthzResource, DynamicAuthzResource]) \
-        -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def authz_context(
+    action: Union[str, AuthzResourceActions, List[str], List[AuthzResourceActions]],
+    resource: Union[AuthzResource, DynamicAuthzResource],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
-        def wrapped(*args, ** kwargs):
-            _dynamic_kwargs = {"function": f,
-                               "function_args": args, "function_kwargs": kwargs}
-            # print(args[0]._authz_provider)
-            # args[0]._authz_provider.authorize()
+        def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+            _dynamic_kwargs = {
+                "function": f,
+                "function_args": args,
+                "function_kwargs": kwargs,
+            }
             request = request_var.get()
             if request:
-                _action = action if isinstance(
-                    action, AuthzAction) else AuthzAction(id=action)
-                _resource = resource if isinstance(
-                    resource, AuthzResource) else \
-                    resource.to_authz_resource(**_dynamic_kwargs)
-                _context = AuthorizationContext(
-                    user=AuthzUser(
-                        id=request.state.user_identity.get_user_id()
-                        if hasattr(request.state, "user_identity") else "Anonymous"),
-                    resource=_resource,
-                    action=_action,
-                )
                 _provider = authz_provider.get()
-                if _provider:
-                    _response = _provider.authorize(_context)
-                    if not _response:
-                        raise AuthorizationError("Unauthorized")
+                a_list: List[Union[str, AuthzAction]] = []
+                if not isinstance(action, List):
+                    a_list = [action]
+                else:
+                    a_list = cast(List[Union[str, AuthzAction]], action)
+                a_authz_responses = []
+                for a in a_list:
+                    _action = a if isinstance(
+                        a, AuthzAction) else AuthzAction(id=a)
+                    _resource = (
+                        resource
+                        if isinstance(resource, AuthzResource)
+                        else resource.to_authz_resource(**_dynamic_kwargs)
+                    )
+                    _context = AuthorizationContext(
+                        user=AuthzUser(
+                            id=request.state.user_identity.get_user_id()
+                            if hasattr(request.state, "user_identity")
+                            else "Anonymous"
+                        ),
+                        resource=_resource,
+                        action=_action,
+                    )
+
+                    if _provider:
+                        a_authz_responses.append(_provider.authorize(_context))
+                if not any(a_authz_responses):
+                    raise AuthorizationError("Unauthorized")
             return f(*args, **kwargs)
+
         return wrapped
+
     return decorator
 
 
@@ -217,9 +240,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp]):
                 ServerAuthorizationProvider, self.require(_cls))
 
     @override
-    def pre_process(
-        self, request: AuthorizationRequestContext
-    ) -> None:
+    def pre_process(self, request: AuthorizationRequestContext[Request]) -> None:
         rest_request = request.get_request()
         request_var.set(rest_request)
         authz_provider.set(self._authz_provider)
@@ -249,6 +270,9 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
         self._middleware = authz_middleware
         self._middleware.instrument_server(app)
 
+    @trace_method(
+        "FastAPIChromaAuthzMiddlewareWrapper.dispatch", OpenTelemetryGranularity.ALL
+    )
     @override
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -260,6 +284,5 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
             )
             return await call_next(request)
         self._middleware.pre_process(
-            FastAPIAuthorizationRequestContext(request)
-        )
+            FastAPIAuthorizationRequestContext(request))
         return await call_next(request)

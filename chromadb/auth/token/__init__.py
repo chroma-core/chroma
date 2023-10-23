@@ -1,7 +1,7 @@
 import logging
 import string
 from enum import Enum
-from typing import Optional, Tuple, Any, cast, Dict, TypeVar
+from typing import List, Optional, Tuple, Any, TypedDict, cast, Dict, TypeVar
 
 from overrides import override
 from pydantic import SecretStr
@@ -23,7 +23,6 @@ from chromadb.auth import (
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -49,8 +48,7 @@ class TokenAuthClientAuthResponse(ClientAuthResponse):
     def __init__(
         self,
         credentials: SecretStr,
-        token_transport_header: TokenTransportHeader =
-            TokenTransportHeader.AUTHORIZATION,
+        token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION,
     ) -> None:
         self._credentials = credentials
         self._token_transport_header = token_transport_header
@@ -81,8 +79,7 @@ def check_token(token: str) -> None:
         c in string.digits + string.ascii_letters + string.punctuation
         for c in token_str
     ):
-        raise ValueError(
-            "Invalid token. Must contain only ASCII letters and digits.")
+        raise ValueError("Invalid token. Must contain only ASCII letters and digits.")
 
 
 @register_provider("token_config")
@@ -109,14 +106,26 @@ class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         return _creds["token"].get_secret_value() == self._token.get_secret_value()
 
     @override
-    def get_user_identity(self, credentials: AbstractCredentials[T]) \
-            -> Optional[SimpleUserIdentity]:
+    def get_user_identity(
+        self, credentials: AbstractCredentials[T]
+    ) -> Optional[SimpleUserIdentity]:
         return None
+
+
+class Token(TypedDict):
+    token: str
+    secret: str
+
+
+class User(TypedDict):
+    id: str
+    role: str
+    tokens: List[Token]
 
 
 @register_provider("user_token_config")
 class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
-    _users: Dict[str, Any]
+    _users: List[User]
     _token_user_mapping: Dict[str, str]  # reverse mapping of token to user
 
     def __init__(self, system: System) -> None:
@@ -124,7 +133,7 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         system.settings.require("chroma_server_auth_credentials_file")
         user_file = str(system.settings.chroma_server_auth_credentials_file)
         with open(user_file) as f:
-            self._users = yaml.safe_load(f)["users"]
+            self._users = cast(List[User], yaml.safe_load(f)["users"])
             self._token_user_mapping = {}
         for user in self._users:
             for t in user["tokens"]:
@@ -143,16 +152,18 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
         return _creds["token"].get_secret_value() in self._token_user_mapping.keys()
 
     @override
-    def get_user_identity(self, credentials: AbstractCredentials[T]) \
-            -> Optional[SimpleUserIdentity]:
+    def get_user_identity(
+        self, credentials: AbstractCredentials[T]
+    ) -> Optional[SimpleUserIdentity]:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         if "token" not in _creds:
             logger.error("Returned credentials do not contain token")
             return None
         # below is just simple identity mapping and may need future work for more
         # complex use cases
-        return SimpleUserIdentity(self._token_user_mapping[
-            _creds["token"].get_secret_value()])
+        return SimpleUserIdentity(
+            self._token_user_mapping[_creds["token"].get_secret_value()]
+        )
 
 
 class TokenAuthCredentials(SecretStrAbstractCredentials):
@@ -168,8 +179,7 @@ class TokenAuthCredentials(SecretStrAbstractCredentials):
     @staticmethod
     def from_header(
         header: str,
-        token_transport_header: TokenTransportHeader =
-            TokenTransportHeader.AUTHORIZATION,
+        token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION,
     ) -> "TokenAuthCredentials":
         """
         Extracts token from header and returns a TokenAuthCredentials object.
@@ -213,8 +223,9 @@ class TokenAuthServerProvider(ServerAuthProvider):
 
     @trace_method("TokenAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(self, request: ServerAuthenticationRequest[Any]) \
-            -> SimpleServerAuthenticationResponse:
+    def authenticate(
+        self, request: ServerAuthenticationRequest[Any]
+    ) -> SimpleServerAuthenticationResponse:
         try:
             _auth_header = request.get_auth_info(
                 AuthInfoType.HEADER, self._token_transport_header.value
@@ -224,10 +235,10 @@ class TokenAuthServerProvider(ServerAuthProvider):
             )
             return SimpleServerAuthenticationResponse(
                 self._credentials_provider.validate_credentials(_token_creds),
-                self._credentials_provider.get_user_identity(_token_creds))
+                self._credentials_provider.get_user_identity(_token_creds),
+            )
         except Exception as e:
-            logger.error(
-                f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
+            logger.error(f"TokenAuthServerProvider.authenticate failed: {repr(e)}")
             return SimpleServerAuthenticationResponse(False, None)
 
 

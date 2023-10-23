@@ -61,6 +61,8 @@ def _run_server(
     chroma_server_auth_credentials_file: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -78,6 +80,8 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
         )
     else:
         settings = Settings(
@@ -93,6 +97,8 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -121,6 +127,8 @@ def _fastapi_fixture(
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_client_auth_token_transport_header: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
@@ -137,6 +145,8 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
+        Optional[str],
+        Optional[str],
     ] = (
         port,
         False,
@@ -146,6 +156,8 @@ def _fastapi_fixture(
         chroma_server_auth_credentials_file,
         chroma_server_auth_credentials,
         chroma_server_auth_token_transport_header,
+        chroma_server_authz_provider,
+        chroma_server_authz_config_file,
     )
     persist_directory = None
     if is_persistent:
@@ -159,6 +171,8 @@ def _fastapi_fixture(
             chroma_server_auth_credentials_file,
             chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider,
+            chroma_server_authz_config_file,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
