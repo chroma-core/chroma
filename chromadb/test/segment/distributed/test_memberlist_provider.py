@@ -1,5 +1,6 @@
 # Tests the CustomResourceMemberlist provider
 import threading
+from chromadb.test.conftest import skip_if_not_cluster
 from kubernetes import client, config
 import pytest
 import os
@@ -11,15 +12,6 @@ from chromadb.segment.impl.distributed.segment_directory import (
     KUBERNETES_NAMESPACE,
 )
 import time
-
-NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
-
-
-def skip_if_not_cluster() -> pytest.MarkDecorator:
-    return pytest.mark.skipif(
-        NOT_CLUSTER_ONLY,
-        reason="Requires Kubernetes to be running with a valid config",
-    )
 
 
 # Used for testing to update the memberlist CRD

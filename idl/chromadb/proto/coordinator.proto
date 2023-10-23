@@ -2,8 +2,10 @@ syntax = "proto3";
 
 package chroma;
 
-import "chromadb/proto/chroma.proto";
+import "chroma.proto";
 import "google/protobuf/empty.proto";
+
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
 
 message CreateSegmentRequest {
   Segment segment = 1;

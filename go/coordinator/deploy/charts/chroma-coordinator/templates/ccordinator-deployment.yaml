@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    {{- include "chroma-cluster.coordinator.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-coordinator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "chroma-cluster.coordinator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        chroma_cluster: {{ .Release.Name }}
+        {{- include "chroma-cluster.coordinator.labels" . | nindent 8 }}
+      name: {{ .Release.Name }}-coordinator
+    spec:
+      serviceAccountName: {{ .Release.Name }}-coordinator
+      containers:
+        - command:
+            - "chroma"
+            - "coordinator"
+            - "--db-address={{ .Values.database.address }}"
+            - "--username={{ .Values.database.username }}"
+            - "--password={{ .Values.database.password }}"
+            - "--db-name={{ .Values.database.name }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          name: coordinator
+          ports:
+            {{- range $key, $value := .Values.coordinator.ports }}
+            - containerPort: {{ $value | int }}
+              name: {{ $key }}
+            {{- end}}
+          resources:
+            limits:
+              cpu: {{ .Values.coordinator.cpu }}
+              memory: {{ .Values.coordinator.memory }}

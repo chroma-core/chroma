@@ -134,6 +134,12 @@ spec:
               value: "8080"
             - name: ALLOW_RESET
               value: "TRUE"
+            - name: CHROMA_SYSDB_IMPL
+              value: "chromadb.db.impl.grpc.client.GrpcSysDB"
+            - name: CHROMA_SERVER_GRPC_PORT
+              value: "50051"
+            - name: CHROMA_COORDINATOR_HOST
+              value: "coordinator.chroma"
           readinessProbe:
             httpGet:
               path: /api/v1/heartbeat
@@ -238,3 +244,53 @@ spec:
 #   resources:
 #     requests:
 #       storage: 1Gi
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      containers:
+        - command:
+            - "chroma"
+            - "coordinator"
+            - "--db-address=aws.connect.psdb.cloud"
+            - "--username=pscale_user"
+            - "--password=pscale_password"
+            - "--db-name=test"
+          image: chroma-coordinator
+          imagePullPolicy: IfNotPresent
+          name: coordinator
+          ports:
+            - containerPort: 50051
+              name: grpc
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: chroma
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: coordinator
+  type: ClusterIP

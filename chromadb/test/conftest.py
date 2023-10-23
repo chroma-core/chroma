@@ -45,6 +45,14 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
+NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+
+def skip_if_not_cluster() -> pytest.MarkDecorator:
+    return pytest.mark.skipif(
+        NOT_CLUSTER_ONLY,
+        reason="Requires Kubernetes to be running with a valid config",
+    )
+
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
