@@ -78,10 +78,10 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         return multiple((name, self.curr_tenant))
 
     @rule(database=databases)
-    def set_database_and_tenant(self, database: Dict[str, str]) -> None:
+    def set_database_and_tenant(self, database: Tuple[str, str]) -> None:
         # Get a database and switch to the database and the tenant it belongs to
-        database_name = database[0]  # type: ignore
-        tenant_name = database[1]  # type: ignore
+        database_name = database[0]
+        tenant_name = database[1]
         self.api.set_tenant_and_database(tenant_name, database_name)
         self.curr_database = database_name
         self.curr_tenant = tenant_name
