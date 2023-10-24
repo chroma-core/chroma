@@ -1,6 +1,6 @@
 from functools import wraps
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -72,8 +72,10 @@ def otel_init(
     Parameters match the environment variables which configure OTel as documented
     at https://docs.trychroma.com/observability.
     - otel_service_name: The name of the service for OTel tagging and aggregation.
-    - otel_collection_endpoint: The endpoint to which OTel spans are sent (e.g. api.honeycomb.com).
-    - otel_collection_headers: The headers to send with OTel spans (e.g. {"x-honeycomb-team": "abc123"}).
+    - otel_collection_endpoint: The endpoint to which OTel spans are sent
+        (e.g. api.honeycomb.com).
+    - otel_collection_headers: The headers to send with OTel spans
+        (e.g. {"x-honeycomb-team": "abc123"}).
     - otel_granularity: The granularity of the spans to emit.
     """
     if otel_granularity == OpenTelemetryGranularity.NONE:
@@ -99,18 +101,32 @@ def otel_init(
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
-    attributes: Dict[str, Union[str, bool, float, int]] = {},
+    attributes: Optional[
+        Dict[
+            str,
+            Union[
+                str,
+                bool,
+                float,
+                int,
+                Sequence[str],
+                Sequence[bool],
+                Sequence[float],
+                Sequence[int],
+            ],
+        ]
+    ] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """A decorator that traces a method."""
 
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
-            global tracer, granularity, _transform_attributes
+            global tracer, granularity
             if trace_granularity < granularity:
                 return f(*args, **kwargs)
             if not tracer:
-                return
+                return f(*args, **kwargs)
             with tracer.start_as_current_span(trace_name, attributes=attributes):
                 return f(*args, **kwargs)
 
@@ -120,13 +136,25 @@ def trace_method(
 
 
 def add_attributes_to_current_span(
-    attributes: Dict[str, Union[str, bool, float, int]]
+    attributes: Dict[
+        str,
+        Union[
+            str,
+            bool,
+            float,
+            int,
+            Sequence[str],
+            Sequence[bool],
+            Sequence[float],
+            Sequence[int],
+        ],
+    ]
 ) -> None:
     """Add attributes to the current span."""
-    global tracer, granularity, _transform_attributes
+    global tracer, granularity
     if granularity == OpenTelemetryGranularity.NONE:
         return
     if not tracer:
         return
     span = trace.get_current_span()
-    span.set_attributes(_transform_attributes(attributes))  # type: ignore
+    span.set_attributes(attributes)
