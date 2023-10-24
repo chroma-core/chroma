@@ -23,6 +23,19 @@ __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
+# URIs
+URI = str
+URIs = List[URI]
+
+
+def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
+    if isinstance(target, str):
+        # One URI
+        return cast(URIs, [target])
+    # Already a sequence
+    return cast(URIs, target)
+
+
 # IDs
 ID = str
 IDs = List[ID]
@@ -176,6 +189,12 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
+
+L = TypeVar("L", covariant=True)
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: URIs) -> L:
+        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
