@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
@@ -95,7 +95,7 @@ def get_settings() -> Settings:
 
 
 def EphemeralClient(
-    settings: Settings = Settings(),
+    settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
@@ -107,6 +107,8 @@ def EphemeralClient(
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
+    if settings is None:
+        settings = Settings()
     settings.is_persistent = False
 
     return ClientCreator(settings=settings, tenant=tenant, database=database)
@@ -114,7 +116,7 @@ def EphemeralClient(
 
 def PersistentClient(
     path: str = "./chroma",
-    settings: Settings = Settings(),
+    settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
@@ -127,6 +129,8 @@ def PersistentClient(
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
+    if settings is None:
+        settings = Settings()
     settings.persist_directory = path
     settings.is_persistent = True
 
@@ -137,8 +141,8 @@ def HttpClient(
     host: str = "localhost",
     port: str = "8000",
     ssl: bool = False,
-    headers: Dict[str, str] = {},
-    settings: Settings = Settings(),
+    headers: Optional[Dict[str, str]] = None,
+    settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
@@ -155,6 +159,11 @@ def HttpClient(
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
+
+    if headers is None:
+        headers = {}
+    if settings is None:
+        settings = Settings()
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = host
