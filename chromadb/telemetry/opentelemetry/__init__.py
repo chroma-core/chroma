@@ -102,7 +102,7 @@ def trace_method(
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
-            global tracer, granularity, _transform_attributes
+            global tracer, granularity
             if trace_granularity < granularity:
                 return f(*args, **kwargs)
             if not tracer:
@@ -119,10 +119,10 @@ def add_attributes_to_current_span(
     attributes: Dict[str, Union[str, bool, float, int]]
 ) -> None:
     """Add attributes to the current span."""
-    global tracer, granularity, _transform_attributes
+    global tracer, granularity
     if granularity == OpenTelemetryGranularity.NONE:
         return
     if not tracer:
         return
     span = trace.get_current_span()
-    span.set_attributes(_transform_attributes(attributes))  # type: ignore
+    span.set_attributes(attributes)  # type: ignore
