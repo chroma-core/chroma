@@ -15,9 +15,10 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
 )
-from chromadb.config import Settings
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 import chromadb.server
 import chromadb.api
+from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
@@ -25,6 +26,8 @@ from chromadb.errors import (
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
+    CreateDatabase,
+    CreateTenant,
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
@@ -35,6 +38,7 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -109,8 +113,10 @@ class FastAPI(chromadb.server.Server):
         super().__init__(settings)
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
-        self._api: chromadb.api.API = chromadb.Client(settings)
+        self._system = System(settings)
+        self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
+        self._system.start()
 
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
@@ -134,6 +140,34 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+        )
+
+        self.router.add_api_route(
+            "/api/v1/databases",
+            self.create_database,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/databases/{database}",
+            self.get_database,
+            methods=["GET"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/tenants",
+            self.create_tenant,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/tenants/{tenant}",
+            self.get_tenant,
+            methods=["GET"],
+            response_model=None,
         )
 
         self.router.add_api_route(
@@ -227,21 +261,55 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
+    @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
+    def create_database(
+        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        return self._api.create_database(database.name, tenant)
+
+    @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
+    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
+        return self._api.get_database(database, tenant)
+
+    @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
+    def create_tenant(self, tenant: CreateTenant) -> None:
+        return self._api.create_tenant(tenant.name)
+
+    @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
+    def get_tenant(self, tenant: str) -> Tenant:
+        return self._api.get_tenant(tenant)
+
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
-    def list_collections(self) -> Sequence[Collection]:
-        return self._api.list_collections()
+    def list_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> Sequence[Collection]:
+        return self._api.list_collections(tenant=tenant, database=database)
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
-    def create_collection(self, collection: CreateCollection) -> Collection:
+    def create_collection(
+        self,
+        collection: CreateCollection,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
-    def get_collection(self, collection_name: str) -> Collection:
-        return self._api.get_collection(collection_name)
+    def get_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        return self._api.get_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
     def update_collection(
@@ -254,8 +322,15 @@ class FastAPI(chromadb.server.Server):
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
-    def delete_collection(self, collection_name: str) -> None:
-        return self._api.delete_collection(collection_name)
+    def delete_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        return self._api.delete_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     def add(self, collection_id: str, add: AddEmbedding) -> None:
