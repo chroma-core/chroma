@@ -22,6 +22,18 @@ __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
+URI = str
+URIs = List[URI]
+
+
+def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
+    if isinstance(target, str):
+        # One URI
+        return cast(URIs, [target])
+    # Already a sequence
+    return cast(URIs, target)
+
+
 ID = str
 IDs = List[ID]
 
@@ -157,6 +169,14 @@ D = TypeVar("D", contravariant=True)
 
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
+        ...
+
+
+L = TypeVar("L", covariant=True)
+
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: URIs) -> L:
         ...
 
 
