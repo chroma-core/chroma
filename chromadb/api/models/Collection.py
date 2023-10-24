@@ -195,8 +195,10 @@ class Collection(BaseModel):
             QueryResult: A QueryResult object containing the results.
 
         Raises:
-            ValueError: If you don't provide either query_embeddings or query_texts
+            ValueError: If you don't provide either query_embeddings, query_texts, or query_images
             ValueError: If you provide both query_embeddings and query_texts
+            ValueError: If you provide both query_embeddings and query_images
+            ValueError: If you provide both query_texts and query_images
 
         """
         # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
