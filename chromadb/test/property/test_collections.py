@@ -65,7 +65,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.name in self.model:
             c = self.api.get_collection(name=coll.name)
             assert c.name == coll.name
-            assert c.metadata == coll.metadata
+            assert c.metadata == self.model[coll.name]
         else:
             with pytest.raises(Exception):
                 self.api.get_collection(name=coll.name)
