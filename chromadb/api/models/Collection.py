@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, cast, List, Any
+from typing import TYPE_CHECKING, Optional, Tuple, Any
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
@@ -7,10 +7,14 @@ import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
     CollectionMetadata,
     Embedding,
+    Embeddings,
     Include,
     Metadata,
+    Metadatas,
     Document,
+    Documents,
     Image,
+    Images,
     Where,
     IDs,
     EmbeddingFunction,
@@ -106,6 +110,12 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents, images
         )
 
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(input=documents)
+            else:
+                embeddings = self._embed(input=images)
+
         self._client._add(ids, self.id, embeddings, metadatas, documents)
 
     def get(
@@ -164,6 +174,7 @@ class Collection(BaseModel):
         self,
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
+        query_images: Optional[OneOrMany[Image]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -187,6 +198,19 @@ class Collection(BaseModel):
             ValueError: If you provide both query_embeddings and query_texts
 
         """
+        # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
+        if (
+            (query_embeddings is None and query_texts is None and query_images is None)
+            or (
+                query_embeddings is not None
+                and (query_texts is not None or query_images is not None)
+            )
+            or (query_texts is not None and query_images is not None)
+        ):
+            raise ValueError(
+                "You must provide either query embeddings, or else one of query texts or query images."
+            )
+
         where = validate_where(where) if where else None
         where_document = (
             validate_where_document(where_document) if where_document else None
@@ -201,26 +225,20 @@ class Collection(BaseModel):
             if query_texts is not None
             else None
         )
+        query_images = (
+            maybe_cast_one_to_many_image(query_images)
+            if query_images is not None
+            else None
+        )
         include = validate_include(include, allow_distances=True)
         n_results = validate_n_results(n_results)
 
-        # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
-        if (query_embeddings is None and query_texts is None) or (
-            query_embeddings is not None and query_texts is not None
-        ):
-            raise ValueError(
-                "You must provide either query embeddings or query texts, but not both"
-            )
-
-        # If query_embeddings are not provided, we need to compute them from the query_texts
+        # If query_embeddings are not provided, we need to compute them from the inputs
         if query_embeddings is None:
-            if self._embedding_function is None:
-                raise ValueError(
-                    "You must provide embeddings or a function to compute them"
-                )
-            # We know query texts is not None at this point, cast for the typechecker
-            query_embeddings = self._embedding_function(
-                cast(List[Document], query_texts)
+            query_embeddings = (
+                self._embed(input=query_texts)
+                if query_texts
+                else self._embed(input=query_images)
             )
 
         if where is None:
@@ -307,6 +325,12 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents
         )
 
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(input=documents)
+            else:
+                embeddings = self._embed(input=images)
+
         self._client._upsert(
             collection_id=self.id,
             ids=ids,
@@ -344,71 +368,80 @@ class Collection(BaseModel):
 
     def _validate_embedding_set(
         self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]] = None,
+        valid_ids: OneOrMany[ID],
+        valid_embeddings: Optional[OneOrMany[Embedding]],
+        valid_metadatas: Optional[OneOrMany[Metadata]],
+        valid_documents: Optional[OneOrMany[Document]],
+        valid_images: Optional[OneOrMany[Image]] = None,
         require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
-        List[Embedding],
-        Optional[List[Metadata]],
-        Optional[List[Document]],
-        Optional[List[Image]],
+        Optional[Embeddings],
+        Optional[Metadatas],
+        Optional[Documents],
+        Optional[Images],
     ]:
-        ids = validate_ids(maybe_cast_one_to_many_ids(ids))
-        embeddings = (
-            validate_embeddings(maybe_cast_one_to_many_embedding(embeddings))
-            if embeddings is not None
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(valid_ids))
+        valid_embeddings = (
+            validate_embeddings(maybe_cast_one_to_many_embedding(valid_embeddings))
+            if valid_embeddings is not None
             else None
         )
-        metadatas = (
-            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
-            if metadatas is not None
+        valid_metadatas = (
+            validate_metadatas(maybe_cast_one_to_many_metadata(valid_metadatas))
+            if valid_metadatas is not None
             else None
         )
-        documents = (
-            maybe_cast_one_to_many_document(documents)
-            if documents is not None
+        valid_documents = (
+            maybe_cast_one_to_many_document(valid_documents)
+            if valid_documents is not None
             else None
         )
-        images = maybe_cast_one_to_many_image(images) if images is not None else None
+        valid_images = (
+            maybe_cast_one_to_many_image(valid_images)
+            if valid_images is not None
+            else None
+        )
 
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
-            if embeddings is None and documents is None and images is None:
+            if (
+                valid_embeddings is None
+                and valid_documents is None
+                and valid_images is None
+            ):
                 raise ValueError("You must provide embeddings, documents, or images.")
 
         # Only one of documents or images can be provided
-        if documents is not None and images is not None:
+        if valid_documents is not None and valid_images is not None:
             raise ValueError("You can only provide documents or images, not both.")
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
-        if embeddings is not None and len(embeddings) != len(ids):
+        if valid_embeddings is not None and len(valid_embeddings) != len(valid_ids):
             raise ValueError(
-                f"Number of embeddings {len(embeddings)} must match number of ids {len(ids)}"
+                f"Number of embeddings {len(valid_embeddings)} must match number of ids {len(valid_ids)}"
             )
-        if metadatas is not None and len(metadatas) != len(ids):
+        if valid_metadatas is not None and len(valid_metadatas) != len(valid_ids):
             raise ValueError(
-                f"Number of metadatas {len(metadatas)} must match number of ids {len(ids)}"
+                f"Number of metadatas {len(valid_metadatas)} must match number of ids {len(valid_ids)}"
             )
-        if documents is not None and len(documents) != len(ids):
+        if valid_documents is not None and len(valid_documents) != len(valid_ids):
             raise ValueError(
-                f"Number of documents {len(documents)} must match number of ids {len(ids)}"
+                f"Number of documents {len(valid_documents)} must match number of ids {len(valid_ids)}"
             )
 
-        # If document embeddings are not provided, we need to compute them
-        if embeddings is None and documents is not None:
-            if self._embedding_function is None:
-                raise ValueError(
-                    "You must provide embeddings or a function to compute them"
-                )
-            embeddings = self._embedding_function(documents)
+        return (
+            valid_ids,
+            valid_embeddings,
+            valid_metadatas,
+            valid_documents,
+            valid_images,
+        )
 
-        # if embeddings is None:
-        #     raise ValueError(
-        #         "Something went wrong. Embeddings should be computed at this point"
-        #     )
-
-        return ids, embeddings, metadatas, documents, images  # type: ignore
+    def _embed(self, input: Any) -> Embeddings:
+        if self._embedding_function is None:
+            raise ValueError(
+                "You must provide an embedding function to compute embeddings."
+                "https://docs.trychroma.com/embeddings"
+            )
+        return self._embedding_function(input=input)

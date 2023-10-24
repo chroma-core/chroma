@@ -87,7 +87,9 @@ def test_persist_index_loading(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading_embedding_function(api_fixture, request):
-    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    def embedding_function(input):
+        return [[1, 2, 3] for _ in range(len(input))]
+
     api = request.getfixturevalue("local_persist_api")
     api.reset()
     collection = api.create_collection("test", embedding_function=embedding_function)
@@ -107,7 +109,9 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):
-    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    def embedding_function(input):
+        return [[1, 2, 3] for _ in range(len(input))]
+
     api = request.getfixturevalue("local_persist_api")
     api.reset()
     collection = api.get_or_create_collection(
