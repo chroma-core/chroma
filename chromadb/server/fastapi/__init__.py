@@ -38,6 +38,7 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
@@ -248,6 +249,7 @@ class FastAPI(chromadb.server.Server):
         self._app.include_router(self.router)
 
         use_route_names_as_operation_ids(self._app)
+        instrument_fastapi(self._app)
 
     def app(self) -> fastapi.FastAPI:
         return self._app
