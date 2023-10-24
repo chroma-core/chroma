@@ -185,6 +185,7 @@ class Collection(BaseModel):
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
+            query_images: The images to get the closes neighbors of. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
             where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
@@ -283,22 +284,34 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids.
 
         Args:
             ids: The ids of the embeddings to update
-            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+            embeddings: The embeddings to update. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
             metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
-
+            images: The images to associate with the embeddings. Optional.
         Returns:
             None
         """
 
         ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, require_embeddings_or_data=False
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            require_embeddings_or_data=False,
         )
+
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(input=documents)
+            elif images is not None:
+                embeddings = self._embed(input=images)
 
         self._client._update(self.id, ids, embeddings, metadatas, documents)
 
