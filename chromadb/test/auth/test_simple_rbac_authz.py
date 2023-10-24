@@ -34,40 +34,12 @@ valid_action_space = [
     "collection:count",
 ]
 
-
-@st.composite
-def random_token(draw: st.DrawFn) -> str:
-    return draw(
-        st.text(alphabet=string.ascii_letters + string.digits, min_size=1, max_size=25)
-    )
-
-
-@st.composite
-def generate_uniq_token(draw: st.DrawFn) -> str:
-    return str(st.uuids())
-
-
-@st.composite
-def invalid_token(draw: st.DrawFn) -> str:
-    opposite_alphabet = set(string.printable) - set(
-        string.digits + string.ascii_letters + string.punctuation
-    )
-    token = draw(st.text(alphabet=list(opposite_alphabet), min_size=1, max_size=50))
-    return token
-
-
 role_name = st.text(alphabet=string.ascii_letters, min_size=1, max_size=20)
 
 user_name = st.text(alphabet=string.ascii_letters, min_size=1, max_size=20)
 
 actions = st.lists(
     st.sampled_from(valid_action_space), min_size=1, max_size=len(valid_action_space)
-)
-
-
-unique_tokens = st.lists(
-    st.text(alphabet=string.ascii_letters + string.digits, min_size=1, max_size=25),
-    unique=True,
 )
 
 
@@ -117,12 +89,12 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     }, _role_config
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def get_temp_file() -> Generator[IO[bytes], None, None]:
     with tempfile.NamedTemporaryFile(delete=False) as f:
         yield f
     if os.path.exists(f.name):
-        shutil.rmtree(f.name)
+        shutil.rmtree(f.name, ignore_errors=True)
 
 
 @st.composite
@@ -261,7 +233,6 @@ def test_authz(
     _api.heartbeat()
     for actions in authz_config["roles_mapping"][random_user["role"]]["actions"]:
         try:
-            # print(actions, get_temp_file.name)
             api_executors[actions](_api)  # type: ignore
         except Exception as e:
             # we want to ignore errors such as collection not found or 400 client error
@@ -280,6 +251,5 @@ def test_authz(
         "unauthorized_actions"
     ]:
         with pytest.raises(Exception) as ex:
-            # print(unauthorized_action)
             api_executors[unauthorized_action](_api)  # type: ignore
             assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
