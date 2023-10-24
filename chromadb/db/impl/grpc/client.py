@@ -1,7 +1,7 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.config import System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import NotFoundError, UniqueConstraintError
 from chromadb.db.system import SysDB
 from chromadb.proto.convert import (
@@ -13,22 +13,28 @@ from chromadb.proto.convert import (
 )
 from chromadb.proto.coordinator_pb2 import (
     CreateCollectionRequest,
+    CreateDatabaseRequest,
     CreateSegmentRequest,
+    CreateTenantRequest,
     DeleteCollectionRequest,
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetDatabaseRequest,
     GetSegmentsRequest,
+    GetTenantRequest,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.types import (
     Collection,
+    Database,
     Metadata,
     OptionalArgument,
     Segment,
     SegmentScope,
+    Tenant,
     Unspecified,
     UpdateMetadata,
 )
@@ -70,6 +76,44 @@ class GrpcSysDB(SysDB):
     def reset_state(self) -> None:
         self._sys_db_stub.ResetState(Empty())
         return super().reset_state()
+
+    @overrides
+    def create_database(
+        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
+        response = self._sys_db_stub.CreateDatabase(request)
+        if response.status.code == 409:
+            raise UniqueConstraintError()
+
+    @overrides
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        request = GetDatabaseRequest(name=name, tenant=tenant)
+        response = self._sys_db_stub.GetDatabase(request)
+        if response.status.code == 404:
+            raise NotFoundError()
+        return Database(
+            id=UUID(hex=response.database.id),
+            name=response.database.name,
+            tenant=response.database.tenant,
+        )
+
+    @overrides
+    def create_tenant(self, name: str) -> None:
+        request = CreateTenantRequest(name=name)
+        response = self._sys_db_stub.CreateTenant(request)
+        if response.status.code == 409:
+            raise UniqueConstraintError()
+
+    @overrides
+    def get_tenant(self, name: str) -> Tenant:
+        request = GetTenantRequest(name=name)
+        response = self._sys_db_stub.GetTenant(request)
+        if response.status.code == 404:
+            raise NotFoundError()
+        return Tenant(
+            name=response.tenant.name,
+        )
 
     @overrides
     def create_segment(self, segment: Segment) -> None:
@@ -164,6 +208,8 @@ class GrpcSysDB(SysDB):
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         request = CreateCollectionRequest(
             id=id.hex,
@@ -171,6 +217,8 @@ class GrpcSysDB(SysDB):
             metadata=to_proto_update_metadata(metadata) if metadata else None,
             dimension=dimension,
             get_or_create=get_or_create,
+            tenant=tenant,
+            database=database,
         )
         response = self._sys_db_stub.CreateCollection(request)
         if response.status.code == 409:
@@ -179,9 +227,13 @@ class GrpcSysDB(SysDB):
         return collection, response.created
 
     @overrides
-    def delete_collection(self, id: UUID) -> None:
+    def delete_collection(
+        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> None:
         request = DeleteCollectionRequest(
             id=id.hex,
+            tenant=tenant,
+            database=database,
         )
         response = self._sys_db_stub.DeleteCollection(request)
         if response.status.code == 404:
@@ -193,11 +245,15 @@ class GrpcSysDB(SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         request = GetCollectionsRequest(
             id=id.hex if id else None,
             topic=topic,
             name=name,
+            tenant=tenant,
+            database=database,
         )
         response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
         results: List[Collection] = []
@@ -243,7 +299,9 @@ class GrpcSysDB(SysDB):
             request.ClearField("metadata")
             request.reset_metadata = True
 
-        self._sys_db_stub.UpdateCollection(request)
+        response = self._sys_db_stub.UpdateCollection(request)
+        if response.status.code == 404:
+            raise NotFoundError()
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)

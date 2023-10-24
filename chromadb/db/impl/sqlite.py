@@ -9,7 +9,6 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.utils.delete_file import delete_file
 import sqlite3
 from overrides import override
 import pypika
@@ -148,8 +147,6 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             for row in cur.fetchall():
                 cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
-        if self._is_persistent:
-            delete_file(self._db_file)
         self.start()
         super().reset_state()
 
