@@ -42,7 +42,7 @@ services:
       - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME:-chroma}
       - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY:-all}
     ports:
-      - 8001:8000
+      - 8000:8000
     depends_on: [otel-collector]
     networks:
       - net
