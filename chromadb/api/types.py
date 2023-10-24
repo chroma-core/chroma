@@ -1,4 +1,6 @@
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from numpy.typing import NDArray
+import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -75,13 +77,28 @@ def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
     return cast(Documents, target)
 
 
+def is_document(object: Any) -> bool:
+    if not isinstance(object, str):
+        return False
+    return True
+
+
 # Images
-Image = List[List[float]]
+ImageDType = Union[np.int_, np.float_]
+Image = NDArray[ImageDType]
 Images = List[Image]
 
 
+def is_image(object: Any) -> bool:
+    if not isinstance(object, np.ndarray):
+        return False
+    if len(object.shape) != 3:
+        return False
+    return True
+
+
 def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
-    if isinstance(target[0][0], float):
+    if is_image(target):
         return cast(Images, [target])
     # Already a sequence
     return cast(Images, target)
