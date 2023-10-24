@@ -1,5 +1,5 @@
-from chromadb.api import API
-from chromadb.config import Settings, System
+from chromadb.api import ServerAPI
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
@@ -77,7 +77,7 @@ def check_index_name(index_name: str) -> None:
         raise ValueError(msg)
 
 
-class SegmentAPI(API):
+class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
 
     _settings: Settings
@@ -104,6 +104,34 @@ class SegmentAPI(API):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @override
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        if len(name) < 3:
+            raise ValueError("Database name must be at least 3 characters long")
+
+        self._sysdb.create_database(
+            id=uuid4(),
+            name=name,
+            tenant=tenant,
+        )
+
+    @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
+        return self._sysdb.get_database(name=name, tenant=tenant)
+
+    @override
+    def create_tenant(self, name: str) -> None:
+        if len(name) < 3:
+            raise ValueError("Tenant name must be at least 3 characters long")
+
+        self._sysdb.create_tenant(
+            name=name,
+        )
+
+    @override
+    def get_tenant(self, name: str) -> t.Tenant:
+        return self._sysdb.get_tenant(name=name)
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
@@ -115,6 +143,8 @@ class SegmentAPI(API):
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         if metadata is not None:
             validate_metadata(metadata)
@@ -130,6 +160,8 @@ class SegmentAPI(API):
             metadata=metadata,
             dimension=None,
             get_or_create=get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
         if created:
@@ -163,12 +195,16 @@ class SegmentAPI(API):
         name: str,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
             get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
@@ -180,8 +216,12 @@ class SegmentAPI(API):
         self,
         name: str,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        existing = self._sysdb.get_collections(name=name)
+        existing = self._sysdb.get_collections(
+            name=name, tenant=tenant, database=database
+        )
 
         if existing:
             return Collection(
@@ -196,9 +236,13 @@ class SegmentAPI(API):
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections()
+        db_collections = self._sysdb.get_collections(tenant=tenant, database=database)
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -236,11 +280,20 @@ class SegmentAPI(API):
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    def delete_collection(self, name: str) -> None:
-        existing = self._sysdb.get_collections(name=name)
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        existing = self._sysdb.get_collections(
+            name=name, tenant=tenant, database=database
+        )
 
         if existing:
-            self._sysdb.delete_collection(existing[0]["id"])
+            self._sysdb.delete_collection(
+                existing[0]["id"], tenant=tenant, database=database
+            )
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
             if existing and existing[0]["id"] in self._collection_cache:

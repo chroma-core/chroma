@@ -55,6 +55,16 @@ message Collection {
   optional int32 dimension = 5;
 }
 
+message Database {
+    string id = 1;
+    string name = 2;
+    string tenant = 3;
+}
+
+message Tenant {
+    string name = 1;
+}
+
 message UpdateMetadataValue {
     oneof value {
         string string_value = 1;

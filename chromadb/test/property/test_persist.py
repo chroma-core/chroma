@@ -6,7 +6,7 @@ from hypothesis import given
 import hypothesis.strategies as st
 import pytest
 import chromadb
-from chromadb.api import API
+from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -26,7 +26,7 @@ import os
 import shutil
 import tempfile
 
-CreatePersistAPI = Callable[[], API]
+CreatePersistAPI = Callable[[], ServerAPI]
 
 configurations = [
     Settings(
@@ -71,7 +71,7 @@ def test_persist(
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
     system_1 = System(settings)
-    api_1 = system_1.instance(API)
+    api_1 = system_1.instance(ServerAPI)
     system_1.start()
 
     api_1.reset()
@@ -103,7 +103,7 @@ def test_persist(
     del system_1
 
     system_2 = System(settings)
-    api_2 = system_2.instance(API)
+    api_2 = system_2.instance(ServerAPI)
     system_2.start()
 
     coll = api_2.get_collection(
@@ -133,7 +133,7 @@ def load_and_check(
 ) -> None:
     try:
         system = System(settings)
-        api = system.instance(API)
+        api = system.instance(ServerAPI)
         system.start()
 
         coll = api.get_collection(
@@ -157,7 +157,7 @@ class PersistEmbeddingsStateMachineStates(EmbeddingStateMachineStates):
 
 
 class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
-    def __init__(self, api: API, settings: Settings):
+    def __init__(self, api: ClientAPI, settings: Settings):
         self.api = api
         self.settings = settings
         self.last_persist_delay = 10
