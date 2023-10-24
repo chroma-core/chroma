@@ -95,7 +95,7 @@ def get_settings() -> Settings:
 
 
 def EphemeralClient(
-    settings: Settings = Optional[Settings] = None,
+    settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
