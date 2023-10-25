@@ -5,7 +5,9 @@ from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
+    URI,
     CollectionMetadata,
+    DataLoader,
     Embedding,
     Embeddings,
     Include,
@@ -15,6 +17,7 @@ from chromadb.api.types import (
     Documents,
     Image,
     Images,
+    URIs,
     Where,
     IDs,
     EmbeddingFunction,
@@ -28,6 +31,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many_metadata,
     maybe_cast_one_to_many_document,
     maybe_cast_one_to_many_image,
+    maybe_cast_one_to_many_uri,
     validate_ids,
     validate_include,
     validate_metadata,
@@ -51,6 +55,7 @@ class Collection(BaseModel):
     metadata: Optional[CollectionMetadata] = None
     _client: "API" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction[Any]] = PrivateAttr()
+    _data_loader: Optional[DataLoader[Any]] = PrivateAttr()
 
     def __init__(
         self,
@@ -60,11 +65,13 @@ class Collection(BaseModel):
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
+        data_loader: Optional[DataLoader[Any]] = None,
         metadata: Optional[CollectionMetadata] = None,
     ):
         super().__init__(name=name, metadata=metadata, id=id)
         self._client = client
         self._embedding_function = embedding_function
+        self._data_loader = data_loader
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"
@@ -85,6 +92,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Add embeddings to the data store.
         Args:
@@ -93,6 +101,7 @@ class Collection(BaseModel):
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
             images: The images to associate with the embeddings. Optional.
+            uris: The uris of the images to associate with the embeddings. Optional.
 
         Returns:
             None
@@ -106,8 +115,15 @@ class Collection(BaseModel):
 
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
         )
 
         if embeddings is None:
@@ -116,7 +132,7 @@ class Collection(BaseModel):
             else:
                 embeddings = self._embed(input=images)
 
-        self._client._add(ids, self.id, embeddings, metadatas, documents)
+        self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
     def get(
         self,
@@ -383,11 +399,12 @@ class Collection(BaseModel):
 
     def _validate_embedding_set(
         self,
-        valid_ids: OneOrMany[ID],
-        valid_embeddings: Optional[OneOrMany[Embedding]],
-        valid_metadatas: Optional[OneOrMany[Metadata]],
-        valid_documents: Optional[OneOrMany[Document]],
-        valid_images: Optional[OneOrMany[Image]] = None,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
         require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
@@ -395,28 +412,29 @@ class Collection(BaseModel):
         Optional[Metadatas],
         Optional[Documents],
         Optional[Images],
+        Optional[URIs],
     ]:
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(valid_ids))
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
         valid_embeddings = (
-            validate_embeddings(maybe_cast_one_to_many_embedding(valid_embeddings))
-            if valid_embeddings is not None
+            validate_embeddings(maybe_cast_one_to_many_embedding(embeddings))
+            if embeddings is not None
             else None
         )
         valid_metadatas = (
-            validate_metadatas(maybe_cast_one_to_many_metadata(valid_metadatas))
-            if valid_metadatas is not None
+            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
+            if metadatas is not None
             else None
         )
         valid_documents = (
-            maybe_cast_one_to_many_document(valid_documents)
-            if valid_documents is not None
+            maybe_cast_one_to_many_document(documents)
+            if documents is not None
             else None
         )
         valid_images = (
-            maybe_cast_one_to_many_image(valid_images)
-            if valid_images is not None
-            else None
+            maybe_cast_one_to_many_image(images) if images is not None else None
         )
+
+        valid_uris = maybe_cast_one_to_many_uri(uris) if uris is not None else None
 
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
@@ -444,6 +462,14 @@ class Collection(BaseModel):
             raise ValueError(
                 f"Number of documents {len(valid_documents)} must match number of ids {len(valid_ids)}"
             )
+        if valid_images is not None and len(valid_images) != len(valid_ids):
+            raise ValueError(
+                f"Number of images {len(valid_images)} must match number of ids {len(valid_ids)}"
+            )
+        if valid_uris is not None and len(valid_uris) != len(valid_ids):
+            raise ValueError(
+                f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
+            )
 
         return (
             valid_ids,
@@ -451,6 +477,7 @@ class Collection(BaseModel):
             valid_metadatas,
             valid_documents,
             valid_images,
+            valid_uris,
         )
 
     def _embed(self, input: Any) -> Embeddings:

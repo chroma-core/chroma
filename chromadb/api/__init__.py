@@ -10,6 +10,7 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
+    URIs,
     Where,
     QueryResult,
     GetResult,
@@ -181,6 +182,7 @@ class API(Component, ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -191,6 +193,7 @@ class API(Component, ABC):
             embedding: The sequence of embeddings to add.
             metadata: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
 
         Returns:
             True if the embeddings were added successfully.
