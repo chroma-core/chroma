@@ -62,8 +62,9 @@ class ClientAuthResponse(EnforceOverrides, ABC):
         ...
 
     @abstractmethod
-    def get_auth_info(self) -> Union[Tuple[str, SecretStr],
-                                     List[Tuple[str, SecretStr]]]:
+    def get_auth_info(
+        self,
+    ) -> Union[Tuple[str, SecretStr], List[Tuple[str, SecretStr]]]:
         ...
 
 
@@ -312,8 +313,7 @@ class DynamicAuthzResource:
     def __init__(
         self,
         id: Optional[Union[str, Callable[..., str]]] = None,
-        namespace: Optional[Union[str, Callable[..., str]]
-                            ] = "default_database",
+        namespace: Optional[Union[str, Callable[..., str]]] = "default_database",
         attributes: Optional[
             Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
         ] = lambda **kwargs: {},
