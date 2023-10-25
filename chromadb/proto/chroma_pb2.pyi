@@ -85,6 +85,22 @@ class Collection(_message.Message):
     dimension: int
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., topic: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ...) -> None: ...
 
+class Database(_message.Message):
+    __slots__ = ["id", "name", "tenant"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TENANT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    tenant: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
+
+class Tenant(_message.Message):
+    __slots__ = ["name"]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
 class UpdateMetadataValue(_message.Message):
     __slots__ = ["string_value", "int_value", "float_value"]
     STRING_VALUE_FIELD_NUMBER: _ClassVar[int]

@@ -63,7 +63,8 @@ _legacy_config_values = {
 
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
-    "chromadb.api.API": "chroma_api_impl",
+    "chromadb.api.API": "chroma_api_impl",  # NOTE: this is to support legacy api construction. Use ServerAPI instead
+    "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
@@ -73,6 +74,9 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
 }
+
+DEFAULT_TENANT = "default_tenant"
+DEFAULT_DATABASE = "default_database"
 
 
 class Settings(BaseSettings):  # type: ignore
@@ -209,7 +213,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_otel_collection_endpoint: Optional[str] = ""
     chroma_otel_service_name: Optional[str] = "chromadb"
     chroma_otel_collection_headers: Dict[str, str] = {}
-    chroma_otel_granularity: Optional[str] = "none"
+    chroma_otel_granularity: Optional[str] = None
 
     allow_reset: bool = False
 

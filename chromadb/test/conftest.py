@@ -22,11 +22,12 @@ from requests.exceptions import ConnectionError
 from typing_extensions import Protocol
 
 import chromadb.server.fastapi
-from chromadb.api import API
+from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -44,6 +45,14 @@ hypothesis.settings.register_profile(
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
+
+NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+
+def skip_if_not_cluster() -> pytest.MarkDecorator:
+    return pytest.mark.skipif(
+        NOT_CLUSTER_ONLY,
+        reason="Requires Kubernetes to be running with a valid config",
+    )
 
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -104,7 +113,7 @@ def _run_server(
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
 
 
-def _await_server(api: API, attempts: int = 0) -> None:
+def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
     except ConnectionError as e:
@@ -186,7 +195,7 @@ def _fastapi_fixture(
         chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
     )
     system = System(settings)
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     system.start()
     _await_server(api)
     yield system
@@ -212,7 +221,7 @@ def basic_http_client() -> Generator[System, None, None]:
         allow_reset=True,
     )
     system = System(settings)
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     _await_server(api)
     system.start()
     yield system
@@ -375,41 +384,50 @@ def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, No
 
 
 @pytest.fixture(scope="module", params=system_fixtures_wrong_auth())
-def system_wrong_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system_wrong_auth(
+    request: pytest.FixtureRequest,
+) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
-def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
-def system_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="function")
-def api(system: System) -> Generator[API, None, None]:
+def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     yield api
+
+
+@pytest.fixture(scope="function")
+def client(system: System) -> Generator[ClientAPI, None, None]:
+    system.reset_state()
+    client = ClientCreator.from_system(system)
+    yield client
 
 
 @pytest.fixture(scope="function")
 def api_wrong_cred(
     system_wrong_auth: System,
-) -> Generator[API, None, None]:
+) -> Generator[ServerAPI, None, None]:
     system_wrong_auth.reset_state()
-    api = system_wrong_auth.instance(API)
+    api = system_wrong_auth.instance(ServerAPI)
     yield api
 
 
 @pytest.fixture(scope="function")
-def api_with_server_auth(system_auth: System) -> Generator[API, None, None]:
+def api_with_server_auth(system_auth: System) -> Generator[ServerAPI, None, None]:
     _sys = system_auth
     _sys.reset_state()
-    api = _sys.instance(API)
+    api = _sys.instance(ServerAPI)
     yield api
 
 

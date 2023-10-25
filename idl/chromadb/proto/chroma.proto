@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package chroma;
 
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+
 message Status {
   string reason = 1;
   int32 code = 2; // TODO: What is the enum of this code?
@@ -53,6 +55,16 @@ message Collection {
   string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
+}
+
+message Database {
+    string id = 1;
+    string name = 2;
+    string tenant = 3;
+}
+
+message Tenant {
+    string name = 1;
 }
 
 message UpdateMetadataValue {
