@@ -17,7 +17,6 @@ from chromadb.auth import (
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -68,8 +67,9 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         )
 
     @override
-    def get_user_identity(self, credentials: AbstractCredentials[T]) \
-            -> Optional[SimpleUserIdentity]:
+    def get_user_identity(
+        self, credentials: AbstractCredentials[T]
+    ) -> Optional[SimpleUserIdentity]:
         _creds = cast(Dict[str, SecretStr], credentials.get_credentials())
         return SimpleUserIdentity(_creds["username"].get_secret_value())
 
@@ -167,9 +167,14 @@ class RequestsClientAuthProtocolAdapter(
     def inject_credentials(self, injection_context: requests.PreparedRequest) -> None:
         if self._auth_header.get_auth_info_type() == AuthInfoType.HEADER:
             _header_info = self._auth_header.get_auth_info()
-            injection_context.headers[_header_info[0]] = _header_info[
-                1
-            ].get_secret_value()
+            if isinstance(_header_info, tuple):
+                injection_context.headers[_header_info[0]] = _header_info[
+                    1
+                ].get_secret_value()
+            else:
+                for header in _header_info:
+                    injection_context.headers[header[0]
+                                              ] = header[1].get_secret_value()
         else:
             raise ValueError(
                 f"Unsupported auth type: {self._auth_header.get_auth_info_type()}"

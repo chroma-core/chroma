@@ -9,6 +9,7 @@ from enum import Enum
 from typing import (
     Any,
     Callable,
+    List,
     Optional,
     Dict,
     TypeVar,
@@ -61,7 +62,8 @@ class ClientAuthResponse(EnforceOverrides, ABC):
         ...
 
     @abstractmethod
-    def get_auth_info(self) -> Tuple[str, SecretStr]:
+    def get_auth_info(self) -> Union[Tuple[str, SecretStr],
+                                     List[Tuple[str, SecretStr]]]:
         ...
 
 
