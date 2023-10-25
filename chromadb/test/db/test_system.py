@@ -105,8 +105,24 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     yield client
 
 
+# def grpc_with_real_server() -> Generator[SysDB, None, None]:
+#     system = System(
+#         Settings(
+#             allow_reset=True,
+#             chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+#         )
+#     )
+#     client = system.instance(GrpcSysDB)
+#     system.start()
+#     client.reset_and_wait_for_ready()
+#     yield client
+
+
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
-    return [sqlite, sqlite_persistent, grpc_with_mock_server]
+    if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
+        return [grpc_with_real_server]
+    else:
+        return [sqlite, sqlite_persistent, grpc_with_mock_server]
 
 
 @pytest.fixture(scope="module", params=db_fixtures())
