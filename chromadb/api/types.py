@@ -145,7 +145,8 @@ class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
-    uris: Optional[List[URI]]
+    uris: Optional[URIs]
+    datas: Optional[Images]
     metadatas: Optional[List[Metadata]]
 
 
@@ -154,6 +155,7 @@ class QueryResult(TypedDict):
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
+    datas: Optional[List[Images]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
