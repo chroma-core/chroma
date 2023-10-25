@@ -1,22 +1,23 @@
-import os
+import json
 import random
-import shutil
 import string
-from typing import IO, Dict, Any, Generator, Tuple
+from typing import Dict, Any, Tuple
 import uuid
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given
-import tempfile
+from hypothesis import given, settings
 
-import yaml
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.config import System
 from chromadb.test.conftest import _fastapi_fixture
 
 
 valid_action_space = [
+    "tenant:create_tenant",
+    "tenant:get_tenant",
+    "db:create_database",
+    "db:get_database",
     "db:reset",
     "db:list_collections",
     "db:get_collection",
@@ -62,6 +63,14 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         ]
     ):
         actions_list.append("db:get_collection")
+    actions_list.extend(
+        [
+            "tenant:create_tenant",
+            "tenant:get_tenant",
+            "db:create_database",
+            "db:get_database",
+        ]
+    )
     unauthorized_actions = set(valid_action_space) - set(actions_list)
     _role_config = {
         f"{role}": {
@@ -87,14 +96,6 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             for _ in range(2)
         ],
     }, _role_config
-
-
-@pytest.fixture(scope="module")
-def get_temp_file() -> Generator[IO[bytes], None, None]:
-    with tempfile.NamedTemporaryFile(delete=False) as f:
-        yield f
-    if os.path.exists(f.name):
-        shutil.rmtree(f.name, ignore_errors=True)
 
 
 @st.composite
@@ -145,6 +146,10 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
 
 
 api_executors = {
+    "db:create_database": lambda api: api.create_database(f"test-{uuid.uuid4()}"),
+    "db:get_database": lambda api: api.get_database("default_database"),
+    "tenant:create_tenant": lambda api: api.create_tenant(f"test-{uuid.uuid4()}"),
+    "tenant:get_tenant": lambda api: api.get_tenant("default_tenant"),
     "db:reset": lambda api: api.reset(),
     "db:list_collections": lambda api: api.list_collections(),
     "db:get_collection": lambda api: (api.get_collection(f"test-get-{uuid.uuid4()}")),
@@ -196,15 +201,12 @@ api_executors = {
 }
 
 
+@settings(max_examples=1)
 @given(token_config=token_config(), rbac_config=rbac_config())
-def test_authz(
-    token_config: Dict[str, Any], rbac_config: Dict[str, Any], get_temp_file: IO[bytes]
-) -> None:
+def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
-    token_config["chroma_server_authz_config_file"] = get_temp_file.name
-    token_config["chroma_server_auth_credentials_file"] = get_temp_file.name
-    with open(get_temp_file.name, "w") as f:
-        yaml.dump(authz_config, f)
+    token_config["chroma_server_authz_config"] = rbac_config
+    token_config["chroma_server_auth_credentials"] = json.dumps(rbac_config["users"])
     random_user = random.choice(authz_config["users"])
     random_token = random.choice(random_user["tokens"])["token"]
     api = _fastapi_fixture(
@@ -213,9 +215,7 @@ def test_authz(
         chroma_server_auth_credentials_provider=token_config[
             "chroma_server_auth_credentials_provider"
         ],
-        chroma_server_auth_credentials_file=token_config[
-            "chroma_server_auth_credentials_file"
-        ],
+        chroma_server_auth_credentials=token_config["chroma_server_auth_credentials"],
         chroma_client_auth_provider=token_config["chroma_client_auth_provider"],
         chroma_client_auth_token_transport_header=token_config[
             "token_transport_header"
@@ -224,12 +224,12 @@ def test_authz(
             "token_transport_header"
         ],
         chroma_server_authz_provider=token_config["chroma_server_authz_provider"],
-        chroma_server_authz_config_file=token_config["chroma_server_authz_config_file"],
+        chroma_server_authz_config=token_config["chroma_server_authz_config"],
         chroma_client_auth_credentials=random_token,
     )
     _sys: System = next(api)
     _sys.reset_state()
-    _api = _sys.instance(API)
+    _api = _sys.instance(ServerAPI)
     _api.heartbeat()
     for actions in authz_config["roles_mapping"][random_user["role"]]["actions"]:
         try:

@@ -28,10 +28,18 @@ class LocalUserConfigAuthorizationConfigurationProvider(
     def __init__(self, system: System) -> None:
         super().__init__(system)
         self._settings = system.settings
-        system.settings.require("chroma_server_authz_config_file")
-        self._config_file = str(system.settings.chroma_server_authz_config_file)
-        with open(self._config_file, "r") as f:
-            self._config = yaml.safe_load(f)
+        if self._settings.chroma_server_authz_config_file:
+            self._config_file = str(system.settings.chroma_server_authz_config_file)
+            with open(self._config_file, "r") as f:
+                self._config = yaml.safe_load(f)
+        elif self._settings.chroma_server_authz_config:
+            self._config = self._settings.chroma_server_authz_config
+        else:
+            raise ValueError(
+                "No configuration (CHROMA_SERVER_AUTHZ_CONFIG_FILE) file or "
+                "configuration (CHROMA_SERVER_AUTHZ_CONFIG) provided for "
+                "LocalUserConfigAuthorizationConfigurationProvider"
+            )
 
     @override
     def get_configuration(self) -> Dict[str, Any]:
@@ -60,7 +68,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             for u in _config["users"]:
                 _actions = _config["roles_mapping"][u["role"]]["actions"]
                 for a in _actions:
-                    self._authz_tuples.append((u["id"], *a.split(":")))
+                    tenant = u["tenant"] if "tenant" in u else "*"
+                    self._authz_tuples.append((u["id"], tenant, *a.split(":")))
             logger.debug(
                 f"Loaded {len(self._authz_tuples)} permissions for "
                 f"({len(_config['users'])}) users"
@@ -75,7 +84,12 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     )
     @override
     def authorize(self, context: AuthorizationContext) -> bool:
-        _authz_tuple = (context.user.id, context.resource.type, context.action.id)
+        _authz_tuple = (
+            context.user.id,
+            context.user.tenant,
+            context.resource.type,
+            context.action.id,
+        )
 
         policy_decision = False
         if _authz_tuple in self._authz_tuples:

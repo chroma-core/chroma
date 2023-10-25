@@ -63,7 +63,8 @@ _legacy_config_values = {
 
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
-    "chromadb.api.API": "chroma_api_impl",  # NOTE: this is to support legacy api construction. Use ServerAPI instead
+    # NOTE: this is to support legacy api construction. Use ServerAPI instead
+    "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
@@ -85,9 +86,8 @@ class Settings(BaseSettings):  # type: ignore
     # Legacy config has to be kept around because pydantic will error
     # on nonexisting keys
     chroma_db_impl: Optional[str] = None
-
-
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"  # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
     chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
     # Required for backwards compatibility
     chroma_telemetry_impl: str = chroma_product_telemetry_impl
@@ -189,6 +189,8 @@ class Settings(BaseSettings):  # type: ignore
     }
     chroma_server_authz_config_file: Optional[str] = None
 
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None
+
     @validator(
         "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
     )
@@ -200,13 +202,12 @@ class Settings(BaseSettings):  # type: ignore
                 "chroma_server_authz_config_file cannot be empty or just whitespace"
             )
         if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(
-                f"chroma_server_authz_config_file [{v}] does not exist"
-            )
+            raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
         return v
 
-    chroma_server_authz_config_provider: Optional[str] = \
-        "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
+    chroma_server_authz_config_provider: Optional[
+        str
+    ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
     anonymized_telemetry: bool = True
 

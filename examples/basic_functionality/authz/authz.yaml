@@ -1,4 +1,8 @@
 resource_type_action: # This is here just for reference
+  - tenant:create_tenant
+  - tenant:get_tenant
+  - db:create_database
+  - db:get_database
   - db:reset
   - db:list_collections
   - db:get_collection
@@ -19,73 +23,86 @@ roles_mapping:
   admin:
     actions:
       [
+        "tenant:create_tenant",
+        "tenant:get_tenant",
+        "db:create_database",
+        "db:get_database",
         "db:reset",
         "db:list_collections",
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
-        collection:add,
-        collection:delete,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:update,
-        collection:upsert,
-        collection:count,
+        "db:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "db:delete_collection",
+        "db:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
       ]
   write:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
-        collection:add,
-        collection:delete,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:update,
-        collection:upsert,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "db:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "db:delete_collection",
+        "db:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
       ]
   db_read:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "db:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "db:delete_collection",
+        "db:update_collection",
       ]
   collection_read:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "db:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
       ]
   collection_x_read:
     actions:
       [
-        db:get_collection,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
       ]
     resources: ["<UUID>"] #not yet supported
 users:
   - id: user@example.com
     role: admin
+    tenant: my_tenant
     tokens:
       - token: test-token-admin
         secret: my_api_secret # not yet supported

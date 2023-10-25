@@ -148,8 +148,7 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
 # AuthZ
 
 
-request_var: ContextVar[Optional[Request]] = ContextVar(
-    "request_var", default=None)
+request_var: ContextVar[Optional[Request]] = ContextVar("request_var", default=None)
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
@@ -177,8 +176,7 @@ def authz_context(
                     a_list = cast(List[Union[str, AuthzAction]], action)
                 a_authz_responses = []
                 for a in a_list:
-                    _action = a if isinstance(
-                        a, AuthzAction) else AuthzAction(id=a)
+                    _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
                     _resource = (
                         resource
                         if isinstance(resource, AuthzResource)
@@ -188,7 +186,10 @@ def authz_context(
                         user=AuthzUser(
                             id=request.state.user_identity.get_user_id()
                             if hasattr(request.state, "user_identity")
-                            else "Anonymous"
+                            else "Anonymous",
+                            tenant=request.state.user_identity.get_user_tenant()
+                            if hasattr(request.state, "user_identity")
+                            else "*",
                         ),
                         resource=_resource,
                         action=_action,
@@ -217,7 +218,7 @@ class FastAPIAuthorizationRequestContext(AuthorizationRequestContext[Request]):
         return self._request
 
 
-class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp]):
+class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
     _authz_provider: ServerAuthorizationProvider
 
     def __init__(self, system: System) -> None:
@@ -236,8 +237,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp]):
             _cls = resolve_provider(
                 self._settings.chroma_server_authz_provider, ServerAuthorizationProvider
             )
-            self._authz_provider = cast(
-                ServerAuthorizationProvider, self.require(_cls))
+            self._authz_provider = cast(ServerAuthorizationProvider, self.require(_cls))
 
     @override
     def pre_process(self, request: AuthorizationRequestContext[Request]) -> None:
@@ -283,6 +283,5 @@ class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
                 "and method {request.method}"
             )
             return await call_next(request)
-        self._middleware.pre_process(
-            FastAPIAuthorizationRequestContext(request))
+        self._middleware.pre_process(FastAPIAuthorizationRequestContext(request))
         return await call_next(request)

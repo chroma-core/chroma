@@ -46,14 +46,23 @@ class UserIdentity(EnforceOverrides, ABC):
     def get_user_id(self) -> str:
         ...
 
+    @abstractmethod
+    def get_user_tenant(self) -> Optional[str]:
+        ...
+
 
 class SimpleUserIdentity(UserIdentity):
-    def __init__(self, user_id: str) -> None:
+    def __init__(self, user_id: str, tenant: Optional[str] = None) -> None:
         self._user_id = user_id
+        self._tenant = tenant
 
     @override
     def get_user_id(self) -> str:
         return self._user_id
+
+    @override
+    def get_user_tenant(self) -> Optional[str]:
+        return self._tenant if self._tenant else "*"
 
 
 class ClientAuthResponse(EnforceOverrides, ABC):
@@ -269,9 +278,14 @@ class ServerAuthCredentialsProvider(Component):
 class AuthzResourceTypes(str, Enum):
     DB = "db"
     COLLECTION = "collection"
+    TENANT = "tenant"
 
 
 class AuthzResourceActions(str, Enum):
+    CREATE_DATABASE = "create_database"
+    GET_DATABASE = "get_database"
+    CREATE_TENANT = "create_tenant"
+    GET_TENANT = "get_tenant"
     LIST_COLLECTIONS = "list_collections"
     GET_COLLECTION = "get_collection"
     CREATE_COLLECTION = "create_collection"
@@ -292,6 +306,7 @@ class AuthzResourceActions(str, Enum):
 @dataclass
 class AuthzUser:
     id: Optional[str]
+    tenant: Optional[str] = "*"
     attributes: Optional[Dict[str, Any]] = None
     claims: Optional[Dict[str, Any]] = None
 
@@ -300,41 +315,55 @@ class AuthzUser:
 class AuthzResource:
     id: Optional[str]
     type: Optional[str]
-    namespace: Optional[str]
     attributes: Optional[Dict[str, Any]] = None
 
 
 class DynamicAuthzResource:
     id: Optional[Union[str, Callable[..., str]]]
-    namespace: Optional[Union[str, Callable[..., str]]]
     type: Optional[Union[str, Callable[..., str]]]
     attributes: Optional[Union[Dict[str, Any], Callable[..., Dict[str, Any]]]]
 
     def __init__(
         self,
         id: Optional[Union[str, Callable[..., str]]] = None,
-        namespace: Optional[Union[str, Callable[..., str]]] = "default_database",
         attributes: Optional[
             Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
         ] = lambda **kwargs: {},
         type: Optional[Union[str, Callable[..., str]]] = "default_database",
     ) -> None:
         self.id = id
-        self.namespace = namespace
         self.attributes = attributes
         self.type = type
 
     def to_authz_resource(self, **kwargs: Any) -> AuthzResource:
         return AuthzResource(
             id=self.id(**kwargs) if callable(self.id) else self.id,
-            namespace=self.namespace(**kwargs)
-            if callable(self.namespace)
-            else self.namespace,
             type=self.type(**kwargs) if callable(self.type) else self.type,
             attributes=self.attributes(**kwargs)
             if callable(self.attributes)
             else self.attributes,
         )
+
+
+def find_key_with_value_of_type(
+    type: AuthzResourceTypes, **kwargs: Any
+) -> Dict[str, Any]:
+    from chromadb.server.fastapi.types import (
+        CreateCollection,
+        CreateDatabase,
+        CreateTenant,
+    )
+
+    for key, value in kwargs.items():
+        if type == AuthzResourceTypes.DB and isinstance(value, CreateDatabase):
+            return dict(value)
+        elif type == AuthzResourceTypes.COLLECTION and isinstance(
+            value, CreateCollection
+        ):
+            return dict(value)
+        elif type == AuthzResourceTypes.TENANT and isinstance(value, CreateTenant):
+            return dict(value)
+    return {}
 
 
 class AuthzDynamicParams:
@@ -353,6 +382,13 @@ class AuthzDynamicParams:
         return partial(
             lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
         )
+
+    @staticmethod
+    def attr_from_resource_object(
+        type: AuthzResourceTypes, **kwargs: Any
+    ) -> Callable[..., Dict[str, Any]]:
+        obj = find_key_with_value_of_type(type, **kwargs)
+        return partial(lambda **kwargs: obj, **kwargs)
 
 
 @dataclass
@@ -383,12 +419,12 @@ class AuthorizationRequestContext(EnforceOverrides, ABC, Generic[T]):
         ...
 
 
-class ChromaAuthzMiddleware(Component, Generic[T]):
+class ChromaAuthzMiddleware(Component, Generic[T, S]):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def pre_process(self, request: AuthorizationRequestContext[T]) -> None:
+    def pre_process(self, request: AuthorizationRequestContext[S]) -> None:
         ...
 
     @abstractmethod

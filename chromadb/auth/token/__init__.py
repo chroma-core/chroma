@@ -1,3 +1,4 @@
+import json
 import logging
 import string
 from enum import Enum
@@ -120,6 +121,7 @@ class Token(TypedDict):
 class User(TypedDict):
     id: str
     role: str
+    tenant: Optional[str]
     tokens: List[Token]
 
 
@@ -130,11 +132,16 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
-        system.settings.require("chroma_server_auth_credentials_file")
-        user_file = str(system.settings.chroma_server_auth_credentials_file)
-        with open(user_file) as f:
-            self._users = cast(List[User], yaml.safe_load(f)["users"])
-            self._token_user_mapping = {}
+        if system.settings.chroma_server_auth_credentials_file:
+            system.settings.require("chroma_server_auth_credentials_file")
+            user_file = str(system.settings.chroma_server_auth_credentials_file)
+            with open(user_file) as f:
+                self._users = cast(List[User], yaml.safe_load(f)["users"])
+        elif system.settings.chroma_server_auth_credentials:
+            self._users = cast(
+                List[User], json.loads(system.settings.chroma_server_auth_credentials)
+            )
+        self._token_user_mapping = {}
         for user in self._users:
             for t in user["tokens"]:
                 token_str = t["token"]
@@ -142,6 +149,12 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
                 if token_str in self._token_user_mapping:
                     raise ValueError("Token already exists for another user")
                 self._token_user_mapping[token_str] = user["id"]
+
+    def find_user_by_id(self, _user_id: str) -> Optional[User]:
+        for user in self._users:
+            if user["id"] == _user_id:
+                return user
+        return None
 
     @override
     def validate_credentials(self, credentials: AbstractCredentials[T]) -> bool:
@@ -161,8 +174,11 @@ class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider
             return None
         # below is just simple identity mapping and may need future work for more
         # complex use cases
+        _user_id = self._token_user_mapping[_creds["token"].get_secret_value()]
+        _user = self.find_user_by_id(_user_id)
         return SimpleUserIdentity(
-            self._token_user_mapping[_creds["token"].get_secret_value()]
+            user_id=_user_id,
+            tenant=_user["tenant"] if _user and "tenant" in _user else "*",
         )
 
 
