@@ -321,6 +321,7 @@ class SegmentAPI(API):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
@@ -361,6 +362,7 @@ class SegmentAPI(API):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
