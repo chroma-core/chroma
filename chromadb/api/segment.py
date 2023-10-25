@@ -15,6 +15,7 @@ from chromadb.api.types import (
     CollectionMetadata,
     Document,
     EmbeddingFunction,
+    DataLoader,
     IDs,
     Embeddings,
     Embedding,
@@ -114,6 +115,7 @@ class SegmentAPI(API):
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
+        data_loader: Optional[DataLoader[Any]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         existing = self._sysdb.get_collections(name=name)
@@ -132,6 +134,7 @@ class SegmentAPI(API):
                     name=existing[0]["name"],
                     metadata=existing[0]["metadata"],  # type: ignore
                     embedding_function=embedding_function,
+                    data_loader=data_loader,
                 )
             else:
                 raise ValueError(f"Collection {name} already exists.")
@@ -165,6 +168,7 @@ class SegmentAPI(API):
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -445,6 +449,7 @@ class SegmentAPI(API):
             metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
             uris=uris if "uris" in include else None,  # type: ignore
+            datas=None,
         )
 
     @override
@@ -616,6 +621,7 @@ class SegmentAPI(API):
             embeddings=embeddings if embeddings else None,
             documents=documents if documents else None,
             uris=uris if uris else None,
+            datas=None,
         )
 
     @override

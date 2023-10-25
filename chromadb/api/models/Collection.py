@@ -129,8 +129,18 @@ class Collection(BaseModel):
         if embeddings is None:
             if documents is not None:
                 embeddings = self._embed(input=documents)
-            else:
+            elif images is not None:
                 embeddings = self._embed(input=images)
+            else:
+                if uris is None:
+                    raise ValueError(
+                        "You must provide either embeddings, documents, images, or uris."
+                    )
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                embeddings = self._embed(self._data_loader(uris))
 
         self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
@@ -158,22 +168,41 @@ class Collection(BaseModel):
             GetResult: A GetResult object containing the results.
 
         """
-        where = validate_where(where) if where else None
-        where_document = (
+
+        if "datas" in include and self._data_loader is None:
+            raise ValueError(
+                "You must set a data loader on the collection if loading from URIs."
+            )
+
+        valid_where = validate_where(where) if where else None
+        valid_where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
-        include = validate_include(include, allow_distances=False)
-        return self._client._get(
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        valid_include = validate_include(include, allow_distances=False)
+
+        if "datas" in include and "uris" not in include:
+            valid_include.append("uris")
+
+        get_results = self._client._get(
             self.id,
-            ids,
-            where,
+            valid_ids,
+            valid_where,
             None,
             limit,
             offset,
-            where_document=where_document,
-            include=include,
+            where_document=valid_where_document,
+            include=valid_include,
         )
+
+        if (
+            "datas" in include
+            and self._data_loader is not None
+            and get_results["uris"] is not None
+        ):
+            get_results["datas"] = self._data_loader(get_results["uris"])
+
+        return get_results
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -191,6 +220,7 @@ class Collection(BaseModel):
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
+        query_uris: Optional[OneOrMany[URI]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -217,63 +247,84 @@ class Collection(BaseModel):
             ValueError: If you provide both query_texts and query_images
 
         """
-        # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
-        if (
-            (query_embeddings is None and query_texts is None and query_images is None)
-            or (
-                query_embeddings is not None
-                and (query_texts is not None or query_images is not None)
-            )
-            or (query_texts is not None and query_images is not None)
+
+        # Users must provide only one of query_embeddings, query_texts, query_images, or query_uris
+        if not (
+            (query_embeddings is not None)
+            ^ (query_texts is not None)
+            ^ (query_images is not None)
+            ^ (query_uris is not None)
         ):
             raise ValueError(
-                "You must provide either query embeddings, or else one of query texts or query images."
+                "You must provide one of query_embeddings, query_texts, query_images, or query_uris."
             )
 
-        where = validate_where(where) if where else None
-        where_document = (
-            validate_where_document(where_document) if where_document else None
+        valid_where = validate_where(where) if where else {}
+        valid_where_document = (
+            validate_where_document(where_document) if where_document else {}
         )
-        query_embeddings = (
+        valid_query_embeddings = (
             validate_embeddings(maybe_cast_one_to_many_embedding(query_embeddings))
             if query_embeddings is not None
             else None
         )
-        query_texts = (
+        valid_query_texts = (
             maybe_cast_one_to_many_document(query_texts)
             if query_texts is not None
             else None
         )
-        query_images = (
+        valid_query_images = (
             maybe_cast_one_to_many_image(query_images)
             if query_images is not None
             else None
         )
-        include = validate_include(include, allow_distances=True)
-        n_results = validate_n_results(n_results)
+        valid_query_uris = (
+            maybe_cast_one_to_many_uri(query_uris) if query_uris is not None else None
+        )
+        valid_include = validate_include(include, allow_distances=True)
+        valid_n_results = validate_n_results(n_results)
 
         # If query_embeddings are not provided, we need to compute them from the inputs
-        if query_embeddings is None:
-            query_embeddings = (
-                self._embed(input=query_texts)
-                if query_texts
-                else self._embed(input=query_images)
-            )
+        if valid_query_embeddings is None:
+            if query_texts is not None:
+                valid_query_embeddings = self._embed(input=valid_query_texts)
+            elif query_images is not None:
+                valid_query_embeddings = self._embed(input=valid_query_images)
+            else:
+                if valid_query_uris is None:
+                    raise ValueError(
+                        "You must provide either query_embeddings, query_texts, query_images, or query_uris."
+                    )
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                valid_query_embeddings = self._embed(
+                    self._data_loader(valid_query_uris)
+                )
 
-        if where is None:
-            where = {}
+        if "datas" in include and "uris" not in include:
+            valid_include.append("uris")
 
-        if where_document is None:
-            where_document = {}
-
-        return self._client._query(
+        query_results = self._client._query(
             collection_id=self.id,
-            query_embeddings=query_embeddings,
-            n_results=n_results,
-            where=where,
-            where_document=where_document,
+            query_embeddings=valid_query_embeddings,
+            n_results=valid_n_results,
+            where=valid_where,
+            where_document=valid_where_document,
             include=include,
         )
+
+        if (
+            "datas" in include
+            and self._data_loader is not None
+            and query_results["uris"] is not None
+        ):
+            query_results["datas"] = [
+                self._data_loader(uris) for uris in query_results["uris"]
+            ]
+
+        return query_results
 
     def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
@@ -461,8 +512,11 @@ class Collection(BaseModel):
                 valid_embeddings is None
                 and valid_documents is None
                 and valid_images is None
+                and valid_uris is None
             ):
-                raise ValueError("You must provide embeddings, documents, or images.")
+                raise ValueError(
+                    "You must provide embeddings, documents, images, or uris."
+                )
 
         # Only one of documents or images can be provided
         if valid_documents is not None and valid_images is not None:

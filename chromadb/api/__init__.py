@@ -6,6 +6,7 @@ from chromadb.api.types import (
     CollectionMetadata,
     Documents,
     EmbeddingFunction,
+    DataLoader,
     Embeddings,
     IDs,
     Include,
@@ -58,6 +59,7 @@ class API(Component, ABC):
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
+        data_loader: Optional[DataLoader[Any]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
