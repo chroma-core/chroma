@@ -191,8 +191,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
                     c.modify(metadata=new_metadata, name=new_name)
                 return multiple()
 
+            self.set_model(new_name, self.model[coll.name])
             self.delete_from_model(coll.name)
-            self.set_model(new_name, coll.metadata)
             coll.name = new_name
 
         c.modify(metadata=new_metadata, name=new_name)
