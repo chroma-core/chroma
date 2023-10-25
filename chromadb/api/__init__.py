@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Any, Sequence, Optional
 from uuid import UUID
 
 from overrides import override
@@ -220,6 +220,7 @@ class BaseAPI(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
@@ -229,7 +230,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to update. Defaults to None.
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-
+            uris: URIs of data sources for each embedding. Defaults to None.
         Returns:
             True if the embeddings were updated successfully.
         """
@@ -243,6 +244,7 @@ class BaseAPI(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -254,6 +256,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
         """
         pass
 

@@ -326,6 +326,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids.
 
@@ -339,12 +340,20 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
+        (
             ids,
             embeddings,
             metadatas,
             documents,
             images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
             require_embeddings_or_data=False,
         )
 
@@ -354,7 +363,7 @@ class Collection(BaseModel):
             elif images is not None:
                 embeddings = self._embed(input=images)
 
-        self._client._update(self.id, ids, embeddings, metadatas, documents)
+        self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
     def upsert(
         self,
@@ -363,6 +372,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -376,8 +386,15 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
         )
 
         if embeddings is None:
@@ -392,6 +409,7 @@ class Collection(BaseModel):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         )
 
     def delete(
