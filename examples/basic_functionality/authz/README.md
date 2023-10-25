@@ -6,17 +6,22 @@
 
 ```yaml
 resource_type_action: # This is here just for reference
+  - tenant:create_tenant
+  - tenant:get_tenant
+  - db:create_database
+  - db:get_database
+  - db:reset
   - db:list_collections
-  - db:get_collection
+  - collection:get_collection
   - db:create_collection
   - db:get_or_create_collection
-  - db:delete_collection
-  - db:update_collection
+  - collection:delete_collection
+  - collection:update_collection
   - collection:add
   - collection:delete
   - collection:get
   - collection:query
-  - collection:peek
+  - collection:peek #from API perspective this is the same as collection:get
   - collection:count
   - collection:update
   - collection:upsert
@@ -34,11 +39,11 @@ roles_mapping:
     actions:
       [
         db:list_collections,
-        db:get_collection,
+        collection:get_collection,
         db:create_collection,
         db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
+        collection:delete_collection,
+        collection:update_collection,
         collection:add,
         collection:delete,
         collection:get,
@@ -52,11 +57,11 @@ roles_mapping:
     actions:
       [
         db:list_collections,
-        db:get_collection,
+        collection:get_collection,
         db:create_collection,
         db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
+        collection:delete_collection,
+        collection:update_collection,
         collection:add,
         collection:delete,
         collection:get,
@@ -70,17 +75,17 @@ roles_mapping:
     actions:
       [
         db:list_collections,
-        db:get_collection,
+        collection:get_collection,
         db:create_collection,
         db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
+        collection:delete_collection,
+        collection:update_collection,
       ]
   collection_read:
     actions:
       [
         db:list_collections,
-        db:get_collection,
+        collection:get_collection,
         collection:get,
         collection:query,
         collection:peek,
@@ -89,7 +94,7 @@ roles_mapping:
   collection_x_read:
     actions:
       [
-        db:get_collection,
+        collection:get_collection,
         collection:get,
         collection:query,
         collection:peek,

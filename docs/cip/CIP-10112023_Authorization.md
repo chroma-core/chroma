@@ -2,7 +2,7 @@
 
 ## Status
 
-Current Status: `Draft`
+Current Status: `Under Discussion`
 
 ## **Motivation**
 
@@ -163,7 +163,7 @@ In this section we propose a minimal implementation example of the authorization
 We introduce the following implementations:
 
 - `LocalUserConfigAuthorizationConfigurationProvider` - a simple authz configuration to read the yaml configuration file.
-- `SimpleRBACAuthorizationProvider` - a simple RBAC authorization provider that reads the configuration from the configuration provider, creates a list of tuples for every user and his role action mappings (e.g. `('user@example.com', 'db', 'list_collections')`) and evaluates the authorization request against the list of tuples.
+- `SimpleRBACAuthorizationProvider` - a simple RBAC authorization provider that reads the configuration from the configuration provider, creates a list of tuples for every user and his role action mappings (e.g. `('user@example.com','tenant_x', 'db', 'list_collections')`) and evaluates the authorization request against the list of tuples.
 
 #### Authentication and Authorization Config Scheme
 
@@ -171,17 +171,22 @@ In our baseline implementation we propose the following configuration scheme:
 
 ```yaml
 resource_type_action: # This is here just for reference
+  - tenant:create_tenant
+  - tenant:get_tenant
+  - db:create_database
+  - db:get_database
+  - db:reset
   - db:list_collections
-  - db:get_collection
+  - collection:get_collection
   - db:create_collection
   - db:get_or_create_collection
-  - db:delete_collection
-  - db:update_collection
+  - collection:delete_collection
+  - collection:update_collection
   - collection:add
   - collection:delete
   - collection:get
   - collection:query
-  - collection:peek
+  - collection:peek #from API perspective this is the same as collection:get
   - collection:count
   - collection:update
   - collection:upsert
@@ -190,73 +195,86 @@ roles_mapping:
   admin:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
-        collection:add,
-        collection:delete,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:update,
-        collection:upsert,
-        collection:count,
+        "tenant:create_tenant",
+        "tenant:get_tenant",
+        "db:create_database",
+        "db:get_database",
+        "db:reset",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
       ]
   write:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
-        collection:add,
-        collection:delete,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:update,
-        collection:upsert,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
       ]
   db_read:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        db:create_collection,
-        db:get_or_create_collection,
-        db:delete_collection,
-        db:update_collection,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
       ]
   collection_read:
     actions:
       [
-        db:list_collections,
-        db:get_collection,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
       ]
   collection_x_read:
     actions:
       [
-        db:get_collection,
-        collection:get,
-        collection:query,
-        collection:peek,
-        collection:count,
+        "tenant:get_tenant",
+        "db:get_database",
+        "collection:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
       ]
     resources: ["<UUID>"] #not yet supported
-
 users:
   - id: user@example.com
     role: admin
+    tenant: my_tenant
     tokens:
       - token: test-token-admin
         secret: my_api_secret # not yet supported
@@ -264,7 +282,7 @@ users:
     role: db_read
     tokens:
       - token: my_api_token
-        secret: my_api_secret # not yet supported
+        secret: my_api_secret
 
 ```
 

@@ -5,7 +5,7 @@ from typing import Dict, Any, Tuple
 import uuid
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -20,11 +20,11 @@ valid_action_space = [
     "db:get_database",
     "db:reset",
     "db:list_collections",
-    "db:get_collection",
+    "collection:get_collection",
     "db:create_collection",
     "db:get_or_create_collection",
-    "db:delete_collection",
-    "db:update_collection",
+    "collection:delete_collection",
+    "collection:update_collection",
     "collection:add",
     "collection:delete",
     "collection:get",
@@ -62,12 +62,10 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             "collection:count",
         ]
     ):
-        actions_list.append("db:get_collection")
+        actions_list.append("collection:get_collection")
     actions_list.extend(
         [
-            "tenant:create_tenant",
             "tenant:get_tenant",
-            "db:create_database",
             "db:get_database",
         ]
     )
@@ -152,17 +150,19 @@ api_executors = {
     "tenant:get_tenant": lambda api: api.get_tenant("default_tenant"),
     "db:reset": lambda api: api.reset(),
     "db:list_collections": lambda api: api.list_collections(),
-    "db:get_collection": lambda api: (api.get_collection(f"test-get-{uuid.uuid4()}")),
+    "collection:get_collection": lambda api: (
+        api.get_collection(f"test-get-{uuid.uuid4()}")
+    ),
     "db:create_collection": lambda api: (
         api.create_collection(f"test-create-{uuid.uuid4()}")
     ),
     "db:get_or_create_collection": lambda api: (
         api.get_or_create_collection(f"test-get-or-create-{uuid.uuid4()}")
     ),
-    "db:delete_collection": lambda api: (
+    "collection:delete_collection": lambda api: (
         api.delete_collection(f"test-delete-col-{uuid.uuid4()}")
     ),
-    "db:update_collection": lambda api: (
+    "collection:update_collection": lambda api: (
         col := Collection(api, f"test-update-{uuid.uuid4()}", uuid.uuid4()),
         col.modify(metadata={"test": "test"}),  # type: ignore
     ),
@@ -201,7 +201,6 @@ api_executors = {
 }
 
 
-@settings(max_examples=1)
 @given(token_config=token_config(), rbac_config=rbac_config())
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
@@ -233,6 +232,7 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
     _api.heartbeat()
     for actions in authz_config["roles_mapping"][random_user["role"]]["actions"]:
         try:
+            print(actions)
             api_executors[actions](_api)  # type: ignore
         except Exception as e:
             # we want to ignore errors such as collection not found or 400 client error
