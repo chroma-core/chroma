@@ -16,8 +16,10 @@ from chromadb.errors import InvalidDimensionException, InvalidCollectionExceptio
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
+    URI,
     CollectionMetadata,
     Embeddable,
+    Document,
     EmbeddingFunction,
     IDs,
     Embeddings,
@@ -367,11 +369,12 @@ class SegmentAPI(ServerAPI):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
@@ -407,11 +410,12 @@ class SegmentAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
@@ -644,7 +648,8 @@ class SegmentAPI(ServerAPI):
         ids: List[List[str]] = []
         distances: List[List[float]] = []
         embeddings: List[List[Embedding]] = []
-        documents: List[List[str]] = []
+        documents: List[List[Document]] = []
+        uris: List[List[URI]] = []
         metadatas: List[List[t.Metadata]] = []
 
         for result in results:
@@ -654,7 +659,7 @@ class SegmentAPI(ServerAPI):
             if "embeddings" in include:
                 embeddings.append([cast(Embedding, r["embedding"]) for r in result])
 
-        if "documents" in include or "metadatas" in include:
+        if "documents" in include or "metadatas" in include or "uris" in include:
             all_ids: Set[str] = set()
             for id_list in ids:
                 all_ids.update(id_list)
@@ -676,6 +681,9 @@ class SegmentAPI(ServerAPI):
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
+                if "uris" in include:
+                    uri_list = [_uri(m) for m in metadata_list]
+                    uris.append(uri_list)  # type: ignore
 
         query_amount = len(query_embeddings)
         self._product_telemetry_client.capture(
@@ -697,6 +705,7 @@ class SegmentAPI(ServerAPI):
             metadatas=metadatas if metadatas else None,
             embeddings=embeddings if embeddings else None,
             documents=documents if documents else None,
+            uris=uris if uris else None,
         )
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
