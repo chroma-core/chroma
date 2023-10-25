@@ -127,6 +127,8 @@ Include = List[
         Literal["embeddings"],
         Literal["metadatas"],
         Literal["distances"],
+        Literal["uris"],
+        Literal["datas"],
     ]
 ]
 
@@ -143,6 +145,7 @@ class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
+    uris: Optional[List[URI]]
     metadatas: Optional[List[Metadata]]
 
 
@@ -150,6 +153,7 @@ class QueryResult(TypedDict):
     ids: List[IDs]
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
+    uris: Optional[List[List[URI]]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
@@ -402,7 +406,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas"]
+        allowed_values = ["embeddings", "documents", "metadatas", "uris", "datas"]
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
@@ -447,7 +451,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 
 
 def validate_batch(
-    batch: Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]],
+    batch: Tuple[
+        IDs,
+        Optional[Embeddings],
+        Optional[Metadatas],
+        Optional[Documents],
+        Optional[URIs],
+    ],
     limits: Dict[str, Any],
 ) -> None:
     if len(batch[0]) > limits["max_batch_size"]:
