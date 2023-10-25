@@ -17,12 +17,14 @@ import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
     CollectionMetadata,
+    Embeddable,
     EmbeddingFunction,
     IDs,
     Embeddings,
     Embedding,
     Metadatas,
     Documents,
+    URIs,
     Where,
     WhereDocument,
     Include,
@@ -45,7 +47,7 @@ from chromadb.telemetry.product.events import (
 
 import chromadb.types as t
 
-from typing import Optional, Sequence, Generator, List, cast, Set, Dict
+from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
 import time
@@ -141,7 +143,9 @@ class SegmentAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Any]
+        ] = ef.DefaultEmbeddingFunction(),
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -196,7 +200,9 @@ class SegmentAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -216,9 +222,11 @@ class SegmentAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -319,11 +327,12 @@ class SegmentAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
@@ -333,6 +342,7 @@ class SegmentAPI(ServerAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
@@ -479,6 +489,9 @@ class SegmentAPI(ServerAPI):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
+        if "uris" in include:
+            uris = [_uri(m) for m in metadatas]
+
         ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionGetEvent(
@@ -499,6 +512,7 @@ class SegmentAPI(ServerAPI):
             if "metadatas" in include
             else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
+            uris=uris if "uris" in include else None,  # type: ignore
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -764,6 +778,7 @@ def _records(
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
+    uris: Optional[URIs] = None,
 ) -> Generator[t.SubmitEmbeddingRecord, None, None]:
     """Convert parallel lists of embeddings, metadatas and documents to a sequence of
     SubmitEmbeddingRecords"""
@@ -771,8 +786,6 @@ def _records(
     # Presumes that callers were invoked via  Collection model, which means
     # that we know that the embeddings, metadatas and documents have already been
     # normalized and are guaranteed to be consistently named lists.
-
-    # TODO: Fix API types to make it explicit that they've already been normalized
 
     for i, id in enumerate(ids):
         metadata = None
@@ -785,6 +798,13 @@ def _records(
                 metadata = {**metadata, "chroma:document": document}
             else:
                 metadata = {"chroma:document": document}
+
+        if uris:
+            uri = uris[i]
+            if metadata:
+                metadata = {**metadata, "chroma:uri": uri}
+            else:
+                metadata = {"chroma:uri": uri}
 
         record = t.SubmitEmbeddingRecord(
             id=id,
@@ -801,6 +821,14 @@ def _doc(metadata: Optional[t.Metadata]) -> Optional[str]:
 
     if metadata and "chroma:document" in metadata:
         return str(metadata["chroma:document"])
+    return None
+
+
+def _uri(metadata: Optional[t.Metadata]) -> Optional[str]:
+    """Retrieve the uri (if any) from a Metadata map"""
+
+    if metadata and "chroma:uri" in metadata:
+        return str(metadata["chroma:uri"])
     return None
 
 
