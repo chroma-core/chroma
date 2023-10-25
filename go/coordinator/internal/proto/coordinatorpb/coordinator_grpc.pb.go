@@ -20,6 +20,10 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	SysDB_CreateDatabase_FullMethodName   = "/chroma.SysDB/CreateDatabase"
+	SysDB_GetDatabase_FullMethodName      = "/chroma.SysDB/GetDatabase"
+	SysDB_CreateTenant_FullMethodName     = "/chroma.SysDB/CreateTenant"
+	SysDB_GetTenant_FullMethodName        = "/chroma.SysDB/GetTenant"
 	SysDB_CreateSegment_FullMethodName    = "/chroma.SysDB/CreateSegment"
 	SysDB_DeleteSegment_FullMethodName    = "/chroma.SysDB/DeleteSegment"
 	SysDB_GetSegments_FullMethodName      = "/chroma.SysDB/GetSegments"
@@ -35,6 +39,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SysDBClient interface {
+	CreateDatabase(ctx context.Context, in *CreateDatabaseRequest, opts ...grpc.CallOption) (*ChromaResponse, error)
+	GetDatabase(ctx context.Context, in *GetDatabaseRequest, opts ...grpc.CallOption) (*GetDatabaseResponse, error)
+	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*ChromaResponse, error)
+	GetTenant(ctx context.Context, in *GetTenantRequest, opts ...grpc.CallOption) (*GetTenantResponse, error)
 	CreateSegment(ctx context.Context, in *CreateSegmentRequest, opts ...grpc.CallOption) (*ChromaResponse, error)
 	DeleteSegment(ctx context.Context, in *DeleteSegmentRequest, opts ...grpc.CallOption) (*ChromaResponse, error)
 	GetSegments(ctx context.Context, in *GetSegmentsRequest, opts ...grpc.CallOption) (*GetSegmentsResponse, error)
@@ -52,6 +60,42 @@ type sysDBClient struct {
 
 func NewSysDBClient(cc grpc.ClientConnInterface) SysDBClient {
 	return &sysDBClient{cc}
+}
+
+func (c *sysDBClient) CreateDatabase(ctx context.Context, in *CreateDatabaseRequest, opts ...grpc.CallOption) (*ChromaResponse, error) {
+	out := new(ChromaResponse)
+	err := c.cc.Invoke(ctx, SysDB_CreateDatabase_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sysDBClient) GetDatabase(ctx context.Context, in *GetDatabaseRequest, opts ...grpc.CallOption) (*GetDatabaseResponse, error) {
+	out := new(GetDatabaseResponse)
+	err := c.cc.Invoke(ctx, SysDB_GetDatabase_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sysDBClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*ChromaResponse, error) {
+	out := new(ChromaResponse)
+	err := c.cc.Invoke(ctx, SysDB_CreateTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sysDBClient) GetTenant(ctx context.Context, in *GetTenantRequest, opts ...grpc.CallOption) (*GetTenantResponse, error) {
+	out := new(GetTenantResponse)
+	err := c.cc.Invoke(ctx, SysDB_GetTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *sysDBClient) CreateSegment(ctx context.Context, in *CreateSegmentRequest, opts ...grpc.CallOption) (*ChromaResponse, error) {
@@ -139,6 +183,10 @@ func (c *sysDBClient) ResetState(ctx context.Context, in *emptypb.Empty, opts ..
 // All implementations must embed UnimplementedSysDBServer
 // for forward compatibility
 type SysDBServer interface {
+	CreateDatabase(context.Context, *CreateDatabaseRequest) (*ChromaResponse, error)
+	GetDatabase(context.Context, *GetDatabaseRequest) (*GetDatabaseResponse, error)
+	CreateTenant(context.Context, *CreateTenantRequest) (*ChromaResponse, error)
+	GetTenant(context.Context, *GetTenantRequest) (*GetTenantResponse, error)
 	CreateSegment(context.Context, *CreateSegmentRequest) (*ChromaResponse, error)
 	DeleteSegment(context.Context, *DeleteSegmentRequest) (*ChromaResponse, error)
 	GetSegments(context.Context, *GetSegmentsRequest) (*GetSegmentsResponse, error)
@@ -155,6 +203,18 @@ type SysDBServer interface {
 type UnimplementedSysDBServer struct {
 }
 
+func (UnimplementedSysDBServer) CreateDatabase(context.Context, *CreateDatabaseRequest) (*ChromaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateDatabase not implemented")
+}
+func (UnimplementedSysDBServer) GetDatabase(context.Context, *GetDatabaseRequest) (*GetDatabaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDatabase not implemented")
+}
+func (UnimplementedSysDBServer) CreateTenant(context.Context, *CreateTenantRequest) (*ChromaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
+}
+func (UnimplementedSysDBServer) GetTenant(context.Context, *GetTenantRequest) (*GetTenantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTenant not implemented")
+}
 func (UnimplementedSysDBServer) CreateSegment(context.Context, *CreateSegmentRequest) (*ChromaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateSegment not implemented")
 }
@@ -193,6 +253,78 @@ type UnsafeSysDBServer interface {
 
 func RegisterSysDBServer(s grpc.ServiceRegistrar, srv SysDBServer) {
 	s.RegisterService(&SysDB_ServiceDesc, srv)
+}
+
+func _SysDB_CreateDatabase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateDatabaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SysDBServer).CreateDatabase(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SysDB_CreateDatabase_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SysDBServer).CreateDatabase(ctx, req.(*CreateDatabaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SysDB_GetDatabase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDatabaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SysDBServer).GetDatabase(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SysDB_GetDatabase_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SysDBServer).GetDatabase(ctx, req.(*GetDatabaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SysDB_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SysDBServer).CreateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SysDB_CreateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SysDBServer).CreateTenant(ctx, req.(*CreateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SysDB_GetTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SysDBServer).GetTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SysDB_GetTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SysDBServer).GetTenant(ctx, req.(*GetTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _SysDB_CreateSegment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -364,6 +496,22 @@ var SysDB_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "chroma.SysDB",
 	HandlerType: (*SysDBServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateDatabase",
+			Handler:    _SysDB_CreateDatabase_Handler,
+		},
+		{
+			MethodName: "GetDatabase",
+			Handler:    _SysDB_GetDatabase_Handler,
+		},
+		{
+			MethodName: "CreateTenant",
+			Handler:    _SysDB_CreateTenant_Handler,
+		},
+		{
+			MethodName: "GetTenant",
+			Handler:    _SysDB_GetTenant_Handler,
+		},
 		{
 			MethodName: "CreateSegment",
 			Handler:    _SysDB_CreateSegment_Handler,

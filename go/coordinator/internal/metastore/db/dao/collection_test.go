@@ -3,6 +3,7 @@ package dao
 import (
 	"testing"
 
+	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -40,7 +41,7 @@ func TestCollectionDb_GetCollections(t *testing.T) {
 	}
 
 	// Test when all parameters are nil
-	collections, err := collectionDb.GetCollections(nil, nil, nil)
+	collections, err := collectionDb.GetCollections(nil, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Len(t, collections, 1)
 	assert.Equal(t, collection.ID, collections[0].Collection.ID)
@@ -51,19 +52,19 @@ func TestCollectionDb_GetCollections(t *testing.T) {
 	assert.Equal(t, metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 
 	// Test when filtering by ID
-	collections, err = collectionDb.GetCollections(nil, nil, nil)
+	collections, err = collectionDb.GetCollections(nil, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Len(t, collections, 1)
 	assert.Equal(t, collection.ID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = collectionDb.GetCollections(nil, collection.Name, nil)
+	collections, err = collectionDb.GetCollections(nil, collection.Name, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Len(t, collections, 1)
 	assert.Equal(t, collection.ID, collections[0].Collection.ID)
 
 	// Test when filtering by topic
-	collections, err = collectionDb.GetCollections(nil, nil, collection.Topic)
+	collections, err = collectionDb.GetCollections(nil, nil, collection.Topic, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Len(t, collections, 1)
 	assert.Equal(t, collection.ID, collections[0].Collection.ID)

@@ -7,6 +7,8 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/model"
 	"github.com/chroma/chroma-coordinator/internal/types"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // ICoordinator is an interface that defines the methods for interacting with the
@@ -15,24 +17,60 @@ import (
 type ICoordinator interface {
 	common.Component
 	ResetState(ctx context.Context) error
-	CreateCollection(ctx context.Context, collection *model.CreateCollection) (*model.Collection, error)
-	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string) ([]*model.Collection, error)
-	DeleteCollection(ctx context.Context, collectionID types.UniqueID) error
-	UpdateCollection(ctx context.Context, collection *model.UpdateCollection) (*model.Collection, error)
-	CreateSegment(ctx context.Context, segment *model.CreateSegment) error
+	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
+	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, dataName string) ([]*model.Collection, error)
+	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
+	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
+	CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
 	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
 	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
-	UpdateSegment(ctx context.Context, segment *model.UpdateSegment) (*model.Segment, error)
+	UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
+	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error)
+	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
+	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
+	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
 }
 
 func (s *Coordinator) ResetState(ctx context.Context) error {
 	return s.meta.ResetState(ctx)
 }
 
+func (s *Coordinator) CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error) {
+	database, err := s.meta.CreateDatabase(ctx, createDatabase)
+	if err != nil {
+		return nil, err
+	}
+	return database, nil
+}
+
+func (s *Coordinator) GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error) {
+	database, err := s.meta.GetDatabase(ctx, getDatabase)
+	if err != nil {
+		return nil, err
+	}
+	return database, nil
+}
+
+func (s *Coordinator) CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error) {
+	tenant, err := s.meta.CreateTenant(ctx, createTenant)
+	if err != nil {
+		return nil, err
+	}
+	return tenant, nil
+}
+
+func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error) {
+	tenant, err := s.meta.GetTenant(ctx, getTenant)
+	if err != nil {
+		return nil, err
+	}
+	return tenant, nil
+}
+
 func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error) {
 	collectionTopic := s.assignCollection(createCollection.ID)
 	createCollection.Topic = collectionTopic
-
+	log.Info("apis create collection", zap.Any("collection", createCollection))
 	collection, err := s.meta.AddCollection(ctx, createCollection)
 	if err != nil {
 		return nil, err
@@ -40,12 +78,12 @@ func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *mo
 	return collection, nil
 }
 
-func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string) ([]*model.Collection, error) {
-	return s.meta.GetCollections(ctx, collectionID, collectionName, collectionTopic)
+func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, databaseName string) ([]*model.Collection, error) {
+	return s.meta.GetCollections(ctx, collectionID, collectionName, collectionTopic, tenantID, databaseName)
 }
 
-func (s *Coordinator) DeleteCollection(ctx context.Context, collectionID types.UniqueID) error {
-	return s.meta.DeleteCollection(ctx, collectionID)
+func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	return s.meta.DeleteCollection(ctx, deleteCollection)
 }
 
 func (s *Coordinator) UpdateCollection(ctx context.Context, collection *model.UpdateCollection) (*model.Collection, error) {
@@ -77,7 +115,6 @@ func (s *Coordinator) UpdateSegment(ctx context.Context, updateSegment *model.Up
 		return nil, err
 	}
 	return segment, nil
-
 }
 
 func verifyCreateCollection(collection *model.CreateCollection) error {
