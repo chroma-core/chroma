@@ -57,7 +57,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self.set_model(coll.name, coll.metadata)
 
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     @rule(coll=collections)
@@ -151,7 +151,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         # Check that model and API are in sync
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     @rule(
@@ -199,7 +199,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         c = self.api.get_collection(name=coll.name)
 
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     def set_model(
