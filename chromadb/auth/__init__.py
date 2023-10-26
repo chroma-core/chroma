@@ -52,11 +52,21 @@ class UserIdentity(EnforceOverrides, ABC):
     def get_user_tenant(self) -> Optional[str]:
         ...
 
+    @abstractmethod
+    def get_user_attributes(self) -> Optional[Dict[str, Any]]:
+        ...
+
 
 class SimpleUserIdentity(UserIdentity):
-    def __init__(self, user_id: str, tenant: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        user_id: str,
+        tenant: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self._user_id = user_id
         self._tenant = tenant
+        self._attributes = attributes
 
     @override
     def get_user_id(self) -> str:
@@ -65,6 +75,10 @@ class SimpleUserIdentity(UserIdentity):
     @override
     def get_user_tenant(self) -> Optional[str]:
         return self._tenant if self._tenant else DEFAULT_TENANT
+
+    @override
+    def get_user_attributes(self) -> Optional[Dict[str, Any]]:
+        return self._attributes
 
 
 class ClientAuthResponse(EnforceOverrides, ABC):
