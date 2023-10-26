@@ -13,4 +13,7 @@ class ImageLoader(DataLoader[Images]):
             )
 
     def __call__(self, uris: URIs) -> Images:
-        return [np.array(self._PILImage.open(uri)) for uri in uris]
+        return [
+            np.array(self._PILImage.open(uri)) if uri is not None else None
+            for uri in uris
+        ]
