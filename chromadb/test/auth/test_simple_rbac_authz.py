@@ -91,6 +91,13 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         ]
     ):
         actions_list.append("collection:get_collection")
+    if any(
+        action in actions_list
+        for action in [
+            "collection:peek",
+        ]
+    ):
+        actions_list.append("collection:get")
     actions_list.extend(
         [
             "tenant:get_tenant",
@@ -128,7 +135,8 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 @st.composite
 def rbac_config(draw: st.DrawFn) -> Dict[str, Any]:
     user_roles = draw(
-        st.lists(user_role_config().filter(lambda t: t[0]), min_size=1, max_size=10)
+        st.lists(user_role_config().filter(
+            lambda t: t[0]), min_size=1, max_size=10)
     )
     muser_role = draw(st.lists(master_user(), min_size=1, max_size=1))
     users = []
@@ -152,15 +160,19 @@ def rbac_config(draw: st.DrawFn) -> Dict[str, Any]:
 
 @st.composite
 def token_config(draw: st.DrawFn) -> Dict[str, Any]:
-    token_header = draw(st.sampled_from(["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
+    token_header = draw(st.sampled_from(
+        ["AUTHORIZATION", "X_CHROMA_TOKEN", None]))
     server_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthServerProvider"])
+        st.sampled_from(
+            ["token", "chromadb.auth.token.TokenAuthServerProvider"])
     )
     client_provider = draw(
-        st.sampled_from(["token", "chromadb.auth.token.TokenAuthClientProvider"])
+        st.sampled_from(
+            ["token", "chromadb.auth.token.TokenAuthClientProvider"])
     )
     server_authz_provider = draw(
-        st.sampled_from(["chromadb.auth.authz.SimpleRBACAuthorizationProvider"])
+        st.sampled_from(
+            ["chromadb.auth.authz.SimpleRBACAuthorizationProvider"])
     )
     server_credentials_provider = draw(st.sampled_from(["user_token_config"]))
     # _rbac_config = draw(rbac_config())
@@ -273,7 +285,8 @@ def master_api(_settings: Settings) -> Tuple[ServerAPI, AdminAPI]:
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
     token_config["chroma_server_authz_config"] = rbac_config
-    token_config["chroma_server_auth_credentials"] = json.dumps(rbac_config["users"])
+    token_config["chroma_server_auth_credentials"] = json.dumps(
+        rbac_config["users"])
     random_user = random.choice(
         [user for user in authz_config["users"] if user["id"] != "__master__"]
     )
