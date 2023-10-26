@@ -200,8 +200,9 @@ api_executors = {
         api.get_or_create_collection(f"test-get-or-create-{uuid.uuid4()}")
     ),
     "collection:delete_collection": lambda api, mapi, _: (
-        mapi.create_collection(f"test-delete-col-{uuid.uuid4()}"),  # pre-condition
-        api.delete_collection(f"test-delete-col-{uuid.uuid4()}"),
+        # pre-condition
+        mcol := mapi.create_collection(f"test-delete-col-{uuid.uuid4()}"),
+        api.delete_collection(f"{mcol.name}"),
     ),
     "collection:update_collection": lambda api, mapi, _: (
         # pre-condition
