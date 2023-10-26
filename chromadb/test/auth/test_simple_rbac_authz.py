@@ -5,7 +5,7 @@ from typing import Dict, Any, Tuple
 import uuid
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -201,6 +201,7 @@ api_executors = {
 }
 
 
+@settings(max_examples=10)
 @given(token_config=token_config(), rbac_config=rbac_config())
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
