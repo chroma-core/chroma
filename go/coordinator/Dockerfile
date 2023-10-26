@@ -3,7 +3,7 @@ FROM golang:1.20-alpine as build
 RUN apk add --no-cache make git build-base bash
 
 ENV PATH=$PATH:/go/bin
-ADD ./go/coordinator /src/chroma-coordinator
+ADD ./ /src/chroma-coordinator
 
 RUN cd /src/chroma-coordinator \
     && make
