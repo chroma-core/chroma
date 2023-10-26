@@ -108,13 +108,3 @@ class BasicAuthServerProvider(ServerAuthProvider):
         except Exception as e:
             logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
             return SimpleServerAuthenticationResponse(False, None)
-
-    # @override
-    # def get_auth_info_type(self, request: ServerAuthenticationRequest[Any]) \
-    #    -> UserIdentity:
-    #     _auth_header = request.get_auth_info(
-    #         AuthInfoType.HEADER, "Authorization")
-    #     _creds = BasicAuthCredentials.from_header(_auth_header)
-    #     return SimpleUserIdentity(
-    #         _creds.get_credentials()["username"].get_secret_value()
-    #     )

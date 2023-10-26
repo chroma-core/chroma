@@ -23,6 +23,8 @@ from overrides import EnforceOverrides, override
 from pydantic import SecretStr
 
 from chromadb.config import (
+    DEFAULT_DATABASE,
+    DEFAULT_TENANT,
     Component,
     System,
 )
@@ -272,9 +274,6 @@ class ServerAuthCredentialsProvider(Component):
         ...
 
 
-# --- AuthZ ---#
-
-
 class AuthzResourceTypes(str, Enum):
     DB = "db"
     COLLECTION = "collection"
@@ -296,7 +295,6 @@ class AuthzResourceActions(str, Enum):
     DELETE = "delete"
     GET = "get"
     QUERY = "query"
-    PEEK = "peek"
     COUNT = "count"
     UPDATE = "update"
     UPSERT = "upsert"
@@ -306,7 +304,7 @@ class AuthzResourceActions(str, Enum):
 @dataclass
 class AuthzUser:
     id: Optional[str]
-    tenant: Optional[str] = "*"
+    tenant: Optional[str] = DEFAULT_TENANT
     attributes: Optional[Dict[str, Any]] = None
     claims: Optional[Dict[str, Any]] = None
 
@@ -329,7 +327,7 @@ class DynamicAuthzResource:
         attributes: Optional[
             Union[Dict[str, Any], Callable[..., Dict[str, Any]]]
         ] = lambda **kwargs: {},
-        type: Optional[Union[str, Callable[..., str]]] = "default_database",
+        type: Optional[Union[str, Callable[..., str]]] = DEFAULT_DATABASE,
     ) -> None:
         self.id = id
         self.attributes = attributes
@@ -343,27 +341,6 @@ class DynamicAuthzResource:
             if callable(self.attributes)
             else self.attributes,
         )
-
-
-def find_key_with_value_of_type(
-    type: AuthzResourceTypes, **kwargs: Any
-) -> Dict[str, Any]:
-    from chromadb.server.fastapi.types import (
-        CreateCollection,
-        CreateDatabase,
-        CreateTenant,
-    )
-
-    for key, value in kwargs.items():
-        if type == AuthzResourceTypes.DB and isinstance(value, CreateDatabase):
-            return dict(value)
-        elif type == AuthzResourceTypes.COLLECTION and isinstance(
-            value, CreateCollection
-        ):
-            return dict(value)
-        elif type == AuthzResourceTypes.TENANT and isinstance(value, CreateTenant):
-            return dict(value)
-    return {}
 
 
 class AuthzDynamicParams:
@@ -382,13 +359,6 @@ class AuthzDynamicParams:
         return partial(
             lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
         )
-
-    @staticmethod
-    def attr_from_resource_object(
-        type: AuthzResourceTypes, **kwargs: Any
-    ) -> Callable[..., Dict[str, Any]]:
-        obj = find_key_with_value_of_type(type, **kwargs)
-        return partial(lambda **kwargs: obj, **kwargs)
 
 
 @dataclass

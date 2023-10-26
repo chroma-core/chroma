@@ -23,6 +23,7 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
 )
+from chromadb.auth.fastapi_utils import attr_from_resource_object
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 import chromadb.server
 import chromadb.api
@@ -280,9 +281,7 @@ class FastAPI(chromadb.server.Server):
         action=AuthzResourceActions.CREATE_DATABASE,
         resource=DynamicAuthzResource(
             type=AuthzResourceTypes.DB,
-            attributes=AuthzDynamicParams.attr_from_resource_object(
-                type=AuthzResourceTypes.DB
-            ),
+            attributes=attr_from_resource_object(type=AuthzResourceTypes.DB),
         ),
     )
     def create_database(
@@ -444,7 +443,7 @@ class FastAPI(chromadb.server.Server):
     )
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
         return self._api._update(
-            ids=add.ids,  # type: ignore
+            ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
             documents=add.documents,  # type: ignore
@@ -461,7 +460,7 @@ class FastAPI(chromadb.server.Server):
     )
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
         return self._api._upsert(
-            collection_id=_uuid(collection_id),  # type: ignore
+            collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,  # type: ignore
             documents=upsert.documents,  # type: ignore
@@ -470,7 +469,7 @@ class FastAPI(chromadb.server.Server):
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
     @authz_context(
-        action=[AuthzResourceActions.GET, AuthzResourceActions.PEEK],
+        action=AuthzResourceActions.GET,
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, cast
+from typing import Any, Dict, Set, cast
 from overrides import override
 import yaml
 from chromadb.auth import (
@@ -8,7 +8,7 @@ from chromadb.auth import (
     ServerAuthorizationProvider,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
-from chromadb.config import System
+from chromadb.config import DEFAULT_TENANT, System
 
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -64,14 +64,18 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
                 self.require(_cls),
             )
             _config = self._authz_config_provider.get_configuration()
-            self._authz_tuples = []
+            self._authz_tuples_map: Dict[str, Set[Any]] = {}
             for u in _config["users"]:
                 _actions = _config["roles_mapping"][u["role"]]["actions"]
                 for a in _actions:
-                    tenant = u["tenant"] if "tenant" in u else "*"
-                    self._authz_tuples.append((u["id"], tenant, *a.split(":")))
+                    tenant = u["tenant"] if "tenant" in u else DEFAULT_TENANT
+                    if u["id"] not in self._authz_tuples_map.keys():
+                        self._authz_tuples_map[u["id"]] = set()
+                    self._authz_tuples_map[u["id"]].add(
+                        (u["id"], tenant, *a.split(":"))
+                    )
             logger.debug(
-                f"Loaded {len(self._authz_tuples)} permissions for "
+                f"Loaded {len(self._authz_tuples_map)} permissions for "
                 f"({len(_config['users'])}) users"
             )
         logger.info(
@@ -92,7 +96,10 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         )
 
         policy_decision = False
-        if _authz_tuple in self._authz_tuples:
+        if (
+            context.user.id in self._authz_tuples_map.keys()
+            and _authz_tuple in self._authz_tuples_map[context.user.id]
+        ):
             policy_decision = True
         logger.debug(
             f"Authorization decision: Access "

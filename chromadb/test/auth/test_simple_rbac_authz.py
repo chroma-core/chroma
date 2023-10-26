@@ -6,10 +6,11 @@ import uuid
 import hypothesis.strategies as st
 import pytest
 from hypothesis import given, settings
+from chromadb import AdminClient
 
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
-from chromadb.config import System
+from chromadb.config import DEFAULT_TENANT, Settings, System
 from chromadb.test.conftest import _fastapi_fixture
 
 
@@ -42,6 +43,33 @@ user_name = st.text(alphabet=string.ascii_letters, min_size=1, max_size=20)
 actions = st.lists(
     st.sampled_from(valid_action_space), min_size=1, max_size=len(valid_action_space)
 )
+
+
+@st.composite
+def master_user(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    return {
+        "role": "__master_role__",
+        "id": "__master__",
+        "tenant": DEFAULT_TENANT,
+        "tokens": [
+            {
+                "token": f"{random.randint(1,1000000)}_"
+                + draw(
+                    st.text(
+                        alphabet=string.ascii_letters + string.digits,
+                        min_size=1,
+                        max_size=25,
+                    )
+                )
+            }
+            for _ in range(2)
+        ],
+    }, {
+        "__master_role__": {
+            "actions": valid_action_space,
+            "unauthorized_actions": [],
+        }
+    }
 
 
 @st.composite
@@ -80,6 +108,7 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     return {
         "role": role,
         "id": user,
+        "tenant": DEFAULT_TENANT,
         "tokens": [
             {
                 "token": f"{random.randint(1,1000000)}_"
@@ -101,11 +130,16 @@ def rbac_config(draw: st.DrawFn) -> Dict[str, Any]:
     user_roles = draw(
         st.lists(user_role_config().filter(lambda t: t[0]), min_size=1, max_size=10)
     )
+    muser_role = draw(st.lists(master_user(), min_size=1, max_size=1))
     users = []
     roles = []
     for user, role in user_roles:
         users.append(user)
         roles.append(role)
+
+    for muser, mrole in muser_role:
+        users.append(muser)
+        roles.append(mrole)
     roles_mapping = {}
     for role in roles:
         roles_mapping.update(role)
@@ -144,70 +178,112 @@ def token_config(draw: st.DrawFn) -> Dict[str, Any]:
 
 
 api_executors = {
-    "db:create_database": lambda api: api.create_database(f"test-{uuid.uuid4()}"),
-    "db:get_database": lambda api: api.get_database("default_database"),
-    "tenant:create_tenant": lambda api: api.create_tenant(f"test-{uuid.uuid4()}"),
-    "tenant:get_tenant": lambda api: api.get_tenant("default_tenant"),
-    "db:reset": lambda api: api.reset(),
-    "db:list_collections": lambda api: api.list_collections(),
-    "collection:get_collection": lambda api: (
-        api.get_collection(f"test-get-{uuid.uuid4()}")
+    "db:create_database": lambda api, mapi, aapi: (
+        aapi.create_database(f"test-{uuid.uuid4()}")
     ),
-    "db:create_collection": lambda api: (
-        api.create_collection(f"test-create-{uuid.uuid4()}")
+    "db:get_database": lambda api, mapi, aapi: (
+        aapi.create_database(f"test-db-{uuid.uuid4()}"),  # pre-condition
+        api.get_database(f"test-db-{uuid.uuid4()}"),
     ),
-    "db:get_or_create_collection": lambda api: (
+    "tenant:create_tenant": lambda api, mapi, aapi: aapi.create_tenant(
+        f"test-{uuid.uuid4()}"
+    ),
+    "tenant:get_tenant": lambda api, mapi, aapi: (
+        aapi.create_tenant(f"test_tenant_{uuid.uuid4()}"),  # pre-condition
+        api.get_tenant(f"test_tenant_{uuid.uuid4()}"),
+    ),
+    "db:reset": lambda api, mapi, _: api.reset(),
+    "db:list_collections": lambda api, mapi: api.list_collections(),
+    "collection:get_collection": lambda api, mapi, _: (
+        mapi.create_collection(f"test-get-{uuid.uuid4()}"),  # pre-condition
+        api.get_collection(f"test-get-{uuid.uuid4()}"),
+    ),
+    "db:create_collection": lambda api, mapi, _: (
+        api.create_collection(f"test-create-{uuid.uuid4()}"),
+    ),
+    "db:get_or_create_collection": lambda api, mapi, _: (
         api.get_or_create_collection(f"test-get-or-create-{uuid.uuid4()}")
     ),
-    "collection:delete_collection": lambda api: (
-        api.delete_collection(f"test-delete-col-{uuid.uuid4()}")
+    "collection:delete_collection": lambda api, mapi, _: (
+        mapi.create_collection(f"test-delete-col-{uuid.uuid4()}"),  # pre-condition
+        api.delete_collection(f"test-delete-col-{uuid.uuid4()}"),
     ),
-    "collection:update_collection": lambda api: (
-        col := Collection(api, f"test-update-{uuid.uuid4()}", uuid.uuid4()),
-        col.modify(metadata={"test": "test"}),  # type: ignore
+    "collection:update_collection": lambda api, mapi, _: (
+        # pre-condition
+        mcol := mapi.create_collection(f"test-modify-col-{uuid.uuid4()}"),
+        col := Collection(api, f"test-modify-col-{uuid.uuid4()}", mcol.id),
+        col.modify(metadata={"test": "test"}),
     ),
-    "collection:add": lambda api: (
-        col := Collection(api, f"test-add-doc-{uuid.uuid4()}", uuid.uuid4()),
-        col.add(documents=["test"], ids=["1"]),  # type: ignore
+    "collection:add": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-add-doc-{uuid.uuid4()}"),
+        col := Collection(api, f"test-add-doc-{uuid.uuid4()}", mcol.id),
+        col.add(documents=["test"], ids=["1"]),
     ),
-    "collection:delete": lambda api: (
-        col := Collection(api, f"test-delete-doc-{uuid.uuid4()}", uuid.uuid4()),
-        col.delete(ids=["1"]),  # type: ignore
+    "collection:delete": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-delete-doc-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-delete-doc-{uuid.uuid4()}", mcol.id),
+        col.delete(ids=["1"]),
     ),
-    "collection:get": lambda api: (
-        col := Collection(api, f"test-get-docs-{uuid.uuid4()}", uuid.uuid4()),
+    "collection:get": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-get-doc-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-get-doc-{uuid.uuid4()}", mcol.id),
         col.get(ids=["1"]),
     ),
-    "collection:query": lambda api: (
-        col := Collection(api, f"test-query-{uuid.uuid4()}", uuid.uuid4()),
+    "collection:query": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-query-doc-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-query-doc-{uuid.uuid4()}", mcol.id),
         col.query(query_texts=["test"]),
     ),
-    "collection:peek": lambda api: (
-        col := Collection(api, f"test-peek-{uuid.uuid4()}", uuid.uuid4()),
+    "collection:peek": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-peek-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-peek-{uuid.uuid4()}", mcol.id),
         col.peek(),
     ),
-    "collection:update": lambda api: (
-        col := Collection(api, f"test-update-docs-{uuid.uuid4()}", uuid.uuid4()),
-        col.update(ids=["1"], documents=["test1"]),  # type: ignore
+    "collection:update": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-update-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-update-{uuid.uuid4()}", mcol.id),
+        col.update(ids=["1"], documents=["test1"]),
     ),
-    "collection:upsert": lambda api: (
-        col := Collection(api, f"test-upsert-{uuid.uuid4()}", uuid.uuid4()),
-        col.upsert(ids=["1"], documents=["test1"]),  # type: ignore
+    "collection:upsert": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-upsert-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-upsert-{uuid.uuid4()}", mcol.id),
+        col.upsert(ids=["1"], documents=["test1"]),
     ),
-    "collection:count": lambda api: (
-        col := Collection(api, f"test-count-{uuid.uuid4()}", uuid.uuid4()),
+    "collection:count": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-count-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"test-count-{uuid.uuid4()}", mcol.id),
         col.count(),
     ),
 }
 
 
-@settings(max_examples=10)
+def master_api(settings):
+    system = System(settings)
+    api = system.instance(ServerAPI)
+    admin_api = AdminClient(api.get_settings())
+    system.start()
+    return api, admin_api
+
+
+@settings(max_examples=1)
 @given(token_config=token_config(), rbac_config=rbac_config())
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
     token_config["chroma_server_authz_config"] = rbac_config
     token_config["chroma_server_auth_credentials"] = json.dumps(rbac_config["users"])
-    random_user = random.choice(authz_config["users"])
+    random_user = random.choice(
+        [user for user in authz_config["users"] if user["id"] != "__master__"]
+    )
+    _master_user = [
+        user for user in authz_config["users"] if user["id"] == "__master__"
+    ][0]
     random_token = random.choice(random_user["tokens"])["token"]
     api = _fastapi_fixture(
         is_persistent=token_config["is_persistent"],
@@ -229,28 +305,17 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
     )
     _sys: System = next(api)
     _sys.reset_state()
+    _master_settings = Settings(**dict(_sys.settings))
+    _master_settings.chroma_client_auth_credentials = _master_user["tokens"][0]["token"]
+    _master_api, admin_api = master_api(_master_settings)
     _api = _sys.instance(ServerAPI)
     _api.heartbeat()
-    for actions in authz_config["roles_mapping"][random_user["role"]]["actions"]:
-        try:
-            print(actions)
-            api_executors[actions](_api)  # type: ignore
-        except Exception as e:
-            # we want to ignore errors such as collection not found or 400 client error
-            # cause by the lack of data on the server side. The reason is that Authz
-            # makes sense in client/server mode but we don't yet have means to provision
-            # the server as part of the tests.
-            assert (
-                "not exist" in str(e)
-                or (
-                    "400 Client Error" in str(e)
-                    and actions in ["collection:upsert", "collection:update"]
-                )
-                or "StopIteration" in str(e)
-            )
+    for action in authz_config["roles_mapping"][random_user["role"]]["actions"]:
+        print(action)
+        api_executors[action](_api, _master_api, admin_api)  # type: ignore
     for unauthorized_action in authz_config["roles_mapping"][random_user["role"]][
         "unauthorized_actions"
     ]:
         with pytest.raises(Exception) as ex:
-            api_executors[unauthorized_action](_api)  # type: ignore
+            api_executors[unauthorized_action](_api, _master_api)  # type: ignore
             assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
