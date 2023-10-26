@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"gorm.io/gorm"
 )
