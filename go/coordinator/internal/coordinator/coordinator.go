@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"gorm.io/gorm"
 )
@@ -28,7 +26,7 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 	}
 
 	// catalog := coordinator.NewMemoryCatalog()
-	catalog := coordinator.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
+	catalog := coordinator.NewMemoryCatalog()
 	meta, err := NewMetaTable(s.ctx, catalog)
 	if err != nil {
 		return nil, err
