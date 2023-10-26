@@ -8,9 +8,9 @@ import pytest
 from hypothesis import given, settings
 from chromadb import AdminClient
 
-from chromadb.api import ServerAPI
+from chromadb.api import AdminAPI, ServerAPI
 from chromadb.api.models.Collection import Collection
-from chromadb.config import DEFAULT_TENANT, Settings, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.test.conftest import _fastapi_fixture
 
 
@@ -181,22 +181,17 @@ api_executors = {
     "db:create_database": lambda api, mapi, aapi: (
         aapi.create_database(f"test-{uuid.uuid4()}")
     ),
-    "db:get_database": lambda api, mapi, aapi: (
-        aapi.create_database(f"test-db-{uuid.uuid4()}"),  # pre-condition
-        api.get_database(f"test-db-{uuid.uuid4()}"),
+    "db:get_database": lambda api, mapi, aapi: (aapi.get_database(DEFAULT_DATABASE),),
+    "tenant:create_tenant": lambda api, mapi, aapi: (
+        aapi.create_tenant(f"test-{uuid.uuid4()}")
     ),
-    "tenant:create_tenant": lambda api, mapi, aapi: aapi.create_tenant(
-        f"test-{uuid.uuid4()}"
-    ),
-    "tenant:get_tenant": lambda api, mapi, aapi: (
-        aapi.create_tenant(f"test_tenant_{uuid.uuid4()}"),  # pre-condition
-        api.get_tenant(f"test_tenant_{uuid.uuid4()}"),
-    ),
+    "tenant:get_tenant": lambda api, mapi, aapi: (aapi.get_tenant(DEFAULT_TENANT),),
     "db:reset": lambda api, mapi, _: api.reset(),
-    "db:list_collections": lambda api, mapi: api.list_collections(),
+    "db:list_collections": lambda api, mapi, _: api.list_collections(),
     "collection:get_collection": lambda api, mapi, _: (
-        mapi.create_collection(f"test-get-{uuid.uuid4()}"),  # pre-condition
-        api.get_collection(f"test-get-{uuid.uuid4()}"),
+        # pre-condition
+        mcol := mapi.create_collection(f"test-get-{uuid.uuid4()}"),
+        api.get_collection(f"{mcol.name}"),
     ),
     "db:create_collection": lambda api, mapi, _: (
         api.create_collection(f"test-create-{uuid.uuid4()}"),
@@ -211,68 +206,68 @@ api_executors = {
     "collection:update_collection": lambda api, mapi, _: (
         # pre-condition
         mcol := mapi.create_collection(f"test-modify-col-{uuid.uuid4()}"),
-        col := Collection(api, f"test-modify-col-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.modify(metadata={"test": "test"}),
     ),
     "collection:add": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-add-doc-{uuid.uuid4()}"),
-        col := Collection(api, f"test-add-doc-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.add(documents=["test"], ids=["1"]),
     ),
     "collection:delete": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-delete-doc-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-delete-doc-{uuid.uuid4()}", mcol.id),
+        col := Collection(client=api, name=f"{mcol.name}", id=mcol.id),
         col.delete(ids=["1"]),
     ),
     "collection:get": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-get-doc-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-get-doc-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.get(ids=["1"]),
     ),
     "collection:query": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-query-doc-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-query-doc-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.query(query_texts=["test"]),
     ),
     "collection:peek": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-peek-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-peek-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.peek(),
     ),
     "collection:update": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-update-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-update-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.update(ids=["1"], documents=["test1"]),
     ),
     "collection:upsert": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-upsert-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-upsert-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.upsert(ids=["1"], documents=["test1"]),
     ),
     "collection:count": lambda api, mapi, _: (
         mcol := mapi.create_collection(f"test-count-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
-        col := Collection(api, f"test-count-{uuid.uuid4()}", mcol.id),
+        col := Collection(api, f"{mcol.name}", mcol.id),
         col.count(),
     ),
 }
 
 
-def master_api(settings):
-    system = System(settings)
+def master_api(_settings: Settings) -> Tuple[ServerAPI, AdminAPI]:
+    system = System(_settings)
     api = system.instance(ServerAPI)
     admin_api = AdminClient(api.get_settings())
     system.start()
     return api, admin_api
 
 
-@settings(max_examples=1)
+@settings(max_examples=10)
 @given(token_config=token_config(), rbac_config=rbac_config())
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
@@ -317,5 +312,7 @@ def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> Non
         "unauthorized_actions"
     ]:
         with pytest.raises(Exception) as ex:
-            api_executors[unauthorized_action](_api, _master_api)  # type: ignore
+            api_executors[unauthorized_action](
+                _api, _master_api, admin_api
+            )  # type: ignore
             assert "Unauthorized" in str(ex) or "Forbidden" in str(ex)
