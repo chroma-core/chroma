@@ -64,7 +64,7 @@ class SimpleUserIdentity(UserIdentity):
 
     @override
     def get_user_tenant(self) -> Optional[str]:
-        return self._tenant if self._tenant else "*"
+        return self._tenant if self._tenant else DEFAULT_TENANT
 
 
 class ClientAuthResponse(EnforceOverrides, ABC):
