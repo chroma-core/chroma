@@ -111,11 +111,17 @@ class Collection(BaseModel):
             ids, embeddings, metadatas, documents, images
         )
 
+        # We need to compute the embeddings if they're not provided
         if embeddings is None:
+            # At this point, we know that one of documents or images are provided from the validation above
             if documents is not None:
                 embeddings = self._embed(input=documents)
-            else:
+            elif images is not None:
                 embeddings = self._embed(input=images)
+            else:
+                raise ValueError(
+                    "You must provide embeddings, documents, or images, or an embedding function."
+                )
 
         self._client._add(ids, self.id, embeddings, metadatas, documents)
 
@@ -239,11 +245,15 @@ class Collection(BaseModel):
 
         # If query_embeddings are not provided, we need to compute them from the inputs
         if query_embeddings is None:
-            query_embeddings = (
-                self._embed(input=query_texts)
-                if query_texts
-                else self._embed(input=query_images)
-            )
+            # At this point, we know that one of query_texts or query_images are provided from the validation above
+            if query_texts is not None:
+                query_embeddings = self._embed(input=query_texts)
+            elif query_images is not None:
+                query_embeddings = self._embed(input=query_images)
+            else:
+                raise ValueError(
+                    "You must provide either query embeddings, or else one of query texts or query images."
+                )
 
         if where is None:
             where = {}
@@ -301,6 +311,9 @@ class Collection(BaseModel):
             None
         """
 
+        if documents is not None and images is not None:
+            raise ValueError("You can only provide documents or images, not both.")
+
         ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
             ids,
             embeddings,
@@ -324,6 +337,7 @@ class Collection(BaseModel):
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -337,8 +351,11 @@ class Collection(BaseModel):
             None
         """
 
+        if documents is not None and images is not None:
+            raise ValueError("You can only provide documents or images, not both.")
+
         ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents
+            ids, embeddings, metadatas, documents, images
         )
 
         if embeddings is None:
