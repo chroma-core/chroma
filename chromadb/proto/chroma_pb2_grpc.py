@@ -19,13 +19,13 @@ class SegmentServerStub(object):
         """
         self.LoadSegment = channel.unary_unary(
             "/chroma.SegmentServer/LoadSegment",
-            request_serializer=chromadb_dot_proto_dot_chroma__pb2.Segment.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.FromString,
+            request_serializer=chromadb_dot_proto_dot_chroma__pb2.LoadSegmentRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.LoadSegmentResponse.FromString,
         )
         self.ReleaseSegment = channel.unary_unary(
             "/chroma.SegmentServer/ReleaseSegment",
-            request_serializer=chromadb_dot_proto_dot_chroma__pb2.Segment.SerializeToString,
-            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.FromString,
+            request_serializer=chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentResponse.FromString,
         )
 
 
@@ -52,13 +52,13 @@ def add_SegmentServerServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "LoadSegment": grpc.unary_unary_rpc_method_handler(
             servicer.LoadSegment,
-            request_deserializer=chromadb_dot_proto_dot_chroma__pb2.Segment.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.SerializeToString,
+            request_deserializer=chromadb_dot_proto_dot_chroma__pb2.LoadSegmentRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.LoadSegmentResponse.SerializeToString,
         ),
         "ReleaseSegment": grpc.unary_unary_rpc_method_handler(
             servicer.ReleaseSegment,
-            request_deserializer=chromadb_dot_proto_dot_chroma__pb2.Segment.FromString,
-            response_serializer=chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.SerializeToString,
+            request_deserializer=chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -91,8 +91,8 @@ class SegmentServer(object):
             request,
             target,
             "/chroma.SegmentServer/LoadSegment",
-            chromadb_dot_proto_dot_chroma__pb2.Segment.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.FromString,
+            chromadb_dot_proto_dot_chroma__pb2.LoadSegmentRequest.SerializeToString,
+            chromadb_dot_proto_dot_chroma__pb2.LoadSegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -120,8 +120,8 @@ class SegmentServer(object):
             request,
             target,
             "/chroma.SegmentServer/ReleaseSegment",
-            chromadb_dot_proto_dot_chroma__pb2.Segment.SerializeToString,
-            chromadb_dot_proto_dot_chroma__pb2.SegmentServerResponse.FromString,
+            chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentRequest.SerializeToString,
+            chromadb_dot_proto_dot_chroma__pb2.ReleaseSegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,

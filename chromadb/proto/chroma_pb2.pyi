@@ -39,12 +39,6 @@ class Status(_message.Message):
     code: int
     def __init__(self, reason: _Optional[str] = ..., code: _Optional[int] = ...) -> None: ...
 
-class ChromaResponse(_message.Message):
-    __slots__ = ["status"]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: Status
-    def __init__(self, status: _Optional[_Union[Status, _Mapping]] = ...) -> None: ...
-
 class Vector(_message.Message):
     __slots__ = ["dimension", "vector", "encoding"]
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
@@ -164,7 +158,25 @@ class VectorQueryResults(_message.Message):
     results: _containers.RepeatedCompositeFieldContainer[VectorQueryResult]
     def __init__(self, results: _Optional[_Iterable[_Union[VectorQueryResult, _Mapping]]] = ...) -> None: ...
 
-class SegmentServerResponse(_message.Message):
+class LoadSegmentRequest(_message.Message):
+    __slots__ = ["segment"]
+    SEGMENT_FIELD_NUMBER: _ClassVar[int]
+    segment: Segment
+    def __init__(self, segment: _Optional[_Union[Segment, _Mapping]] = ...) -> None: ...
+
+class LoadSegmentResponse(_message.Message):
+    __slots__ = ["success"]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    def __init__(self, success: bool = ...) -> None: ...
+
+class ReleaseSegmentRequest(_message.Message):
+    __slots__ = ["segment"]
+    SEGMENT_FIELD_NUMBER: _ClassVar[int]
+    segment: Segment
+    def __init__(self, segment: _Optional[_Union[Segment, _Mapping]] = ...) -> None: ...
+
+class ReleaseSegmentResponse(_message.Message):
     __slots__ = ["success"]
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     success: bool

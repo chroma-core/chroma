@@ -9,10 +9,6 @@ message Status {
   int32 code = 2; // TODO: What is the enum of this code?
 }
 
-message ChromaResponse {
-  Status status = 1;
-}
-
 // Types here should mirror chromadb/types.py
 
 enum Operation {
@@ -107,12 +103,23 @@ message VectorQueryResults {
 
 // TODO: figure out subpackaging, ideally this file is colocated with the segment server implementation
 service SegmentServer {
-    rpc LoadSegment (Segment) returns (SegmentServerResponse) {}
-    rpc ReleaseSegment (Segment) returns (SegmentServerResponse) {} // TODO: this maybe should only take id/type/scope
+    rpc LoadSegment (LoadSegmentRequest) returns (LoadSegmentResponse) {}
+    rpc ReleaseSegment (ReleaseSegmentRequest) returns (ReleaseSegmentResponse) {} // TODO: this maybe should only take id/type/scope
 }
 
-// TODO: enum of succcess/failure/or already loaded
-message SegmentServerResponse {
+message LoadSegmentRequest {
+    Segment segment = 1;
+}
+
+message LoadSegmentResponse {
+    bool success = 1;
+}
+
+message ReleaseSegmentRequest {
+    Segment segment = 1;
+}
+
+message ReleaseSegmentResponse {
     bool success = 1;
 }
 
