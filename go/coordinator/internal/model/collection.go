@@ -27,15 +27,6 @@ type CreateCollection struct {
 	Ts           types.Timestamp
 }
 
-type GetCollection struct {
-	ID           types.UniqueID
-	Name         string
-	Topic        string
-	TenantID     string
-	DatabaseName string
-	Ts           types.Timestamp
-}
-
 type DeleteCollection struct {
 	ID           types.UniqueID
 	TenantID     string

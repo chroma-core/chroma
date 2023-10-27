@@ -38,28 +38,11 @@ func testMeta(t *rapid.T) {
 			if err := mt.reload(); err != nil {
 				t.Fatalf("error reloading meta table: %v", err)
 			}
-			// if len(mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase]) != len(catalog.Collections) {
-			// 	t.Fatalf("error reloading meta table: %v", err)
-			// }
-			// for _, collection := range catalog.Collections {
-			// 	if _, ok := mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase][collection.ID]; !ok {
-			// 		t.Fatalf("error reloading meta table: %v", err)
-			// 	}
-			// }
 		},
 		"add_collection": func(t *rapid.T) {
 			if err := mt.reload(); err != nil {
 				t.Fatalf("error reloading meta table: %v", err)
 			}
-			// if len(mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase]) != len(catalog.Collections) {
-			// 	t.Fatalf("error reloading meta table: %v", err)
-			// }
-			// for _, collection := range catalog.Collections {
-			// 	if _, ok := mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase][collection.ID]; !ok {
-			// 		t.Fatalf("error reloading meta table: %v", err)
-			// 	}
-			// }
-
 			collection := rapid.Custom[*model.CreateCollection](func(t *rapid.T) *model.CreateCollection {
 				return &model.CreateCollection{
 					ID:   genCollectinID(t),
@@ -76,16 +59,6 @@ func testMeta(t *rapid.T) {
 			if _, err := mt.AddCollection(context.Background(), collection); err != nil {
 				t.Fatalf("error adding collection: %v", err)
 			}
-			// if len(mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase]) != len(catalog.Collections) {
-			// 	t.Logf("len(mt.collectionCache): %v", len(mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase]))
-			// 	t.Logf("len(catalog.Collections): %v", len(catalog.Collections))
-			// 	t.Fatalf("error adding collection: %v", err)
-			// }
-			// for _, collection := range catalog.Collections {
-			// 	if _, ok := mt.tenantDatabaseCollectionCache[defaultTenant][defaultDatabase][collection.ID]; !ok {
-			// 		t.Fatalf("error adding collection: %v", err)
-			// 	}
-			// }
 		},
 	})
 }

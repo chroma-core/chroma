@@ -32,14 +32,6 @@ func TestMemoryCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating collection: %v", err)
 	}
-	// if len(mc.Collections) != 1 {
-	// 	t.Fatalf("expected 1 collection, got %d", len(mc.Collections))
-	// }
-
-	// if mc.Collections[coll.ID] != collection {
-	// 	t.Fatalf("expected collection with ID %q, got %+v", coll.ID, mc.Collections[coll.ID])
-	// }
-
 	// Test GetCollections
 	collections, err := mc.GetCollections(ctx, coll.ID, &coll.Name, nil, defaultTenant, defaultDatabase)
 	if err != nil {
@@ -115,12 +107,6 @@ func TestMemoryCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating collection: %v", err)
 	}
-	// if len(mc.Collections) != 1 {
-	// 	t.Fatalf("expected 1 collection, got %d", len(mc.Collections))
-	// }
-	// if mc.Collections[coll.ID] != collection {
-	// 	t.Fatalf("expected collection with ID %q, got %+v", coll.ID, mc.Collections[coll.ID])
-	// }
 
 	// Test GetCollections
 	collections, err = mc.GetCollections(ctx, coll.ID, &coll.Name, nil, defaultTenant, defaultDatabase)

@@ -734,7 +734,7 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
-	// c.ResetState(ctx)
+	c.ResetState(ctx)
 
 	for _, collection := range sampleCollections {
 		c.CreateCollection(ctx, &model.CreateCollection{
@@ -837,7 +837,7 @@ func TestUpdateSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
-	// c.ResetState(ctx)
+	c.ResetState(ctx)
 
 	testTopic := "test_topic_a"
 

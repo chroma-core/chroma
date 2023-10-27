@@ -137,19 +137,7 @@ func (s *collectionDb) DeleteCollectionByID(collectionID string) error {
 }
 
 func (s *collectionDb) Insert(in *dbmodel.Collection) error {
-	err := s.db.Create(&in).Error
-
-	if err != nil {
-		// // TODO: This only works for MySQL, figure out a way for Postgres.
-		// log.Error("insert collection failed", zap.String("collectionID", in.ID), zap.Int64("ts", in.Ts), zap.Error(err))
-		// mysqlErr := err.(*mysql.MySQLError)
-		// switch mysqlErr.Number {
-		// case 1062:
-		// 	return common.ErrCollectionUniqueConstraintViolation
-		// }
-		return err
-	}
-	return nil
+	return s.db.Create(&in).Error
 }
 
 func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {
