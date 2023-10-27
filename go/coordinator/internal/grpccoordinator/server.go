@@ -5,7 +5,6 @@ import (
 
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
-	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -40,19 +39,19 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
-	dBConfig := dbcore.DBConfig{
-		Username:     config.Username,
-		Password:     config.Password,
-		Address:      config.Address,
-		DBName:       config.DBName,
-		MaxIdleConns: config.MaxIdleConns,
-		MaxOpenConns: config.MaxOpenConns,
-	}
-	db, err := dbcore.Connect(dBConfig)
-	if err != nil {
-		return nil, err
-	}
-	return NewWithGrpcProvider(config, grpcutils.Default, db)
+	// dBConfig := dbcore.DBConfig{
+	// 	Username:     config.Username,
+	// 	Password:     config.Password,
+	// 	Address:      config.Address,
+	// 	DBName:       config.DBName,
+	// 	MaxIdleConns: config.MaxIdleConns,
+	// 	MaxOpenConns: config.MaxOpenConns,
+	// }
+	// db, err := dbcore.Connect(dBConfig)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	return NewWithGrpcProvider(config, grpcutils.Default, nil)
 }
 
 func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gorm.DB) (*Server, error) {
