@@ -16,13 +16,23 @@
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.1",
     "tsd": "^0.28.1",
+    "tsup": "^7.2.0",
     "typescript": "^5.0.4"
   },
-  "main": "dist/main/index.js",
-  "module": "dist/module/index.js",
+  "type": "module",
+  "main": "dist/cjs/chromadb.cjs",
+  "module": "dist/chromadb.legacy-esm.js",
   "exports": {
-    "require": "./dist/main/index.js",
-    "import": "./dist/module/index.js"
+    ".": {
+      "import": {
+        "types": "./dist/chromadb.d.ts",
+        "default": "./dist/chromadb.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/chromadb.d.cts",
+        "default": "./dist/cjs/chromadb.cjs"
+      }
+    }
   },
   "files": [
     "src",
@@ -49,10 +59,8 @@
     "db:run-auth-basic": "cd ../.. && docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd && echo \"CHROMA_SERVER_AUTH_CREDENTIALS_FILE=/chroma/server.htpasswd\\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider\\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.basic.BasicAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
     "db:run-auth-token": "cd ../.. && echo \"CHROMA_SERVER_AUTH_CREDENTIALS=test-token\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
     "db:run-auth-xtoken": "cd ../.. && echo \"CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=X_CHROMA_TOKEN\nCHROMA_SERVER_AUTH_CREDENTIALS=test-token\nCHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider\nCHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider\\nCHROMA_PORT=8001\" > .chroma_env && docker-compose -f docker-compose.test-auth.yml --env-file ./.chroma_env up --detach && sleep 5",
-    "clean": "rimraf dist",
-    "build": "run-s clean build:*",
-    "build:main": "tsc -p tsconfig.json",
-    "build:module": "tsc -p tsconfig.module.json",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
     "genapi": "./genapi.sh",
     "prettier": "prettier --write .",
     "release": "run-s build test:run && npm publish",
