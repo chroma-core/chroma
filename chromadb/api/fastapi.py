@@ -13,6 +13,7 @@ from chromadb.api import API
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
+    Embeddable,
     Embeddings,
     EmbeddingFunction,
     IDs,
@@ -151,7 +152,9 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         get_or_create: bool = False,
     ) -> Collection:
         """Creates a collection"""
@@ -175,7 +178,7 @@ class FastAPI(API):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
     ) -> Collection:
         """Returns a collection"""
         resp = self._session.get(self._api_url + "/collections/" + name)
@@ -194,7 +197,7 @@ class FastAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
     ) -> Collection:
         return self.create_collection(
             name, metadata, embedding_function, get_or_create=True
