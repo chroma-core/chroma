@@ -189,6 +189,7 @@ spec:
     metadata:
       labels:
         app: segment-server
+        member-type: worker
     spec:
       containers:
         - name: segment-server
@@ -231,7 +232,7 @@ spec:
         - name: chroma
           emptyDir: {}
 
-# ---
+---
 
 # apiVersion: v1
 # kind: PersistentVolumeClaim

@@ -1,11 +1,9 @@
 package grpccoordinator
 
 import (
-	"io"
-
 	"github.com/chroma/chroma-coordinator/cmd/flag"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
-	"github.com/chroma/chroma-coordinator/internal/utils"
+	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
 
 	"github.com/spf13/cobra"
 )
@@ -33,7 +31,11 @@ func init() {
 }
 
 func exec(*cobra.Command, []string) {
-	utils.RunProcess(func() (io.Closer, error) {
-		return grpccoordinator.New(conf)
-	})
+	// utils.RunProcess(func() (io.Closer, error) {
+	// 	return grpccoordinator.New(conf)
+	// })
+	// Create a memberlist manager
+	memberlist_manager := memberlist_manager.NewMemberlistManager("member-type=worker", "chroma", "worker-memberlist")
+	// Run the memberlist manager
+	memberlist_manager.Start()
 }
