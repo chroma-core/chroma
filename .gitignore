@@ -17,6 +17,8 @@ chroma/
 chroma_test_data/
 server.htpasswd
 
+go/coordinator/bin
+
 .venv
 venv
 .env
