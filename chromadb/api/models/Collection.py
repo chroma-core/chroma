@@ -8,6 +8,7 @@ from chromadb.api.types import (
     CollectionMetadata,
     Embedding,
     Embeddings,
+    Embeddable,
     Include,
     Metadata,
     Metadatas,
@@ -50,7 +51,7 @@ class Collection(BaseModel):
     id: UUID
     metadata: Optional[CollectionMetadata] = None
     _client: "API" = PrivateAttr()
-    _embedding_function: Optional[EmbeddingFunction[Any]] = PrivateAttr()
+    _embedding_function: Optional[EmbeddingFunction[Embeddable]] = PrivateAttr()
 
     def __init__(
         self,
@@ -58,8 +59,8 @@ class Collection(BaseModel):
         name: str,
         id: UUID,
         embedding_function: Optional[
-            EmbeddingFunction[Any]
-        ] = ef.DefaultEmbeddingFunction(),
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         metadata: Optional[CollectionMetadata] = None,
     ):
         super().__init__(name=name, metadata=metadata, id=id)

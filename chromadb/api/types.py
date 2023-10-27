@@ -22,6 +22,7 @@ __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
 
+# IDs
 ID = str
 IDs = List[ID]
 
@@ -69,18 +70,18 @@ Document = str
 Documents = List[Document]
 
 
+def is_document(target: Any) -> bool:
+    if not isinstance(target, str):
+        return False
+    return True
+
+
 def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
     # One Document
-    if isinstance(target, str):
+    if is_document(target):
         return cast(Documents, [target])
     # Already a sequence
     return cast(Documents, target)
-
-
-def is_document(object: Any) -> bool:
-    if not isinstance(object, str):
-        return False
-    return True
 
 
 # Images
@@ -89,10 +90,10 @@ Image = NDArray[ImageDType]
 Images = List[Image]
 
 
-def is_image(object: Any) -> bool:
-    if not isinstance(object, np.ndarray):
+def is_image(target: Any) -> bool:
+    if not isinstance(target, np.ndarray):
         return False
-    if len(object.shape) != 3:
+    if len(target.shape) < 2:
         return False
     return True
 
@@ -152,7 +153,8 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-D = TypeVar("D", contravariant=True)
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
 class EmbeddingFunction(Protocol[D]):
