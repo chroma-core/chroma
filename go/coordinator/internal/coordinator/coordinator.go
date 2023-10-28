@@ -25,7 +25,6 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 		collectionAssignmentPolicy: assignmentPolicy,
 	}
 
-	// catalog := coordinator.NewMemoryCatalog()
 	catalog := coordinator.NewMemoryCatalog()
 	meta, err := NewMetaTable(s.ctx, catalog)
 	if err != nil {

@@ -100,11 +100,12 @@ func convertToCreateCollectionModel(req *coordinatorpb.CreateCollectionRequest) 
 	}
 
 	return &model.CreateCollection{
-		ID:        collectionID,
-		Name:      req.Name,
-		Topic:     "dummy_topic",
-		Dimension: req.Dimension,
-		Metadata:  metadata,
+		ID:           collectionID,
+		Name:         req.Name,
+		Dimension:    req.Dimension,
+		Metadata:     metadata,
+		TenantID:     req.GetTenant(),
+		DatabaseName: req.GetDatabase(),
 	}, nil
 }
 

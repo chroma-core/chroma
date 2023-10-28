@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
+	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -112,11 +114,29 @@ func GetDB(ctx context.Context) *gorm.DB {
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
 	if err != nil {
 		panic("failed to connect database")
 	}
 	SetGlobalDB(db)
+	// Setup tenant related tables
+	db.Migrator().DropTable(&dbmodel.Tenant{})
+	db.Migrator().CreateTable(&dbmodel.Tenant{})
+	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
+		ID: common.DefaultTenant,
+	})
+
+	// Setup database related tables
+	db.Migrator().DropTable(&dbmodel.Database{})
+	db.Migrator().CreateTable(&dbmodel.Database{})
+
+	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
+		ID:       types.NilUniqueID().String(),
+		Name:     common.DefaultDatabase,
+		TenantID: common.DefaultTenant,
+	})
 
 	// Setup collection related tables
 	db.Migrator().DropTable(&dbmodel.Collection{})

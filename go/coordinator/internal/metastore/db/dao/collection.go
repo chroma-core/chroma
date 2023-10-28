@@ -6,9 +6,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
-	"github.com/go-sql-driver/mysql"
 	"github.com/pingcap/log"
 )
 
@@ -22,13 +20,18 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, topic *string) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(id *string, name *string, topic *string, tenantID string, databaseName string) ([]*dbmodel.CollectionAndMetadata, error) {
 	var collections []*dbmodel.CollectionAndMetadata
 
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.topic, collections.dimension, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
+		Select("collections.id, collections.name, collections.topic, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
+
+	query = query.Where("databases.name = ?", databaseName)
+
+	query = query.Where("databases.tenant_id = ?", tenantID)
 
 	if id != nil {
 		query = query.Where("collections.id = ?", *id)
@@ -52,17 +55,20 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string) (
 
 	for rows.Next() {
 		var (
-			collectionID        string
-			collectionName      string
-			collectionTopic     string
-			collectionDimension sql.NullInt32
-			key                 sql.NullString
-			strValue            sql.NullString
-			intValue            sql.NullInt64
-			floatValue          sql.NullFloat64
+			collectionID         string
+			collectionName       string
+			collectionTopic      string
+			collectionDimension  sql.NullInt32
+			collectionDatabaseID string
+			databaseName         string
+			databaseTenantID     string
+			key                  sql.NullString
+			strValue             sql.NullString
+			intValue             sql.NullInt64
+			floatValue           sql.NullFloat64
 		)
 
-		err := rows.Scan(&collectionID, &collectionName, &collectionTopic, &collectionDimension, &key, &strValue, &intValue, &floatValue)
+		err := rows.Scan(&collectionID, &collectionName, &collectionTopic, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID, &key, &strValue, &intValue, &floatValue)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -73,11 +79,14 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string) (
 
 			currentCollection = &dbmodel.CollectionAndMetadata{
 				Collection: &dbmodel.Collection{
-					ID:    collectionID,
-					Name:  &collectionName,
-					Topic: &collectionTopic,
+					ID:         collectionID,
+					Name:       &collectionName,
+					Topic:      &collectionTopic,
+					DatabaseID: collectionDatabaseID,
 				},
 				CollectionMetadata: metadata,
+				TenantID:           databaseTenantID,
+				DatabaseName:       databaseName,
 			}
 			if collectionDimension.Valid {
 				currentCollection.Collection.Dimension = &collectionDimension.Int32
@@ -128,19 +137,7 @@ func (s *collectionDb) DeleteCollectionByID(collectionID string) error {
 }
 
 func (s *collectionDb) Insert(in *dbmodel.Collection) error {
-	err := s.db.Create(&in).Error
-
-	if err != nil {
-		// TODO: This only works for MySQL, figure out a way for Postgres.
-		log.Error("insert collection failed", zap.String("collectionID", in.ID), zap.Int64("ts", in.Ts), zap.Error(err))
-		mysqlErr := err.(*mysql.MySQLError)
-		switch mysqlErr.Number {
-		case 1062:
-			return common.ErrCollectionUniqueConstraintViolation
-		}
-		return err
-	}
-	return nil
+	return s.db.Create(&in).Error
 }
 
 func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {

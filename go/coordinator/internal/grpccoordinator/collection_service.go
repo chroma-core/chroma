@@ -60,7 +60,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 func (s *Server) getOrCreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
 	res := &coordinatorpb.CreateCollectionResponse{}
 	name := req.GetName()
-	collections, err := s.coordinator.GetCollections(ctx, types.NilUniqueID(), &name, nil)
+	tenantID := req.GetTenant()
+	databaseName := req.GetDatabase()
+	collections, err := s.coordinator.GetCollections(ctx, types.NilUniqueID(), &name, nil, tenantID, databaseName)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Collection = &coordinatorpb.Collection{
@@ -169,6 +171,8 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	collectionID := req.Id
 	collectionName := req.Name
 	collectionTopic := req.Topic
+	tenantID := req.Tenant
+	databaseName := req.Database
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
@@ -179,7 +183,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		return res, nil
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, collectionTopic)
+	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, collectionTopic, tenantID, databaseName)
 	if err != nil {
 		log.Error("error getting collections", zap.Error(err))
 		res.Status = failResponseWithError(err, errorCode)
@@ -204,7 +208,12 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
 		return res, nil
 	}
-	err = s.coordinator.DeleteCollection(ctx, parsedCollectionID)
+	deleteCollection := &model.DeleteCollection{
+		ID:           parsedCollectionID,
+		TenantID:     req.GetTenant(),
+		DatabaseName: req.GetDatabase(),
+	}
+	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
 	if err != nil {
 		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
 		if err == common.ErrCollectionDeleteNonExistingCollection {

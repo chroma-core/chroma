@@ -55,7 +55,7 @@ func testCollection(t *rapid.T) {
 			}
 			if err == nil {
 				// verify the correctness
-				collectionList, err := c.GetCollections(ctx, collection.ID, nil, nil)
+				collectionList, err := c.GetCollections(ctx, collection.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 				if err != nil {
 					t.Fatalf("error getting collections: %v", err)
 				}
@@ -153,7 +153,7 @@ func TestAPIs(t *testing.T) {
 	rapid.Check(t, testSegment)
 }
 
-func SampleCollections(t *testing.T) []*model.Collection {
+func SampleCollections(t *testing.T, tenantID string, databaseName string) []*model.Collection {
 	dimension := int32(128)
 	metadata1 := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	metadata1.Add("test_str", &model.CollectionMetadataValueStringType{Value: "str1"})
@@ -171,25 +171,31 @@ func SampleCollections(t *testing.T) []*model.Collection {
 	metadata3.Add("test_float", &model.CollectionMetadataValueFloat64Type{Value: 3.3})
 	sampleCollections := []*model.Collection{
 		{
-			ID:        types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
-			Name:      "test_collection_1",
-			Topic:     "test_topic_1",
-			Metadata:  metadata1,
-			Dimension: &dimension,
+			ID:           types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+			Name:         "test_collection_1",
+			Topic:        "test_topic_1",
+			Metadata:     metadata1,
+			Dimension:    &dimension,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 		{
-			ID:        types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
-			Name:      "test_collection_2",
-			Topic:     "test_topic_2",
-			Metadata:  metadata2,
-			Dimension: nil,
+			ID:           types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+			Name:         "test_collection_2",
+			Topic:        "test_topic_2",
+			Metadata:     metadata2,
+			Dimension:    nil,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 		{
-			ID:        types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
-			Name:      "test_collection_3",
-			Topic:     "test_topic_3",
-			Metadata:  metadata3,
-			Dimension: nil,
+			ID:           types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+			Name:         "test_collection_3",
+			Topic:        "test_topic_3",
+			Metadata:     metadata3,
+			Dimension:    nil,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 	}
 	return sampleCollections
@@ -215,7 +221,8 @@ func (m *MockAssignmentPolicy) AssignCollection(collectionID types.UniqueID) str
 }
 
 func TestCreateGetDeleteCollections(t *testing.T) {
-	sampleCollections := SampleCollections(t)
+
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
@@ -228,15 +235,17 @@ func TestCreateGetDeleteCollections(t *testing.T) {
 
 	for _, collection := range sampleCollections {
 		c.CreateCollection(ctx, &model.CreateCollection{
-			ID:        collection.ID,
-			Name:      collection.Name,
-			Topic:     collection.Topic,
-			Metadata:  collection.Metadata,
-			Dimension: collection.Dimension,
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Topic:        collection.Topic,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     collection.TenantID,
+			DatabaseName: collection.DatabaseName,
 		})
 	}
 
-	results, err := c.GetCollections(ctx, types.NilUniqueID(), nil, nil)
+	results, err := c.GetCollections(ctx, types.NilUniqueID(), nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 
 	sort.Slice(results, func(i, j int) bool {
@@ -247,35 +256,37 @@ func TestCreateGetDeleteCollections(t *testing.T) {
 
 	// Duplicate create fails
 	_, err = c.CreateCollection(ctx, &model.CreateCollection{
-		ID:   sampleCollections[0].ID,
-		Name: sampleCollections[0].Name,
+		ID:           sampleCollections[0].ID,
+		Name:         sampleCollections[0].Name,
+		TenantID:     common.DefaultTenant,
+		DatabaseName: common.DefaultDatabase,
 	})
 	assert.Error(t, err)
 
 	// Find by name
 	for _, collection := range sampleCollections {
-		result, err := c.GetCollections(ctx, types.NilUniqueID(), &collection.Name, nil)
+		result, err := c.GetCollections(ctx, types.NilUniqueID(), &collection.Name, nil, common.DefaultTenant, common.DefaultDatabase)
 		assert.NoError(t, err)
 		assert.Equal(t, []*model.Collection{collection}, result)
 	}
 
 	// Find by topic
 	for _, collection := range sampleCollections {
-		result, err := c.GetCollections(ctx, types.NilUniqueID(), nil, &collection.Topic)
+		result, err := c.GetCollections(ctx, types.NilUniqueID(), nil, &collection.Topic, common.DefaultTenant, common.DefaultDatabase)
 		assert.NoError(t, err)
 		assert.Equal(t, []*model.Collection{collection}, result)
 	}
 
 	// Find by id
 	for _, collection := range sampleCollections {
-		result, err := c.GetCollections(ctx, collection.ID, nil, nil)
+		result, err := c.GetCollections(ctx, collection.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 		assert.NoError(t, err)
 		assert.Equal(t, []*model.Collection{collection}, result)
 	}
 
 	// Find by id and topic (positive case)
 	for _, collection := range sampleCollections {
-		result, err := c.GetCollections(ctx, collection.ID, nil, &collection.Topic)
+		result, err := c.GetCollections(ctx, collection.ID, nil, &collection.Topic, common.DefaultTenant, common.DefaultDatabase)
 		assert.NoError(t, err)
 		assert.Equal(t, []*model.Collection{collection}, result)
 	}
@@ -283,34 +294,39 @@ func TestCreateGetDeleteCollections(t *testing.T) {
 	// find by id and topic (negative case)
 	for _, collection := range sampleCollections {
 		otherTopic := "other topic"
-		result, err := c.GetCollections(ctx, collection.ID, nil, &otherTopic)
+		result, err := c.GetCollections(ctx, collection.ID, nil, &otherTopic, common.DefaultTenant, common.DefaultDatabase)
 		assert.NoError(t, err)
 		assert.Empty(t, result)
 	}
 
 	// Delete
 	c1 := sampleCollections[0]
-	err = c.DeleteCollection(ctx, c1.ID)
+	deleteCollection := &model.DeleteCollection{
+		ID:           c1.ID,
+		DatabaseName: common.DefaultDatabase,
+		TenantID:     common.DefaultTenant,
+	}
+	err = c.DeleteCollection(ctx, deleteCollection)
 	assert.NoError(t, err)
 
-	results, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil)
+	results, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 
 	assert.NotContains(t, results, c1)
 	assert.Len(t, results, len(sampleCollections)-1)
 	assert.Equal(t, sampleCollections[1:], results)
 
-	by_id_result, err := c.GetCollections(ctx, c1.ID, nil, nil)
+	byIDResult, err := c.GetCollections(ctx, c1.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
-	assert.Empty(t, by_id_result)
+	assert.Empty(t, byIDResult)
 
 	// Duplicate delete throws an exception
-	err = c.DeleteCollection(ctx, c1.ID)
+	err = c.DeleteCollection(ctx, deleteCollection)
 	assert.Error(t, err)
 }
 
 func TestUpdateCollections(t *testing.T) {
-	sampleCollections := SampleCollections(t)
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
@@ -322,19 +338,23 @@ func TestUpdateCollections(t *testing.T) {
 	c.ResetState(ctx)
 
 	coll := &model.Collection{
-		Name:      sampleCollections[0].Name,
-		ID:        sampleCollections[0].ID,
-		Topic:     sampleCollections[0].Topic,
-		Metadata:  sampleCollections[0].Metadata,
-		Dimension: sampleCollections[0].Dimension,
+		Name:         sampleCollections[0].Name,
+		ID:           sampleCollections[0].ID,
+		Topic:        sampleCollections[0].Topic,
+		Metadata:     sampleCollections[0].Metadata,
+		Dimension:    sampleCollections[0].Dimension,
+		TenantID:     sampleCollections[0].TenantID,
+		DatabaseName: sampleCollections[0].DatabaseName,
 	}
 
 	c.CreateCollection(ctx, &model.CreateCollection{
-		ID:        coll.ID,
-		Name:      coll.Name,
-		Topic:     coll.Topic,
-		Metadata:  coll.Metadata,
-		Dimension: coll.Dimension,
+		ID:           coll.ID,
+		Name:         coll.Name,
+		Topic:        coll.Topic,
+		Metadata:     coll.Metadata,
+		Dimension:    coll.Dimension,
+		TenantID:     coll.TenantID,
+		DatabaseName: coll.DatabaseName,
 	})
 
 	// Update name
@@ -342,7 +362,7 @@ func TestUpdateCollections(t *testing.T) {
 	result, err := c.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
 	assert.NoError(t, err)
 	assert.Equal(t, coll, result)
-	resultList, err := c.GetCollections(ctx, types.NilUniqueID(), &coll.Name, nil)
+	resultList, err := c.GetCollections(ctx, types.NilUniqueID(), &coll.Name, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Collection{coll}, resultList)
 
@@ -351,7 +371,7 @@ func TestUpdateCollections(t *testing.T) {
 	result, err = c.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Topic: &coll.Topic})
 	assert.NoError(t, err)
 	assert.Equal(t, coll, result)
-	resultList, err = c.GetCollections(ctx, types.NilUniqueID(), nil, &coll.Topic)
+	resultList, err = c.GetCollections(ctx, types.NilUniqueID(), nil, &coll.Topic, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Collection{coll}, resultList)
 
@@ -361,7 +381,7 @@ func TestUpdateCollections(t *testing.T) {
 	result, err = c.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
 	assert.NoError(t, err)
 	assert.Equal(t, coll, result)
-	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil)
+	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Collection{coll}, resultList)
 
@@ -372,7 +392,7 @@ func TestUpdateCollections(t *testing.T) {
 	result, err = c.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
 	assert.NoError(t, err)
 	assert.Equal(t, coll, result)
-	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil)
+	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Collection{coll}, resultList)
 
@@ -381,9 +401,280 @@ func TestUpdateCollections(t *testing.T) {
 	result, err = c.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
 	assert.NoError(t, err)
 	assert.Equal(t, coll, result)
-	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil)
+	resultList, err = c.GetCollections(ctx, coll.ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Equal(t, []*model.Collection{coll}, resultList)
+}
+
+func TestCreateUpdateWithDatabase(t *testing.T) {
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
+	db := dbcore.ConfigDatabaseForTesting()
+	ctx := context.Background()
+	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	if err != nil {
+		t.Fatalf("error creating coordinator: %v", err)
+	}
+	c.ResetState(ctx)
+	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     types.MustParse("00000000-d7d7-413b-92e1-731098a6e492").String(),
+		Name:   "new_database",
+		Tenant: common.DefaultTenant,
+	})
+	assert.NoError(t, err)
+
+	c.CreateCollection(ctx, &model.CreateCollection{
+		ID:           sampleCollections[0].ID,
+		Name:         sampleCollections[0].Name,
+		Topic:        sampleCollections[0].Topic,
+		Metadata:     sampleCollections[0].Metadata,
+		Dimension:    sampleCollections[0].Dimension,
+		TenantID:     sampleCollections[0].TenantID,
+		DatabaseName: "new_database",
+	})
+
+	c.CreateCollection(ctx, &model.CreateCollection{
+		ID:           sampleCollections[1].ID,
+		Name:         sampleCollections[1].Name,
+		Topic:        sampleCollections[1].Topic,
+		Metadata:     sampleCollections[1].Metadata,
+		Dimension:    sampleCollections[1].Dimension,
+		TenantID:     sampleCollections[1].TenantID,
+		DatabaseName: sampleCollections[1].DatabaseName,
+	})
+
+	newName1 := "new_name_1"
+	c.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:   sampleCollections[1].ID,
+		Name: &newName1,
+	})
+
+	result, err := c.GetCollections(ctx, sampleCollections[1].ID, nil, nil, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, "new_name_1", result[0].Name)
+
+	newName0 := "new_name_0"
+	c.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:   sampleCollections[0].ID,
+		Name: &newName0,
+	})
+	result, err = c.GetCollections(ctx, sampleCollections[0].ID, nil, nil, common.DefaultTenant, "new_database")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, "new_name_0", result[0].Name)
+	//     # Try to create the collection in the default database in the new database and expect an error
+	//     with pytest.raises(UniqueConstraintError):
+	//         sysdb.create_collection(
+	//             id=sample_collections[1]["id"],
+	//             name=sample_collections[1]["name"],
+	//             metadata=sample_collections[1]["metadata"],
+	//             dimension=sample_collections[1]["dimension"],
+	//             database="new_database",
+	//         )
+	//
+}
+
+func TestGetMultipleWithDatabase(t *testing.T) {
+	sampleCollections := SampleCollections(t, common.DefaultTenant, "new_database")
+	db := dbcore.ConfigDatabaseForTesting()
+	ctx := context.Background()
+	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	if err != nil {
+		t.Fatalf("error creating coordinator: %v", err)
+	}
+	c.ResetState(ctx)
+	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     types.MustParse("00000000-d7d7-413b-92e1-731098a6e492").String(),
+		Name:   "new_database",
+		Tenant: common.DefaultTenant,
+	})
+	assert.NoError(t, err)
+
+	for _, collection := range sampleCollections {
+		c.CreateCollection(ctx, &model.CreateCollection{
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Topic:        collection.Topic,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     common.DefaultTenant,
+			DatabaseName: "new_database",
+		})
+	}
+	result, err := c.GetCollections(ctx, types.NilUniqueID(), nil, nil, common.DefaultTenant, "new_database")
+	assert.NoError(t, err)
+	assert.Equal(t, len(sampleCollections), len(result))
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	assert.Equal(t, sampleCollections, result)
+
+	result, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil, common.DefaultTenant, common.DefaultDatabase)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(result))
+}
+
+func TestCreateDatabaseWithTenants(t *testing.T) {
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
+	db := dbcore.ConfigDatabaseForTesting()
+	ctx := context.Background()
+	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	if err != nil {
+		t.Fatalf("error creating coordinator: %v", err)
+	}
+	c.ResetState(ctx)
+
+	// Create a new tenant
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: "tenant1",
+	})
+	assert.NoError(t, err)
+
+	// Create tenant that already exits and expect an error
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: "tenant1",
+	})
+	assert.Error(t, err)
+
+	// Create tenant that already exits and expect an error
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: common.DefaultTenant,
+	})
+	assert.Error(t, err)
+
+	// Create a new database within this tenant and also in the default tenant
+	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     types.MustParse("33333333-d7d7-413b-92e1-731098a6e492").String(),
+		Name:   "new_database",
+		Tenant: "tenant1",
+	})
+	assert.NoError(t, err)
+
+	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     types.MustParse("44444444-d7d7-413b-92e1-731098a6e492").String(),
+		Name:   "new_database",
+		Tenant: common.DefaultTenant,
+	})
+	assert.NoError(t, err)
+
+	// Create a new collection in the new tenant
+	_, err = c.CreateCollection(ctx, &model.CreateCollection{
+		ID:           sampleCollections[0].ID,
+		Name:         sampleCollections[0].Name,
+		Topic:        sampleCollections[0].Topic,
+		Metadata:     sampleCollections[0].Metadata,
+		Dimension:    sampleCollections[0].Dimension,
+		TenantID:     "tenant1",
+		DatabaseName: "new_database",
+	})
+	assert.NoError(t, err)
+
+	// Create a new collection in the default tenant
+	c.CreateCollection(ctx, &model.CreateCollection{
+		ID:           sampleCollections[1].ID,
+		Name:         sampleCollections[1].Name,
+		Topic:        sampleCollections[1].Topic,
+		Metadata:     sampleCollections[1].Metadata,
+		Dimension:    sampleCollections[1].Dimension,
+		TenantID:     common.DefaultTenant,
+		DatabaseName: "new_database",
+	})
+
+	// Check that both tenants have the correct collections
+	expected := []*model.Collection{sampleCollections[0]}
+	expected[0].TenantID = "tenant1"
+	expected[0].DatabaseName = "new_database"
+	result, err := c.GetCollections(ctx, types.NilUniqueID(), nil, nil, "tenant1", "new_database")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, expected[0], result[0])
+
+	expected = []*model.Collection{sampleCollections[1]}
+	expected[0].TenantID = common.DefaultTenant
+	expected[0].DatabaseName = "new_database"
+	result, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil, common.DefaultTenant, "new_database")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, expected[0], result[0])
+
+	// A new tenant DOES NOT have a default database. This does not error, instead 0
+	// results are returned
+	result, err = c.GetCollections(ctx, types.NilUniqueID(), nil, nil, "tenant1", common.DefaultDatabase)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestCreateGetDeleteTenants(t *testing.T) {
+	db := dbcore.ConfigDatabaseForTesting()
+	ctx := context.Background()
+	assignmentPolicy := NewMockAssignmentPolicy(nil)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	if err != nil {
+		t.Fatalf("error creating coordinator: %v", err)
+	}
+	c.ResetState(ctx)
+
+	// Create a new tenant
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: "tenant1",
+	})
+	assert.NoError(t, err)
+
+	// Create tenant that already exits and expect an error
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: "tenant1",
+	})
+	assert.Error(t, err)
+
+	// Create tenant that already exits and expect an error
+	_, err = c.CreateTenant(ctx, &model.CreateTenant{
+		Name: common.DefaultTenant,
+	})
+	assert.Error(t, err)
+
+	// Get the tenant and check that it exists
+	result, err := c.GetTenant(ctx, &model.GetTenant{Name: "tenant1"})
+	assert.NoError(t, err)
+	assert.Equal(t, "tenant1", result.Name)
+
+	// Get a tenant that does not exist and expect an error
+	_, err = c.GetTenant(ctx, &model.GetTenant{Name: "tenant2"})
+	assert.Error(t, err)
+
+	// Create a new database within this tenant
+	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     types.MustParse("33333333-d7d7-413b-92e1-731098a6e492").String(),
+		Name:   "new_database",
+		Tenant: "tenant1",
+	})
+	assert.NoError(t, err)
+
+	// Get the database and check that it exists
+	databaseResult, err := c.GetDatabase(ctx, &model.GetDatabase{
+		Name:   "new_database",
+		Tenant: "tenant1",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "new_database", databaseResult.Name)
+	assert.Equal(t, "tenant1", databaseResult.Tenant)
+
+	// Get a database that does not exist in a tenant that does exist and expect an error
+	_, err = c.GetDatabase(ctx, &model.GetDatabase{
+		Name:   "new_database1",
+		Tenant: "tenant1",
+	})
+	assert.Error(t, err)
+
+	// Get a database that does not exist in a tenant that does not exist and expect an
+	// error
+	_, err = c.GetDatabase(ctx, &model.GetDatabase{
+		Name:   "new_database1",
+		Tenant: "tenant2",
+	})
+	assert.Error(t, err)
 }
 
 func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*model.Segment {
@@ -434,7 +725,7 @@ func SampleSegments(t *testing.T, sampleCollections []*model.Collection) []*mode
 }
 
 func TestCreateGetDeleteSegments(t *testing.T) {
-	sampleCollections := SampleCollections(t)
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
@@ -447,11 +738,13 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 
 	for _, collection := range sampleCollections {
 		c.CreateCollection(ctx, &model.CreateCollection{
-			ID:        collection.ID,
-			Name:      collection.Name,
-			Topic:     collection.Topic,
-			Metadata:  collection.Metadata,
-			Dimension: collection.Dimension,
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Topic:        collection.Topic,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     collection.TenantID,
+			DatabaseName: collection.DatabaseName,
 		})
 	}
 
@@ -535,7 +828,7 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 }
 
 func TestUpdateSegment(t *testing.T) {
-	sampleCollections := SampleCollections(t)
+	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
@@ -564,12 +857,15 @@ func TestUpdateSegment(t *testing.T) {
 
 	for _, collection := range sampleCollections {
 		_, err := c.CreateCollection(ctx, &model.CreateCollection{
-			ID:        collection.ID,
-			Name:      collection.Name,
-			Topic:     collection.Topic,
-			Metadata:  collection.Metadata,
-			Dimension: collection.Dimension,
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Topic:        collection.Topic,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     collection.TenantID,
+			DatabaseName: collection.DatabaseName,
 		})
+
 		assert.NoError(t, err)
 	}
 

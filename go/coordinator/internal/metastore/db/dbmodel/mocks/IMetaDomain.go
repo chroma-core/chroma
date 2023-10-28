@@ -46,6 +46,22 @@ func (_m *IMetaDomain) CollectionMetadataDb(ctx context.Context) dbmodel.ICollec
 	return r0
 }
 
+// DatabaseDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) DatabaseDb(ctx context.Context) dbmodel.IDatabaseDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.IDatabaseDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IDatabaseDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.IDatabaseDb)
+		}
+	}
+
+	return r0
+}
+
 // SegmentDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) SegmentDb(ctx context.Context) dbmodel.ISegmentDb {
 	ret := _m.Called(ctx)
@@ -72,6 +88,22 @@ func (_m *IMetaDomain) SegmentMetadataDb(ctx context.Context) dbmodel.ISegmentMe
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(dbmodel.ISegmentMetadataDb)
+		}
+	}
+
+	return r0
+}
+
+// TenantDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.ITenantDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.ITenantDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.ITenantDb)
 		}
 	}
 

@@ -14,11 +14,11 @@ from chromadb.auth import (
     BasicAuthCredentials,
     ClientAuthCredentialsProvider,
     ClientAuthResponse,
+    SimpleServerAuthenticationResponse,
 )
 from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -91,12 +91,20 @@ class BasicAuthServerProvider(ServerAuthProvider):
 
     @trace_method("BasicAuthServerProvider.authenticate", OpenTelemetryGranularity.ALL)
     @override
-    def authenticate(self, request: ServerAuthenticationRequest[Any]) -> bool:
+    def authenticate(
+        self, request: ServerAuthenticationRequest[Any]
+    ) -> SimpleServerAuthenticationResponse:
         try:
             _auth_header = request.get_auth_info(AuthInfoType.HEADER, "Authorization")
-            return self._credentials_provider.validate_credentials(
+            _validation = self._credentials_provider.validate_credentials(
                 BasicAuthCredentials.from_header(_auth_header)
+            )
+            return SimpleServerAuthenticationResponse(
+                _validation,
+                self._credentials_provider.get_user_identity(
+                    BasicAuthCredentials.from_header(_auth_header)
+                ),
             )
         except Exception as e:
             logger.error(f"BasicAuthServerProvider.authenticate failed: {repr(e)}")
-            return False
+            return SimpleServerAuthenticationResponse(False, None)

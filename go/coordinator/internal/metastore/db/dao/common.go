@@ -13,6 +13,14 @@ func NewMetaDomain() *metaDomain {
 	return &metaDomain{}
 }
 
+func (*metaDomain) DatabaseDb(ctx context.Context) dbmodel.IDatabaseDb {
+	return &databaseDb{dbcore.GetDB(ctx)}
+}
+
+func (*metaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
+	return &tenantDb{dbcore.GetDB(ctx)}
+}
+
 func (*metaDomain) CollectionDb(ctx context.Context) dbmodel.ICollectionDb {
 	return &collectionDb{dbcore.GetDB(ctx)}
 }
