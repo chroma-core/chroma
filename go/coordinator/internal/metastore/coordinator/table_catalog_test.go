@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel/mocks"
 	"github.com/chroma/chroma-coordinator/internal/model"
@@ -109,10 +110,10 @@ func TestCatalog_GetCollections(t *testing.T) {
 
 	// mock the get collections method
 	mockMetaDomain.On("CollectionDb", context.Background()).Return(&mocks.ICollectionDb{})
-	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollections", types.FromUniqueID(collectionID), &collectionName, &collectionTopic).Return(collectionAndMetadataList, nil)
+	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollections", types.FromUniqueID(collectionID), &collectionName, &collectionTopic, common.DefaultTenant, common.DefaultDatabase).Return(collectionAndMetadataList, nil)
 
 	// call the GetCollections method
-	collections, err := catalog.GetCollections(context.Background(), collectionID, &collectionName, &collectionTopic)
+	collections, err := catalog.GetCollections(context.Background(), collectionID, &collectionName, &collectionTopic, defaultTenant, defaultDatabase)
 
 	// assert that the method returned no error
 	assert.NoError(t, err)

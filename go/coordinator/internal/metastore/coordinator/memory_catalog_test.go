@@ -8,6 +8,11 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 )
 
+const (
+	defaultTenant   = "default_tenant"
+	defaultDatabase = "default_database"
+)
+
 func TestMemoryCatalog(t *testing.T) {
 	ctx := context.Background()
 	mc := NewMemoryCatalog()
@@ -27,16 +32,8 @@ func TestMemoryCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating collection: %v", err)
 	}
-	if len(mc.Collections) != 1 {
-		t.Fatalf("expected 1 collection, got %d", len(mc.Collections))
-	}
-
-	if mc.Collections[coll.ID] != collection {
-		t.Fatalf("expected collection with ID %q, got %+v", coll.ID, mc.Collections[coll.ID])
-	}
-
 	// Test GetCollections
-	collections, err := mc.GetCollections(ctx, coll.ID, &coll.Name, nil)
+	collections, err := mc.GetCollections(ctx, coll.ID, &coll.Name, nil, defaultTenant, defaultDatabase)
 	if err != nil {
 		t.Fatalf("unexpected error getting collections: %v", err)
 	}
@@ -48,7 +45,12 @@ func TestMemoryCatalog(t *testing.T) {
 	}
 
 	// Test DeleteCollection
-	if err := mc.DeleteCollection(ctx, coll.ID); err != nil {
+	deleteCollection := &model.DeleteCollection{
+		ID:           coll.ID,
+		DatabaseName: defaultDatabase,
+		TenantID:     defaultTenant,
+	}
+	if err := mc.DeleteCollection(ctx, deleteCollection); err != nil {
 		t.Fatalf("unexpected error deleting collection: %v", err)
 	}
 
@@ -70,12 +72,12 @@ func TestMemoryCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating segment: %v", err)
 	}
-	if len(mc.Segments) != 1 {
-		t.Fatalf("expected 1 segment, got %d", len(mc.Segments))
+	if len(mc.segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(mc.segments))
 	}
 
-	if mc.Segments[createSegment.ID] != segment {
-		t.Fatalf("expected segment with ID %q, got %+v", createSegment.ID, mc.Segments[createSegment.ID])
+	if mc.segments[createSegment.ID] != segment {
+		t.Fatalf("expected segment with ID %q, got %+v", createSegment.ID, mc.segments[createSegment.ID])
 	}
 
 	// Test GetSegments
@@ -105,15 +107,9 @@ func TestMemoryCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating collection: %v", err)
 	}
-	if len(mc.Collections) != 1 {
-		t.Fatalf("expected 1 collection, got %d", len(mc.Collections))
-	}
-	if mc.Collections[coll.ID] != collection {
-		t.Fatalf("expected collection with ID %q, got %+v", coll.ID, mc.Collections[coll.ID])
-	}
 
 	// Test GetCollections
-	collections, err = mc.GetCollections(ctx, coll.ID, &coll.Name, nil)
+	collections, err = mc.GetCollections(ctx, coll.ID, &coll.Name, nil, defaultTenant, defaultDatabase)
 	if err != nil {
 		t.Fatalf("unexpected error getting collections: %v", err)
 	}
@@ -125,7 +121,12 @@ func TestMemoryCatalog(t *testing.T) {
 	}
 
 	// Test DeleteCollection
-	if err := mc.DeleteCollection(ctx, coll.ID); err != nil {
+	deleteCollection = &model.DeleteCollection{
+		ID:           coll.ID,
+		DatabaseName: defaultDatabase,
+		TenantID:     defaultTenant,
+	}
+	if err := mc.DeleteCollection(ctx, deleteCollection); err != nil {
 		t.Fatalf("unexpected error deleting collection: %v", err)
 	}
 }
