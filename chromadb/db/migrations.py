@@ -6,6 +6,11 @@ import hashlib
 from chromadb.db.base import SqlDB, Cursor
 from abc import abstractmethod
 from chromadb.config import System, Settings
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 
 
 class MigrationFile(TypedDict):
@@ -82,6 +87,7 @@ class MigratableDB(SqlDB):
 
     def __init__(self, system: System) -> None:
         self._settings = system.settings
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
     @staticmethod
@@ -127,6 +133,7 @@ class MigratableDB(SqlDB):
         if migrate == "apply":
             self.apply_migrations()
 
+    @trace_method("MigratableDB.validate_migrations", OpenTelemetryGranularity.ALL)
     def validate_migrations(self) -> None:
         """Validate all migrations and throw an exception if there are any unapplied
         migrations in the source repo."""
@@ -142,6 +149,7 @@ class MigratableDB(SqlDB):
                 version = unapplied_migrations[0]["version"]
                 raise UnappliedMigrationsError(dir=dir.name, version=version)
 
+    @trace_method("MigratableDB.apply_migrations", OpenTelemetryGranularity.ALL)
     def apply_migrations(self) -> None:
         """Validate existing migrations, and apply all new ones."""
         self.setup_migrations()

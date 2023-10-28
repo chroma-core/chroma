@@ -2,6 +2,19 @@ syntax = "proto3";
 
 package chroma;
 
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+
+message Status {
+  string reason = 1;
+  int32 code = 2; // TODO: What is the enum of this code?
+}
+
+message ChromaResponse {
+  Status status = 1;
+}
+
+// Types here should mirror chromadb/types.py
+
 enum Operation {
     ADD = 0;
     UPDATE = 1;
@@ -34,6 +47,24 @@ message Segment {
     // collection and can be used to service queries (for it's given scope.)
     optional string collection = 5;
     optional UpdateMetadata metadata = 6;
+}
+
+message Collection {
+  string id = 1;
+  string name = 2;
+  string topic = 3;
+  optional UpdateMetadata metadata = 4;
+  optional int32 dimension = 5;
+}
+
+message Database {
+    string id = 1;
+    string name = 2;
+    string tenant = 3;
+}
+
+message Tenant {
+    string name = 1;
 }
 
 message UpdateMetadataValue {

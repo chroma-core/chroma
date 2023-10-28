@@ -21,7 +21,7 @@ persist_dir = tempfile.mkdtemp()
 
 @pytest.fixture
 def local_persist_api():
-    yield chromadb.Client(
+    client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -33,6 +33,8 @@ def local_persist_api():
             persist_directory=persist_dir,
         ),
     )
+    yield client
+    client.clear_system_cache()
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 
@@ -40,7 +42,7 @@ def local_persist_api():
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
-    yield chromadb.Client(
+    client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -52,6 +54,8 @@ def local_persist_api_cache_bust():
             persist_directory=persist_dir,
         ),
     )
+    yield client
+    client.clear_system_cache()
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 

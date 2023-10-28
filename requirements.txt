@@ -2,12 +2,15 @@ bcrypt==4.0.1
 chroma-hnswlib==0.7.3
 fastapi>=0.95.2
 graphlib_backport==1.0.3; python_version < '3.9'
-grpcio==1.58.0
+grpcio>=1.58.0
 importlib-resources
 kubernetes>=28.1.0
 numpy==1.21.6; python_version < '3.8'
 numpy>=1.22.4; python_version >= '3.8'
 onnxruntime>=1.14.1
+opentelemetry-api>=1.2.0
+opentelemetry-exporter-otlp-proto-grpc>=1.2.0
+opentelemetry-sdk>=1.2.0
 overrides==7.3.1
 posthog==2.4.0
 pulsar-client==3.1.0
@@ -20,3 +23,4 @@ tqdm>=4.65.0
 typer>=0.9.0
 typing_extensions>=4.5.0
 uvicorn[standard]==0.18.3
+PyYAML>=6.0.0

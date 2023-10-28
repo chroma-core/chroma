@@ -47,19 +47,21 @@ class GetAPITest(unittest.TestCase):
     @patch("chromadb.api.segment.SegmentAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
     def test_local(self, mock_api: Mock) -> None:
-        chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
+        client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
         assert mock_api.called
+        client.clear_system_cache()
 
     @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
     def test_local_db(self, mock_db: Mock) -> None:
-        chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
+        client = chromadb.Client(chromadb.config.Settings(persist_directory="./foo"))
         assert mock_db.called
+        client.clear_system_cache()
 
     @patch("chromadb.api.fastapi.FastAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
     def test_fastapi(self, mock: Mock) -> None:
-        chromadb.Client(
+        client = chromadb.Client(
             chromadb.config.Settings(
                 chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 persist_directory="./foo",
@@ -68,6 +70,7 @@ class GetAPITest(unittest.TestCase):
             )
         )
         assert mock.called
+        client.clear_system_cache()
 
     @patch("chromadb.api.fastapi.FastAPI", autospec=True)
     @patch.dict(os.environ, {}, clear=True)
@@ -78,7 +81,7 @@ class GetAPITest(unittest.TestCase):
             chroma_server_http_port="80",
             chroma_server_headers={"foo": "bar"},
         )
-        chromadb.Client(settings)
+        client = chromadb.Client(settings)
 
         # Check that the mock was called
         assert mock.called
@@ -93,11 +96,12 @@ class GetAPITest(unittest.TestCase):
         # Check if the settings passed to the mock match the settings we used
         # raise Exception(passed_settings.settings)
         assert passed_settings.settings == settings
+        client.clear_system_cache()
 
 
 def test_legacy_values() -> None:
     with pytest.raises(ValueError):
-        chromadb.Client(
+        client = chromadb.Client(
             chromadb.config.Settings(
                 chroma_api_impl="chromadb.api.local.LocalAPI",
                 persist_directory="./foo",
@@ -105,3 +109,4 @@ def test_legacy_values() -> None:
                 chroma_server_http_port="80",
             )
         )
+        client.clear_system_cache()

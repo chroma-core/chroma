@@ -14,6 +14,11 @@ from chromadb.types import (
     Operation,
 )
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from overrides import override
 from collections import defaultdict
 from typing import Sequence, Tuple, Optional, Dict, Set, cast
@@ -79,8 +84,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def __init__(self, system: System):
         self._subscriptions = defaultdict(set)
         self._max_batch_size = None
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
+    @trace_method("SqlEmbeddingsQueue.reset_state", OpenTelemetryGranularity.ALL)
     @override
     def reset_state(self) -> None:
         super().reset_state()
@@ -91,6 +98,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         # Topic creation is implicit for this impl
         pass
 
+    @trace_method("SqlEmbeddingsQueue.delete_topic", OpenTelemetryGranularity.ALL)
     @override
     def delete_topic(self, topic_name: str) -> None:
         t = Table("embeddings_queue")
@@ -104,6 +112,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
 
+    @trace_method("SqlEmbeddingsQueue.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
@@ -113,6 +122,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         return self.submit_embeddings(topic_name, [embedding])[0]
 
+    @trace_method("SqlEmbeddingsQueue.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
@@ -126,10 +136,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if len(embeddings) > self.max_batch_size:
             raise ValueError(
                 f"""
-                Cannot submit more than {self.max_batch_size:,} embeddings at once.
-                Please submit your embeddings in batches of size
-                {self.max_batch_size:,} or less.
-                """
+                    Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                    Please submit your embeddings in batches of size
+                    {self.max_batch_size:,} or less.
+                    """
             )
 
         t = Table("embeddings_queue")
@@ -182,6 +192,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             self._notify_all(topic_name, embedding_records)
             return seq_ids
 
+    @trace_method("SqlEmbeddingsQueue.subscribe", OpenTelemetryGranularity.ALL)
     @override
     def subscribe(
         self,
@@ -207,6 +218,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
 
         return subscription_id
 
+    @trace_method("SqlEmbeddingsQueue.unsubscribe", OpenTelemetryGranularity.ALL)
     @override
     def unsubscribe(self, subscription_id: UUID) -> None:
         for topic_name, subscriptions in self._subscriptions.items():
@@ -226,6 +238,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         return 2**63 - 1
 
     @property
+    @trace_method("SqlEmbeddingsQueue.max_batch_size", OpenTelemetryGranularity.ALL)
     @override
     def max_batch_size(self) -> int:
         if self._max_batch_size is None:
@@ -247,6 +260,10 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     self._max_batch_size = 999 // self.VARIABLES_PER_RECORD
         return self._max_batch_size
 
+    @trace_method(
+        "SqlEmbeddingsQueue._prepare_vector_encoding_metadata",
+        OpenTelemetryGranularity.ALL,
+    )
     def _prepare_vector_encoding_metadata(
         self, embedding: SubmitEmbeddingRecord
     ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
@@ -260,6 +277,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         metadata = json.dumps(embedding["metadata"]) if embedding["metadata"] else None
         return embedding_bytes, encoding, metadata
 
+    @trace_method("SqlEmbeddingsQueue._backfill", OpenTelemetryGranularity.ALL)
     def _backfill(self, subscription: Subscription) -> None:
         """Backfill the given subscription with any currently matching records in the
         DB"""
@@ -298,6 +316,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                     ],
                 )
 
+    @trace_method("SqlEmbeddingsQueue._validate_range", OpenTelemetryGranularity.ALL)
     def _validate_range(
         self, start: Optional[SeqId], end: Optional[SeqId]
     ) -> Tuple[int, int]:
@@ -311,6 +330,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             raise ValueError(f"Invalid SeqID range: {start} to {end}")
         return start, end
 
+    @trace_method("SqlEmbeddingsQueue._next_seq_id", OpenTelemetryGranularity.ALL)
     def _next_seq_id(self) -> int:
         """Get the next SeqID for this database."""
         t = Table("embeddings_queue")
@@ -319,12 +339,14 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             cur.execute(q.get_sql())
             return int(cur.fetchone()[0]) + 1
 
+    @trace_method("SqlEmbeddingsQueue._notify_all", OpenTelemetryGranularity.ALL)
     def _notify_all(self, topic: str, embeddings: Sequence[EmbeddingRecord]) -> None:
         """Send a notification to each subscriber of the given topic."""
         if self._running:
             for sub in self._subscriptions[topic]:
                 self._notify_one(sub, embeddings)
 
+    @trace_method("SqlEmbeddingsQueue._notify_one", OpenTelemetryGranularity.ALL)
     def _notify_one(
         self, sub: Subscription, embeddings: Sequence[EmbeddingRecord]
     ) -> None:

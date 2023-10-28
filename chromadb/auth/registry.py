@@ -11,6 +11,8 @@ from chromadb.auth import (
     ServerAuthConfigurationProvider,
     ServerAuthCredentialsProvider,
     ClientAuthProvider,
+    ServerAuthorizationConfigurationProvider,
+    ServerAuthorizationProvider,
 )
 from chromadb.utils import get_class
 
@@ -23,6 +25,8 @@ ProviderTypes = Union[
     "ServerAuthConfigurationProvider",
     "ServerAuthCredentialsProvider",
     "ClientAuthProtocolAdapter",
+    "ServerAuthorizationProvider",
+    "ServerAuthorizationConfigurationProvider",
 ]
 
 _provider_registry = {
@@ -33,6 +37,8 @@ _provider_registry = {
     "server_auth_providers": {},
     "server_auth_config_providers": {},
     "server_auth_credentials_providers": {},
+    "server_authz_providers": {},
+    "server_authz_config_providers": {},
 }  # type: Dict[str, Dict[str, Type[ProviderTypes]]]
 
 
@@ -63,12 +69,17 @@ def register_provider(
             _provider_registry["server_auth_config_providers"][short_hand] = cls
         elif issubclass(cls, ServerAuthCredentialsProvider):
             _provider_registry["server_auth_credentials_providers"][short_hand] = cls
+        elif issubclass(cls, ServerAuthorizationProvider):
+            _provider_registry["server_authz_providers"][short_hand] = cls
+        elif issubclass(cls, ServerAuthorizationConfigurationProvider):
+            _provider_registry["server_authz_config_providers"][short_hand] = cls
         else:
             raise ValueError(
                 "Only ClientAuthProvider, ClientAuthConfigurationProvider, "
                 "ClientAuthCredentialsProvider, ServerAuthProvider, "
-                "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, ClientAuthProtocolAdapter "
-                "can be registered."
+                "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
+                "ClientAuthProtocolAdapter, ServerAuthorizationProvider, "
+                "ServerAuthorizationConfigurationProvider can be registered."
             )
         return cls
 
@@ -94,12 +105,17 @@ def resolve_provider(
         _key = "server_auth_config_providers"
     elif issubclass(cls, ServerAuthCredentialsProvider):
         _key = "server_auth_credentials_providers"
+    elif issubclass(cls, ServerAuthorizationProvider):
+        _key = "server_authz_providers"
+    elif issubclass(cls, ServerAuthorizationConfigurationProvider):
+        _key = "server_authz_config_providers"
     else:
         raise ValueError(
             "Only ClientAuthProvider, ClientAuthConfigurationProvider, "
             "ClientAuthCredentialsProvider, ServerAuthProvider, "
-            "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider,ClientAuthProtocolAdapter "
-            "can be registered."
+            "ServerAuthConfigurationProvider, and ServerAuthCredentialsProvider, "
+            "ClientAuthProtocolAdapter, ServerAuthorizationProvider,"
+            "ServerAuthorizationConfigurationProvider, can be registered."
         )
     if class_or_name in _provider_registry[_key]:
         return _provider_registry[_key][class_or_name]

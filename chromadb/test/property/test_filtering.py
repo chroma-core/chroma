@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, cast
 from hypothesis import given, settings, HealthCheck
 import pytest
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
@@ -165,7 +165,7 @@ recordset_st = st.shared(
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
 )
 def test_filterable_metadata_get(
-    caplog, api: API, collection: strategies.Collection, record_set, filters
+    caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -204,7 +204,7 @@ def test_filterable_metadata_get(
 )
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
-    api: API,
+    api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
@@ -257,7 +257,7 @@ def test_filterable_metadata_query(
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 
-def test_empty_filter(api: API) -> None:
+def test_empty_filter(api: ServerAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
     api.reset()
     coll = api.create_collection(name="test")
@@ -291,7 +291,7 @@ def test_empty_filter(api: API) -> None:
     assert res["metadatas"] == [[], []]
 
 
-def test_boolean_metadata(api: API) -> None:
+def test_boolean_metadata(api: ServerAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
     api.reset()
     coll = api.create_collection(name="test")

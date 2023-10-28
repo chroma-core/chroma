@@ -10,6 +10,11 @@ from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
 from chromadb.ingest.impl.utils import create_pulsar_connection_str
 from chromadb.proto.convert import from_proto_submit, to_proto_submit
 import chromadb.proto.chroma_pb2 as proto
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import SeqId, SubmitEmbeddingRecord
 import pulsar
 from concurrent.futures import wait, Future
@@ -18,8 +23,10 @@ from chromadb.utils.messageid import int_to_pulsar, pulsar_to_int
 
 
 class PulsarProducer(Producer, EnforceOverrides):
+    # TODO: ensure trace context propagates
     _connection_str: str
     _topic_to_producer: Dict[str, pulsar.Producer]
+    _opentelemetry_client: OpenTelemetryClient
     _client: pulsar.Client
     _admin: PulsarAdmin
     _settings: Settings
@@ -31,6 +38,7 @@ class PulsarProducer(Producer, EnforceOverrides):
         self._topic_to_producer = {}
         self._settings = system.settings
         self._admin = PulsarAdmin(system)
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
     @overrides
@@ -51,6 +59,7 @@ class PulsarProducer(Producer, EnforceOverrides):
     def delete_topic(self, topic_name: str) -> None:
         self._admin.delete_topic(topic_name)
 
+    @trace_method("PulsarProducer.submit_embedding", OpenTelemetryGranularity.ALL)
     @overrides
     def submit_embedding(
         self, topic_name: str, embedding: SubmitEmbeddingRecord
@@ -62,6 +71,7 @@ class PulsarProducer(Producer, EnforceOverrides):
         msg_id: pulsar.MessageId = producer.send(proto_submit.SerializeToString())
         return pulsar_to_int(msg_id)
 
+    @trace_method("PulsarProducer.submit_embeddings", OpenTelemetryGranularity.ALL)
     @overrides
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
@@ -75,10 +85,10 @@ class PulsarProducer(Producer, EnforceOverrides):
         if len(embeddings) > self.max_batch_size:
             raise ValueError(
                 f"""
-                Cannot submit more than {self.max_batch_size:,} embeddings at once.
-                Please submit your embeddings in batches of size
-                {self.max_batch_size:,} or less.
-                """
+                    Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                    Please submit your embeddings in batches of size
+                    {self.max_batch_size:,} or less.
+                    """
             )
 
         producer = self._get_or_create_producer(topic_name)
@@ -171,6 +181,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
 
     _connection_str: str
     _client: pulsar.Client
+    _opentelemetry_client: OpenTelemetryClient
     _subscriptions: Dict[str, Set[PulsarSubscription]]
     _settings: Settings
 
@@ -180,6 +191,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         self._connection_str = create_pulsar_connection_str(pulsar_host, pulsar_port)
         self._subscriptions = defaultdict(set)
         self._settings = system.settings
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
     @overrides
@@ -192,6 +204,7 @@ class PulsarConsumer(Consumer, EnforceOverrides):
         self._client.close()
         super().stop()
 
+    @trace_method("PulsarConsumer.subscribe", OpenTelemetryGranularity.ALL)
     @overrides
     def subscribe(
         self,

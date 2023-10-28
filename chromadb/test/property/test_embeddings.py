@@ -5,7 +5,7 @@ from typing import Dict, Set, cast, Union, DefaultDict
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs
 import chromadb.errors as errors
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -64,7 +64,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: API):
+    def __init__(self, api: ServerAPI):
         super().__init__()
         self.api = api
         self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
@@ -294,13 +294,13 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         pass
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: API) -> None:
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
     print_traces()
 
 
-def test_multi_add(api: API) -> None:
+def test_multi_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
@@ -319,7 +319,7 @@ def test_multi_add(api: API) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: API) -> None:
+def test_dup_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
@@ -328,7 +328,7 @@ def test_dup_add(api: API) -> None:
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: API) -> None:
+def test_query_without_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
@@ -343,7 +343,7 @@ def test_query_without_add(api: API) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: API) -> None:
+def test_get_non_existent(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
@@ -355,7 +355,7 @@ def test_get_non_existent(api: API) -> None:
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: API) -> None:
+def test_escape_chars_in_ids(api: ServerAPI) -> None:
     api.reset()
     id = "\x1f"
     coll = api.create_collection(name="foo")
@@ -375,7 +375,7 @@ def test_escape_chars_in_ids(api: API) -> None:
         {"where_document": {}, "where": {}},
     ],
 )
-def test_delete_empty_fails(api: API, kwargs: dict):
+def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
     api.reset()
     coll = api.create_collection(name="foo")
     with pytest.raises(Exception) as e:
@@ -398,7 +398,7 @@ def test_delete_empty_fails(api: API, kwargs: dict):
         },
     ],
 )
-def test_delete_success(api: API, kwargs: dict):
+def test_delete_success(api: ServerAPI, kwargs: dict):
     api.reset()
     coll = api.create_collection(name="foo")
     # Should not raise
