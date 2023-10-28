@@ -311,9 +311,6 @@ class Collection(BaseModel):
             None
         """
 
-        if documents is not None and images is not None:
-            raise ValueError("You can only provide documents or images, not both.")
-
         ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
             ids,
             embeddings,
@@ -350,9 +347,6 @@ class Collection(BaseModel):
         Returns:
             None
         """
-
-        if documents is not None and images is not None:
-            raise ValueError("You can only provide documents or images, not both.")
 
         ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
             ids, embeddings, metadatas, documents, images
