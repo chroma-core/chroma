@@ -342,9 +342,9 @@ func (mc *MemoryCatalog) UpdateSegment(ctx context.Context, updateSegment *model
 		if updateSegment.Metadata != nil {
 			for key, value := range updateSegment.Metadata.Metadata {
 				if value == nil {
-					updateSegment.Metadata.Remove(key)
+					oldSegment.Metadata.Remove(key)
 				} else {
-					updateSegment.Metadata.Set(key, value)
+					oldSegment.Metadata.Set(key, value)
 				}
 			}
 		}
