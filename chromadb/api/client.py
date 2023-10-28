@@ -5,7 +5,9 @@ from overrides import override
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.types import (
     CollectionMetadata,
+    DataLoader,
     Documents,
+    Embeddable,
     EmbeddingFunction,
     Embeddings,
     GetResult,
@@ -13,6 +15,7 @@ from chromadb.api.types import (
     Include,
     Metadatas,
     QueryResult,
+    URIs,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -173,13 +176,17 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Embeddable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         return self._server.create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
@@ -188,14 +195,18 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Embeddable]] = None,
     ) -> Collection:
         return self._server.get_collection(
             id=id,
             name=name,
             embedding_function=embedding_function,
+            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
         )
@@ -205,12 +216,16 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Embeddable]] = None,
     ) -> Collection:
         return self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
         )
@@ -251,6 +266,7 @@ class Client(SharedSystemClient, ClientAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         return self._server._add(
             ids=ids,
@@ -258,6 +274,7 @@ class Client(SharedSystemClient, ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         )
 
     @override
@@ -268,6 +285,7 @@ class Client(SharedSystemClient, ClientAPI):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         return self._server._update(
             collection_id=collection_id,
@@ -275,6 +293,7 @@ class Client(SharedSystemClient, ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         )
 
     @override
@@ -285,6 +304,7 @@ class Client(SharedSystemClient, ClientAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         return self._server._upsert(
             collection_id=collection_id,
@@ -292,6 +312,7 @@ class Client(SharedSystemClient, ClientAPI):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         )
 
     @override
