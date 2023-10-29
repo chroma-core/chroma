@@ -226,7 +226,7 @@ def test_filterable_metadata_get(
     filters=st.lists(strategies.filters(collection_st_lf, recordset_st_lf), min_size=1),
 )
 def test_filterable_metadata_get_lf(
-    caplog, api: API, collection: strategies.Collection, record_set, filters
+    caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
 
