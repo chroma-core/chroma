@@ -395,11 +395,11 @@ class Collection(BaseModel):
 
     def _validate_embedding_set(
         self,
-        valid_ids: OneOrMany[ID],
-        valid_embeddings: Optional[OneOrMany[Embedding]],
-        valid_metadatas: Optional[OneOrMany[Metadata]],
-        valid_documents: Optional[OneOrMany[Document]],
-        valid_images: Optional[OneOrMany[Image]] = None,
+        ids: OneOrMany[ID],
+        embeddings: Optional[OneOrMany[Embedding]],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
+        images: Optional[OneOrMany[Image]] = None,
         require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
@@ -408,26 +408,24 @@ class Collection(BaseModel):
         Optional[Documents],
         Optional[Images],
     ]:
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(valid_ids))
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
         valid_embeddings = (
-            validate_embeddings(maybe_cast_one_to_many_embedding(valid_embeddings))
-            if valid_embeddings is not None
+            validate_embeddings(maybe_cast_one_to_many_embedding(embeddings))
+            if embeddings is not None
             else None
         )
         valid_metadatas = (
-            validate_metadatas(maybe_cast_one_to_many_metadata(valid_metadatas))
-            if valid_metadatas is not None
+            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
+            if metadatas is not None
             else None
         )
         valid_documents = (
-            maybe_cast_one_to_many_document(valid_documents)
-            if valid_documents is not None
+            maybe_cast_one_to_many_document(documents)
+            if documents is not None
             else None
         )
         valid_images = (
-            maybe_cast_one_to_many_image(valid_images)
-            if valid_images is not None
-            else None
+            maybe_cast_one_to_many_image(images) if images is not None else None
         )
 
         # Check that one of embeddings or ducuments or images is provided

@@ -54,10 +54,9 @@ Metadatas = List[Metadata]
 
 
 def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
-    if isinstance(target, List):
-        # One Metadata dict
-        if isinstance(target, dict):
-            return cast(Metadatas, [target])
+    # One Metadata dict
+    if isinstance(target, dict):
+        return cast(Metadatas, [target])
     # Already a sequence
     return cast(Metadatas, target)
 
