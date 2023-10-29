@@ -319,6 +319,56 @@ def test_filterable_metadata_query(
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 
+def test_empty_filter(api: API) -> None:
+    """Test that a filter where no document matches returns an empty result"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_query_embedding: Embedding = [1, 2]
+    test_query_embeddings: Embeddings = [test_query_embedding, test_query_embedding]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings)
+
+    res = coll.query(
+        query_embeddings=test_query_embedding,
+        where={"q": {"$eq": 4}},
+        n_results=3,
+        include=["embeddings", "distances", "metadatas"],
+    )
+    assert res["ids"] == [[]]
+    assert res["embeddings"] == [[]]
+    assert res["distances"] == [[]]
+    assert res["metadatas"] == [[]]
+
+    res = coll.query(
+        query_embeddings=test_query_embeddings,
+        where={"test": "yes"},
+        n_results=3,
+    )
+    assert res["ids"] == [[], []]
+    assert res["embeddings"] is None
+    assert res["distances"] == [[], []]
+    assert res["metadatas"] == [[], []]
+
+
+def test_boolean_metadata(api: API) -> None:
+    """Test that metadata with boolean values is correctly filtered"""
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_metadatas: Metadatas = [{"test": True}, {"test": False}, {"test": True}]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
+
+    res = coll.get(where={"test": True})
+
+    assert res["ids"] == ["1", "3"]
+
+
 @settings(
     suppress_health_check=[
         HealthCheck.function_scoped_fixture,
@@ -386,53 +436,3 @@ def test_filterable_metadata_query_lf(
             )
         )
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
-
-
-def test_empty_filter(api: API) -> None:
-    """Test that a filter where no document matches returns an empty result"""
-    api.reset()
-    coll = api.create_collection(name="test")
-
-    test_ids: IDs = ["1", "2", "3"]
-    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
-    test_query_embedding: Embedding = [1, 2]
-    test_query_embeddings: Embeddings = [test_query_embedding, test_query_embedding]
-
-    coll.add(ids=test_ids, embeddings=test_embeddings)
-
-    res = coll.query(
-        query_embeddings=test_query_embedding,
-        where={"q": {"$eq": 4}},
-        n_results=3,
-        include=["embeddings", "distances", "metadatas"],
-    )
-    assert res["ids"] == [[]]
-    assert res["embeddings"] == [[]]
-    assert res["distances"] == [[]]
-    assert res["metadatas"] == [[]]
-
-    res = coll.query(
-        query_embeddings=test_query_embeddings,
-        where={"test": "yes"},
-        n_results=3,
-    )
-    assert res["ids"] == [[], []]
-    assert res["embeddings"] is None
-    assert res["distances"] == [[], []]
-    assert res["metadatas"] == [[], []]
-
-
-def test_boolean_metadata(api: API) -> None:
-    """Test that metadata with boolean values is correctly filtered"""
-    api.reset()
-    coll = api.create_collection(name="test")
-
-    test_ids: IDs = ["1", "2", "3"]
-    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
-    test_metadatas: Metadatas = [{"test": True}, {"test": False}, {"test": True}]
-
-    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
-
-    res = coll.get(where={"test": True})
-
-    assert res["ids"] == ["1", "3"]
