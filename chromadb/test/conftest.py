@@ -423,6 +423,7 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
     client = ClientCreator.from_system(system)
     yield client
+    client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")
