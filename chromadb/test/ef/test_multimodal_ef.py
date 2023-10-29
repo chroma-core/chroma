@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Generator, cast
 import numpy as np
 import pytest
 import chromadb
@@ -39,11 +39,13 @@ def random_document() -> Document:
 @pytest.fixture
 def multimodal_collection(
     default_ef: EmbeddingFunction[Embeddable] = hashing_multimodal_ef(),
-) -> chromadb.Collection:
+) -> Generator[chromadb.Collection, None, None]:
     client = chromadb.Client()
-    return client.create_collection(
+    collection = client.create_collection(
         name="multimodal_collection", embedding_function=default_ef
     )
+    yield collection
+    client.clear_system_cache()
 
 
 # Test adding and querying of a multimodal collection consisting of images and documents
