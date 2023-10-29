@@ -22,6 +22,9 @@ def main(
             ):
                 # Strip whitespace and append the line to the documents list
                 line = line.strip()
+                # Skip empty lines
+                if len(line) == 0:
+                    continue
                 documents.append(line)
                 metadatas.append({"filename": filename, "line_number": line_number})
 

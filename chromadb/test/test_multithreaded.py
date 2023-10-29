@@ -5,7 +5,7 @@ import threading
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 import numpy as np
 
-from chromadb.api import API
+from chromadb.api import ServerAPI
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.strategies import RecordSet
 from chromadb.test.property.strategies import test_hnsw_config
@@ -37,7 +37,7 @@ def generate_record_set(N: int, D: int) -> RecordSet:
 
 # Hypothesis is bad at generating large datasets so we manually generate data in
 # this test to test multithreaded add with larger datasets
-def _test_multithreaded_add(api: API, N: int, D: int, num_workers: int) -> None:
+def _test_multithreaded_add(api: ServerAPI, N: int, D: int, num_workers: int) -> None:
     records_set = generate_record_set(N, D)
     ids = records_set["ids"]
     embeddings = records_set["embeddings"]
@@ -95,7 +95,9 @@ def _test_multithreaded_add(api: API, N: int, D: int, num_workers: int) -> None:
     )
 
 
-def _test_interleaved_add_query(api: API, N: int, D: int, num_workers: int) -> None:
+def _test_interleaved_add_query(
+    api: ServerAPI, N: int, D: int, num_workers: int
+) -> None:
     """Test that will use multiple threads to interleave operations on the db and verify they work correctly"""
 
     api.reset()
@@ -207,14 +209,14 @@ def _test_interleaved_add_query(api: API, N: int, D: int, num_workers: int) -> N
     )
 
 
-def test_multithreaded_add(api: API) -> None:
+def test_multithreaded_add(api: ServerAPI) -> None:
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()
         _test_multithreaded_add(api, N, D, num_workers)
 
 
-def test_interleaved_add_query(api: API) -> None:
+def test_interleaved_add_query(api: ServerAPI) -> None:
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()

@@ -8,7 +8,7 @@ authors = [
 ]
 description = "Chroma."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Apache Software License",
@@ -26,20 +26,27 @@ dependencies = [
   'typing_extensions >= 4.5.0',
   'pulsar-client>=3.1.0',
   'onnxruntime >= 1.14.1',
+  'opentelemetry-api>=1.2.0',
+  'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
+  'opentelemetry-sdk>=1.2.0',
   'tokenizers >= 0.13.2',
   'pypika >= 0.48.9',
   'tqdm >= 4.65.0',
   'overrides >= 7.3.1',
   'importlib-resources',
   'graphlib_backport >= 1.0.3; python_version < "3.9"',
+  'grpcio >= 1.58.0',
   'bcrypt >= 4.0.1',
   'typer >= 0.9.0',
+  'kubernetes>=28.1.0',
+  'tenacity>=8.2.3',
+  'PyYAML>=6.0.0',
 ]
 
 [tool.black]
 line-length = 88
 required-version = "23.3.0" # Black will refuse to run if it's not this version.
-target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+target-version = ['py38', 'py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

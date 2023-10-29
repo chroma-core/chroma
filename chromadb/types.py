@@ -29,6 +29,16 @@ class Collection(TypedDict):
     dimension: Optional[int]
 
 
+class Database(TypedDict):
+    id: UUID
+    name: str
+    tenant: str
+
+
+class Tenant(TypedDict):
+    name: str
+
+
 class Segment(TypedDict):
     id: UUID
     type: NamespacedName

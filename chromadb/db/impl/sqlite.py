@@ -4,7 +4,11 @@ from chromadb.config import System, Settings
 import chromadb.db.base as base
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
-from chromadb.utils.delete_file import delete_file
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 import sqlite3
 from overrides import override
 import pypika
@@ -67,6 +71,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             files("chromadb.migrations.metadb"),
         ]
         self._is_persistent = self._settings.require("is_persistent")
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         if not self._is_persistent:
             # In order to allow sqlite to be shared between multiple threads, we need to use a
             # URI connection string with shared cache.
@@ -84,6 +89,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         self._tx_stack = local()
         super().__init__(system)
 
+    @trace_method("SqliteDB.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
         super().start()
@@ -92,6 +98,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
 
+    @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:
         super().stop()
@@ -122,6 +129,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             self._tx_stack.stack = []
         return TxWrapper(self._conn_pool, stack=self._tx_stack)
 
+    @trace_method("SqliteDB.reset_state", OpenTelemetryGranularity.ALL)
     @override
     def reset_state(self) -> None:
         if not self._settings.require("allow_reset"):
@@ -132,40 +140,40 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             # Drop all tables
             cur.execute(
                 """
-                SELECT name FROM sqlite_master
-                WHERE type='table'
-                """
+                    SELECT name FROM sqlite_master
+                    WHERE type='table'
+                    """
             )
             for row in cur.fetchall():
                 cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
         self._conn_pool.close()
-        if self._is_persistent:
-            delete_file(self._db_file)
         self.start()
         super().reset_state()
 
+    @trace_method("SqliteDB.setup_migrations", OpenTelemetryGranularity.ALL)
     @override
     def setup_migrations(self) -> None:
         with self.tx() as cur:
             cur.execute(
                 """
-                 CREATE TABLE IF NOT EXISTS migrations (
-                     dir TEXT NOT NULL,
-                     version INTEGER NOT NULL,
-                     filename TEXT NOT NULL,
-                     sql TEXT NOT NULL,
-                     hash TEXT NOT NULL,
-                     PRIMARY KEY (dir, version)
-                 )
-                 """
+                    CREATE TABLE IF NOT EXISTS migrations (
+                        dir TEXT NOT NULL,
+                        version INTEGER NOT NULL,
+                        filename TEXT NOT NULL,
+                        sql TEXT NOT NULL,
+                        hash TEXT NOT NULL,
+                        PRIMARY KEY (dir, version)
+                    )
+                    """
             )
 
+    @trace_method("SqliteDB.migrations_initialized", OpenTelemetryGranularity.ALL)
     @override
     def migrations_initialized(self) -> bool:
         with self.tx() as cur:
             cur.execute(
                 """SELECT count(*) FROM sqlite_master
-                   WHERE type='table' AND name='migrations'"""
+                WHERE type='table' AND name='migrations'"""
             )
 
             if cur.fetchone()[0] == 0:
@@ -173,6 +181,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             else:
                 return True
 
+    @trace_method("SqliteDB.db_migrations", OpenTelemetryGranularity.ALL)
     @override
     def db_migrations(self, dir: Traversable) -> Sequence[Migration]:
         with self.tx() as cur:
