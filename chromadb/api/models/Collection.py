@@ -178,17 +178,17 @@ class Collection(BaseModel):
 
         """
 
-        if "datas" in include and self._data_loader is None:
-            raise ValueError(
-                "You must set a data loader on the collection if loading from URIs."
-            )
-
         valid_where = validate_where(where) if where else None
         valid_where_document = (
             validate_where_document(where_document) if where_document else None
         )
         valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
         valid_include = validate_include(include, allow_distances=False)
+
+        if "datas" in include and self._data_loader is None:
+            raise ValueError(
+                "You must set a data loader on the collection if loading from URIs."
+            )
 
         if "datas" in include and "uris" not in include:
             valid_include.append("uris")
