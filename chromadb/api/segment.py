@@ -149,29 +149,13 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
-        data_loader: Optional[DataLoader[Any]] = None,
+        data_loader: Optional[DataLoader[Embeddable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         if metadata is not None:
             validate_metadata(metadata)
-
-        if existing:
-            if get_or_create:
-                if metadata and existing[0]["metadata"] != metadata:
-                    self._modify(id=existing[0]["id"], new_metadata=metadata)
-                    existing = self._sysdb.get_collections(id=existing[0]["id"])
-                return Collection(
-                    client=self,
-                    id=existing[0]["id"],
-                    name=existing[0]["name"],
-                    metadata=existing[0]["metadata"],  # type: ignore
-                    embedding_function=embedding_function,
-                    data_loader=data_loader,
-                )
-            else:
-                raise ValueError(f"Collection {name} already exists.")
 
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
@@ -224,6 +208,7 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Embeddable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -231,6 +216,7 @@ class SegmentAPI(ServerAPI):
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            data_loader=data_loader,
             get_or_create=True,
             tenant=tenant,
             database=database,
@@ -248,6 +234,7 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Embeddable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -264,6 +251,7 @@ class SegmentAPI(ServerAPI):
                 name=existing[0]["name"],
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
+                data_loader=data_loader,
                 tenant=tenant,
                 database=database,
             )
