@@ -385,7 +385,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
 )
 def test_filterable_metadata_query_lf(
     caplog: pytest.LogCaptureFixture,
-    api: API,
+    api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
