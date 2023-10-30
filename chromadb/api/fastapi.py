@@ -250,15 +250,21 @@ class FastAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
+
         resp = self._session.get(
-            self._api_url + "/collections/" + name,
-            params={"tenant": tenant, "database": database},
+            self._api_url + "/collections",
+            params={
+                "tenant": tenant,
+                "database": database,
+            },
+            data=json.dumps({"name": name, "id": id}),
         )
         raise_chroma_error(resp)
         resp_json = resp.json()

@@ -56,6 +56,11 @@ class CreateCollection(BaseModel):  # type: ignore
     get_or_create: bool = False
 
 
+class GetCollection(BaseModel):  # type: ignore
+    id: Optional[str] = None
+    name: Optional[str] = None
+
+
 class UpdateCollection(BaseModel):  # type: ignore
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None

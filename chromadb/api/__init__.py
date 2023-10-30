@@ -90,12 +90,14 @@ class BaseAPI(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
     ) -> Collection:
         """Get a collection with the given name.
         Args:
             name: The name of the collection to get
+            id: The UUID of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
 
@@ -104,6 +106,7 @@ class BaseAPI(ABC):
 
         Raises:
             ValueError: If the collection does not exist
+            ValueError: If both name and id are None
 
         Examples:
             ```python
@@ -496,8 +499,9 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

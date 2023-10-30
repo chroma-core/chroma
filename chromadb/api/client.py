@@ -188,12 +188,14 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
     ) -> Collection:
         return self._server.get_collection(
             name=name,
             embedding_function=embedding_function,
+            id=id,
             tenant=self.tenant,
             database=self.database,
         )

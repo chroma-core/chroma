@@ -38,6 +38,7 @@ from chromadb.server.fastapi.types import (
     CreateDatabase,
     CreateTenant,
     DeleteEmbedding,
+    GetCollection,
     GetEmbedding,
     QueryEmbedding,
     CreateCollection,
@@ -241,8 +242,18 @@ class FastAPI(chromadb.server.Server):
             methods=["POST"],
             response_model=None,
         )
+        # We introduced get_collection with support for getting by id and split this path into two
+        # 1. get_collection_by_name which operates on /api/v1/collections/{collection_name}
+        # 2. get_collection which operates on /api/v1/collections and takes a body with
+        # name and id
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
+            self.get_collection_by_name,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
+            "/api/v1/collections",
             self.get_collection,
             methods=["GET"],
             response_model=None,
@@ -359,6 +370,24 @@ class FastAPI(chromadb.server.Server):
             database=database,
         )
 
+    @trace_method("FastAPI.get_collection_by_name", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.GET_COLLECTION,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
+            type=AuthzResourceTypes.COLLECTION,
+        ),
+    )
+    def get_collection_by_name(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        return self._api.get_collection(
+            collection_name, tenant=tenant, database=database
+        )
+
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
         action=AuthzResourceActions.GET_COLLECTION,
@@ -369,12 +398,15 @@ class FastAPI(chromadb.server.Server):
     )
     def get_collection(
         self,
-        collection_name: str,
+        get_collection: GetCollection,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self._api.get_collection(
-            collection_name, tenant=tenant, database=database
+            name=get_collection.name,
+            tenant=tenant,
+            database=database,
+            id=_uuid(get_collection.id) if get_collection.id else None,
         )
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)

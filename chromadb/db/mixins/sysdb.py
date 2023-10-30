@@ -226,7 +226,13 @@ class SqlSysDB(SqlDB, SysDB):
 
         topic = self._assignment_policy.assign_collection(id)
         collection = Collection(
-            id=id, topic=topic, name=name, metadata=metadata, dimension=dimension
+            id=id,
+            topic=topic,
+            name=name,
+            metadata=metadata,
+            dimension=dimension,
+            tenant=tenant,
+            database=database,
         )
 
         with self.tx() as cur:
@@ -379,6 +385,7 @@ class SqlSysDB(SqlDB, SysDB):
 
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
+        databases_t = Table("databases")
         q = (
             self.querybuilder()
             .from_(collections_t)
@@ -387,6 +394,8 @@ class SqlSysDB(SqlDB, SysDB):
                 collections_t.name,
                 collections_t.topic,
                 collections_t.dimension,
+                collections_t.database_id,
+                databases_t.tenant_id,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -394,6 +403,8 @@ class SqlSysDB(SqlDB, SysDB):
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
+            .join(databases_t)
+            .on(collections_t.database_id == databases_t.id)
             .orderby(collections_t.id)
         )
         if id:
@@ -404,7 +415,6 @@ class SqlSysDB(SqlDB, SysDB):
             q = q.where(collections_t.name == ParameterValue(name))
 
         if tenant and database:
-            databases_t = Table("databases")
             q = q.where(
                 collections_t.database_id
                 == self.querybuilder()
@@ -425,6 +435,8 @@ class SqlSysDB(SqlDB, SysDB):
                 name = str(rows[0][1])
                 topic = str(rows[0][2])
                 dimension = int(rows[0][3]) if rows[0][3] else None
+                tenant = str(rows[0][4])
+                database = str(rows[0][5])
                 metadata = self._metadata_from_rows(rows)
                 collections.append(
                     Collection(
@@ -433,6 +445,8 @@ class SqlSysDB(SqlDB, SysDB):
                         name=name,
                         metadata=metadata,
                         dimension=dimension,
+                        tenant=tenant,
+                        database=database,
                     )
                 )
 

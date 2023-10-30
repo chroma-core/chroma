@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional, Tuple, cast, List
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
@@ -40,6 +41,8 @@ class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
+    tenant: str = DEFAULT_TENANT
+    database: str = DEFAULT_DATABASE
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -50,8 +53,12 @@ class Collection(BaseModel):
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ):
-        super().__init__(name=name, metadata=metadata, id=id)
+        super().__init__(
+            name=name, metadata=metadata, id=id, tenant=tenant, database=database
+        )
         self._client = client
         self._embedding_function = embedding_function
 

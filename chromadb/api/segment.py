@@ -214,22 +214,33 @@ class SegmentAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        existing = self._sysdb.get_collections(
-            name=name, tenant=tenant, database=database
-        )
+        if id is None and name is None or (id is not None and name is not None):
+            raise ValueError("Must provide either id or name, but not both.")
+
+        existing = None
+        if id is not None:
+            existing = self._get_collection(id)
+        else:
+            res = self._sysdb.get_collections(
+                name=name, id=id, tenant=tenant, database=database
+            )
+            existing = res[0] if res else None
 
         if existing:
             return Collection(
                 client=self,
-                id=existing[0]["id"],
-                name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
+                id=existing["id"],
+                name=existing["name"],
+                metadata=existing["metadata"],  # type: ignore
                 embedding_function=embedding_function,
+                tenant=existing["tenant"],
+                database=existing["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
