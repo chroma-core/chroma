@@ -131,7 +131,7 @@ class BaseAPI(ABC):
 
         Examples:
             ```python
-            client.get_collection_by_id("my_collection")
+            client.get_collection_by_id('97c86f7b-6197-4ebe-bf97-9b73fceccdef')
             # collection(name="my_collection", metadata={})
             ```
         """
