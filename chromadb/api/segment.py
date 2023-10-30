@@ -289,8 +289,8 @@ class SegmentAPI(ServerAPI):
         existing = self._sysdb.get_collections(
             name=name, tenant=tenant, database=database
         )
-
         if existing:
+            self._manager.hint_use_collection(existing[0]["id"], t.Operation.DELETE)
             self._sysdb.delete_collection(
                 existing[0]["id"], tenant=tenant, database=database
             )
@@ -486,7 +486,9 @@ class SegmentAPI(ServerAPI):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas)
+            if "metadatas" in include
+            else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
 
