@@ -115,8 +115,8 @@ class SysDB(Component):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
+        tenant: Optional[str] = DEFAULT_TENANT,
+        database: Optional[str] = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
         pass

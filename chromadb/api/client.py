@@ -198,6 +198,16 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
         )
 
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        return self._server.get_collection_by_id(
+            id=id,
+            embedding_function=embedding_function,
+        )
+
     @override
     def get_or_create_collection(
         self,

@@ -270,6 +270,15 @@ class FastAPI(ServerAPI):
             metadata=resp_json["metadata"],
         )
 
+    @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
+    @override
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        raise NotImplementedError()
+
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )

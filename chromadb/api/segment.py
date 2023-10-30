@@ -184,6 +184,8 @@ class SegmentAPI(ServerAPI):
             name=name,
             metadata=coll["metadata"],  # type: ignore
             embedding_function=embedding_function,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method(
@@ -230,9 +232,33 @@ class SegmentAPI(ServerAPI):
                 name=existing[0]["name"],
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
+                tenant=tenant,
+                database=database,
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
+
+    @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
+    @override
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+    ) -> Collection:
+        existing = self._sysdb.get_collections(id=id, tenant=None, database=None)
+
+        if existing:
+            return Collection(
+                client=self,
+                id=existing[0]["id"],
+                name=existing[0]["name"],
+                metadata=existing[0]["metadata"],  # type: ignore
+                embedding_function=embedding_function,
+                tenant=existing[0]["tenant"],
+                database=existing[0]["database"],
+            )
+        else:
+            raise ValueError(f"Collection {id} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -250,6 +276,8 @@ class SegmentAPI(ServerAPI):
                     id=db_collection["id"],
                     name=db_collection["name"],
                     metadata=db_collection["metadata"],  # type: ignore
+                    tenant=db_collection["tenant"],
+                    database=db_collection["database"],
                 )
             )
         return collections
@@ -486,7 +514,9 @@ class SegmentAPI(ServerAPI):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas)
+            if "metadatas" in include
+            else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
 

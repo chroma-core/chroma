@@ -245,8 +245,8 @@ class GrpcSysDB(SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
+        tenant: Optional[str] = DEFAULT_TENANT,
+        database: Optional[str] = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         request = GetCollectionsRequest(
             id=id.hex if id else None,
