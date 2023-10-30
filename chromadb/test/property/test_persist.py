@@ -8,6 +8,7 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
+from chromadb.db.system import SysDB
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -25,6 +26,8 @@ from hypothesis.stateful import (
 import os
 import shutil
 import tempfile
+
+from chromadb.types import SegmentScope
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -56,7 +59,8 @@ def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
 
 
 collection_st = st.shared(
-    strategies.collections(with_hnsw_params=True, with_persistent_hnsw_params=True),
+    strategies.collections(with_hnsw_params=True,
+                           with_persistent_hnsw_params=True),
     key="coll",
 )
 
@@ -120,6 +124,65 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
+    system_2.stop()
+    del api_2
+    del system_2
+
+
+@given(
+    collection_strategy=collection_st,
+    embeddings_strategy=strategies.recordsets(collection_st),
+)
+def test_remove_unloaded_local_segment(
+    settings: Settings,
+    collection_strategy: strategies.Collection,
+    embeddings_strategy: strategies.RecordSet,
+) -> None:
+    system_1 = System(settings)
+    api_1 = system_1.instance(ServerAPI)
+    system_1.start()
+
+    api_1.reset()
+    coll = api_1.create_collection(
+        name=collection_strategy.name,
+        metadata=collection_strategy.metadata,
+        embedding_function=collection_strategy.embedding_function,
+    )
+    _id = coll.id
+    if not invariants.is_metadata_valid(invariants.wrap_all(embeddings_strategy)):
+        with pytest.raises(Exception):
+            coll.add(**embeddings_strategy)
+        return
+
+    coll.add(**embeddings_strategy)
+
+    invariants.count(coll, embeddings_strategy)
+    invariants.metadatas_match(coll, embeddings_strategy)
+    invariants.documents_match(coll, embeddings_strategy)
+    invariants.ids_match(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        embedding_function=collection_strategy.embedding_function,
+    )
+
+    system_1.stop()
+    del api_1
+    del system_1
+
+    system_2 = System(settings)
+    api_2 = system_2.instance(ServerAPI)
+    system_2.start()
+    segman = system_2.require(SysDB)
+    segment_id = str(
+        segman.get_segments(collection=_id, scope=SegmentScope.VECTOR)[0]["id"]
+    )
+
+    api_2.delete_collection(
+        name=collection_strategy.name,
+    )
+    assert not os.path.exists(os.path.join(
+        settings.persist_directory, segment_id))
     system_2.stop()
     del api_2
     del system_2
@@ -196,7 +259,8 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachine):
         conn1, conn2 = multiprocessing.Pipe()
         p = ctx.Process(
             target=load_and_check,
-            args=(self.settings, collection_name, self.record_set_state, conn2),
+            args=(self.settings, collection_name,
+                  self.record_set_state, conn2),
         )
         p.start()
         p.join()
