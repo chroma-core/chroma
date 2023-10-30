@@ -201,8 +201,8 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         dimension=collection.dimension
         if collection.HasField("dimension") and collection.dimension
         else None,
-        database=collection.database if collection.HasField("database") else None,
-        tenant=collection.tenant if collection.HasField("tenant") else None,
+        database=collection.database,
+        tenant=collection.tenant,
     )
 
 

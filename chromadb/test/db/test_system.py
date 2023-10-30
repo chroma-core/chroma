@@ -273,7 +273,6 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         get_or_create=True,
         metadata=collection["metadata"],
     )
-    print(result["database"])
     assert result == collection
 
     # Only one collection with the same name exists

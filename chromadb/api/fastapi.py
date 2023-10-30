@@ -250,15 +250,21 @@ class FastAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
+        if name is None and id is None:
+            raise ValueError("Either name or id must be provided")
+
+        _params = {"tenant": tenant, "database": database}
+        if id is not None:
+            _params["type"] = str(id)
         resp = self._session.get(
-            self._api_url + "/collections/" + name,
-            params={"tenant": tenant, "database": database},
+            self._api_url + "/collections/" + name if name else str(id), params=_params
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
@@ -270,14 +276,15 @@ class FastAPI(ServerAPI):
             metadata=resp_json["metadata"],
         )
 
-    @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
-    @override
-    def get_collection_by_id(
-        self,
-        id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-    ) -> Collection:
-        raise NotImplementedError()
+    # @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
+    # @override
+    # def get_collection(
+    #     self,
+    #     id: UUID,
+    #     embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
+    #     ),
+    # ) -> Collection:
+    #     raise NotImplementedError()
 
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION

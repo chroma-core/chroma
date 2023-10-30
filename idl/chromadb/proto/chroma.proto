@@ -55,8 +55,8 @@ message Collection {
   string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
-  optional string tenant = 6;
-  optional string database = 7;
+  string tenant = 6;
+  string database = 7;
 }
 
 message Database {

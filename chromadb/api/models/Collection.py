@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING, Optional, Tuple, cast, List
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
@@ -41,8 +40,8 @@ class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
-    _tenant: Optional[str] = None
-    _database: Optional[str] = None
+    tenant: Optional[str] = None
+    database: Optional[str] = None
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -52,15 +51,15 @@ class Collection(BaseModel):
         name: str,
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-        tenant: Optional[str] = DEFAULT_TENANT,
-        database: Optional[str] = DEFAULT_DATABASE,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
     ):
         super().__init__(name=name, metadata=metadata, id=id)
         self._client = client
         self._embedding_function = embedding_function
-        self._tenant = tenant
-        self._database = database
+        self.tenant = tenant
+        self.database = database
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"
@@ -337,22 +336,6 @@ class Collection(BaseModel):
         )
 
         self._client._delete(self.id, ids, where, where_document)
-
-    @property
-    def tenant(self) -> Optional[str]:
-        return self._tenant
-
-    @tenant.setter
-    def tenant(self, value: str) -> None:
-        raise AttributeError("Can't set attribute tenant")
-
-    @property
-    def database(self) -> Optional[str]:
-        return self._database
-
-    @database.setter
-    def database(self, value: str) -> None:
-        raise AttributeError("Can't set attribute database")
 
     def _validate_embedding_set(
         self,

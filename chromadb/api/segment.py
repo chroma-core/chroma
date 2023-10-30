@@ -216,13 +216,16 @@ class SegmentAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
+        if id is None and name is None:
+            raise ValueError("Must provide either id or name")
         existing = self._sysdb.get_collections(
-            name=name, tenant=tenant, database=database
+            id=id, name=name, tenant=tenant, database=database
         )
 
         if existing:
@@ -237,28 +240,6 @@ class SegmentAPI(ServerAPI):
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
-
-    @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
-    @override
-    def get_collection_by_id(
-        self,
-        id: UUID,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
-    ) -> Collection:
-        existing = self._sysdb.get_collections(id=id, tenant=None, database=None)
-
-        if existing:
-            return Collection(
-                client=self,
-                id=existing[0]["id"],
-                name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
-                embedding_function=embedding_function,
-                tenant=existing[0]["tenant"],
-                database=existing[0]["database"],
-            )
-        else:
-            raise ValueError(f"Collection {id} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override

@@ -3,7 +3,6 @@ from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 
 Metadata = Mapping[str, Union[str, int, float, bool]]
 UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
