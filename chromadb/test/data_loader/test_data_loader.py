@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 import pytest
 import chromadb
 from chromadb.api.types import URI, DataLoader, Documents, IDs, Image, URIs
+from chromadb.api import ServerAPI
 from chromadb.test.ef.test_multimodal_ef import hashing_multimodal_ef
 
 
@@ -27,30 +28,28 @@ def record_set_with_uris(n: int = 3) -> Dict[str, Union[IDs, Documents, URIs]]:
 
 
 @pytest.fixture()
-def collection_with_data_loader() -> Generator[chromadb.Collection, None, None]:
-    client = chromadb.Client()
-
-    collection = client.create_collection(
+def collection_with_data_loader(
+    api: ServerAPI,
+) -> Generator[chromadb.Collection, None, None]:
+    collection = api.create_collection(
         name="collection_with_data_loader",
         data_loader=DefaultDataLoader(),
         embedding_function=hashing_multimodal_ef(),
     )
     yield collection
-    client.delete_collection(collection.name)
-    client.clear_system_cache()
+    api.delete_collection(collection.name)
 
 
 @pytest.fixture
-def collection_without_data_loader() -> Generator[chromadb.Collection, None, None]:
-    client = chromadb.Client()
-
-    collection = client.create_collection(
+def collection_without_data_loader(
+    api: ServerAPI,
+) -> Generator[chromadb.Collection, None, None]:
+    collection = api.create_collection(
         name="collection_without_data_loader",
         embedding_function=hashing_multimodal_ef(),
     )
     yield collection
-    client.delete_collection(collection.name)
-    client.clear_system_cache()
+    api.delete_collection(collection.name)
 
 
 def test_without_data_loader(
