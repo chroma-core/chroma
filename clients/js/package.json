@@ -39,7 +39,7 @@
     "dist"
   ],
   "scripts": {
-    "test": "run-s db:clean db:cleanauth db:run test:runfull db:clean db:run-auth test:runfull-authonly db:cleanauth",
+    "test": "run-s db:clean db:cleanauth db:run test:runfull db:clean test:runfull-authonly db:cleanauth",
     "testnoauth": "run-s db:clean db:run test:runfull db:clean",
     "testauth": "run-s db:cleanauth db:run-auth test:runfull-authonly db:cleanauth",
     "test:set-port": "cross-env URL=localhost:8001",

@@ -89,37 +89,39 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
         this.model = openai_model || "text-embedding-ada-002";
     }
 
-    public async generate(texts: string[]): Promise<number[][]> {
-
+    private async loadClient() {
         // cache the client
-        if (this.openaiApi === undefined) {
+        if(this.openaiApi) return;
 
-            try {
-                const { openai, version } = await OpenAIEmbeddingFunction.import();
-                OpenAIApi = openai;
-                let versionVar: string = version;
-                openAiVersion = versionVar.replace(/[^0-9.]/g, '');
-                openAiMajorVersion = parseInt(openAiVersion.split('.')[0]);
-            } catch (_a) {
-                // @ts-ignore
-                if (_a.code === 'MODULE_NOT_FOUND') {
-                    throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
-                }
-                throw _a; // Re-throw other errors
+        try {
+            const { openai, version } = await OpenAIEmbeddingFunction.import();
+            OpenAIApi = openai;
+            let versionVar: string = version;
+            openAiVersion = versionVar.replace(/[^0-9.]/g, '');
+            openAiMajorVersion = parseInt(openAiVersion.split('.')[0]);
+        } catch (_a) {
+            // @ts-ignore
+            if (_a.code === 'MODULE_NOT_FOUND') {
+                throw new Error("Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`");
             }
-
-            if (openAiMajorVersion > 3) {
-                this.openaiApi = new OpenAIAPIv4(this.api_key);
-            } else {
-                this.openaiApi = new OpenAIAPIv3({
-                    organization: this.org_id,
-                    apiKey: this.api_key,
-                });
-            }
-
+            throw _a; // Re-throw other errors
         }
 
-        return await this.openaiApi.createEmbedding({
+        if (openAiMajorVersion > 3) {
+            this.openaiApi = new OpenAIAPIv4(this.api_key);
+        } else {
+            this.openaiApi = new OpenAIAPIv3({
+                organization: this.org_id,
+                apiKey: this.api_key,
+            });
+        }
+    }
+
+    public async generate(texts: string[]): Promise<number[][]> {
+
+        await this.loadClient();
+
+        return await this.openaiApi!.createEmbedding({
             model: this.model,
             input: texts,
         }).catch((error: any) => {

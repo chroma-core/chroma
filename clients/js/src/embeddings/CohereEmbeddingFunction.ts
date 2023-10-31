@@ -14,25 +14,26 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
         this.model = model || "large";
     }
 
+    private async loadClient() {
+        if(this.cohereAiApi) return;
+        try {
+            // eslint-disable-next-line global-require,import/no-extraneous-dependencies
+            const { cohere } = await CohereEmbeddingFunction.import();
+            CohereAiApi = cohere;
+            CohereAiApi.init(this.api_key);
+        } catch (_a) {
+            // @ts-ignore
+            if (_a.code === 'MODULE_NOT_FOUND') {
+                throw new Error("Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`");
+            }
+            throw _a; // Re-throw other errors
+        }
+        this.cohereAiApi = CohereAiApi;
+    }
+
     public async generate(texts: string[]) {
 
-        if (this.cohereAiApi === undefined) {
-
-            try {
-                // eslint-disable-next-line global-require,import/no-extraneous-dependencies
-                const { cohere } = await CohereEmbeddingFunction.import();
-                CohereAiApi = cohere;
-                CohereAiApi.init(this.api_key);
-            } catch (_a) {
-                // @ts-ignore
-                if (_a.code === 'MODULE_NOT_FOUND') {
-                    throw new Error("Please install the cohere-ai package to use the CohereEmbeddingFunction, `npm install -S cohere-ai`");
-                }
-                throw _a; // Re-throw other errors
-            }
-            this.cohereAiApi = CohereAiApi;
-
-        }
+        await this.loadClient();
 
         const response = await this.cohereAiApi.embed({
             texts: texts,
