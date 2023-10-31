@@ -22,23 +22,23 @@ import uuid
 
 sample_collections = [
     Collection(
-        id=uuid.UUID("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+        id=uuid.UUID(int=1),
         name="test_collection_1",
-        topic="test_topic_1",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000001",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
     ),
     Collection(
-        id=uuid.UUID("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+        id=uuid.UUID(int=2),
         name="test_collection_2",
-        topic="test_topic_2",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000002",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
     ),
     Collection(
-        id=uuid.UUID("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+        id=uuid.UUID(int=3),
         name="test_collection_3",
-        topic="test_topic_3",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000003",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
     ),
@@ -105,8 +105,24 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     yield client
 
 
+def grpc_with_real_server() -> Generator[SysDB, None, None]:
+    system = System(
+        Settings(
+            allow_reset=True,
+            chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+        )
+    )
+    client = system.instance(GrpcSysDB)
+    system.start()
+    client.reset_and_wait_for_ready()
+    yield client
+
+
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
-    return [sqlite, sqlite_persistent, grpc_with_mock_server]
+    if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
+        return [grpc_with_real_server]
+    else:
+        return [sqlite, sqlite_persistent, grpc_with_mock_server]
 
 
 @pytest.fixture(scope="module", params=db_fixtures())

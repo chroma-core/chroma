@@ -26,6 +26,11 @@ rules:
   - get
   - list
   - watch
+  # TODO: FIX THIS LEAKY PERMISSION
+  - create
+  - update
+  - patch
+  - delete
 
 ---
 

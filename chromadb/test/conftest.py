@@ -6,6 +6,8 @@ import socket
 import tempfile
 import time
 from typing import (
+    Any,
+    Dict,
     Generator,
     Iterator,
     List,
@@ -46,6 +48,16 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
+NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+
+
+def skip_if_not_cluster() -> pytest.MarkDecorator:
+    return pytest.mark.skipif(
+        NOT_CLUSTER_ONLY,
+        reason="Requires Kubernetes to be running with a valid config",
+    )
+
+
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -62,6 +74,9 @@ def _run_server(
     chroma_server_auth_credentials_file: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -79,6 +94,9 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
+            chroma_server_authz_config=chroma_server_authz_config,
         )
     else:
         settings = Settings(
@@ -94,6 +112,9 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
+            chroma_server_authz_config=chroma_server_authz_config,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
     uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
@@ -122,6 +143,9 @@ def _fastapi_fixture(
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_client_auth_token_transport_header: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
@@ -138,6 +162,9 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[Dict[str, Any]],
     ] = (
         port,
         False,
@@ -147,6 +174,9 @@ def _fastapi_fixture(
         chroma_server_auth_credentials_file,
         chroma_server_auth_credentials,
         chroma_server_auth_token_transport_header,
+        chroma_server_authz_provider,
+        chroma_server_authz_config_file,
+        chroma_server_authz_config,
     )
     persist_directory = None
     if is_persistent:
@@ -160,6 +190,9 @@ def _fastapi_fixture(
             chroma_server_auth_credentials_file,
             chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider,
+            chroma_server_authz_config_file,
+            chroma_server_authz_config,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
