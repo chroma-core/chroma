@@ -129,7 +129,7 @@ Include = List[
         Literal["metadatas"],
         Literal["distances"],
         Literal["uris"],
-        Literal["datas"],
+        Literal["data"],
     ]
 ]
 
@@ -164,7 +164,7 @@ class GetResult(TypedDict):
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
-    datas: Optional[Loadable]
+    data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
 
 
@@ -173,7 +173,7 @@ class QueryResult(TypedDict):
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
-    datas: Optional[List[Loadable]]
+    data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
@@ -440,7 +440,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas", "uris", "datas"]
+        allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
