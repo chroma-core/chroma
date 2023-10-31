@@ -67,7 +67,7 @@ def test_without_data_loader(
 
     # Can't get data from URIs without a data loader
     with pytest.raises(ValueError):
-        collection_without_data_loader.get(include=["datas"])
+        collection_without_data_loader.get(include=["data"])
 
 
 def test_without_uris(
@@ -80,10 +80,10 @@ def test_without_uris(
         documents=record_set["documents"],
     )
 
-    get_result = collection_with_data_loader.get(include=["datas"])
+    get_result = collection_with_data_loader.get(include=["data"])
 
-    assert get_result["datas"] is not None
-    for data in get_result["datas"]:
+    assert get_result["data"] is not None
+    for data in get_result["data"]:
         assert data is None
 
 
@@ -97,11 +97,11 @@ def test_data_loader(
         uris=record_set["uris"],
     )
 
-    # Get with datas
-    get_result = collection_with_data_loader.get(include=["datas"])
+    # Get with "data"
+    get_result = collection_with_data_loader.get(include=["data"])
 
-    assert get_result["datas"] is not None
-    for i, data in enumerate(get_result["datas"]):
+    assert get_result["data"] is not None
+    for i, data in enumerate(get_result["data"]):
         assert data is not None
         assert data == encode_data(record_set["uris"][i])
 
@@ -109,11 +109,11 @@ def test_data_loader(
     query_result = collection_with_data_loader.query(
         query_uris=record_set["uris"],
         n_results=len(record_set["uris"][0]),
-        include=["datas", "uris"],
+        include=["data", "uris"],
     )
 
-    assert query_result["datas"] is not None
-    for i, data in enumerate(query_result["datas"][0]):
+    assert query_result["data"] is not None
+    for i, data in enumerate(query_result["data"][0]):
         assert data is not None
         assert query_result["uris"] is not None
         assert data == encode_data(query_result["uris"][0][i])
