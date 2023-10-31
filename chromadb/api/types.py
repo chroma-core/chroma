@@ -1,4 +1,4 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -141,13 +141,30 @@ OperatorExpression = OperatorExpression
 Where = Where
 WhereDocumentOperator = WhereDocumentOperator
 
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
+
+
+class EmbeddingFunction(Protocol[D]):
+    def __call__(self, input: D) -> Embeddings:
+        ...
+
+
+Loadable = List[Optional[Image]]
+L = TypeVar("L", covariant=True, bound=Loadable)
+
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
+        ...
+
 
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
-    datas: Optional[Images]
+    datas: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
 
 
@@ -156,7 +173,7 @@ class QueryResult(TypedDict):
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
-    datas: Optional[List[Images]]
+    datas: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 

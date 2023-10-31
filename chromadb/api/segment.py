@@ -25,6 +25,7 @@ from chromadb.api.types import (
     IDs,
     Embeddings,
     Embedding,
+    Loadable,
     Metadatas,
     Documents,
     URIs,
@@ -149,7 +150,7 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -208,7 +209,7 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -234,7 +235,7 @@ class SegmentAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

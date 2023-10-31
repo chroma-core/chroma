@@ -12,6 +12,7 @@ from chromadb.api.types import (
     Embeddings,
     Embeddable,
     Include,
+    Loadable,
     Metadata,
     Metadatas,
     Document,
@@ -59,7 +60,7 @@ class Collection(BaseModel):
     database: Optional[str] = None
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction[Embeddable]] = PrivateAttr()
-    _data_loader: Optional[DataLoader[Any]] = PrivateAttr()
+    _data_loader: Optional[DataLoader[Loadable]] = PrivateAttr()
 
     def __init__(
         self,
@@ -69,7 +70,7 @@ class Collection(BaseModel):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Any]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: Optional[str] = None,
         database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
