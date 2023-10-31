@@ -13,6 +13,7 @@ from chromadb.api.types import (
     GetResult,
     IDs,
     Include,
+    Loadable,
     Metadatas,
     QueryResult,
     URIs,
@@ -179,7 +180,7 @@ class Client(SharedSystemClient, ClientAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         return self._server.create_collection(
@@ -200,7 +201,7 @@ class Client(SharedSystemClient, ClientAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         return self._server.get_collection(
             id=id,
@@ -219,7 +220,7 @@ class Client(SharedSystemClient, ClientAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         return self._server.get_or_create_collection(
             name=name,

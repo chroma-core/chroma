@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    Loadable,
     Metadatas,
     URIs,
     Where,
@@ -64,7 +65,7 @@ class BaseAPI(ABC):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -101,7 +102,7 @@ class BaseAPI(ABC):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -131,7 +132,7 @@ class BaseAPI(ABC):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -506,7 +507,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -522,7 +523,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -537,7 +538,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Embeddable]] = None,
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
