@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.5.12-alpha1",
+  "version": "1.5.12-beta.0",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -48,7 +48,7 @@
     "test:run-auth-token": "jest --runInBand --testPathPattern=test/auth.token.test.ts",
     "test:run-auth-xtoken": "XTOKEN_TEST=true jest --runInBand --testPathPattern=test/auth.token.test.ts",
     "test:runfull": "PORT=8001 jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
-    "test:runfull-authonly": "run-s db:run-auth-basic test:runfull-authonly-basic db:clean db:run-auth-token test:runfull-authonly-token db:clean db:run-auth-xtoken test:runfull-authonly-xtoken db:clean",
+    "test:runfull-authonly": "run-s db:ruan-auth-basic test:runfull-authonly-basic db:clean db:run-auth-token test:runfull-authonly-token db:clean db:run-auth-xtoken test:runfull-authonly-xtoken db:clean",
     "test:runfull-authonly-basic": "PORT=8001 jest --runInBand --testPathPattern=test/auth.basic.test.ts",
     "test:runfull-authonly-token": "PORT=8001 jest --runInBand --testPathPattern=test/auth.token.test.ts",
     "test:runfull-authonly-xtoken": "PORT=8001 XTOKEN_TEST=true jest --runInBand --testPathPattern=test/auth.token.test.ts",
@@ -85,6 +85,6 @@
     }
   },
   "resolutions": {
-    "string-width": "^4"
+    "jackspeak": "2.1.1"
   }
 }
