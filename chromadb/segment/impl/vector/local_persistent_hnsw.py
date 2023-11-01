@@ -1,8 +1,11 @@
 import os
+import platform
 import shutil
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
+
+from tenacity import RetryCallState, retry, stop_after_attempt
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
@@ -34,6 +37,18 @@ from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
 
 logger = logging.getLogger(__name__)
+
+
+def move_to_recycle_bin(retry_state: RetryCallState) -> None:
+    """Move the index directory to the wastebin"""
+    data_path = retry_state.args[0]
+    if os.path.exists(data_path):
+        shutil.move(data_path, "C:\\$Recycle.Bin")
+
+
+@retry(stop=stop_after_attempt(7), retry_error_callback=move_to_recycle_bin)
+def remove_index_dir_win(data_path: str) -> None:
+    shutil.rmtree(data_path, ignore_errors=False)
 
 
 class PersistentData:
@@ -437,7 +452,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         data_path = self._get_storage_folder()
         if os.path.exists(data_path):
             self.close_persistent_index()
-            shutil.rmtree(data_path, ignore_errors=True)
+            if platform.system() == "Windows":
+                remove_index_dir_win(data_path)
+            else:
+                shutil.rmtree(data_path, ignore_errors=True)
 
     @staticmethod
     def get_file_handle_count() -> int:
