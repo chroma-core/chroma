@@ -1,7 +1,8 @@
 name: Build and Push Hosted Chroma
 
 on:
- push:
+  workflow_dispatch:
+  push:
     branches:
       - beggers/hosted-chroma-autodeploy
 
