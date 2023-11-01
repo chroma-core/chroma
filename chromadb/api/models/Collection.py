@@ -40,6 +40,8 @@ class Collection(BaseModel):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
+    tenant: Optional[str] = None
+    database: Optional[str] = None
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction] = PrivateAttr()
 
@@ -49,9 +51,13 @@ class Collection(BaseModel):
         name: str,
         id: UUID,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
     ):
-        super().__init__(name=name, metadata=metadata, id=id)
+        super().__init__(
+            name=name, metadata=metadata, id=id, tenant=tenant, database=database
+        )
         self._client = client
         self._embedding_function = embedding_function
 

@@ -90,7 +90,8 @@ class BaseAPI(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
     ) -> Collection:
         """Get a collection with the given name.
@@ -496,7 +497,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
