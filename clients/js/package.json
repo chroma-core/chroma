@@ -72,9 +72,7 @@
     "node": ">=14.17.0"
   },
   "dependencies": {
-    "isomorphic-fetch": "^3.0.0",
-    "string-width-cjs": "^5.1.1",
-    "strip-ansi": "^7.1.0"
+    "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
     "cohere-ai": "^5.0.0 || ^6.0.0",
@@ -89,8 +87,6 @@
     }
   },
   "resolutions": {
-    "string-width": "^4",
-    "jackspeak": "^2",
-    "strip-ansi": "^6"
+    "jackspeak": "2.1.1"
   }
 }
