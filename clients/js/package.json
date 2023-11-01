@@ -73,6 +73,7 @@
   },
   "dependencies": {
     "isomorphic-fetch": "^3.0.0",
+    "string-width-cjs": "^5.1.1",
     "strip-ansi": "^7.1.0"
   },
   "peerDependencies": {

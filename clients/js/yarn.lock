@@ -3676,6 +3676,11 @@ string-length@^4.0.1:
     char-regex "^1.0.2"
     strip-ansi "^6.0.0"
 
+string-width-cjs@^5.1.1:
+  version "5.1.1"
+  resolved "https://registry.yarnpkg.com/string-width-cjs/-/string-width-cjs-5.1.1.tgz#9db7e00211027471870621778b089402cf9bdee3"
+  integrity sha512-N5/f0RNFtXPNDLtEvo8Y/+mH4xZWzIAnnqXPzCB4BBAQL8P3sHlz0dqDzTkGQoVsL56aCsORFFlyvA70k5yq3A==
+
 "string-width-cjs@npm:string-width@^4.2.0", string-width@^4, string-width@^4.1.0, string-width@^4.2.0, string-width@^4.2.3, string-width@^5.0.1, string-width@^5.1.2:
   version "4.2.3"
   resolved "https://registry.yarnpkg.com/string-width/-/string-width-4.2.3.tgz#269c7117d27b05ad2e536830a8ec895ef9c6d010"
