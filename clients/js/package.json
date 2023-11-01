@@ -72,7 +72,8 @@
     "node": ">=14.17.0"
   },
   "dependencies": {
-    "isomorphic-fetch": "^3.0.0"
+    "isomorphic-fetch": "^3.0.0",
+    "cliui": "^8.0.1"
   },
   "peerDependencies": {
     "cohere-ai": "^5.0.0 || ^6.0.0",
@@ -85,8 +86,5 @@
     "openai": {
       "optional": true
     }
-  },
-  "resolutions": {
-    "jackspeak": "2.1.1"
   }
 }

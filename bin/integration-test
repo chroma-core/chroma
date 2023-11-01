@@ -57,9 +57,6 @@ python -m pytest "$@"
 
 cd clients/js
 
-npm install --global yarn
-npm upgrade --global yarn 
-
 yarn
 yarn test:run
 docker compose down
