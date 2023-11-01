@@ -162,7 +162,7 @@ def authz_context(
         @wraps(f)
         def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
             _dynamic_kwargs = {
-                "fastapi": args[0],
+                "api": args[0]._api,
                 "function": f,
                 "function_args": args,
                 "function_kwargs": kwargs,

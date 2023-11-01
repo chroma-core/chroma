@@ -1,5 +1,6 @@
 from functools import partial
 from typing import Any, Callable, Dict, Optional, Sequence, cast
+from chromadb.api import ServerAPI
 from chromadb.auth import AuthzResourceTypes
 
 
@@ -42,12 +43,8 @@ def attr_from_collection_lookup(
     collection_id_arg: str, **kwargs: Any
 ) -> Callable[..., Dict[str, Any]]:
     def _wrap(**kwargs: Any) -> Dict[str, Any]:
-        from chromadb.server.fastapi import FastAPI
-
-        fastapi = cast(FastAPI, kwargs.get("fastapi"))
-        col = fastapi._api.get_collection(
-            id=kwargs["function_kwargs"][collection_id_arg]
-        )
+        _api = cast(ServerAPI, kwargs.get("api"))
+        col = _api.get_collection(id=kwargs["function_kwargs"][collection_id_arg])
         return {"tenant": col.tenant, "database": col.database}
 
     return partial(_wrap, **kwargs)
