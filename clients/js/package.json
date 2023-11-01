@@ -86,7 +86,7 @@
   },
   "resolutions": {
     "string-width": "^4",
-    "jackspeak": "^2.1.1",
+    "jackspeak": "^2",
     "strip-ansi": "^6"
   }
 }
