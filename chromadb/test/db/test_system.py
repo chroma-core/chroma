@@ -20,6 +20,8 @@ from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
+# These are the sample collections that are used in the tests below. Tests can override
+# the fields as needed.
 sample_collections = [
     Collection(
         id=uuid.UUID(int=1),

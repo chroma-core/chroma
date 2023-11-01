@@ -114,31 +114,6 @@ class BaseAPI(ABC):
         """
         pass
 
-    # @abstractmethod
-    # def get_collection_by_id(
-    #     self,
-    #     id: UUID,
-    #     embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-    #     ),
-    # ) -> Collection:
-    #     """Get a collection with the given UUID.
-    #     Args:
-    #         id: The UUID of the collection to get
-
-    #     Returns:
-    #         Collection: The collection
-
-    #     Raises:
-    #         ValueError: If the collection does not exist
-
-    #     Examples:
-    #         ```python
-    #         client.get_collection_by_id('97c86f7b-6197-4ebe-bf97-9b73fceccdef')
-    #         # collection(name="my_collection", metadata={})
-    #         ```
-    #     """
-    #     pass
-
     @abstractmethod
     def get_or_create_collection(
         self,

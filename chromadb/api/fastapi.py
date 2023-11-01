@@ -257,8 +257,8 @@ class FastAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         """Returns a collection"""
-        if name is None and id is None:
-            raise ValueError("Either name or id must be provided")
+        if (name is None and id is None) or (name is not None and id is not None):
+            raise ValueError("Name or id must be specified, but not both")
 
         _params = {"tenant": tenant, "database": database}
         if id is not None:
@@ -275,16 +275,6 @@ class FastAPI(ServerAPI):
             embedding_function=embedding_function,
             metadata=resp_json["metadata"],
         )
-
-    # @trace_method("SegmentAPI.get_collection_by_id", OpenTelemetryGranularity.OPERATION)
-    # @override
-    # def get_collection(
-    #     self,
-    #     id: UUID,
-    #     embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(
-    #     ),
-    # ) -> Collection:
-    #     raise NotImplementedError()
 
     @trace_method(
         "FastAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION

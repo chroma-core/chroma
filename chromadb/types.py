@@ -28,8 +28,8 @@ class Collection(TypedDict):
     topic: str
     metadata: Optional[Metadata]
     dimension: Optional[int]
-    tenant: Optional[str]
-    database: Optional[str]
+    tenant: str
+    database: str
 
 
 class Database(TypedDict):

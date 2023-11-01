@@ -55,11 +55,11 @@ class Collection(BaseModel):
         database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
     ):
-        super().__init__(name=name, metadata=metadata, id=id)
+        super().__init__(
+            name=name, metadata=metadata, id=id, tenant=tenant, database=database
+        )
         self._client = client
         self._embedding_function = embedding_function
-        self.tenant = tenant
-        self.database = database
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"

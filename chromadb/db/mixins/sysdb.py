@@ -365,8 +365,8 @@ class SqlSysDB(SqlDB, SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
-        tenant: Optional[str] = DEFAULT_TENANT,
-        database: Optional[str] = DEFAULT_DATABASE,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
 
