@@ -83,5 +83,8 @@
     "openai": {
       "optional": true
     }
+  },
+  "resolutions": {
+    "string-width": "^4"
   }
 }
