@@ -40,10 +40,35 @@ logger = logging.getLogger(__name__)
 
 
 def move_to_recycle_bin(retry_state: RetryCallState) -> None:
-    """Move the index directory to the wastebin"""
-    data_path = retry_state.args[0]
-    if os.path.exists(data_path):
-        shutil.move(data_path, "C:\\$Recycle.Bin")
+    import ctypes
+    from ctypes import wintypes
+
+    # Define SHFILEOPSTRUCT and constants
+    filepath = retry_state.args[0]
+    SHFILEOPSTRUCT = ctypes.StructType(  # type: ignore
+        [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", wintypes.UINT),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", wintypes.HANDLE),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+    )
+
+    FO_DELETE = 0x0003
+    FOF_ALLOWUNDO = 0x0040
+    FOF_NOCONFIRMATION = 0x0010
+
+    shfileop = SHFILEOPSTRUCT()
+    shfileop.wFunc = FO_DELETE
+    shfileop.pFrom = filepath + "\0"  # Null-terminated string
+    shfileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION
+
+    # Call SHFileOperation
+    ctypes.windll.shell32.SHFileOperationW(ctypes.byref(shfileop))  # type: ignore
 
 
 @retry(stop=stop_after_attempt(7), retry_error_callback=move_to_recycle_bin)
