@@ -190,6 +190,9 @@ def authz_context(
                             tenant=request.state.user_identity.get_user_tenant()
                             if hasattr(request.state, "user_identity")
                             else DEFAULT_TENANT,
+                            attributes=request.state.user_identity.get_user_attributes()
+                            if hasattr(request.state, "user_identity")
+                            else {},
                         ),
                         resource=_resource,
                         action=_action,
