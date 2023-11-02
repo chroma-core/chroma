@@ -4,6 +4,8 @@ import tempfile
 import pytest
 from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
 from chromadb.config import System, Settings
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     SubmitEmbeddingRecord,
@@ -14,6 +16,7 @@ from chromadb.types import (
     SegmentScope,
     SeqId,
 )
+from pypika import Table
 from chromadb.ingest import Producer
 from chromadb.segment import MetadataReader
 import uuid
@@ -522,3 +525,40 @@ def _test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+
+def test_delete_segment(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+    _id = segment._id
+    segment.delete()
+    _db = system.instance(SqliteDB)
+    t = Table("embeddings")
+    q = (
+        _db.querybuilder()
+        .from_(t)
+        .select(t.id)
+        .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+    )
+    sql, params = get_sql(q)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that the segment is gone
+        assert len(res.fetchall()) == 0
