@@ -43,32 +43,38 @@ def move_to_recycle_bin(retry_state: RetryCallState) -> None:
     import ctypes
     from ctypes import wintypes
 
-    # Define SHFILEOPSTRUCT and constants
-    filepath = retry_state.args[0]
-    SHFILEOPSTRUCT = ctypes.StructType(  # type: ignore
-        [
+    class SHFILEOPSTRUCT(ctypes.Structure):
+        _fields_ = [
             ("hwnd", wintypes.HWND),
-            ("wFunc", wintypes.UINT),
-            ("pFrom", wintypes.LPCWSTR),
-            ("pTo", wintypes.LPCWSTR),
+            ("wFunc", ctypes.c_uint),
+            ("pFrom", ctypes.c_wchar_p),
+            ("pTo", ctypes.c_wchar_p),
             ("fFlags", wintypes.UINT),
-            ("fAnyOperationsAborted", wintypes.BOOL),
-            ("hNameMappings", wintypes.HANDLE),
-            ("lpszProgressTitle", wintypes.LPCWSTR),
+            ("fAnyOperationsAborted", ctypes.c_bool),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", ctypes.c_wchar_p),
         ]
-    )
 
     FO_DELETE = 0x0003
     FOF_ALLOWUNDO = 0x0040
     FOF_NOCONFIRMATION = 0x0010
+    FOF_SILENT = 0x0004
 
-    shfileop = SHFILEOPSTRUCT()
-    shfileop.wFunc = FO_DELETE
-    shfileop.pFrom = filepath + "\0"  # Null-terminated string
-    shfileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION
+    def move_to_bin(file_path: str) -> None:
+        file_op = SHFILEOPSTRUCT(
+            hwnd=None,
+            wFunc=FO_DELETE,
+            pFrom=file_path + "\0",  # Double-null terminated for multiple files
+            pTo=None,
+            fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT,
+            fAnyOperationsAborted=False,
+            hNameMappings=None,
+            lpszProgressTitle=None,
+        )
 
-    # Call SHFileOperation
-    ctypes.windll.shell32.SHFileOperationW(ctypes.byref(shfileop))  # type: ignore
+        ctypes.windll.shell32.SHFileOperationW(ctypes.byref(file_op))
+
+    move_to_bin(retry_state.args[0])
 
 
 @retry(stop=stop_after_attempt(7), retry_error_callback=move_to_recycle_bin)
