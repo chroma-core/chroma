@@ -500,6 +500,22 @@ class SqliteMetadataSegment(MetadataReader):
     @override
     def delete(self) -> None:
         t = Table("embeddings")
+        t1 = Table("embedding_metadata")
+        q0 = (
+            self._db.querybuilder()
+            .from_(t1)
+            .delete()
+            .where(
+                t1.id.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
         q = (
             self._db.querybuilder()
             .from_(t)
@@ -515,9 +531,9 @@ class SqliteMetadataSegment(MetadataReader):
                 )
             )
         )
-        sql, params = get_sql(q)
         with self._db.tx() as cur:
-            cur.execute(sql, params)
+            cur.execute(*get_sql(q0))
+            cur.execute(*get_sql(q))
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
