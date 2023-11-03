@@ -481,13 +481,13 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
 class VoyageAIEmbeddingFunction(EmbeddingFunction):
     def __init__(self, api_key: str, model_name: str = "voyage-01", batch_size: int = 8):
-             """
+        """
         Initialize the VoyageAIEmbeddingFunction.
 
         Args:
-            api_key (str): Your API key for the HuggingFace API.
-            model_name (str, optional): The name of the model to use for text embeddings. Defaults to "voyage-01".
-            batch_size (int, optional): The number of documents to send at a time. Defaults to 8 (The max supported 3rd Nov 2023).
+        api_key (str): Your API key for the HuggingFace API.
+        model_name (str, optional): The name of the model to use for text embeddings. Defaults to "voyage-01".
+        batch_size (int, optional): The number of documents to send at a time. Defaults to 8 (The max supported 3rd Nov 2023).
         """
         if batch_size > 8:
             print(f"Voyage AI as of (3rd Nov 2023) has a batch size of max 8")
@@ -507,19 +507,19 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
         self.get_embeddings = get_embeddings
 
     def __call__(self, texts: Documents) -> Embeddings:
-                """
+        """
         Get the embeddings for a list of texts.
 
         Args:
-            texts (Documents): A list of texts to get embeddings for.
+        texts (Documents): A list of texts to get embeddings for.
 
         Returns:
-            Embeddings: The embeddings for the texts.
+        Embeddings: The embeddings for the texts.
 
         Example:
-            >>> voyage_ef = VoyageAIEmbeddingFunction(api_key="your_api_key")
-            >>> texts = ["Hello, world!", "How are you?"]
-            >>> embeddings = voyage_ef(texts)
+        >>> voyage_ef = VoyageAIEmbeddingFunction(api_key="your_api_key")
+        >>> texts = ["Hello, world!", "How are you?"]
+        >>> embeddings = voyage_ef(texts)
         """
         iters = range(0, len(texts), self.batch_size)
         embeddings = []
@@ -531,7 +531,6 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
             )
             embeddings += results;
         return embeddings;
-
 
 # List of all classes in this module
 _classes = [
