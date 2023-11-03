@@ -5,11 +5,20 @@ import (
 )
 
 var (
+	// Tenant errors
+	ErrTenantNotFound                  = errors.New("tenant not found")
+	ErrTenantUniqueConstraintViolation = errors.New("tenant unique constraint violation")
+
+	// Database errors
+	ErrDatabaseNotFound                  = errors.New("database not found")
+	ErrDatabaseUniqueConstraintViolation = errors.New("database unique constraint violation")
+
 	// Collection errors
+	ErrCollectionNotFound                    = errors.New("collection not found")
 	ErrCollectionIDFormat                    = errors.New("collection id format error")
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
 	ErrCollectionTopicEmpty                  = errors.New("collection topic is empty")
-	ErrCollectionUniqueConstraintViolation   = errors.New("unique constraint violation")
+	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
 	ErrCollectionDeleteNonExistingCollection = errors.New("delete non existing collection")
 
 	// Collection metadata errors

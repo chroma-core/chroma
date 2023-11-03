@@ -49,8 +49,151 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 			log.Error("error reset segment metadata db", zap.Error(err))
 			return err
 		}
+		err = tc.metaDomain.DatabaseDb(txCtx).DeleteAll()
+		if err != nil {
+			log.Error("error reset database db", zap.Error(err))
+			return err
+		}
+
+		err = tc.metaDomain.DatabaseDb(txCtx).Insert(&dbmodel.Database{
+			ID:       types.NilUniqueID().String(),
+			Name:     common.DefaultDatabase,
+			TenantID: common.DefaultTenant,
+		})
+		if err != nil {
+			log.Error("error inserting default database", zap.Error(err))
+			return err
+		}
+
+		err = tc.metaDomain.TenantDb(txCtx).DeleteAll()
+		if err != nil {
+			log.Error("error reset tenant db", zap.Error(err))
+			return err
+		}
+		err = tc.metaDomain.TenantDb(txCtx).Insert(&dbmodel.Tenant{
+			ID: common.DefaultTenant,
+		})
+		if err != nil {
+			log.Error("error inserting default tenant", zap.Error(err))
+			return err
+		}
+
 		return nil
 	})
+}
+
+func (tc *Catalog) CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase, ts types.Timestamp) (*model.Database, error) {
+	var result *model.Database
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		dbDatabase := &dbmodel.Database{
+			ID:       createDatabase.ID,
+			Name:     createDatabase.Name,
+			TenantID: createDatabase.Tenant,
+			Ts:       ts,
+		}
+		err := tc.metaDomain.DatabaseDb(txCtx).Insert(dbDatabase)
+		if err != nil {
+			log.Error("error inserting database", zap.Error(err))
+			return err
+		}
+		databaseList, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(createDatabase.Tenant, createDatabase.Name)
+		if err != nil {
+			log.Error("error getting database", zap.Error(err))
+			return err
+		}
+		result = convertDatabaseToModel(databaseList[0])
+		return nil
+	})
+	if err != nil {
+		log.Error("error creating database", zap.Error(err))
+		return nil, err
+	}
+	log.Info("database created", zap.Any("database", result))
+	return result, nil
+}
+
+func (tc *Catalog) GetDatabases(ctx context.Context, getDatabase *model.GetDatabase, ts types.Timestamp) (*model.Database, error) {
+	databases, err := tc.metaDomain.DatabaseDb(ctx).GetDatabases(getDatabase.Tenant, getDatabase.Name)
+	if err != nil {
+		return nil, err
+	}
+	if len(databases) == 0 {
+		return nil, common.ErrDatabaseNotFound
+	}
+	result := make([]*model.Database, 0, len(databases))
+	for _, database := range databases {
+		result = append(result, convertDatabaseToModel(database))
+	}
+	return result[0], nil
+}
+
+func (tc *Catalog) GetAllDatabases(ctx context.Context, ts types.Timestamp) ([]*model.Database, error) {
+	databases, err := tc.metaDomain.DatabaseDb(ctx).GetAllDatabases()
+	if err != nil {
+		log.Error("error getting all databases", zap.Error(err))
+		return nil, err
+	}
+	result := make([]*model.Database, 0, len(databases))
+	for _, database := range databases {
+		result = append(result, convertDatabaseToModel(database))
+	}
+	return result, nil
+}
+
+func (tc *Catalog) CreateTenant(ctx context.Context, createTenant *model.CreateTenant, ts types.Timestamp) (*model.Tenant, error) {
+	var result *model.Tenant
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		dbTenant := &dbmodel.Tenant{
+			ID: createTenant.Name,
+			Ts: ts,
+		}
+		err := tc.metaDomain.TenantDb(txCtx).Insert(dbTenant)
+		if err != nil {
+			return err
+		}
+		tenantList, err := tc.metaDomain.TenantDb(txCtx).GetTenants(createTenant.Name)
+		if err != nil {
+			return err
+		}
+		result = convertTenantToModel(tenantList[0])
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (tc *Catalog) GetTenants(ctx context.Context, getTenant *model.GetTenant, ts types.Timestamp) (*model.Tenant, error) {
+	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenants(getTenant.Name)
+	if err != nil {
+		log.Error("error getting tenants", zap.Error(err))
+		return nil, err
+	}
+	if (len(tenants)) == 0 {
+		log.Error("tenant not found", zap.Error(err))
+		return nil, common.ErrTenantNotFound
+	}
+	result := make([]*model.Tenant, 0, len(tenants))
+	for _, tenant := range tenants {
+		result = append(result, convertTenantToModel(tenant))
+	}
+	return result[0], nil
+}
+
+func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*model.Tenant, error) {
+	tenants, err := tc.metaDomain.TenantDb(ctx).GetAllTenants()
+	if err != nil {
+		log.Error("error getting all tenants", zap.Error(err))
+		return nil, err
+	}
+	result := make([]*model.Tenant, 0, len(tenants))
+	for _, tenant := range tenants {
+		result = append(result, convertTenantToModel(tenant))
+	}
+	return result, nil
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, error) {
@@ -58,15 +201,30 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// insert collection
-		dbCollection := &dbmodel.Collection{
-			ID:        createCollection.ID.String(),
-			Name:      &createCollection.Name,
-			Topic:     &createCollection.Topic,
-			Dimension: createCollection.Dimension,
-			Ts:        ts,
-		}
-		err := tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+		databaseName := createCollection.DatabaseName
+		tenantID := createCollection.TenantID
+		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(tenantID, databaseName)
 		if err != nil {
+			log.Error("error getting database", zap.Error(err))
+			return err
+		}
+		if len(databases) == 0 {
+			log.Error("database not found", zap.Error(err))
+			return common.ErrDatabaseNotFound
+		}
+
+		dbCollection := &dbmodel.Collection{
+			ID:         createCollection.ID.String(),
+			Name:       &createCollection.Name,
+			Topic:      &createCollection.Topic,
+			Dimension:  createCollection.Dimension,
+			DatabaseID: databases[0].ID,
+			Ts:         ts,
+		}
+
+		err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+		if err != nil {
+			log.Error("error inserting collection", zap.Error(err))
 			return err
 		}
 		// insert collection metadata
@@ -79,21 +237,24 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			}
 		}
 		// get collection
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, nil)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, nil, tenantID, databaseName)
 		if err != nil {
+			log.Error("error getting collection", zap.Error(err))
 			return err
 		}
 		ressult = convertCollectionToModel(collectionList)[0]
 		return nil
 	})
 	if err != nil {
+		log.Error("error creating collection", zap.Error(err))
 		return nil, err
 	}
+	log.Info("collection created", zap.Any("collection", ressult))
 	return ressult, nil
 }
 
-func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string) ([]*model.Collection, error) {
-	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, collectionTopic)
+func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenandID string, databaseName string) ([]*model.Collection, error) {
+	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, collectionTopic, tenandID, databaseName)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +262,9 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
-func (tc *Catalog) DeleteCollection(ctx context.Context, collectionID types.UniqueID) error {
+func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		collectionID := deleteCollection.ID
 		err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
 			return err
@@ -161,7 +323,9 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 				}
 			}
 		}
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, nil)
+		databaseName := updateCollection.DatabaseName
+		tenantID := updateCollection.TenantID
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, nil, tenantID, databaseName)
 		if err != nil {
 			return err
 		}

@@ -20,27 +20,35 @@ from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
+# These are the sample collections that are used in the tests below. Tests can override
+# the fields as needed.
 sample_collections = [
     Collection(
-        id=uuid.UUID("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+        id=uuid.UUID(int=1),
         name="test_collection_1",
-        topic="test_topic_1",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000001",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
+        database=DEFAULT_DATABASE,
+        tenant=DEFAULT_TENANT,
     ),
     Collection(
-        id=uuid.UUID("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+        id=uuid.UUID(int=2),
         name="test_collection_2",
-        topic="test_topic_2",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000002",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
+        database=DEFAULT_DATABASE,
+        tenant=DEFAULT_TENANT,
     ),
     Collection(
-        id=uuid.UUID("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+        id=uuid.UUID(int=3),
         name="test_collection_3",
-        topic="test_topic_3",
+        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000003",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
+        database=DEFAULT_DATABASE,
+        tenant=DEFAULT_TENANT,
     ),
 ]
 
@@ -105,17 +113,17 @@ def grpc_with_mock_server() -> Generator[SysDB, None, None]:
     yield client
 
 
-# def grpc_with_real_server() -> Generator[SysDB, None, None]:
-#     system = System(
-#         Settings(
-#             allow_reset=True,
-#             chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
-#         )
-#     )
-#     client = system.instance(GrpcSysDB)
-#     system.start()
-#     client.reset_and_wait_for_ready()
-#     yield client
+def grpc_with_real_server() -> Generator[SysDB, None, None]:
+    system = System(
+        Settings(
+            allow_reset=True,
+            chroma_collection_assignment_policy_impl="chromadb.test.db.test_system.MockAssignmentPolicy",
+        )
+    )
+    client = system.instance(GrpcSysDB)
+    system.start()
+    client.reset_and_wait_for_ready()
+    yield client
 
 
 def db_fixtures() -> List[Callable[[], Generator[SysDB, None, None]]]:
@@ -141,6 +149,8 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
             metadata=collection["metadata"],
             dimension=collection["dimension"],
         )
+        collection["database"] = DEFAULT_DATABASE
+        collection["tenant"] = DEFAULT_TENANT
 
     results = sysdb.get_collections()
     results = sorted(results, key=lambda c: c["name"])
@@ -202,6 +212,8 @@ def test_update_collections(sysdb: SysDB) -> None:
         topic=sample_collections[0]["topic"],
         metadata=sample_collections[0]["metadata"],
         dimension=sample_collections[0]["dimension"],
+        database=DEFAULT_DATABASE,
+        tenant=DEFAULT_TENANT,
     )
 
     sysdb.reset_state()
@@ -360,6 +372,7 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
         name=sample_collections[0]["name"], database="new_database"
     )
     assert len(result) == 1
+    sample_collections[0]["database"] = "new_database"
     assert result[0] == sample_collections[0]
 
     # Check that the collection in the default database exists
@@ -471,6 +484,7 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
             dimension=collection["dimension"],
             database="new_database",
         )
+        collection["database"] = "new_database"
 
     # Get all collections in the new database
     result = sysdb.get_collections(database="new_database")
@@ -508,6 +522,8 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
         database="new_database",
         tenant="tenant1",
     )
+    sample_collections[0]["tenant"] = "tenant1"
+    sample_collections[0]["database"] = "new_database"
 
     # Create a new collection in the default tenant
     sysdb.create_collection(
@@ -517,6 +533,8 @@ def test_create_database_with_tenants(sysdb: SysDB) -> None:
         dimension=sample_collections[1]["dimension"],
         database="new_database",
     )
+
+    sample_collections[1]["database"] = "new_database"
 
     # Check that both tenants have the correct collections
     result = sysdb.get_collections(database="new_database", tenant="tenant1")

@@ -15,11 +15,13 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	collections := make([]*model.Collection, 0, len(collectionAndMetadataList))
 	for _, collectionAndMetadata := range collectionAndMetadataList {
 		collection := &model.Collection{
-			ID:        types.MustParse(collectionAndMetadata.Collection.ID),
-			Name:      *collectionAndMetadata.Collection.Name,
-			Topic:     *collectionAndMetadata.Collection.Topic,
-			Dimension: collectionAndMetadata.Collection.Dimension,
-			Ts:        collectionAndMetadata.Collection.Ts,
+			ID:           types.MustParse(collectionAndMetadata.Collection.ID),
+			Name:         *collectionAndMetadata.Collection.Name,
+			Topic:        *collectionAndMetadata.Collection.Topic,
+			Dimension:    collectionAndMetadata.Collection.Dimension,
+			TenantID:     collectionAndMetadata.TenantID,
+			DatabaseName: collectionAndMetadata.DatabaseName,
+			Ts:           collectionAndMetadata.Collection.Ts,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)
@@ -162,4 +164,18 @@ func convertSegmentMetadataToDB(segmentID string, metadata *model.SegmentMetadat
 	}
 	log.Debug("segment metadata db", zap.Any("segmentMetadata", dbSegmentMetadataList))
 	return dbSegmentMetadataList
+}
+
+func convertDatabaseToModel(dbDatabase *dbmodel.Database) *model.Database {
+	return &model.Database{
+		ID:     dbDatabase.ID,
+		Name:   dbDatabase.Name,
+		Tenant: dbDatabase.TenantID,
+	}
+}
+
+func convertTenantToModel(dbTenant *dbmodel.Tenant) *model.Tenant {
+	return &model.Tenant{
+		Name: dbTenant.ID,
+	}
 }

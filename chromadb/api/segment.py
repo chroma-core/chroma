@@ -184,6 +184,8 @@ class SegmentAPI(ServerAPI):
             name=name,
             metadata=coll["metadata"],  # type: ignore
             embedding_function=embedding_function,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method(
@@ -214,13 +216,16 @@ class SegmentAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
         embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
+        if id is None and name is None or (id is not None and name is not None):
+            raise ValueError("Name or id must be specified, but not both")
         existing = self._sysdb.get_collections(
-            name=name, tenant=tenant, database=database
+            id=id, name=name, tenant=tenant, database=database
         )
 
         if existing:
@@ -230,6 +235,8 @@ class SegmentAPI(ServerAPI):
                 name=existing[0]["name"],
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
+                tenant=tenant,
+                database=database,
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
@@ -250,6 +257,8 @@ class SegmentAPI(ServerAPI):
                     id=db_collection["id"],
                     name=db_collection["name"],
                     metadata=db_collection["metadata"],  # type: ignore
+                    tenant=db_collection["tenant"],
+                    database=db_collection["database"],
                 )
             )
         return collections
@@ -486,7 +495,9 @@ class SegmentAPI(ServerAPI):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas)
+            if "metadatas" in include
+            else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
         )
 
