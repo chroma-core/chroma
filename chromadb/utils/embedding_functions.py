@@ -497,11 +497,11 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
 
         try:
             import voyageai
-            from voyageai import get_embeddings,
-            voyageai.api_key = api_key  # add you Voyage API KEY
+            from voyageai import get_embeddings
         except ImportError:
             raise ValueError("The VoyageAI python package is not installed. Please install it with `pip install voyageai`")
 
+        voyageai.api_key = api_key  # Voyage API Key
         self.batch_size = batch_size
         self.model = model_name
         self.get_embeddings = get_embeddings
