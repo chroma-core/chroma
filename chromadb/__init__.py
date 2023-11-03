@@ -160,8 +160,6 @@ def HttpClient(
         database: The database to use for this client. Defaults to the default database.
     """
 
-    if headers is None:
-        headers = {}
     if settings is None:
         settings = Settings()
 
