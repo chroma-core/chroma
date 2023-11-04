@@ -364,6 +364,7 @@ class SegmentAPI(ServerAPI):
                 add_amount=len(ids),
                 with_metadata=len(ids) if metadatas is not None else 0,
                 with_documents=len(ids) if documents is not None else 0,
+                with_uri=len(ids) if uris is not None else 0,
             )
         )
         return True
@@ -405,6 +406,7 @@ class SegmentAPI(ServerAPI):
                 with_embeddings=len(embeddings) if embeddings else 0,
                 with_metadata=len(metadatas) if metadatas else 0,
                 with_documents=len(documents) if documents else 0,
+                with_uri=len(uris) if uris else 0,
             )
         )
 
@@ -514,6 +516,7 @@ class SegmentAPI(ServerAPI):
                 limit=limit if limit else 0,
                 include_metadata=ids_amount if "metadatas" in include else 0,
                 include_documents=ids_amount if "documents" in include else 0,
+                include_uris=ids_amount if "uris" in include else 0,
             )
         )
 
@@ -706,6 +709,7 @@ class SegmentAPI(ServerAPI):
                 with_document_filter=query_amount if where_document is not None else 0,
                 include_metadatas=query_amount if "metadatas" in include else 0,
                 include_documents=query_amount if "documents" in include else 0,
+                include_uris=query_amount if "uris" in include else 0,
                 include_distances=query_amount if "distances" in include else 0,
             )
         )

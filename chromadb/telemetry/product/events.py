@@ -32,6 +32,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
     add_amount: int
     with_documents: int
     with_metadata: int
+    with_uri: int
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
         add_amount: int,
         with_documents: int,
         with_metadata: int,
+        with_uri: int,
         batch_size: int = 1,
     ):
         super().__init__()
@@ -46,6 +48,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
         self.add_amount = add_amount
         self.with_documents = with_documents
         self.with_metadata = with_metadata
+        self.with_uri = with_uri
         self.batch_size = batch_size
 
     @property
@@ -62,6 +65,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
             add_amount=total_amount,
             with_documents=self.with_documents + other.with_documents,
             with_metadata=self.with_metadata + other.with_metadata,
+            with_uri=self.with_uri + other.with_uri,
             batch_size=self.batch_size + other.batch_size,
         )
 
@@ -72,6 +76,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
     with_embeddings: int
     with_metadata: int
     with_documents: int
+    with_uri: int
 
     def __init__(
         self,
@@ -80,6 +85,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         with_embeddings: int,
         with_metadata: int,
         with_documents: int,
+        with_uri: int,
     ):
         super().__init__()
         self.collection_uuid = collection_uuid
@@ -87,6 +93,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         self.with_embeddings = with_embeddings
         self.with_metadata = with_metadata
         self.with_documents = with_documents
+        self.with_uri = with_uri
 
 
 class CollectionQueryEvent(ProductTelemetryEvent):
@@ -99,6 +106,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
     n_results: int
     include_metadatas: int
     include_documents: int
+    include_uris: int
     include_distances: int
 
     def __init__(
@@ -110,6 +118,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         n_results: int,
         include_metadatas: int,
         include_documents: int,
+        include_uris: int,
         include_distances: int,
         batch_size: int = 1,
     ):
@@ -121,6 +130,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         self.n_results = n_results
         self.include_metadatas = include_metadatas
         self.include_documents = include_documents
+        self.include_uris = include_uris
         self.include_distances = include_distances
         self.batch_size = batch_size
 
@@ -141,6 +151,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
             n_results=self.n_results + other.n_results,
             include_metadatas=self.include_metadatas + other.include_metadatas,
             include_documents=self.include_documents + other.include_documents,
+            include_uris=self.include_uris + other.include_uris,
             include_distances=self.include_distances + other.include_distances,
             batch_size=self.batch_size + other.batch_size,
         )
@@ -152,6 +163,7 @@ class CollectionGetEvent(ProductTelemetryEvent):
     limit: int
     include_metadata: int
     include_documents: int
+    include_uris: int
 
     def __init__(
         self,
@@ -160,6 +172,7 @@ class CollectionGetEvent(ProductTelemetryEvent):
         limit: int,
         include_metadata: int,
         include_documents: int,
+        include_uris: int,
     ):
         super().__init__()
         self.collection_uuid = collection_uuid
@@ -167,6 +180,7 @@ class CollectionGetEvent(ProductTelemetryEvent):
         self.limit = limit
         self.include_metadata = include_metadata
         self.include_documents = include_documents
+        self.include_uris = include_uris
 
 
 class CollectionDeleteEvent(ProductTelemetryEvent):
