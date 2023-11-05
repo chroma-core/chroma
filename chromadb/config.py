@@ -10,6 +10,7 @@ from typing import Type, TypeVar, cast
 from overrides import EnforceOverrides
 from overrides import override
 from typing_extensions import Literal
+import platform
 
 
 in_pydantic_v2 = False
@@ -123,6 +124,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_grpc_port: Optional[str] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
+    chroma_server_nofile: Optional[int] = None
 
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[str] = "8080"
@@ -297,6 +299,39 @@ class System(Component):
         for key in _legacy_config_keys:
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
+
+        # Apply the nofile limit if set
+        if settings["chroma_server_nofile"] is not None:
+            if platform.system() != "Windows":
+                import resource
+
+                curr_soft, curr_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                desired_soft = settings["chroma_server_nofile"]
+                # Validate
+                if desired_soft > curr_hard:
+                    raise ValueError(
+                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}"
+                    )
+                # Apply
+                if desired_soft > curr_soft:
+                    try:
+                        resource.setrlimit(
+                            resource.RLIMIT_NOFILE, (desired_soft, curr_hard)
+                        )
+                        logger.info(f"Set chroma_server_nofile to {desired_soft}")
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to set chroma_server_nofile to {desired_soft}: {e} nofile soft limit will remain at {curr_soft}"
+                        )
+                # Don't apply if reducing the limit
+                elif desired_soft < curr_soft:
+                    logger.warning(
+                        f"chroma_server_nofile is set to {desired_soft}, but this is less than current soft limit of {curr_soft}. chroma_server_nofile will not be set."
+                    )
+            else:
+                logger.warning(
+                    "chroma_server_nofile is not supported on Windows. chroma_server_nofile will not be set."
+                )
 
         self.settings = settings
         self._instances = {}
