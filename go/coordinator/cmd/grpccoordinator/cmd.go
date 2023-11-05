@@ -1,6 +1,9 @@
 package grpccoordinator
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/chroma/chroma-coordinator/cmd/flag"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
 	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
@@ -35,7 +38,26 @@ func exec(*cobra.Command, []string) {
 	// 	return grpccoordinator.New(conf)
 	// })
 	// Create a memberlist manager
-	memberlist_manager := memberlist_manager.NewMemberlistManager("member-type=worker", "chroma", "worker-memberlist")
+	// memberlist_manager := memberlist_manager.NewMemberlistManager("member-type=worker", "chroma", "worker-memberlist")
+	// Run the memberlist manager
+	// memberlist_manager.Start()
+	// Create a node watcher
+	node_watcher := memberlist_manager.NewKubernetesWatcher("chroma", "worker")
+	// Create a mock memberlist store
+	memberlist_store := memberlist_manager.NewMockMemberlistStore()
+	// Create a memberlist manager with the node watcher and memberlist store
+	memberlist_manager := memberlist_manager.NewMemberlistManager(node_watcher, memberlist_store)
 	// Run the memberlist manager
 	memberlist_manager.Start()
+	// Sleep for 10 seconds
+	time.Sleep(10 * time.Second)
+	// Print the memberlist
+	memberlist, err := memberlist_store.GetMemberlist()
+	fmt.Printf("After getting memberlist: %v\n", memberlist)
+	if err != nil {
+		panic(err)
+	}
+	for _, node := range memberlist.Nodes {
+		println(node.GetIP())
+	}
 }

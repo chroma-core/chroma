@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -14,7 +15,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// A watcher takes a queue and adds updates to it
 type IWatcher interface {
 	Start() error
 	Stop() error
@@ -35,6 +35,10 @@ const (
 type NodeUpdate struct {
 	node_ip string
 	status  Status
+}
+
+func (nu *NodeUpdate) GetIP() string {
+	return nu.node_ip
 }
 
 // A mock watcher that generates random updates
@@ -100,13 +104,17 @@ type KubernetesWatcher struct {
 	isRunning bool
 	clientset *kubernetes.Clientset     // clientset for the coordinator
 	informer  cache.SharedIndexInformer // informer for the coordinator
+	callbacks []func(NodeUpdate)
 }
 
-func NewKubernetesWatcher(coordinator_namespace string) *KubernetesWatcher {
+func NewKubernetesWatcher(coordinator_namespace string, pod_label string) *KubernetesWatcher {
 	// Create a new kubernetes watcher
 	// Load the default kubeconfig file
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	config, err := loadingRules.Load()
+	if err != nil {
+		panic(err.Error())
+	}
 
 	clientConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
@@ -120,7 +128,7 @@ func NewKubernetesWatcher(coordinator_namespace string) *KubernetesWatcher {
 	}
 
 	// Create an informer for the coordinator for pods with the given label
-	labelSelector := labels.SelectorFromSet(map[string]string{"member-type": "worker"})
+	labelSelector := labels.SelectorFromSet(map[string]string{"member-type": pod_label})
 
 	fmt.Println("Creating informer for namespace: " + coordinator_namespace)
 	// Create a shared informer factory with the specific label selector
@@ -131,19 +139,31 @@ func NewKubernetesWatcher(coordinator_namespace string) *KubernetesWatcher {
 	// Get a Pod informer. This pod informer will only watch pods with the given label
 	podInformer := factory.Core().V1().Pods().Informer()
 
-	return &KubernetesWatcher{
+	w := &KubernetesWatcher{
+		isRunning: false,
 		clientset: clientset,
 		informer:  podInformer,
 	}
+
+	w.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			update := NodeUpdate{node_ip: obj.(*v1.Pod).Status.PodIP, status: Ready}
+			w.notify(update)
+			fmt.Printf("Update: %s\n", update.node_ip)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			update := NodeUpdate{node_ip: newObj.(*v1.Pod).Status.PodIP, status: Ready}
+			w.notify(update)
+		},
+		DeleteFunc: func(obj interface{}) {
+			// TODO: Handle pod deletion
+		},
+	})
+
+	return w
 }
 
 func (w *KubernetesWatcher) Start() error {
-
-	// Create a goroutine that generates updates
-	if w.queue == nil {
-		return errors.New("Queue is not Registered")
-	}
-
 	if w.isRunning {
 		return errors.New("Watcher is already running")
 	}
@@ -151,7 +171,7 @@ func (w *KubernetesWatcher) Start() error {
 	w.stopCh = make(chan struct{})
 	w.isRunning = true
 
-	w.informer.Run(w.stopCh)
+	go w.informer.Run(w.stopCh)
 
 	if !cache.WaitForCacheSync(w.stopCh, w.informer.HasSynced) {
 		fmt.Println("Failed to sync cache")
@@ -176,17 +196,7 @@ func (w *KubernetesWatcher) Stop() error {
 
 // Register a queue
 func (w *KubernetesWatcher) RegisterCallback(callback func(NodeUpdate)) {
-	w.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			w.queue.Add(obj)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			w.queue.Add(newObj)
-		},
-		DeleteFunc: func(obj interface{}) {
-			// Handle pod deletion if necessary
-		},
-	})
+	w.callbacks = append(w.callbacks, callback)
 }
 
 func (w *KubernetesWatcher) notify(update NodeUpdate) {

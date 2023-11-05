@@ -1,12 +1,8 @@
 package memberlist_manager
 
 import (
-	"context"
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -22,129 +18,79 @@ import (
 // contains a list of all the members in the coordinator's cluster.
 // The memberlist uses k8s watch to monitor changes to pods and then updates a CR
 
-// Code structure
-// 1. MemberlistManager struct
-// 2. MemberlistManager methods
-// 3. MemberlistManager helper methods
-// 4. MemberlistManager CR methods
-// 5. MemberlistManager CR helper methods
-// 6. MemberlistManager CR event handler methods
-
-// TODO: define interface
 type IMemberlistManager interface {
 	Start() error
 	Stop() error
 }
 
-// A memberlist manager watches pods in the cluster and updates a CR with the list of pods
-// that are ready. The CR is a custom resource that is defined in the coordinator's namespace.
 type MemberlistManager struct {
-	pod_label string // labels of the pods in the cluster
-	// coordinator_namespace      string                          // namespace of the coordinator
-	memberlist_custom_resource string                          // name of the memberlist custom resource to update
-	workqueue                  workqueue.RateLimitingInterface // workqueue for the coordinator
-	// stopCh 				   	   chan struct{}                   // stop channel for the coordinator
-	node_watcher IWatcher // node watcher for the coordinator
+	workqueue        workqueue.RateLimitingInterface // workqueue for the coordinator
+	node_watcher     IWatcher                        // node watcher for the coordinator
+	memberlist_store IMemberlistStore                // memberlist store for the coordinator
 }
 
-// NewMemberlistManager creates a new memberlist manager
-func NewMemberlistManager(pod_label string, coordinator_namespace string, memberlist_custom_resource string, node_watcher IWatcher) *MemberlistManager {
-	// Load the default kubeconfig file
-	// loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	// config, err := loadingRules.Load()
-
-	// clientConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
-
-	// // Create a clientset for the coordinator
-	// clientset, err := kubernetes.NewForConfig(clientConfig)
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
-
-	// // Create the dynamic client for the memberlist custom resource
-	// dynamic_client, err := dynamic.NewForConfig(clientConfig)
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
-
-	// // Create an informer for the coordinator for pods with the given label
-	// labelSelector := labels.SelectorFromSet(map[string]string{"member-type": "worker"})
-
-	// fmt.Println("Creating informer for namespace: " + coordinator_namespace)
-	// // Create a shared informer factory with the specific label selector
-	// // TODO: set resync period to something other than 0?
-	// factory := informers.NewSharedInformerFactoryWithOptions(clientset, 0, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
-	// // factory := informers.NewSharedInformerFactoryWithOptions(clientset, 0, informers.WithNamespace(coordinator_namespace))
-
-	// // Create a workqueue
-	// queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-
-	// // Get a Pod informer. This pod informer will only watch pods with the given label
-	// podInformer := factory.Core().V1().Pods().Informer()
-
-	// Add handlers to the informer
-	// podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-	// 	AddFunc: func(obj interface{}) {
-	// 		queue.Add(obj)
-	// 	},
-	// 	UpdateFunc: func(oldObj, newObj interface{}) {
-	// 		queue.Add(newObj)
-	// 	},
-	// 	DeleteFunc: func(obj interface{}) {
-	// 		// Handle pod deletion if necessary
-	// 	},
-	// })
-
-	// stopCh := make(chan struct{})
+func NewMemberlistManager(node_watcher IWatcher, memberlist_store IMemberlistStore) *MemberlistManager {
+	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
 	return &MemberlistManager{
-		// pod_label: pod_label,
-		// coordinator_namespace:      coordinator_namespace,
-		// memberlist_custom_resource: memberlist_custom_resource,
-		// clientset:                  clientset,
-		// dynamic_client: dynamic_client,
-		// informer:                   podInformer,
-		// workqueue: queue,
-		// stopCh:                     stopCh,
-		node_watcher: node_watcher,
+		workqueue:        queue,
+		node_watcher:     node_watcher,
+		memberlist_store: memberlist_store,
 	}
 }
 
-// Implement Component interface
 func (m *MemberlistManager) Start() error {
-	// go m.informer.Run(stopCh)
+	m.node_watcher.RegisterCallback(func(node_update NodeUpdate) {
+		m.workqueue.Add(node_update)
+	})
+	err := m.node_watcher.Start()
+	if err != nil {
+		return err
+	}
+	go m.run()
+	return nil
+}
 
-	// if !cache.WaitForCacheSync(stopCh, m.informer.HasSynced) {
-	// 	fmt.Println("Failed to sync cache")
-	// 	return
-	// }
-
+func (m *MemberlistManager) run() {
 	for {
 		key, shutdown := m.workqueue.Get()
 		if shutdown {
+			fmt.Println("Shutting down memberlist manager")
 			break
 		}
-		// print the key
-		pod := key.(*v1.Pod)
-		fmt.Println("Status of pod in key: " + pod.Status.Phase)
-		fmt.Println("IP of pod in key: " + pod.Status.PodIP)
+		fmt.Printf("Update HERE: %s\n", key.(NodeUpdate).node_ip)
+		// TODO: use cache instead of storing the memberlist on the queue
+		nodeUpdate := key.(NodeUpdate)
+		m.reconcile(&nodeUpdate)
 		m.workqueue.Done(key)
-
-		// get the memberlist cr using the dynamic client
-		// TODO: used passed in memberlist custom resource name
-		gvr := schema.GroupVersionResource{Group: "chroma.cluster", Version: "v1", Resource: "memberlists"}
-		unstrucuted, err := m.dynamic_client.Resource(gvr).Namespace("chroma").Get(context.TODO(), "worker-memberlist", metav1.GetOptions{}) //.Namespace(m.coordinator_namespace).Get(context.TODO(), m.memberlist_custom_resource, metav1.GetOptions{})
-		if err != nil {
-			panic(err.Error())
-		}
-		fmt.Println("Memberlist CR: ")
-		fmt.Println(unstrucuted.UnstructuredContent())
 	}
+}
+
+func (m *MemberlistManager) reconcile(node_update *NodeUpdate) error {
+	memberlist, err := m.memberlist_store.GetMemberlist()
+	fmt.Printf("Current memberlist: %v\n", memberlist)
+	if err != nil {
+		return err
+	}
+	exists := false
+	new_memberlist := Memberlist{}
+	for _, node := range memberlist.Nodes {
+		if node.GetIP() == node_update.GetIP() {
+			if node_update.status == Ready {
+				new_memberlist.Nodes = append(new_memberlist.Nodes, node_update)
+			}
+			exists = true
+		}
+	}
+	if !exists && node_update.status == Ready {
+		fmt.Printf("Adding node: %s\n", node_update.GetIP())
+		new_memberlist.Nodes = append(new_memberlist.Nodes, node_update)
+	}
+	fmt.Printf("Updated memberlist: %v\n", new_memberlist.Nodes[0])
+	return m.memberlist_store.UpdateMemberlist(new_memberlist)
 }
 
 func (m *MemberlistManager) Stop() error {
 	m.workqueue.ShutDown()
+	return nil
 }
