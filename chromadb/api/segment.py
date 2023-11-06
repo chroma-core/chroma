@@ -230,7 +230,7 @@ class SegmentAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: str,
+        name: Optional[str] = None,
         id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
