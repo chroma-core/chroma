@@ -64,7 +64,9 @@ def test_multimodal(
     document_embeddings = default_ef(documents)
 
     # Trying to add a document and an image at the same time should fail
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="You can only provide documents or images, not both."
+    ):
         multimodal_collection.add(
             ids=image_ids[0], documents=documents[0], images=images[0]
         )
