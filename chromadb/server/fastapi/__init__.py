@@ -23,7 +23,10 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
 )
-from chromadb.auth.fastapi_utils import attr_from_resource_object
+from chromadb.auth.fastapi_utils import (
+    attr_from_collection_lookup,
+    attr_from_resource_object,
+)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 import chromadb.server
 import chromadb.api
@@ -281,7 +284,9 @@ class FastAPI(chromadb.server.Server):
         action=AuthzResourceActions.CREATE_DATABASE,
         resource=DynamicAuthzResource(
             type=AuthzResourceTypes.DB,
-            attributes=attr_from_resource_object(type=AuthzResourceTypes.DB),
+            attributes=attr_from_resource_object(
+                type=AuthzResourceTypes.DB, additional_attrs=["tenant"]
+            ),
         ),
     )
     def create_database(
@@ -295,6 +300,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
@@ -343,6 +351,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def create_collection(
@@ -365,6 +376,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def get_collection(
@@ -383,6 +397,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def update_collection(
@@ -400,6 +415,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def delete_collection(
@@ -418,6 +436,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def add(self, collection_id: str, add: AddEmbedding) -> None:
@@ -439,6 +458,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
@@ -456,6 +476,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
@@ -473,6 +494,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
@@ -493,6 +515,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
@@ -509,6 +532,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def count(self, collection_id: str) -> int:
@@ -531,6 +555,7 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
             type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
     def get_nearest_neighbors(

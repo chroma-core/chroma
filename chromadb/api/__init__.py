@@ -94,6 +94,7 @@ class BaseAPI(ABC):
     def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -506,6 +507,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
