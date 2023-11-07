@@ -68,13 +68,14 @@ class Text2VecEmbeddingFunction(EmbeddingFunction):
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model_name: str = "text-embedding-ada-002",
-        organization_id: Optional[str] = None,
-        api_base: Optional[str] = None,
-        api_type: Optional[str] = None,
-        api_version: Optional[str] = None,
+            self,
+            api_key: Optional[str] = None,
+            model_name: str = "text-embedding-ada-002",
+            organization_id: Optional[str] = None,
+            api_base: Optional[str] = None,
+            api_type: Optional[str] = None,
+            api_version: Optional[str] = None,
+            deployment_id: Optional[str] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
@@ -93,6 +94,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
             api_version (str, optional): The api version for the API. If not provided,
                 it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
+            deployment_id (str, optional): Deployment ID for Azure OpenAI.
 
         """
         try:
@@ -102,6 +104,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
+        self._api_key = api_key
         if api_key is not None:
             openai.api_key = api_key
         # If the api key is still not set, raise an error
@@ -122,21 +125,51 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         if organization_id is not None:
             openai.organization = organization_id
 
-        self._client = openai.Embedding
+        self._v1 = openai.__version__.startswith('1.')
+        if self._v1:
+            if api_type == "azure":
+                self._client = openai.AzureOpenAI(
+                    api_key=api_key,
+                    api_version=api_version,
+                    azure_endpoint=api_base
+                ).embeddings
+            else:
+                self._client = openai.OpenAI(
+                    api_key=api_key,
+                    base_url=api_base
+                ).embeddings
+        else:
+            self._client = openai.Embedding
         self._model_name = model_name
+        self._deployment_id = deployment_id
 
     def __call__(self, texts: Documents) -> Embeddings:
         # replace newlines, which can negatively affect performance.
         texts = [t.replace("\n", " ") for t in texts]
 
         # Call the OpenAI Embedding API
-        embeddings = self._client.create(input=texts, engine=self._model_name)["data"]
+        if self._v1:
+            embeddings = self._client.create(
+                input=texts,
+                model=self._deployment_id or self._model_name
+            ).data
 
-        # Sort resulting embeddings by index
-        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
+            # Sort resulting embeddings by index
+            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)  # type: ignore
 
-        # Return just the embeddings
-        return [result["embedding"] for result in sorted_embeddings]
+            # Return just the embeddings
+            return [result.embedding for result in sorted_embeddings]
+        else:
+            if self._deployment_id:
+                embeddings = self._client(input=texts, deployment_id=self._deployment_id)["data"]
+            else:
+                embeddings = self._client(input=texts, model=self._model_name)["data"]
+
+            # Sort resulting embeddings by index
+            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
+
+            # Return just the embeddings
+            return [result["embedding"] for result in sorted_embeddings]
 
 
 class CohereEmbeddingFunction(EmbeddingFunction):
