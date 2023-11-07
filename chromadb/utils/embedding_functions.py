@@ -118,6 +118,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
         if api_version is not None:
             openai.api_version = api_version
 
+        self._api_type = api_type
         if api_type is not None:
             openai.api_type = api_type
 
@@ -159,10 +160,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
             # Return just the embeddings
             return [result.embedding for result in sorted_embeddings]
         else:
-            if self._deployment_id:
-                embeddings = self._client(input=texts, deployment_id=self._deployment_id)["data"]
+            if self._api_type == "azure":
+                embeddings = self._client.create(
+                    input=texts,
+                    engine=self._deployment_id or self._model_name
+                )["data"]
             else:
-                embeddings = self._client(input=texts, model=self._model_name)["data"]
+                embeddings = self._client.create(input=texts, model=self._model_name)["data"]
 
             # Sort resulting embeddings by index
             sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
