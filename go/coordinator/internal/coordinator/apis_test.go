@@ -419,7 +419,7 @@ func TestCreateUpdateWithDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
-	c.ResetState(ctx)
+	// c.ResetState(ctx)
 	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
 		ID:     types.MustParse("00000000-d7d7-413b-92e1-731098a6e492").String(),
 		Name:   "new_database",
