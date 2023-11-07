@@ -93,7 +93,7 @@ def _uuid(uuid_str: str) -> UUID:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
-class ChromaAPIRouter(fastapi.APIRouter):
+class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
     # same as URLs without. Docs will only contain URLs without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
@@ -449,6 +449,7 @@ class FastAPI(chromadb.server.Server):
                 embeddings=add.embeddings,  # type: ignore
                 metadatas=add.metadatas,  # type: ignore
                 documents=add.documents,  # type: ignore
+                uris=add.uris,  # type: ignore
                 ids=add.ids,
             )
         except InvalidDimensionException as e:
@@ -465,11 +466,12 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        return self._api._update(
+        self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
             documents=add.documents,  # type: ignore
+            uris=add.uris,  # type: ignore
             metadatas=add.metadatas,  # type: ignore
         )
 
@@ -483,11 +485,12 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        return self._api._upsert(
+        self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,  # type: ignore
             documents=upsert.documents,  # type: ignore
+            uris=upsert.uris,  # type: ignore
             metadatas=upsert.metadatas,  # type: ignore
         )
 
