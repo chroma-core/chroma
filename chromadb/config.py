@@ -197,7 +197,7 @@ class Settings(BaseSettings):  # type: ignore
         "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
     )
     def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str  # type: ignore
+        cls: Type["Settings"], v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(

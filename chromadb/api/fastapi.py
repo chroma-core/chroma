@@ -110,6 +110,28 @@ class FastAPI(ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
+        import socket
+        from urllib3.connection import HTTPConnection
+
+        # USe IPPROTO_TCP instead of SOL_TCP for platform independence
+        # HTTPConnection.default_socket_options = (
+        #     HTTPConnection.default_socket_options
+        #     + [
+        #         (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+        #         (socket.SOL_TCP, socket.TCP_KEEPIDLE, 45),
+        #         (socket.SOL_TCP, socket.TCP_KEEPINTVL, 10),
+        #         (socket.SOL_TCP, socket.TCP_KEEPCNT, 6),
+        #     ]
+        # )
+        # TCP_KEEPALIVE = 0x10
+        # HTTPConnection.default_socket_options = (
+        #     HTTPConnection.default_socket_options
+        #     + [
+        #         (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+        #         (socket.IPPROTO_TCP, TCP_KEEPALIVE, 60),
+        #     ]
+        # )
+
         self._header = system.settings.chroma_server_headers
         if (
             system.settings.chroma_client_auth_provider

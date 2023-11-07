@@ -67,7 +67,7 @@ def run(
         "port": port,
         "workers": 1,
         "log_config": f"{chromadb_path}/log_config.yml",
-        "timeout_keep_alive": 30,
+        # "timeout_keep_alive": 30,
     }
 
     if test:
