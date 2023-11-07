@@ -2,6 +2,7 @@ from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 
 from overrides import override
+import requests
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.types import (
     CollectionMetadata,
@@ -402,6 +403,10 @@ class Client(SharedSystemClient, ClientAPI):
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
+        except requests.exceptions.ConnectionError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
         except Exception:
             raise ValueError(
                 f"Could not connect to tenant {tenant}. Are you sure it exists?"
@@ -409,6 +414,10 @@ class Client(SharedSystemClient, ClientAPI):
 
         try:
             self._admin_client.get_database(name=database, tenant=tenant)
+        except requests.exceptions.ConnectionError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
         except Exception:
             raise ValueError(
                 f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
