@@ -15,6 +15,7 @@ from chromadb.types import (
     WhereDocumentOperator,
     WhereDocument,
 )
+from inspect import signature
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -159,6 +160,22 @@ D = TypeVar("D", bound=Embeddable, contravariant=True)
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
+
+
+def validate_embedding_function(
+    embedding_function: EmbeddingFunction[Embeddable],
+) -> None:
+    function_signature = signature(
+        embedding_function.__class__.__call__
+    ).parameters.keys()
+    protocol_signature = signature(EmbeddingFunction.__call__).parameters.keys()
+
+    if not function_signature == protocol_signature:
+        raise ValueError(
+            f"Expected EmbeddingFunction.__call__ to have the following signature: {protocol_signature}, got {function_signature}\n"
+            "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
+            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
+        )
 
 
 def validate_ids(ids: IDs) -> IDs:

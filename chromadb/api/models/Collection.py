@@ -37,6 +37,7 @@ from chromadb.api.types import (
     validate_where_document,
     validate_n_results,
     validate_embeddings,
+    validate_embedding_function,
 )
 import logging
 
@@ -71,6 +72,11 @@ class Collection(BaseModel):
             name=name, metadata=metadata, id=id, tenant=tenant, database=database
         )
         self._client = client
+
+        # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
+        if embedding_function is not None:
+            validate_embedding_function(embedding_function)
+
         self._embedding_function = embedding_function
 
     def __repr__(self) -> str:
