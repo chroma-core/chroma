@@ -26,7 +26,7 @@ def test_add(
     # TODO: Generative embedding functions
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,  # type: ignore
+        metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -64,7 +64,7 @@ def create_large_recordset(
         "metadatas": metadatas,
         "documents": documents,
     }
-    return cast(strategies.RecordSet, record_set)
+    return record_set
 
 
 @given(collection=collection_st)
@@ -77,7 +77,7 @@ def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
     )
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,  # type: ignore
+        metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -107,7 +107,7 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
     )
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,  # type: ignore
+        metadata=collection.metadata,
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -157,7 +157,7 @@ def test_out_of_order_ids(api: ServerAPI) -> None:
     ]
 
     coll = api.create_collection(
-        "test", embedding_function=lambda input: [[1, 2, 3] for _ in input]  # type: ignore
+        "test", embedding_function=lambda texts: [[1, 2, 3] for _ in texts]  # type: ignore
     )
     embeddings: Embeddings = [[1, 2, 3] for _ in ooo_ids]
     coll.add(ids=ooo_ids, embeddings=embeddings)
@@ -174,7 +174,7 @@ def test_add_partial(api: ServerAPI) -> None:
     # TODO: We need to clean up the api types to support this typing
     coll.add(
         ids=["1", "2", "3"],
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],
         metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
         documents=["a", "b", None],  # type: ignore
     )
