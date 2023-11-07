@@ -68,14 +68,14 @@ class Text2VecEmbeddingFunction(EmbeddingFunction):
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __init__(
-            self,
-            api_key: Optional[str] = None,
-            model_name: str = "text-embedding-ada-002",
-            organization_id: Optional[str] = None,
-            api_base: Optional[str] = None,
-            api_type: Optional[str] = None,
-            api_version: Optional[str] = None,
-            deployment_id: Optional[str] = None,
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = "text-embedding-ada-002",
+        organization_id: Optional[str] = None,
+        api_base: Optional[str] = None,
+        api_type: Optional[str] = None,
+        api_version: Optional[str] = None,
+        deployment_id: Optional[str] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
