@@ -3,7 +3,7 @@ import requests
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult, EmbeddingFunction, Document
+from chromadb.api.types import QueryResult
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
@@ -91,17 +91,14 @@ def test_persist_index_loading(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading_embedding_function(api_fixture, request):
-    class TestEF(EmbeddingFunction[Document]):
-        def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
-
+    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", embedding_function=TestEF())
+    collection = api.create_collection("test", embedding_function=embedding_function)
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test", embedding_function=TestEF())
+    collection = api2.get_collection("test", embedding_function=embedding_function)
 
     nn = collection.query(
         query_texts="hello",
@@ -114,17 +111,18 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):
-    class TestEF(EmbeddingFunction[Document]):
-        def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
-
+    embedding_function = lambda x: [[1, 2, 3] for _ in range(len(x))]  # noqa E731
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.get_or_create_collection("test", embedding_function=TestEF())
+    collection = api.get_or_create_collection(
+        "test", embedding_function=embedding_function
+    )
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_or_create_collection("test", embedding_function=TestEF())
+    collection = api2.get_or_create_collection(
+        "test", embedding_function=embedding_function
+    )
 
     nn = collection.query(
         query_texts="hello",
