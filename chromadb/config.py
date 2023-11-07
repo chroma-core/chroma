@@ -127,7 +127,7 @@ class Settings(BaseSettings):  # type: ignore
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
-        if v.strip() == "":
+        if type(v) is str and v.strip() == "":
             return None
         return v
 
