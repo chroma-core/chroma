@@ -134,7 +134,7 @@ CHROMA_SERVER_AUTH_CREDENTIALS_FILE=examples/basic_functionality/authz/authz.yam
 CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="user_token_config" \
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider" \
 CHROMA_SERVER_AUTHZ_CONFIG_FILE=examples/basic_functionality/authz/authz.yaml \
-uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --reload
+uvicorn chromadb.app:app --workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --reload --timeout-keep-alive 30
 ```
 
 ## Testing the authorization
