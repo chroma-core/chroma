@@ -335,6 +335,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def list_collections(
