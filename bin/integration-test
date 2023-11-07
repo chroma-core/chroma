@@ -56,8 +56,11 @@ echo testing: python -m pytest "$@"
 python -m pytest "$@"
 
 cd clients/js
-yarn
-yarn test:run
+
+# moved off of yarn to npm to fix issues with jackspeak/cliui/string-width versions #1314
+npm install
+npm run test:run
+
 docker compose down
 cd ../..
 for auth_type in basic token xtoken; do
