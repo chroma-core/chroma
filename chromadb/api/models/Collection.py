@@ -5,17 +5,21 @@ from uuid import UUID
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
+    URI,
     CollectionMetadata,
+    DataLoader,
     Embedding,
     Embeddings,
     Embeddable,
     Include,
+    Loadable,
     Metadata,
     Metadatas,
     Document,
     Documents,
     Image,
     Images,
+    URIs,
     Where,
     IDs,
     EmbeddingFunction,
@@ -29,6 +33,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many_metadata,
     maybe_cast_one_to_many_document,
     maybe_cast_one_to_many_image,
+    maybe_cast_one_to_many_uri,
     validate_ids,
     validate_include,
     validate_metadata,
@@ -55,6 +60,7 @@ class Collection(BaseModel):
     database: Optional[str] = None
     _client: "ServerAPI" = PrivateAttr()
     _embedding_function: Optional[EmbeddingFunction[Embeddable]] = PrivateAttr()
+    _data_loader: Optional[DataLoader[Loadable]] = PrivateAttr()
 
     def __init__(
         self,
@@ -64,6 +70,7 @@ class Collection(BaseModel):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: Optional[str] = None,
         database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
@@ -78,6 +85,7 @@ class Collection(BaseModel):
             validate_embedding_function(embedding_function)
 
         self._embedding_function = embedding_function
+        self._data_loader = data_loader
 
     def __repr__(self) -> str:
         return f"Collection(name={self.name})"
@@ -98,6 +106,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Add embeddings to the data store.
         Args:
@@ -106,6 +115,7 @@ class Collection(BaseModel):
             metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
             documents: The documents to associate with the embeddings. Optional.
             images: The images to associate with the embeddings. Optional.
+            uris: The uris of the images to associate with the embeddings. Optional.
 
         Returns:
             None
@@ -119,8 +129,15 @@ class Collection(BaseModel):
 
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
         )
 
         # We need to compute the embeddings if they're not provided
@@ -131,11 +148,17 @@ class Collection(BaseModel):
             elif images is not None:
                 embeddings = self._embed(input=images)
             else:
-                raise ValueError(
-                    "You must provide embeddings, documents, or images, or an embedding function."
-                )
+                if uris is None:
+                    raise ValueError(
+                        "You must provide either embeddings, documents, images, or uris."
+                    )
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                embeddings = self._embed(self._data_loader(uris))
 
-        self._client._add(ids, self.id, embeddings, metadatas, documents)
+        self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
 
     def get(
         self,
@@ -161,22 +184,46 @@ class Collection(BaseModel):
             GetResult: A GetResult object containing the results.
 
         """
-        where = validate_where(where) if where else None
-        where_document = (
+
+        valid_where = validate_where(where) if where else None
+        valid_where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
-        include = validate_include(include, allow_distances=False)
-        return self._client._get(
+        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        valid_include = validate_include(include, allow_distances=False)
+
+        if "data" in include and self._data_loader is None:
+            raise ValueError(
+                "You must set a data loader on the collection if loading from URIs."
+            )
+
+        # We need to include uris in the result from the API to load datas
+        if "data" in include and "uris" not in include:
+            valid_include.append("uris")
+
+        get_results = self._client._get(
             self.id,
-            ids,
-            where,
+            valid_ids,
+            valid_where,
             None,
             limit,
             offset,
-            where_document=where_document,
-            include=include,
+            where_document=valid_where_document,
+            include=valid_include,
         )
+
+        if (
+            "data" in include
+            and self._data_loader is not None
+            and get_results["uris"] is not None
+        ):
+            get_results["data"] = self._data_loader(get_results["uris"])
+
+        # Remove URIs from the result if they weren't requested
+        if "uris" not in include:
+            get_results["uris"] = None
+
+        return get_results
 
     def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -194,6 +241,7 @@ class Collection(BaseModel):
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
+        query_uris: Optional[OneOrMany[URI]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -220,67 +268,88 @@ class Collection(BaseModel):
             ValueError: If you provide both query_texts and query_images
 
         """
-        # If neither query_embeddings nor query_texts are provided, or both are provided, raise an error
-        if (
-            (query_embeddings is None and query_texts is None and query_images is None)
-            or (
-                query_embeddings is not None
-                and (query_texts is not None or query_images is not None)
-            )
-            or (query_texts is not None and query_images is not None)
+
+        # Users must provide only one of query_embeddings, query_texts, query_images, or query_uris
+        if not (
+            (query_embeddings is not None)
+            ^ (query_texts is not None)
+            ^ (query_images is not None)
+            ^ (query_uris is not None)
         ):
             raise ValueError(
-                "You must provide either query embeddings, or else one of query texts or query images."
+                "You must provide one of query_embeddings, query_texts, query_images, or query_uris."
             )
 
-        where = validate_where(where) if where else None
-        where_document = (
-            validate_where_document(where_document) if where_document else None
+        valid_where = validate_where(where) if where else {}
+        valid_where_document = (
+            validate_where_document(where_document) if where_document else {}
         )
-        query_embeddings = (
+        valid_query_embeddings = (
             validate_embeddings(maybe_cast_one_to_many_embedding(query_embeddings))
             if query_embeddings is not None
             else None
         )
-        query_texts = (
+        valid_query_texts = (
             maybe_cast_one_to_many_document(query_texts)
             if query_texts is not None
             else None
         )
-        query_images = (
+        valid_query_images = (
             maybe_cast_one_to_many_image(query_images)
             if query_images is not None
             else None
         )
-        include = validate_include(include, allow_distances=True)
-        n_results = validate_n_results(n_results)
+        valid_query_uris = (
+            maybe_cast_one_to_many_uri(query_uris) if query_uris is not None else None
+        )
+        valid_include = validate_include(include, allow_distances=True)
+        valid_n_results = validate_n_results(n_results)
 
         # If query_embeddings are not provided, we need to compute them from the inputs
-        if query_embeddings is None:
-            # At this point, we know that one of query_texts or query_images are provided from the validation above
+        if valid_query_embeddings is None:
             if query_texts is not None:
-                query_embeddings = self._embed(input=query_texts)
+                valid_query_embeddings = self._embed(input=valid_query_texts)
             elif query_images is not None:
-                query_embeddings = self._embed(input=query_images)
+                valid_query_embeddings = self._embed(input=valid_query_images)
             else:
-                raise ValueError(
-                    "You must provide either query embeddings, or else one of query texts or query images."
+                if valid_query_uris is None:
+                    raise ValueError(
+                        "You must provide either query_embeddings, query_texts, query_images, or query_uris."
+                    )
+                if self._data_loader is None:
+                    raise ValueError(
+                        "You must set a data loader on the collection if loading from URIs."
+                    )
+                valid_query_embeddings = self._embed(
+                    self._data_loader(valid_query_uris)
                 )
 
-        if where is None:
-            where = {}
+        if "data" in include and "uris" not in include:
+            valid_include.append("uris")
 
-        if where_document is None:
-            where_document = {}
-
-        return self._client._query(
+        query_results = self._client._query(
             collection_id=self.id,
-            query_embeddings=query_embeddings,
-            n_results=n_results,
-            where=where,
-            where_document=where_document,
+            query_embeddings=valid_query_embeddings,
+            n_results=valid_n_results,
+            where=valid_where,
+            where_document=valid_where_document,
             include=include,
         )
+
+        if (
+            "data" in include
+            and self._data_loader is not None
+            and query_results["uris"] is not None
+        ):
+            query_results["data"] = [
+                self._data_loader(uris) for uris in query_results["uris"]
+            ]
+
+        # Remove URIs from the result if they weren't requested
+        if "uris" not in include:
+            query_results["uris"] = None
+
+        return query_results
 
     def modify(
         self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
@@ -310,6 +379,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids.
 
@@ -323,12 +393,20 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
+        (
             ids,
             embeddings,
             metadatas,
             documents,
             images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
             require_embeddings_or_data=False,
         )
 
@@ -338,7 +416,7 @@ class Collection(BaseModel):
             elif images is not None:
                 embeddings = self._embed(input=images)
 
-        self._client._update(self.id, ids, embeddings, metadatas, documents)
+        self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
 
     def upsert(
         self,
@@ -347,6 +425,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
 
@@ -360,8 +439,15 @@ class Collection(BaseModel):
             None
         """
 
-        ids, embeddings, metadatas, documents, images = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images
+        (
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        ) = self._validate_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
         )
 
         if embeddings is None:
@@ -376,6 +462,7 @@ class Collection(BaseModel):
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         )
 
     def delete(
@@ -412,6 +499,7 @@ class Collection(BaseModel):
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
         require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
@@ -419,6 +507,7 @@ class Collection(BaseModel):
         Optional[Metadatas],
         Optional[Documents],
         Optional[Images],
+        Optional[URIs],
     ]:
         valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
         valid_embeddings = (
@@ -440,14 +529,19 @@ class Collection(BaseModel):
             maybe_cast_one_to_many_image(images) if images is not None else None
         )
 
+        valid_uris = maybe_cast_one_to_many_uri(uris) if uris is not None else None
+
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
             if (
                 valid_embeddings is None
                 and valid_documents is None
                 and valid_images is None
+                and valid_uris is None
             ):
-                raise ValueError("You must provide embeddings, documents, or images.")
+                raise ValueError(
+                    "You must provide embeddings, documents, images, or uris."
+                )
 
         # Only one of documents or images can be provided
         if valid_documents is not None and valid_images is not None:
@@ -466,6 +560,14 @@ class Collection(BaseModel):
             raise ValueError(
                 f"Number of documents {len(valid_documents)} must match number of ids {len(valid_ids)}"
             )
+        if valid_images is not None and len(valid_images) != len(valid_ids):
+            raise ValueError(
+                f"Number of images {len(valid_images)} must match number of ids {len(valid_ids)}"
+            )
+        if valid_uris is not None and len(valid_uris) != len(valid_ids):
+            raise ValueError(
+                f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
+            )
 
         return (
             valid_ids,
@@ -473,6 +575,7 @@ class Collection(BaseModel):
             valid_metadatas,
             valid_documents,
             valid_images,
+            valid_uris,
         )
 
     def _embed(self, input: Any) -> Embeddings:

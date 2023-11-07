@@ -13,13 +13,16 @@ import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    DataLoader,
     Documents,
     Embeddable,
     Embeddings,
     EmbeddingFunction,
     IDs,
     Include,
+    Loadable,
     Metadatas,
+    URIs,
     Where,
     WhereDocument,
     GetResult,
@@ -223,6 +226,7 @@ class FastAPI(ServerAPI):
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -246,6 +250,7 @@ class FastAPI(ServerAPI):
             id=resp_json["id"],
             name=resp_json["name"],
             embedding_function=embedding_function,
+            data_loader=data_loader,
             metadata=resp_json["metadata"],
         )
 
@@ -255,7 +260,10 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -276,6 +284,7 @@ class FastAPI(ServerAPI):
             name=resp_json["name"],
             id=resp_json["id"],
             embedding_function=embedding_function,
+            data_loader=data_loader,
             metadata=resp_json["metadata"],
         )
 
@@ -287,16 +296,20 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return cast(
             Collection,
             self.create_collection(
-                name,
-                metadata,
-                embedding_function,
+                name=name,
+                metadata=metadata,
+                embedding_function=embedding_function,
+                data_loader=data_loader,
                 get_or_create=True,
                 tenant=tenant,
                 database=database,
@@ -403,6 +416,8 @@ class FastAPI(ServerAPI):
             embeddings=body.get("embeddings", None),
             metadatas=body.get("metadatas", None),
             documents=body.get("documents", None),
+            data=None,
+            uris=body.get("uris", None),
         )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -429,7 +444,11 @@ class FastAPI(ServerAPI):
     def _submit_batch(
         self,
         batch: Tuple[
-            IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]
+            IDs,
+            Optional[Embeddings],
+            Optional[Metadatas],
+            Optional[Documents],
+            Optional[URIs],
         ],
         url: str,
     ) -> requests.Response:
@@ -444,6 +463,7 @@ class FastAPI(ServerAPI):
                     "embeddings": batch[1],
                     "metadatas": batch[2],
                     "documents": batch[3],
+                    "uris": batch[4],
                 }
             ),
         )
@@ -458,12 +478,13 @@ class FastAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
+        batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         raise_chroma_error(resp)
@@ -478,12 +499,13 @@ class FastAPI(ServerAPI):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
+        batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
@@ -500,12 +522,13 @@ class FastAPI(ServerAPI):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents)
+        batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.max_batch_size})
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
@@ -547,6 +570,8 @@ class FastAPI(ServerAPI):
             embeddings=body.get("embeddings", None),
             metadatas=body.get("metadatas", None),
             documents=body.get("documents", None),
+            uris=body.get("uris", None),
+            data=None,
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)

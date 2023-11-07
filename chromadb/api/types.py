@@ -1,4 +1,4 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -22,6 +22,19 @@ __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
+
+# URIs
+URI = str
+URIs = List[URI]
+
+
+def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
+    if isinstance(target, str):
+        # One URI
+        return cast(URIs, [target])
+    # Already a sequence
+    return cast(URIs, target)
+
 
 # IDs
 ID = str
@@ -115,6 +128,8 @@ Include = List[
         Literal["embeddings"],
         Literal["metadatas"],
         Literal["distances"],
+        Literal["uris"],
+        Literal["data"],
     ]
 ]
 
@@ -126,11 +141,30 @@ OperatorExpression = OperatorExpression
 Where = Where
 WhereDocumentOperator = WhereDocumentOperator
 
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
+
+
+class EmbeddingFunction(Protocol[D]):
+    def __call__(self, input: D) -> Embeddings:
+        ...
+
+
+Loadable = List[Optional[Image]]
+L = TypeVar("L", covariant=True, bound=Loadable)
+
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
+        ...
+
 
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
+    uris: Optional[URIs]
+    data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
 
 
@@ -138,6 +172,8 @@ class QueryResult(TypedDict):
     ids: List[IDs]
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
+    uris: Optional[List[List[URI]]]
+    data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
@@ -176,6 +212,12 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
+
+L = TypeVar("L", covariant=True)
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: URIs) -> L:
+        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
@@ -398,7 +440,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas"]
+        allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
@@ -443,7 +485,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 
 
 def validate_batch(
-    batch: Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]],
+    batch: Tuple[
+        IDs,
+        Optional[Embeddings],
+        Optional[Metadatas],
+        Optional[Documents],
+        Optional[URIs],
+    ],
     limits: Dict[str, Any],
 ) -> None:
     if len(batch[0]) > limits["max_batch_size"]:
