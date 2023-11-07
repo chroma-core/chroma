@@ -464,6 +464,15 @@ class SegmentAPI(ServerAPI):
             offset=offset,
         )
 
+        if len(records) == 0:
+            # Nothing to return if there are no records
+            return GetResult(
+                ids=[],
+                embeddings=[] if "embeddings" in include else None,
+                metadatas=[] if "metadatas" in include else None,
+                documents=[] if "documents" in include else None,
+            )
+
         vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]

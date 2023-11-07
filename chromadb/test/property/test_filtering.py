@@ -305,3 +305,22 @@ def test_boolean_metadata(api: ServerAPI) -> None:
     res = coll.get(where={"test": True})
 
     assert res["ids"] == ["1", "3"]
+
+
+def test_get_empty(api: ServerAPI) -> None:
+    """Tests that calling get() with empty filters returns nothing"""
+
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_metadatas: Metadatas = [{"test": 10}, {"test": 20}, {"test": 30}]
+
+    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
+
+    res = coll.get(ids=["nope"], include=["embeddings"])
+
+    assert len(res["ids"]) == 0
+    assert res["embeddings"] is not None
+    assert len(res["embeddings"]) == 0
