@@ -11,20 +11,15 @@ import (
 )
 
 type INode interface {
-	// Get the ip of the node
 	GetIP() string
 }
 
-// A memberlist represents all ready nodes in the cluster
 type Memberlist struct {
-	// List of node ips and statuses
 	Nodes []INode
 }
 
 type IMemberlistStore interface {
-	// Get the current memberlist or error
 	GetMemberlist() (Memberlist, error)
-	// Update the memberlist
 	UpdateMemberlist(memberlist Memberlist) error
 }
 

@@ -52,11 +52,11 @@ type MockWatcher struct {
 func (w *MockWatcher) Start() error {
 	// Create a goroutine that generates updates
 	if (w.callbacks == nil) || (len(w.callbacks) == 0) {
-		return errors.New("No callbacks registered")
+		return errors.New("no callbacks registered")
 	}
 
 	if w.isRunning {
-		return errors.New("Watcher is already running")
+		return errors.New("watcher is already running")
 	}
 
 	w.stopCh = make(chan struct{})
