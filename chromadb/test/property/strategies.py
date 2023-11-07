@@ -210,7 +210,7 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
 
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
-    def __call__(self, inpu: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         assert False, "This embedding function is not implemented"
 
 
