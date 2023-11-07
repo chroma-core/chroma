@@ -96,7 +96,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         self.with_embeddings = with_embeddings
         self.with_metadata = with_metadata
         self.with_documents = with_documents
-        self.with_uri = with_uris
+        self.with_uris = with_uris
         self.batch_size = batch_size
 
     @property
