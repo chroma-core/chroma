@@ -124,6 +124,13 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_grpc_port: Optional[str] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
+
+    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+    def empty_str_to_none(cls, v: str) -> Optional[str]:
+        if type(v) is str and v.strip() == "":
+            return None
+        return v
+
     chroma_server_nofile: Optional[int] = None
 
     pulsar_broker_url: Optional[str] = None
