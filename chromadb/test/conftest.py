@@ -117,7 +117,13 @@ def _run_server(
             chroma_server_authz_config=chroma_server_authz_config,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
+    uvicorn.run(
+        server.app(),
+        host="0.0.0.0",
+        port=port,
+        log_level="error",
+        timeout_keep_alive=30,
+    )
 
 
 def _await_server(api: ServerAPI, attempts: int = 0) -> None:

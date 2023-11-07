@@ -51,6 +51,7 @@ class TxWrapper(base.TxWrapper):
                 self._conn.commit()
             else:
                 self._conn.rollback()
+        self._conn.cursor().close()
         self._pool.return_to_pool(self._conn)
         return False
 

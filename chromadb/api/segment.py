@@ -364,7 +364,7 @@ class SegmentAPI(ServerAPI):
                 add_amount=len(ids),
                 with_metadata=len(ids) if metadatas is not None else 0,
                 with_documents=len(ids) if documents is not None else 0,
-                with_uri=len(ids) if uris is not None else 0,
+                with_uris=len(ids) if uris is not None else 0,
             )
         )
         return True
@@ -406,7 +406,7 @@ class SegmentAPI(ServerAPI):
                 with_embeddings=len(embeddings) if embeddings else 0,
                 with_metadata=len(metadatas) if metadatas else 0,
                 with_documents=len(documents) if documents else 0,
-                with_uri=len(uris) if uris else 0,
+                with_uris=len(uris) if uris else 0,
             )
         )
 
@@ -489,6 +489,17 @@ class SegmentAPI(ServerAPI):
             limit=limit,
             offset=offset,
         )
+
+        if len(records) == 0:
+            # Nothing to return if there are no records
+            return GetResult(
+                ids=[],
+                embeddings=[] if "embeddings" in include else None,
+                metadatas=[] if "metadatas" in include else None,
+                documents=[] if "documents" in include else None,
+                uris=[] if "uris" in include else None,
+                data=[] if "data" in include else None,
+            )
 
         vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
