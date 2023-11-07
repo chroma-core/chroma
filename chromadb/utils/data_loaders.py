@@ -1,4 +1,5 @@
 import importlib
+import multiprocessing
 from typing import Optional, Sequence, List
 import numpy as np
 from chromadb.api.types import URI, DataLoader, Image
@@ -6,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class ImageLoader(DataLoader[List[Optional[Image]]]):
-    def __init__(self, max_workers: int = 4) -> None:
+    def __init__(self, max_workers: int = multiprocessing.cpu_count()) -> None:
         try:
             self._PILImage = importlib.import_module("PIL.Image")
             self._max_workers = max_workers
