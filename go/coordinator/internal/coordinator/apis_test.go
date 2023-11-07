@@ -176,6 +176,7 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_1",
 			Metadata:     metadata1,
 			Dimension:    &dimension,
+			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -185,6 +186,7 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_2",
 			Metadata:     metadata2,
 			Dimension:    nil,
+			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -194,6 +196,7 @@ func SampleCollections(t *testing.T, tenantID string, databaseName string) []*mo
 			Topic:        "test_topic_3",
 			Metadata:     metadata3,
 			Dimension:    nil,
+			Created:      true,
 			TenantID:     tenantID,
 			DatabaseName: databaseName,
 		},
@@ -343,6 +346,7 @@ func TestUpdateCollections(t *testing.T) {
 		Topic:        sampleCollections[0].Topic,
 		Metadata:     sampleCollections[0].Metadata,
 		Dimension:    sampleCollections[0].Dimension,
+		Created:      false,
 		TenantID:     sampleCollections[0].TenantID,
 		DatabaseName: sampleCollections[0].DatabaseName,
 	}
@@ -415,7 +419,7 @@ func TestCreateUpdateWithDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
-	c.ResetState(ctx)
+	// c.ResetState(ctx)
 	_, err = c.CreateDatabase(ctx, &model.CreateDatabase{
 		ID:     types.MustParse("00000000-d7d7-413b-92e1-731098a6e492").String(),
 		Name:   "new_database",
@@ -463,16 +467,6 @@ func TestCreateUpdateWithDatabase(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(result))
 	assert.Equal(t, "new_name_0", result[0].Name)
-	//     # Try to create the collection in the default database in the new database and expect an error
-	//     with pytest.raises(UniqueConstraintError):
-	//         sysdb.create_collection(
-	//             id=sample_collections[1]["id"],
-	//             name=sample_collections[1]["name"],
-	//             metadata=sample_collections[1]["metadata"],
-	//             dimension=sample_collections[1]["dimension"],
-	//             database="new_database",
-	//         )
-	//
 }
 
 func TestGetMultipleWithDatabase(t *testing.T) {
