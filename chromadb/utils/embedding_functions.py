@@ -104,7 +104,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        self._api_key = api_key
         if api_key is not None:
             openai.api_key = api_key
         # If the api key is still not set, raise an error
