@@ -14,6 +14,7 @@ from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     Documents,
+    Embeddable,
     Embeddings,
     EmbeddingFunction,
     IDs,
@@ -219,7 +220,9 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -250,9 +253,9 @@ class FastAPI(ServerAPI):
     @override
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -284,17 +287,20 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return self.create_collection(
-            name,
-            metadata,
-            embedding_function,
-            get_or_create=True,
-            tenant=tenant,
-            database=database,
+        return cast(
+            Collection,
+            self.create_collection(
+                name,
+                metadata,
+                embedding_function,
+                get_or_create=True,
+                tenant=tenant,
+                database=database,
+            ),
         )
 
     @trace_method("FastAPI._modify", OpenTelemetryGranularity.OPERATION)
@@ -347,10 +353,13 @@ class FastAPI(ServerAPI):
         collection_id: UUID,
         n: int = 10,
     ) -> GetResult:
-        return self._get(
-            collection_id,
-            limit=n,
-            include=["embeddings", "documents", "metadatas"],
+        return cast(
+            GetResult,
+            self._get(
+                collection_id,
+                limit=n,
+                include=["embeddings", "documents", "metadatas"],
+            ),
         )
 
     @trace_method("FastAPI._get", OpenTelemetryGranularity.OPERATION)

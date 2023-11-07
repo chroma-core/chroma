@@ -8,6 +8,7 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
+    Embeddable,
     EmbeddingFunction,
     Embeddings,
     IDs,
@@ -58,7 +59,9 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -90,9 +93,11 @@ class BaseAPI(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -119,7 +124,9 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -486,7 +493,9 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -497,9 +506,11 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @override
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -511,7 +522,9 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

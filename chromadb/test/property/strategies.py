@@ -1,7 +1,7 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Any, Optional, List, Dict, Union
+from typing import Any, Optional, List, Dict, Union, cast
 from typing_extensions import TypedDict
 import numpy as np
 import numpy.typing as npt
@@ -13,8 +13,14 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from dataclasses import dataclass
 
-from chromadb.api.types import Documents, Embeddings, Metadata
-from chromadb.types import LiteralValue
+from chromadb.api.types import (
+    Documents,
+    Embeddable,
+    EmbeddingFunction,
+    Embeddings,
+    Metadata,
+)
+from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -178,15 +184,15 @@ def create_embeddings(
     return embeddings
 
 
-class hashing_embedding_function(types.EmbeddingFunction):
+class hashing_embedding_function(types.EmbeddingFunction[Documents]):
     def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
         self.dtype = dtype
 
-    def __call__(self, texts: types.Documents) -> types.Embeddings:
+    def __call__(self, input: types.Documents) -> types.Embeddings:
         # Hash the texts and convert to hex strings
         hashed_texts = [
-            list(hashlib.sha256(text.encode("utf-8")).hexdigest()) for text in texts
+            list(hashlib.sha256(text.encode("utf-8")).hexdigest()) for text in input
         ]
         # Pad with repetition, or truncate the hex strings to the desired dimension
         padded_texts = [
@@ -203,15 +209,17 @@ class hashing_embedding_function(types.EmbeddingFunction):
         return embeddings
 
 
-class not_implemented_embedding_function(types.EmbeddingFunction):
-    def __call__(self, texts: Documents) -> Embeddings:
+class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
+    def __call__(self, input: Documents) -> Embeddings:
         assert False, "This embedding function is not implemented"
 
 
 def embedding_function_strategy(
     dim: int, dtype: npt.DTypeLike
-) -> st.SearchStrategy[types.EmbeddingFunction]:
-    return st.just(hashing_embedding_function(dim, dtype))
+) -> st.SearchStrategy[types.EmbeddingFunction[Embeddable]]:
+    return st.just(
+        cast(EmbeddingFunction[Embeddable], hashing_embedding_function(dim, dtype))
+    )
 
 
 @dataclass
@@ -224,7 +232,7 @@ class Collection:
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
-    embedding_function: Optional[types.EmbeddingFunction] = None
+    embedding_function: Optional[types.EmbeddingFunction[Embeddable]] = None
 
 
 @st.composite
@@ -311,12 +319,12 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
     if collection.known_metadata_keys:
         for key in collection.known_metadata_keys.keys():
             if key in metadata:
-                del metadata[key]
+                del metadata[key]  # type: ignore
         # Finally, add in some of the known keys for the collection
         sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
-        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))
+        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
     return metadata
 
 
@@ -332,11 +340,11 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     else:
         known_words_st = st.text(
             min_size=1,
-            alphabet=st.characters(blacklist_categories=blacklist_categories),
+            alphabet=st.characters(blacklist_categories=blacklist_categories),  # type: ignore
         )
 
     random_words_st = st.text(
-        min_size=1, alphabet=st.characters(blacklist_categories=blacklist_categories)
+        min_size=1, alphabet=st.characters(blacklist_categories=blacklist_categories)  # type: ignore
     )
     words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
@@ -487,20 +495,20 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
 
-    op: types.WhereOperator = draw(st.sampled_from(legal_ops))
+    op: WhereOperator = draw(st.sampled_from(legal_ops))
 
     if op is None:
         return {key: value}
-    elif op == "$in":
+    elif op == "$in":  # type: ignore
         if isinstance(value, str) and not value:
             return {}
         return {key: {op: [value, *[draw(opposite_value(value)) for _ in range(3)]]}}
-    elif op == "$nin":
+    elif op == "$nin":  # type: ignore
         if isinstance(value, str) and not value:
             return {}
         return {key: {op: [draw(opposite_value(value)) for _ in range(3)]}}
     else:
-        return {key: {op: value}}
+        return {key: {op: value}}  # type: ignore
 
 
 @st.composite
@@ -516,7 +524,7 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
 def binary_operator_clause(
     base_st: SearchStrategy[types.Where],
 ) -> SearchStrategy[types.Where]:
-    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    op: SearchStrategy[LogicalOperator] = st.sampled_from(["$and", "$or"])
     return st.dictionaries(
         keys=op,
         values=st.lists(base_st, max_size=2, min_size=2),
@@ -528,7 +536,7 @@ def binary_operator_clause(
 def binary_document_operator_clause(
     base_st: SearchStrategy[types.WhereDocument],
 ) -> SearchStrategy[types.WhereDocument]:
-    op: SearchStrategy[types.LogicalOperator] = st.sampled_from(["$and", "$or"])
+    op: SearchStrategy[LogicalOperator] = st.sampled_from(["$and", "$or"])
     return st.dictionaries(
         keys=op,
         values=st.lists(base_st, max_size=2, min_size=2),
