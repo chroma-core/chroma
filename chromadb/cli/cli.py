@@ -28,11 +28,11 @@ def run(
     path: str = typer.Option(
         "./chroma_data", help="The path to the file or directory."
     ),
-    host: Annotated[Optional[str], typer.Option(
-        help="The host to listen to. Default: localhost")] = "localhost",
+    host: Annotated[
+        Optional[str], typer.Option(help="The host to listen to. Default: localhost")
+    ] = "localhost",
     port: int = typer.Option(8000, help="The port to run the server on."),
-    test: bool = typer.Option(False, help="Test mode.",
-                              show_envvar=False, hidden=True),
+    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
 
@@ -53,6 +53,7 @@ def run(
     # set ENV variable for PERSIST_DIRECTORY to path
     os.environ["IS_PERSISTENT"] = "True"
     os.environ["PERSIST_DIRECTORY"] = path
+    os.environ["CHROMA_SERVER_NOFILE"] = "65535"
 
     # get the path where chromadb is installed
     chromadb_path = os.path.dirname(os.path.realpath(__file__))
@@ -66,6 +67,7 @@ def run(
         "port": port,
         "workers": 1,
         "log_config": f"{chromadb_path}/log_config.yml",
+        "timeout_keep_alive": 30,
     }
 
     if test:
