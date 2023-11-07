@@ -48,8 +48,6 @@ from chromadb.server.fastapi.types import (
     UpdateEmbedding,
 )
 from starlette.requests import Request
-from anyio.lowlevel import RunVar
-from anyio import CapacityLimiter
 
 import logging
 from chromadb.types import Database, Tenant
@@ -131,8 +129,6 @@ class FastAPI(chromadb.server.Server):
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
         self._system.start()
-
-        # RunVar("_default_thread_limiter").set(CapacityLimiter(600))
 
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
