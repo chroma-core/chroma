@@ -264,10 +264,6 @@ spec:
         - command:
             - "chroma"
             - "coordinator"
-            - "--db-address=aws.connect.psdb.cloud"
-            - "--username=pscale_user"
-            - "--password=pscale_password"
-            - "--db-name=test"
           image: chroma-coordinator
           imagePullPolicy: IfNotPresent
           name: coordinator
