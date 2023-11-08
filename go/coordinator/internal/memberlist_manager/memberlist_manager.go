@@ -8,9 +8,7 @@ import (
 
 // TODO:
 /*
-
 - Switch to camel case for all variables and methods
-
 */
 
 // A memberlist manager is responsible for managing the memberlist for a
@@ -24,26 +22,26 @@ type IMemberlistManager interface {
 }
 
 type MemberlistManager struct {
-	workqueue        workqueue.RateLimitingInterface // workqueue for the coordinator
-	node_watcher     IWatcher                        // node watcher for the coordinator
-	memberlist_store IMemberlistStore                // memberlist store for the coordinator
+	workqueue       workqueue.RateLimitingInterface // workqueue for the coordinator
+	nodeWatcher     IWatcher                        // node watcher for the coordinator
+	memberlistStore IMemberlistStore                // memberlist store for the coordinator
 }
 
-func NewMemberlistManager(node_watcher IWatcher, memberlist_store IMemberlistStore) *MemberlistManager {
+func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore) *MemberlistManager {
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
 	return &MemberlistManager{
-		workqueue:        queue,
-		node_watcher:     node_watcher,
-		memberlist_store: memberlist_store,
+		workqueue:       queue,
+		nodeWatcher:     nodeWatcher,
+		memberlistStore: memberlistStore,
 	}
 }
 
 func (m *MemberlistManager) Start() error {
-	m.node_watcher.RegisterCallback(func(node_update NodeUpdate) {
-		m.workqueue.Add(node_update)
+	m.nodeWatcher.RegisterCallback(func(node_ip string) {
+		m.workqueue.Add(node_ip)
 	})
-	err := m.node_watcher.Start()
+	err := m.nodeWatcher.Start()
 	if err != nil {
 		return err
 	}
@@ -58,36 +56,36 @@ func (m *MemberlistManager) run() {
 			fmt.Println("Shutting down memberlist manager")
 			break
 		}
-		fmt.Printf("Update HERE: %s\n", key.(NodeUpdate).node_ip)
-		// TODO: use cache instead of storing the memberlist on the queue
-		nodeUpdate := key.(NodeUpdate)
-		m.reconcile(&nodeUpdate)
+		nodeUpdate, err := m.nodeWatcher.GetStatus(key.(string))
+		if err != nil {
+			fmt.Printf("Error getting node status: %v\n", err)
+			m.workqueue.Done(key)
+			continue
+		}
+		m.reconcile(key.(string), nodeUpdate)
 		m.workqueue.Done(key)
 	}
 }
 
-func (m *MemberlistManager) reconcile(node_update *NodeUpdate) error {
-	memberlist, err := m.memberlist_store.GetMemberlist()
-	fmt.Printf("Current memberlist: %v\n", memberlist)
+func (m *MemberlistManager) reconcile(node_ip string, status Status) error {
+	memberlist, err := m.memberlistStore.GetMemberlist()
 	if err != nil {
 		return err
 	}
 	exists := false
-	new_memberlist := Memberlist{}
-	for _, node := range memberlist.Nodes {
-		if node.GetIP() == node_update.GetIP() {
-			if node_update.status == Ready {
-				new_memberlist.Nodes = append(new_memberlist.Nodes, node_update)
+	new_memberlist := []string{}
+	for _, node := range memberlist {
+		if node == node_ip {
+			if status == Ready {
+				new_memberlist = append(new_memberlist, node)
 			}
 			exists = true
 		}
 	}
-	if !exists && node_update.status == Ready {
-		fmt.Printf("Adding node: %s\n", node_update.GetIP())
-		new_memberlist.Nodes = append(new_memberlist.Nodes, node_update)
+	if !exists && status == Ready {
+		new_memberlist = append(new_memberlist, node_ip)
 	}
-	fmt.Printf("Updated memberlist: %v\n", new_memberlist.Nodes[0])
-	return m.memberlist_store.UpdateMemberlist(new_memberlist)
+	return m.memberlistStore.UpdateMemberlist(new_memberlist)
 }
 
 func (m *MemberlistManager) Stop() error {
