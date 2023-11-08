@@ -243,7 +243,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"})
 
-    def __call__(self, texts: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
@@ -255,12 +255,12 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Example:
             >>> jina_ai_fn = JinaEmbeddingFunction(api_key="your_api_key")
-            >>> texts = ["Hello, world!", "How are you?"]
-            >>> embeddings = jina_ai_fn(texts)
+            >>> input = ["Hello, world!", "How are you?"]
+            >>> embeddings = jina_ai_fn(input)
         """
         # Call Jina AI Embedding API
         resp = self._session.post(  # type: ignore
-            self._api_url, json={"input": texts, "model": self._model_name}
+            self._api_url, json={"input": input, "model": self._model_name}
         ).json()
         if "data" not in resp:
             raise RuntimeError(resp["detail"])
