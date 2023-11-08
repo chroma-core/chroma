@@ -28,15 +28,8 @@ class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
         return cast(Embeddings, embeddings.tolist())
 
 
-def random_image_generator() -> Generator[Image, None, None]:
-    # Fix numpy's random seed for reproducibility
-    random_state = np.random.get_state()
-    yield np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
-    np.random.set_state(random_state)
-
-
 def random_image() -> Image:
-    return next(random_image_generator())
+    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
 
 
 def random_document() -> Document:
@@ -62,6 +55,10 @@ def test_multimodal(
     n_examples: int = 10,
     n_query_results: int = 3,
 ) -> None:
+    # Fix numpy's random seed for reproducibility
+    random_state = np.random.get_state()
+    np.random.seed(0)
+
     image_ids = [str(i) for i in range(n_examples)]
     images = [random_image() for _ in range(n_examples)]
     image_embeddings = default_ef(images)
@@ -138,6 +135,7 @@ def test_multimodal(
     )
 
     assert query_result["ids"][0] == nearest_document_neighbor_ids
+    np.random.set_state(random_state)
 
 
 @pytest.mark.xfail
