@@ -160,7 +160,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call the OpenAI Embedding API
         if self._v1:
             embeddings = self._client.create(
-                input=texts,
+                input=input,
                 model=self._deployment_id or self._model_name
             ).data
 
