@@ -86,6 +86,7 @@ message SubmitEmbeddingRecord {
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
+    string collection_id = 5;
 }
 
 message VectorEmbeddingRecord {

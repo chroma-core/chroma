@@ -83,6 +83,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
             operation=Operation.ADD,
+            collection_id=uuid.UUID(int=0),
         )
         return record
 
@@ -357,6 +358,7 @@ def test_delete(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = produce_fns(producer, topic, (delete_embedding for _ in range(1)), 1)[1][
         -1
@@ -402,6 +404,7 @@ def test_update(
         embedding=None,
         encoding=None,
         operation=Operation.UPDATE,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -431,6 +434,7 @@ def test_upsert(
         embedding=None,
         encoding=None,
         operation=Operation.UPSERT,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = produce_fns(
         producer=producer,
@@ -470,6 +474,7 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -485,6 +490,7 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -502,6 +508,7 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
@@ -515,6 +522,7 @@ def _test_update(
         embedding=None,
         encoding=None,
         operation=op,
+        collection_id=uuid.UUID(int=0),
     )
     max_id = producer.submit_embedding(topic, update_record)
     sync(segment, max_id)
