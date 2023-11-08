@@ -58,7 +58,6 @@ func (m *MemberlistManager) run() {
 		}
 		nodeUpdate, err := m.nodeWatcher.GetStatus(key.(string))
 		if err != nil {
-			fmt.Printf("Error getting node status: %v\n", err)
 			m.workqueue.Done(key)
 			continue
 		}
@@ -73,19 +72,22 @@ func (m *MemberlistManager) reconcile(node_ip string, status Status) error {
 		return err
 	}
 	exists := false
-	new_memberlist := []string{}
-	for _, node := range memberlist {
+	new_memberlist := Memberlist{}
+	for _, node := range *memberlist {
 		if node == node_ip {
 			if status == Ready {
 				new_memberlist = append(new_memberlist, node)
 			}
 			exists = true
+		} else {
+			// This update doesn't pertains to this node, so we just add it to the new memberlist
+			new_memberlist = append(new_memberlist, node)
 		}
 	}
 	if !exists && status == Ready {
 		new_memberlist = append(new_memberlist, node_ip)
 	}
-	return m.memberlistStore.UpdateMemberlist(new_memberlist)
+	return m.memberlistStore.UpdateMemberlist(&new_memberlist)
 }
 
 func (m *MemberlistManager) Stop() error {
