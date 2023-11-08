@@ -10,6 +10,7 @@ type Collection struct {
 	Topic        string
 	Dimension    *int32
 	Metadata     *CollectionMetadata[CollectionMetadataValueType]
+	Created      bool
 	TenantID     string
 	DatabaseName string
 	Ts           types.Timestamp

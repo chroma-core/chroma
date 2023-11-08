@@ -162,11 +162,13 @@ func (mc *MemoryCatalog) CreateCollection(ctx context.Context, createCollection 
 			log.Info("collection already exists", zap.Any("collection", collections[createCollection.ID]))
 			if createCollection.GetOrCreate {
 				if createCollection.Metadata != nil {
+					// For getOrCreate, update the metadata
 					collection.Metadata = createCollection.Metadata
 				}
 				return collection, nil
+			} else {
+				return nil, common.ErrCollectionUniqueConstraintViolation
 			}
-			return nil, common.ErrCollectionUniqueConstraintViolation
 		}
 	}
 	collection := &model.Collection{
@@ -175,6 +177,7 @@ func (mc *MemoryCatalog) CreateCollection(ctx context.Context, createCollection 
 		Topic:        createCollection.Topic,
 		Dimension:    createCollection.Dimension,
 		Metadata:     createCollection.Metadata,
+		Created:      true,
 		TenantID:     createCollection.TenantID,
 		DatabaseName: createCollection.DatabaseName,
 	}
