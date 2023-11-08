@@ -28,8 +28,15 @@ class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
         return cast(Embeddings, embeddings.tolist())
 
 
+def random_image_generator() -> Generator[Image, None, None]:
+    # Fix numpy's random seed for reproducibility
+    random_state = np.random.get_state()
+    yield np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
+    np.random.set_state(random_state)
+
+
 def random_image() -> Image:
-    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
+    return next(random_image_generator())
 
 
 def random_document() -> Document:
