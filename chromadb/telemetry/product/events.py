@@ -26,12 +26,13 @@ class ClientCreateCollectionEvent(ProductTelemetryEvent):
 
 
 class CollectionAddEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 100
+    max_batch_size: ClassVar[int] = 1000
     batch_size: int
     collection_uuid: str
     add_amount: int
     with_documents: int
     with_metadata: int
+    with_uris: int
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
         add_amount: int,
         with_documents: int,
         with_metadata: int,
+        with_uris: int,
         batch_size: int = 1,
     ):
         super().__init__()
@@ -46,6 +48,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
         self.add_amount = add_amount
         self.with_documents = with_documents
         self.with_metadata = with_metadata
+        self.with_uris = with_uris
         self.batch_size = batch_size
 
     @property
@@ -62,16 +65,20 @@ class CollectionAddEvent(ProductTelemetryEvent):
             add_amount=total_amount,
             with_documents=self.with_documents + other.with_documents,
             with_metadata=self.with_metadata + other.with_metadata,
+            with_uris=self.with_uris + other.with_uris,
             batch_size=self.batch_size + other.batch_size,
         )
 
 
 class CollectionUpdateEvent(ProductTelemetryEvent):
+    max_batch_size: ClassVar[int] = 100
+    batch_size: int
     collection_uuid: str
     update_amount: int
     with_embeddings: int
     with_metadata: int
     with_documents: int
+    with_uris: int
 
     def __init__(
         self,
@@ -80,6 +87,8 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         with_embeddings: int,
         with_metadata: int,
         with_documents: int,
+        with_uris: int,
+        batch_size: int = 1,
     ):
         super().__init__()
         self.collection_uuid = collection_uuid
@@ -87,10 +96,31 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
         self.with_embeddings = with_embeddings
         self.with_metadata = with_metadata
         self.with_documents = with_documents
+        self.with_uris = with_uris
+        self.batch_size = batch_size
+
+    @property
+    def batch_key(self) -> str:
+        return self.collection_uuid + self.name
+
+    def batch(self, other: "ProductTelemetryEvent") -> "CollectionUpdateEvent":
+        if not self.batch_key == other.batch_key:
+            raise ValueError("Cannot batch events")
+        other = cast(CollectionUpdateEvent, other)
+        total_amount = self.update_amount + other.update_amount
+        return CollectionUpdateEvent(
+            collection_uuid=self.collection_uuid,
+            update_amount=total_amount,
+            with_documents=self.with_documents + other.with_documents,
+            with_metadata=self.with_metadata + other.with_metadata,
+            with_embeddings=self.with_embeddings + other.with_embeddings,
+            with_uris=self.with_uris + other.with_uris,
+            batch_size=self.batch_size + other.batch_size,
+        )
 
 
 class CollectionQueryEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 20
+    max_batch_size: ClassVar[int] = 1000
     batch_size: int
     collection_uuid: str
     query_amount: int
@@ -99,6 +129,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
     n_results: int
     include_metadatas: int
     include_documents: int
+    include_uris: int
     include_distances: int
 
     def __init__(
@@ -110,6 +141,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         n_results: int,
         include_metadatas: int,
         include_documents: int,
+        include_uris: int,
         include_distances: int,
         batch_size: int = 1,
     ):
@@ -121,6 +153,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         self.n_results = n_results
         self.include_metadatas = include_metadatas
         self.include_documents = include_documents
+        self.include_uris = include_uris
         self.include_distances = include_distances
         self.batch_size = batch_size
 
@@ -141,17 +174,21 @@ class CollectionQueryEvent(ProductTelemetryEvent):
             n_results=self.n_results + other.n_results,
             include_metadatas=self.include_metadatas + other.include_metadatas,
             include_documents=self.include_documents + other.include_documents,
+            include_uris=self.include_uris + other.include_uris,
             include_distances=self.include_distances + other.include_distances,
             batch_size=self.batch_size + other.batch_size,
         )
 
 
 class CollectionGetEvent(ProductTelemetryEvent):
+    max_batch_size: ClassVar[int] = 100
+    batch_size: int
     collection_uuid: str
     ids_count: int
     limit: int
     include_metadata: int
     include_documents: int
+    include_uris: int
 
     def __init__(
         self,
@@ -160,6 +197,8 @@ class CollectionGetEvent(ProductTelemetryEvent):
         limit: int,
         include_metadata: int,
         include_documents: int,
+        include_uris: int,
+        batch_size: int = 1,
     ):
         super().__init__()
         self.collection_uuid = collection_uuid
@@ -167,6 +206,27 @@ class CollectionGetEvent(ProductTelemetryEvent):
         self.limit = limit
         self.include_metadata = include_metadata
         self.include_documents = include_documents
+        self.include_uris = include_uris
+        self.batch_size = batch_size
+
+    @property
+    def batch_key(self) -> str:
+        return self.collection_uuid + self.name + str(self.limit)
+
+    def batch(self, other: "ProductTelemetryEvent") -> "CollectionGetEvent":
+        if not self.batch_key == other.batch_key:
+            raise ValueError("Cannot batch events")
+        other = cast(CollectionGetEvent, other)
+        total_amount = self.ids_count + other.ids_count
+        return CollectionGetEvent(
+            collection_uuid=self.collection_uuid,
+            ids_count=total_amount,
+            limit=self.limit,
+            include_metadata=self.include_metadata + other.include_metadata,
+            include_documents=self.include_documents + other.include_documents,
+            include_uris=self.include_uris + other.include_uris,
+            batch_size=self.batch_size + other.batch_size,
+        )
 
 
 class CollectionDeleteEvent(ProductTelemetryEvent):

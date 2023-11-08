@@ -374,6 +374,15 @@ class AuthzDynamicParams:
             lambda **kwargs: kwargs["function_kwargs"][kwargs["arg_name"]], **kwargs
         )
 
+    @staticmethod
+    def dict_from_function_kwargs(**kwargs: Any) -> Callable[..., Dict[str, Any]]:
+        return partial(
+            lambda **kwargs: {
+                k: kwargs["function_kwargs"][k] for k in kwargs["arg_names"]
+            },
+            **kwargs,
+        )
+
 
 @dataclass
 class AuthzAction:
