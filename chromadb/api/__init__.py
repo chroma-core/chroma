@@ -8,11 +8,15 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
+    Embeddable,
     EmbeddingFunction,
+    DataLoader,
     Embeddings,
     IDs,
     Include,
+    Loadable,
     Metadatas,
+    URIs,
     Where,
     QueryResult,
     GetResult,
@@ -58,7 +62,10 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -90,9 +97,12 @@ class BaseAPI(ABC):
     @abstractmethod
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get a collection with the given name.
         Args:
@@ -119,7 +129,10 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
@@ -186,6 +199,7 @@ class BaseAPI(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -196,6 +210,7 @@ class BaseAPI(ABC):
             embedding: The sequence of embeddings to add.
             metadata: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
 
         Returns:
             True if the embeddings were added successfully.
@@ -210,6 +225,7 @@ class BaseAPI(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
@@ -219,7 +235,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to update. Defaults to None.
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-
+            uris: URIs of data sources for each embedding. Defaults to None.
         Returns:
             True if the embeddings were updated successfully.
         """
@@ -233,6 +249,7 @@ class BaseAPI(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -244,6 +261,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
         """
         pass
 
@@ -486,7 +504,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -497,9 +518,12 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @override
     def get_collection(
         self,
-        name: Optional[str] = None,
+        name: str,
         id: Optional[UUID] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -511,7 +535,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

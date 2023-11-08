@@ -75,25 +75,30 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     private api_key: string;
     private org_id: string;
     private model: string;
-    private openaiApi: OpenAIAPI;
+    private openaiApi?: OpenAIAPI;
 
     constructor({openai_api_key, openai_model, openai_organization_id}: {
         openai_api_key: string,
         openai_model?: string,
         openai_organization_id?: string
     }) {
+        // we used to construct the client here, but we need to async import the types
+        // for the openai npm package, and the constructor can not be async
+        this.api_key = openai_api_key;
+        this.org_id = openai_organization_id || "";
+        this.model = openai_model || "text-embedding-ada-002";
+    }
+
+    private async loadClient() {
+        // cache the client
+        if(this.openaiApi) return;
+
         try {
-            // eslint-disable-next-line global-require,import/no-extraneous-dependencies
-            OpenAIApi = require("openai");
-            let version = null;
-            try {
-                const {VERSION} = require('openai/version');
-                version = VERSION;
-            } catch (e) {
-                version = "3.x";
-            }
-            openAiVersion = version.replace(/[^0-9.]/g, '');
-            openAiMajorVersion = openAiVersion.split('.')[0];
+            const { openai, version } = await OpenAIEmbeddingFunction.import();
+            OpenAIApi = openai;
+            let versionVar: string = version;
+            openAiVersion = versionVar.replace(/[^0-9.]/g, '');
+            openAiMajorVersion = parseInt(openAiVersion.split('.')[0]);
         } catch (_a) {
             // @ts-ignore
             if (_a.code === 'MODULE_NOT_FOUND') {
@@ -101,9 +106,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
             }
             throw _a; // Re-throw other errors
         }
-        this.api_key = openai_api_key;
-        this.org_id = openai_organization_id || "";
-        this.model = openai_model || "text-embedding-ada-002";
+
         if (openAiMajorVersion > 3) {
             this.openaiApi = new OpenAIAPIv4(this.api_key);
         } else {
@@ -115,11 +118,34 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     }
 
     public async generate(texts: string[]): Promise<number[][]> {
-        return await this.openaiApi.createEmbedding({
+
+        await this.loadClient();
+
+        return await this.openaiApi!.createEmbedding({
             model: this.model,
             input: texts,
         }).catch((error: any) => {
             throw error;
         });
     }
+
+     /** @ignore */
+     static async import(): Promise<{
+        // @ts-ignore
+        openai: typeof import("openai");
+        version: string;
+    }> {
+        try {
+            // @ts-ignore
+            const { default: openai } = await import("openai");
+            // @ts-ignore
+            const { VERSION } = await import('openai/version');
+            return { openai, version: VERSION };
+        } catch (e) {
+            throw new Error(
+                "Please install openai as a dependency with, e.g. `yarn add openai`"
+            );
+        }
+    }
+
 }

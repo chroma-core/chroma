@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.15"
+__version__ = "0.4.16"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
@@ -160,8 +160,6 @@ def HttpClient(
         database: The database to use for this client. Defaults to the default database.
     """
 
-    if headers is None:
-        headers = {}
     if settings is None:
         settings = Settings()
 
