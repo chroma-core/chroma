@@ -37,9 +37,26 @@ func Assign(key Key, members Members, hasher Hasher) (Member, error) {
 	return maxMember, nil
 }
 
+func mergeHashes(a uint64, b uint64) uint64 {
+	acc := a ^ b
+	acc ^= acc >> 33
+	acc *= 0xff51afd7ed558ccd
+	acc ^= acc >> 33
+	acc *= 0xc4ceb9fe1a85ec53
+	acc ^= acc >> 33
+	return acc
+}
+
+// NOTE: The python implementation of murmur3 may differ from the golang implementation.
+// For now, this is fine since go and python don't need to agree on any hashing schemes
+// but if we ever need to agree on a hashing scheme, we should verify that the implementations
+// are the same.
 func Murmur3Hasher(member string, key string) uint64 {
 	hasher := murmur3.New64()
 	hasher.Write([]byte(member))
+	memberHash := hasher.Sum64()
+	hasher.Reset()
 	hasher.Write([]byte(key))
-	return hasher.Sum64()
+	keyHash := hasher.Sum64()
+	return mergeHashes(memberHash, keyHash)
 }
