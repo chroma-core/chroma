@@ -82,7 +82,7 @@ func (m *MemberlistManager) run() {
 }
 
 func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
-	memberlist, err := m.memberlistStore.GetMemberlist(context.TODO())
+	memberlist, resourceVersion, err := m.memberlistStore.GetMemberlist(context.Background())
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
 	if !exists && status == Ready {
 		newMemberlist = append(newMemberlist, nodeIp)
 	}
-	return m.memberlistStore.UpdateMemberlist(context.TODO(), &newMemberlist)
+	return m.memberlistStore.UpdateMemberlist(context.TODO(), &newMemberlist, resourceVersion)
 }
 
 func (m *MemberlistManager) Stop() error {

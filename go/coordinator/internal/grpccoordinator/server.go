@@ -6,8 +6,11 @@ import (
 
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
+	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"github.com/chroma/chroma-coordinator/internal/utils"
+	"github.com/pingcap/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"gorm.io/gorm"
@@ -80,8 +83,29 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 	s.coordinator = coordinator
 	s.coordinator.Start()
-
 	if !config.Testing {
+		// TODO: Make this configuration
+		log.Info("Starting memberlist manager")
+		memberlist_name := "worker-memberlist"
+		namespace := "chroma"
+		clientset, err := utils.GetKubernetesInterface()
+		if err != nil {
+			return nil, err
+		}
+		dynamicClient, err := utils.GetKubernetesDynamicInterface()
+		if err != nil {
+			return nil, err
+		}
+		nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker")
+		memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
+		memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
+
+		// Start the memberlist manager
+		err = memberlist_manager.Start()
+		if err != nil {
+			return nil, err
+		}
+
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.BindAddress, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
