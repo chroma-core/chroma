@@ -135,18 +135,15 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if organization_id is not None:
             openai.organization = organization_id
 
-        self._v1 = openai.__version__.startswith('1.')
+        self._v1 = openai.__version__.startswith("1.")
         if self._v1:
             if api_type == "azure":
                 self._client = openai.AzureOpenAI(
-                    api_key=api_key,
-                    api_version=api_version,
-                    azure_endpoint=api_base
+                    api_key=api_key, api_version=api_version, azure_endpoint=api_base
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key,
-                    base_url=api_base
+                    api_key=api_key, base_url=api_base
                 ).embeddings
         else:
             self._client = openai.Embedding
@@ -160,26 +157,30 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call the OpenAI Embedding API
         if self._v1:
             embeddings = self._client.create(
-                input=input,
-                model=self._deployment_id or self._model_name
+                input=input, model=self._deployment_id or self._model_name
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)  # type: ignore
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e.index
+            )  # type: ignore
 
             # Return just the embeddings
             return [result.embedding for result in sorted_embeddings]
         else:
             if self._api_type == "azure":
                 embeddings = self._client.create(
-                    input=input,
-                    engine=self._deployment_id or self._model_name
+                    input=input, engine=self._deployment_id or self._model_name
                 )["data"]
             else:
-                embeddings = self._client.create(input=input, model=self._model_name)["data"]
+                embeddings = self._client.create(input=input, model=self._model_name)[
+                    "data"
+                ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e["index"]
+            )  # type: ignore
 
             # Return just the embeddings
             return [result["embedding"] for result in sorted_embeddings]
@@ -275,7 +276,8 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
             return self._model.encode(input).tolist()  # type: ignore
 
         texts_with_instructions = [[self._instruction, text] for text in input]
-        return self._model.encode(texts_with_instructions).tolist()  # type: ignore
+        # type: ignore
+        return self._model.encode(texts_with_instructions).tolist()
 
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
@@ -355,7 +357,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         norm[norm == 0] = 1e-12
         return v / norm[:, np.newaxis]  # type: ignore
 
-    def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:  # type: ignore
+    # type: ignore
+    def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
         self.tokenizer = cast(self.Tokenizer, self.tokenizer)  # type: ignore
         self.model = cast(self.ort.InferenceSession, self.model)  # type: ignore
@@ -579,6 +582,51 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             elif is_document(item):
                 embeddings.append(self._encode_text(cast(Document, item)))
         return embeddings
+
+
+class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
+    """
+    This class is used to get embeddings for a list of texts using the HuggingFace Embedding server (https://github.com/huggingface/text-embeddings-inference).
+    The embedding model is configured in the server.
+    """
+
+    def __init__(self, url: str):
+        """
+        Initialize the HuggingFaceEmbeddingServer.
+
+        Args:
+            url (str): The URL of the HuggingFace Embedding Server.
+        """
+        try:
+            import requests
+        except ImportError:
+            raise ValueError(
+                "The requests python package is not installed. Please install it with `pip install requests`"
+            )
+        self._api_url = f"{url}"
+        if not self._api_url.endswith("embed"):
+            self._api_url = f"{self._api_url}/embed".replace("//embed", "/embed")
+        self._session = requests.Session()
+
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            texts (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+
+        Example:
+            >>> hugging_face = HuggingFaceEmbeddingServer(url="http://localhost:8080/embed")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = hugging_face(texts)
+        """
+        # Call HuggingFace Embedding Server API for each document
+        return self._session.post(  # type: ignore
+            self._api_url, json={"inputs": input}
+        ).json()
 
 
 # List of all classes in this module
