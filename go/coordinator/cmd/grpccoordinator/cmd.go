@@ -22,7 +22,7 @@ var (
 )
 
 func init() {
-	flag.GRPCAddr(Cmd, &conf.BindAddress)
+	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 	Cmd.Flags().StringVar(&conf.Username, "username", "root", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.Password, "password", "", "MetaTable password")
 	Cmd.Flags().StringVar(&conf.Address, "db-address", "127.0.0.1:3306", "MetaTable db address")

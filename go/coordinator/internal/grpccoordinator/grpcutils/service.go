@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 const (
@@ -22,7 +23,7 @@ type GrpcServer interface {
 }
 
 type GrpcProvider interface {
-	StartGrpcServer(name, bindAddress string, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error)
+	StartGrpcServer(name string, grpcConfig *GrpcConfig, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error)
 }
 
 var Default = &defaultProvider{}
@@ -30,8 +31,8 @@ var Default = &defaultProvider{}
 type defaultProvider struct {
 }
 
-func (d *defaultProvider) StartGrpcServer(name, bindAddress string, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
-	return newDefaultGrpcProvider(name, bindAddress, registerFunc)
+func (d *defaultProvider) StartGrpcServer(name string, grpcConfig *GrpcConfig, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
+	return newDefaultGrpcProvider(name, grpcConfig, registerFunc)
 }
 
 type defaultGrpcServer struct {
@@ -40,15 +41,23 @@ type defaultGrpcServer struct {
 	port   int
 }
 
-func newDefaultGrpcProvider(name, bindAddress string, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
+func newDefaultGrpcProvider(name string, grpcConfig *GrpcConfig, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
+	var opts []grpc.ServerOption
+	opts = append(opts, grpc.MaxRecvMsgSize(maxGrpcFrameSize))
+	if grpcConfig.TLSEnabled() {
+		creds, err := credentials.NewServerTLSFromFile(grpcConfig.CertPath, grpcConfig.KeyPath)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, grpc.Creds(creds))
+	}
+
 	c := &defaultGrpcServer{
-		server: grpc.NewServer(
-			grpc.MaxRecvMsgSize(maxGrpcFrameSize),
-		),
+		server: grpc.NewServer(opts...),
 	}
 	registerFunc(c.server)
 
-	listener, err := net.Listen("tcp", bindAddress)
+	listener, err := net.Listen("tcp", grpcConfig.BindAddress)
 	if err != nil {
 		return nil, err
 	}

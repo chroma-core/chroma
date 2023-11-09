@@ -12,8 +12,8 @@ import (
 )
 
 type Config struct {
-	// GRPC config
-	BindAddress string
+	// GrpcConfig config
+	GrpcConfig *grpcutils.GrpcConfig
 
 	// MetaTable config
 	Username     string
@@ -68,7 +68,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s.coordinator.Start()
 
 	if !config.Testing {
-		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.BindAddress, func(registrar grpc.ServiceRegistrar) {
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
 		if err != nil {
