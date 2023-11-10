@@ -415,7 +415,8 @@ class SqlSysDB(SqlDB, SysDB):
             q = q.where(collections_t.name == ParameterValue(name))
 
         # Only if we have a name, tenant and database do we need to filter databases
-        if name and tenant and database:
+        # Given an id, we can uniquely identify the collection so we don't need to filter databases
+        if id is None and tenant and database:
             databases_t = Table("databases")
             q = q.where(
                 collections_t.database_id
