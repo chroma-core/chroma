@@ -30,13 +30,11 @@ from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
 import logging
 import os
 
-# Run this with python -m chromadb.segment.impl.distributed.server
+# This file is a prototype. It will be replaced with a real distributed segment server
+# written in a different language. This is just a proof of concept to get the distributed
+# segment type working end to end.
 
-# TODO: for now the distirbuted segment type is serviced by a persistent local segment, since
-# the only real material difference is the way the segment is loaded and persisted.
-# we should refactor our the index logic from the segment logic, and then we can have a
-# distributed segment implementation that uses the same index impl but has a different segment wrapper
-# that handles the distributed logic and storage
+# Run this with python -m chromadb.segment.impl.distributed.server
 
 SEGMENT_TYPE_IMPLS = {
     SegmentType.HNSW_DISTRIBUTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
@@ -126,7 +124,8 @@ class SegmentServer(VectorReaderServicer):
         return None
 
     def _create_pulsar_topics(self) -> None:
-        """This creates the pulsar topics used by the system. THIS IS COMPLETELY A HACK AND WILL BE REPLACED
+        """This creates the pulsar topics used by the system.
+        HACK: THIS IS COMPLETELY A HACK AND WILL BE REPLACED
         BY A PROPER TOPIC MANAGEMENT SYSTEM IN THE COORDINATOR"""
         topics = self._assignment_policy.get_topics()
         admin = PulsarAdmin(self._system)
