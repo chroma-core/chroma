@@ -133,12 +133,12 @@ class SegmentServer(VectorReaderServicer):
         for topic in topics:
             admin.create_topic(topic)
 
-    # def QueryVectors(
-    #     self, request: proto.QueryVectorsRequest, context: Any
-    # ) -> proto.QueryVectorsResponse:
-    #     context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    #     context.set_details("Query segment not implemented yet")
-    #     return proto.QueryVectorsResponse()
+    def QueryVectors(
+        self, request: proto.QueryVectorsRequest, context: Any
+    ) -> proto.QueryVectorsResponse:
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Query segment not implemented yet")
+        return proto.QueryVectorsResponse()
 
     # @trace_method(
     #     "SegmentServer.GetVectors", OpenTelemetryGranularity.OPERATION_AND_SEGMENT
