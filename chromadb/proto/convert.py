@@ -115,6 +115,9 @@ def from_proto_submit(
     submit_embedding_record: proto.SubmitEmbeddingRecord, seq_id: SeqId
 ) -> EmbeddingRecord:
     embedding, encoding = from_proto_vector(submit_embedding_record.vector)
+    print(
+        f"RECV EMBEDDING RECORD FOR COLLECTION {submit_embedding_record.collection_id}"
+    )
     record = EmbeddingRecord(
         id=submit_embedding_record.id,
         seq_id=seq_id,

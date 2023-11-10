@@ -1,10 +1,10 @@
-from typing import Any, Dict, List, Type, cast
+from typing import Any, Dict, List, Sequence, Set, Type, cast
 from uuid import UUID
 from chromadb.config import Settings, System, get_class
-from chromadb.ingest import CollectionAssignmentPolicy
+from chromadb.ingest import CollectionAssignmentPolicy, Consumer
 from chromadb.proto.chroma_pb2_grpc import (
-    SegmentServerServicer,
-    add_SegmentServerServicer_to_server,
+    # SegmentServerServicer,
+    # add_SegmentServerServicer_to_server,
     VectorReaderServicer,
     add_VectorReaderServicer_to_server,
 )
@@ -23,9 +23,10 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.types import ScalarEncoding, Segment, SegmentScope
+from chromadb.types import EmbeddingRecord, ScalarEncoding, Segment, SegmentScope
 from chromadb.segment.distributed import MemberlistProvider, Memberlist
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
+from chromadb.ingest.impl.pulsar_admin import PulsarAdmin
 import logging
 import os
 
@@ -42,45 +43,72 @@ SEGMENT_TYPE_IMPLS = {
 }
 
 
-class SegmentServer(SegmentServerServicer, VectorReaderServicer):
+class SegmentServer(VectorReaderServicer):
     _segment_cache: Dict[UUID, SegmentImplementation] = {}
     _system: System
     _opentelemetry_client: OpenTelemetryClient
     _memberlist_provider: MemberlistProvider
     _curr_memberlist: Memberlist
-    _assigned_topics: List[str]
+    _assigned_topics: Set[str]
+    _topic_to_subscription: Dict[str, UUID]
+    _consumer: Consumer
 
     def __init__(self, system: System) -> None:
         super().__init__()
         self._system = system
+
+        # Init dependency services
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         # TODO: add term and epoch to segment server
         self._memberlist_provider = system.require(MemberlistProvider)
         self._memberlist_provider.set_memberlist_name("worker-memberlist")
         self._assignment_policy = system.require(CollectionAssignmentPolicy)
+        self._create_pulsar_topics()
+        self._consumer = system.require(Consumer)
+
+        # Init data
+        self._topic_to_subscription = {}
+        self._assigned_topics = set()
         self._curr_memberlist = self._memberlist_provider.get_memberlist()
+        self._compute_assigned_topics()
+
         self._memberlist_provider.register_updated_memberlist_callback(
             self._on_memberlist_update
         )
-        self._assigned_topics = []
 
     def _compute_assigned_topics(self) -> None:
         """Uses rendezvous hashing to compute the topics that this node is responsible for"""
+        if not self._curr_memberlist:
+            self._assigned_topics = set()
+            return
         topics = self._assignment_policy.get_topics()
         my_ip = os.environ["MY_POD_IP"]
-        new_assignments = []
+        new_assignments: List[str] = []
         for topic in topics:
             assigned = assign(topic, self._curr_memberlist, murmur3hasher)
             if assigned == my_ip:
                 new_assignments.append(topic)
-        # TODO: We need to lock this assignment
-        self._assigned_topics = new_assignments
-        print("Memberlist: ", self._curr_memberlist)
-        print("Assigned topics: ", self._assigned_topics)
+        new_assignments_set = set(new_assignments)
+        # TODO: We need to lock around this assignment
+        net_new_assignments = new_assignments_set - self._assigned_topics
+        removed_assignments = self._assigned_topics - new_assignments_set
+
+        for topic in removed_assignments:
+            subscription = self._topic_to_subscription[topic]
+            self._consumer.unsubscribe(subscription)
+            del self._topic_to_subscription[topic]
+
+        for topic in net_new_assignments:
+            subscription = self._consumer.subscribe(topic, self._on_message)
+            self._topic_to_subscription[topic] = subscription
+
+        self._assigned_topics = new_assignments_set
+        print(
+            f"Topic assigment updated and now assigned to {len(self._assigned_topics)} topics"
+        )
 
     def _on_memberlist_update(self, memberlist: Memberlist) -> None:
         """Called when the memberlist is updated"""
-        print("Memberlist updated ", memberlist)
         self._curr_memberlist = memberlist
         if len(self._curr_memberlist) > 0:
             self._compute_assigned_topics()
@@ -88,6 +116,22 @@ class SegmentServer(SegmentServerServicer, VectorReaderServicer):
             # In this case we'd want to warn that there are no members but
             # this is not an error, as it could be that the cluster is just starting up
             print("Memberlist is empty")
+
+    def _on_message(self, embedding_records: Sequence[EmbeddingRecord]) -> None:
+        """Called when a message is received from the consumer"""
+        print(f"Received {len(embedding_records)} records")
+        print(
+            f"First record: {embedding_records[0]} is for collection {embedding_records[0]['collection_id']}"
+        )
+        return None
+
+    def _create_pulsar_topics(self) -> None:
+        """This creates the pulsar topics used by the system. THIS IS COMPLETELY A HACK AND WILL BE REPLACED
+        BY A PROPER TOPIC MANAGEMENT SYSTEM IN THE COORDINATOR"""
+        topics = self._assignment_policy.get_topics()
+        admin = PulsarAdmin(self._system)
+        for topic in topics:
+            admin.create_topic(topic)
 
     # def QueryVectors(
     #     self, request: proto.QueryVectorsRequest, context: Any
@@ -139,7 +183,7 @@ if __name__ == "__main__":
     system = System(Settings())
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     segment_server = SegmentServer(system)
-    add_SegmentServerServicer_to_server(segment_server, server)  # type: ignore
+    # add_SegmentServerServicer_to_server(segment_server, server)  # type: ignore
     add_VectorReaderServicer_to_server(segment_server, server)  # type: ignore
     server.add_insecure_port(
         f"[::]:{system.settings.require('chroma_server_grpc_port')}"

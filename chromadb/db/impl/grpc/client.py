@@ -224,6 +224,7 @@ class GrpcSysDB(SysDB):
         if response.status.code == 409:
             raise UniqueConstraintError()
         collection = from_proto_collection(response.collection)
+        print(f"Created collection {collection['name']} on topic {collection['topic']}")
         return collection, response.created
 
     @overrides

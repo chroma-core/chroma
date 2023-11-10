@@ -76,7 +76,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 	// assignmentPolicy := coordinator.NewSimpleAssignmentPolicy("test-tenant", "test-topic")
 	// TODO: make this configuration, and make the pulsar tenant configuration too
-	assignmentPolicy := coordinator.NewRendezvousAssignmentPolicy("test-tenant", "test-topic")
+	assignmentPolicy := coordinator.NewRendezvousAssignmentPolicy("default", "default")
 	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db)
 	if err != nil {
 		return nil, err
