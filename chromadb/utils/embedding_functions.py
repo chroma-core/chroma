@@ -604,8 +604,6 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
                 "The requests python package is not installed. Please install it with `pip install requests`"
             )
         self._api_url = f"{url}"
-        if not self._api_url.endswith("embed"):
-            self._api_url = f"{self._api_url}/embed".replace("//embed", "/embed")
         self._session = requests.Session()
 
     def __call__(self, input: Documents) -> Embeddings:
