@@ -1,8 +1,11 @@
 package grpcutils
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net"
+	"os"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -44,12 +47,28 @@ type defaultGrpcServer struct {
 func newDefaultGrpcProvider(name string, grpcConfig *GrpcConfig, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.MaxRecvMsgSize(maxGrpcFrameSize))
-	if grpcConfig.TLSEnabled() {
-		creds, err := credentials.NewServerTLSFromFile(grpcConfig.CertPath, grpcConfig.KeyPath)
+	if grpcConfig.MTLSEnabled() {
+		cert, err := tls.LoadX509KeyPair(grpcConfig.CertPath, grpcConfig.KeyPath)
 		if err != nil {
 			return nil, err
 		}
-		opts = append(opts, grpc.Creds(creds))
+
+		ca := x509.NewCertPool()
+		caBytes, err := os.ReadFile(grpcConfig.CAPath)
+		if err != nil {
+			return nil, err
+		}
+		if !ca.AppendCertsFromPEM(caBytes) {
+			return nil, err
+		}
+
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientCAs:    ca,
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+		}
+
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 	}
 
 	c := &defaultGrpcServer{
