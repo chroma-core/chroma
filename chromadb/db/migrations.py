@@ -52,7 +52,7 @@ class InconsistentVersionError(Exception):
 class InconsistentHashError(Exception):
     def __init__(self, path: str, db_hash: str, source_hash: str):
         super().__init__(
-            f"Inconsistent MD5 hashes in {path}:"
+            f"Inconsistent hashes in {path}:"
             + f"db hash was {db_hash}, source has was {source_hash}."
             + " Was the migration file modified after being applied to the DB?"
         )
