@@ -73,9 +73,10 @@ def test_settings_invalid_hash_algorithm(mock: MagicMock) -> None:
 
 
 @pytest.mark.parametrize("migrations_hash_algorithm", ["md5", "sha256"])
+@patch("chromadb.db.migrations.verify_migration_sequence")
 @patch("chromadb.db.migrations.hashlib")
 @patch.dict(os.environ, {}, clear=True)
-def test_hashlib_alg(hashlib_mock: MagicMock, migrations_hash_algorithm: str) -> None:
+def test_hashlib_alg(hashlib_mock: MagicMock, verify_migration_sequence_mock: MagicMock, migrations_hash_algorithm: str) -> None:
     """
     Test that only the appropriate hashlib functions are called
     """
@@ -92,10 +93,10 @@ def test_hashlib_alg(hashlib_mock: MagicMock, migrations_hash_algorithm: str) ->
     # replace the real migration application call with a mock we can check
     db.apply_migration = MagicMock()  # type: ignore [method-assign]
 
-    # we don't want this to run since a) we're not testing that functionality and
-    # b) db may be cached between tests and we're changing the algorithm so it may
-    # fail
-    db.verify_migration_sequence = MagicMock()  # type: ignore [method-assign]
+    # we don't want `verify_migration_sequence` to actually run since a) we're not testing that functionality and
+    # b) db may be cached between tests, and we're changing the algorithm, so it may fail.
+    # Instead, return a fake unapplied migration (expect `apply_migration` to be called after)
+    verify_migration_sequence_mock.return_value = ["unapplied_migration"]
 
     db.start()
 
