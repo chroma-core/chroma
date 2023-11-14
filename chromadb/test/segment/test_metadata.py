@@ -249,12 +249,23 @@ def test_get(
     result = segment.get_metadata(where={"int_key": {"$ne": 5}})
     assert len(result) == 8
 
+    # Get with $like
+    result = segment.get_metadata(where={"str_key": {'$like': 'value%'}})
+    assert len(result) == 9
+
+    # Get with $regex
+    result = segment.get_metadata(
+        where={"str_key": {'$regex': 'value_[2|4|6|8]'}})
+    assert len(result) == 4
+
     # get with multiple heterogenous conditions
-    result = segment.get_metadata(where={"div_by_three": "true", "int_key": {"$gt": 5}})
+    result = segment.get_metadata(
+        where={"div_by_three": "true", "int_key": {"$gt": 5}})
     assert len(result) == 2
 
     # get with OR conditions
-    result = segment.get_metadata(where={"$or": [{"int_key": 1}, {"int_key": 2}]})
+    result = segment.get_metadata(
+        where={"$or": [{"int_key": 1}, {"int_key": 2}]})
     assert len(result) == 2
 
     # get with AND conditions
