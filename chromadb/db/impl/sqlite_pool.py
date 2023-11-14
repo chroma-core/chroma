@@ -3,6 +3,26 @@ from abc import ABC, abstractmethod
 from typing import Any, Set
 import threading
 from overrides import override
+import re
+
+
+def regex(expr, item):
+    """Define a simple regex matching function.
+
+    Args:
+        expr (str): the expression we want to find
+        item (str): the string in which we will look
+
+    Returns:
+        bool, based on whether there is a match
+
+    References:
+        Thanks to [aGuegu on StackOverflow](https://stackoverflow.com/a/24053719) for sharing his sqlite3 regex solution, which inspired this one.
+
+    Note:
+        We can also use re.search.
+    """
+    return bool(re.findall(expr, item))
 
 
 class Connection:
@@ -21,6 +41,8 @@ class Connection:
             db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
         )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
+
+        self._conn.create_function(name="REGEX", narg=2, func=regex)
 
     def execute(self, sql: str, parameters=...) -> sqlite3.Cursor:  # type: ignore
         if parameters is ...:
