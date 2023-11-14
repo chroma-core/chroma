@@ -33,18 +33,14 @@ services:
       - net
   embedding_server:
     image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0} #default image with CPU support
-    command: --model-id ${ST_MODEL:-BAAI/bge-small-en-v1.5} --revision ${ST_MODEL_REVISION:-main}
+    command: --model-id ${ST_MODEL:-BAAI/bge-small-en-v1.5} --revision ${ST_MODEL_REVISION:-main} #configure model and model revision paramters
     ports:
       - 8001:80
     platform: linux/amd64 #right now the images are only available for linux
-    environment:
-      - ST_MODEL=${ST_MODEL:-BAAI/bge-small-en-v1.5}
-      - ST_MODEL_REVISION=${ST_MODEL_REVISION:-main}
     networks:
       - net
     volumes:
-      - hfmodels:/data
-
+      - hfmodels:/data #by default we create a volume for the models.
 volumes:
   backups:
     driver: local
