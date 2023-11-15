@@ -11,6 +11,15 @@ pub struct Index {
 #[link(name = "bindings", kind = "static")]
 extern "C" {
     fn create_index(space_name: *const c_char, dim: c_int) -> *mut Index;
+    //     void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted)
+    fn init_index(
+        index: *mut Index,
+        max_elements: usize,
+        M: usize,
+        ef_construction: usize,
+        random_seed: usize,
+        allow_replace_deleted: bool,
+    );
     fn get_ef(index: *mut Index) -> c_int;
 }
 
@@ -19,5 +28,8 @@ fn main() {
     let dim = 128;
     let index = unsafe { create_index(space_name.as_ptr(), dim) };
     println!("Hello, world!");
+    unsafe {
+        init_index(index, 100, 16, 100, 0, true);
+    }
     println!("ef: {}", unsafe { get_ef(index) });
 }
