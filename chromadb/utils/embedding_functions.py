@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import Any, Dict, List, Union, cast
+from typing import Any, Dict, List, Mapping, Union, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -86,6 +86,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_type: Optional[str] = None,
         api_version: Optional[str] = None,
         deployment_id: Optional[str] = None,
+        default_headers: Optional[Mapping[str, str]] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
@@ -105,6 +106,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
             deployment_id (str, optional): Deployment ID for Azure OpenAI.
+            default_headers (Mapping, optional): A mapping of default headers to be sent with each API request.
 
         """
         try:
@@ -141,12 +143,14 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 self._client = openai.AzureOpenAI(
                     api_key=api_key,
                     api_version=api_version,
-                    azure_endpoint=api_base
+                    azure_endpoint=api_base,
+                    default_headers=default_headers
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
                     api_key=api_key,
-                    base_url=api_base
+                    base_url=api_base,
+                    default_headers=default_headers
                 ).embeddings
         else:
             self._client = openai.Embedding
