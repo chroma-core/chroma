@@ -5,7 +5,7 @@ from typing import Dict, Any, Tuple
 import uuid
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given, settings
+from hypothesis import given, reproduce_failure, settings
 from chromadb import AdminClient
 
 from chromadb.api import AdminAPI, ServerAPI
@@ -23,7 +23,6 @@ valid_action_space = [
     "db:list_collections",
     "collection:get_collection",
     "db:create_collection",
-    "db:get_or_create_collection",
     "collection:delete_collection",
     "collection:update_collection",
     "collection:add",
@@ -281,6 +280,7 @@ def master_api(_settings: Settings) -> Tuple[ServerAPI, AdminAPI]:
 
 
 @settings(max_examples=10)
+@reproduce_failure('6.88.3', b'AXicY2BgYGBkBGIg4mCAMKAUAAEDABE=')
 @given(token_config=token_config(), rbac_config=rbac_config())
 def test_authz(token_config: Dict[str, Any], rbac_config: Dict[str, Any]) -> None:
     authz_config = rbac_config
