@@ -9,6 +9,8 @@ edition = "2021"
 tonic = "0.10"
 prost = "0.12"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+rand = "0.8.5"
+rayon = "1.8.0"
 
 [build-dependencies]
 tonic-build = "0.10"
