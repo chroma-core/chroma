@@ -253,8 +253,8 @@ class SegmentAPI(ServerAPI):
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
                 data_loader=data_loader,
-                tenant=tenant,
-                database=database,
+                tenant=existing[0]["tenant"],
+                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")

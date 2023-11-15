@@ -349,10 +349,7 @@ class FastAPI(chromadb.server.Server):
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
-        action=[
-            AuthzResourceActions.CREATE_COLLECTION,
-            AuthzResourceActions.GET_OR_CREATE_COLLECTION,
-        ],
+        action=AuthzResourceActions.CREATE_COLLECTION,
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
