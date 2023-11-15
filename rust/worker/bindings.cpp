@@ -1,7 +1,15 @@
 #include "/Users/hammad/Documents/index/hnswlib/hnswlib/hnswlib.h" // TODO: move hnswlib into rust/worker
 
+struct RustPtrWrap
+{
+    void *ptr;
+};
+
 // HACK: copied from my java bindings
 // TODO: redo this / clean it up
+// TODO: use const pointers where possible
+// TODO: use ptr wraps where needed for Index
+
 template <typename dist_t, typename data_t = float>
 class Index
 {
@@ -148,6 +156,11 @@ public:
             distance[i] = res_i.first;
             res.pop();
         }
+        std::ofstream myfile;
+        myfile.open("/Users/hammad/Documents/chroma/rust/worker/test.txt");
+        myfile << "Writing this to a file.\n";
+        myfile << "total_results: " << total_results << "\n";
+        myfile.close();
     }
 
     int get_ef()
@@ -174,11 +187,18 @@ extern "C"
 {
     Index<float> *create_index(const char *space_name, const int dim)
     {
+        std::cout << "index with dim: " << dim << std::endl;
         return new Index<float>(space_name, dim);
     }
 
     void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted)
     {
+        // write to a file for debug
+        std::ofstream myfile;
+        myfile.open("/Users/hammad/Documents/chroma/rust/worker/test.txt");
+        myfile << "Writing this to a file.\n";
+        myfile << "ef_construction: " << ef_construction << "\n";
+        myfile.close();
         index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted);
     }
 
@@ -193,10 +213,18 @@ extern "C"
     //     index->loadIndex(path_to_index, allow_replace_deleted);
     // }
 
-    // void add_item(Index<float> *index, float *data, hnswlib::labeltype id, bool replace_deleted)
-    // {
-    //     index->add_item(data, id);
-    // }
+    void add_item(RustPtrWrap *ptr, RustPtrWrap *dataPtr, hnswlib::labeltype id, bool replace_deleted)
+    {
+        Index<float> *index = (Index<float> *)ptr->ptr;
+        float *data = (float *)dataPtr->ptr;
+        index->add_item(data, id);
+
+        // Print the 0th element of every 1000th id
+        if (id % 1000 == 0)
+        {
+            std::cout << "id: " << id << " 0th element: " << data[0] << std::endl;
+        }
+    }
 
     // // Note we use int for ids not labeltype since JNA handling of size_t is ugly, we will replace this with strings in the future
     // int add_items_batch(Index<float> *index, float *data, int *ids, size_t num_items, bool replace_deleted)
@@ -209,18 +237,13 @@ extern "C"
     //     return index->mark_deleted(id);
     // }
 
-    // void knn_query(Index<float> *index, float *query_vector, size_t k, int *ids, float *distance)
-    // {
-    //     index->knn_query(query_vector, k, ids, distance);
-    // }
+    void knn_query(Index<float> *index, float *query_vector, size_t k, int *ids, float *distance)
+    {
+        index->knn_query(query_vector, k, ids, distance);
+    }
 
     int get_ef(Index<float> *index)
     {
-        // write to a file for debug
-        std::ofstream myfile;
-        myfile.open("/Users/hammad/Documents/chroma/rust/worker/test.txt");
-        myfile << "Writing this to a file.\n";
-        myfile.close();
         return index->appr_alg->ef_;
     }
 
