@@ -40,5 +40,6 @@
     "options": [
       "--proto_path=idl/",
     ]
-  }
+  },
+  "rust-analyzer.cargo.buildScripts.enable": true,
 }
