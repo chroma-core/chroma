@@ -219,7 +219,6 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)
-
         if self._chroma_server_grpc_port is not None:
             assignment = f"{assignment}:{self._chroma_server_grpc_port}"
         else:
