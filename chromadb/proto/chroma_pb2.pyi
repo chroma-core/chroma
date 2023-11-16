@@ -129,16 +129,18 @@ class UpdateMetadata(_message.Message):
     def __init__(self, metadata: _Optional[_Mapping[str, UpdateMetadataValue]] = ...) -> None: ...
 
 class SubmitEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "vector", "metadata", "operation"]
+    __slots__ = ["id", "vector", "metadata", "operation", "collection_id"]
     ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     vector: Vector
     metadata: UpdateMetadata
     operation: Operation
-    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
+    collection_id: str
+    def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ..., collection_id: _Optional[str] = ...) -> None: ...
 
 class VectorEmbeddingRecord(_message.Message):
     __slots__ = ["id", "seq_id", "vector"]
