@@ -2,6 +2,7 @@ package memberlist_manager
 
 import (
 	"errors"
+	"time"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/pingcap/log"
@@ -43,9 +44,9 @@ type KubernetesWatcher struct {
 	informerHandle cache.ResourceEventHandlerRegistration
 }
 
-func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace string, pod_label string, resyncPeriod int) *KubernetesWatcher {
+func NewKubernetesWatcher(clientset kubernetes.Interface, coordinator_namespace string, pod_label string, resyncPeriod time.Duration) *KubernetesWatcher {
 	labelSelector := labels.SelectorFromSet(map[string]string{MemberLabel: pod_label})
-	factory := informers.NewSharedInformerFactoryWithOptions(clientset, 60, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
+	factory := informers.NewSharedInformerFactoryWithOptions(clientset, resyncPeriod, informers.WithNamespace(coordinator_namespace), informers.WithTweakListOptions(func(options *metav1.ListOptions) { options.LabelSelector = labelSelector.String() }))
 	podInformer := factory.Core().V1().Pods().Informer()
 	ipToKey := make(map[string]string)
 

@@ -1,6 +1,7 @@
 package memberlist_manager
 
 import (
+	"context"
 	"errors"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -81,7 +82,7 @@ func (m *MemberlistManager) run() {
 }
 
 func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
-	memberlist, err := m.memberlistStore.GetMemberlist()
+	memberlist, err := m.memberlistStore.GetMemberlist(context.TODO())
 	if err != nil {
 		return err
 	}
@@ -109,7 +110,7 @@ func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
 	if !exists && status == Ready {
 		newMemberlist = append(newMemberlist, nodeIp)
 	}
-	return m.memberlistStore.UpdateMemberlist(&newMemberlist)
+	return m.memberlistStore.UpdateMemberlist(context.TODO(), &newMemberlist)
 }
 
 func (m *MemberlistManager) Stop() error {

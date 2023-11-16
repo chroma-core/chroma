@@ -22,7 +22,7 @@ func TestNodeWatcher(t *testing.T) {
 	}
 
 	// Create a node watcher
-	node_watcher := NewKubernetesWatcher(clientset, "chroma", "worker", 60)
+	node_watcher := NewKubernetesWatcher(clientset, "chroma", "worker", 60*time.Second)
 	node_watcher.Start()
 
 	// create some fake pods to test the watcher
@@ -94,7 +94,7 @@ func TestMemberlistStore(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr_memberlist)
 
 	memberlist_store := NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
-	memberlist, err := memberlist_store.GetMemberlist()
+	memberlist, err := memberlist_store.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
@@ -102,8 +102,8 @@ func TestMemberlistStore(t *testing.T) {
 	assert.Equal(t, Memberlist{}, *memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(&Memberlist{"10.0.0.1", "10.0.0.2"})
-	memberlist, err = memberlist_store.GetMemberlist()
+	memberlist_store.UpdateMemberlist(context.TODO(), &Memberlist{"10.0.0.1", "10.0.0.2"})
+	memberlist, err = memberlist_store.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestMemberlistManager(t *testing.T) {
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), initialCrMemberlist)
 
 	// Create a node watcher
-	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 60)
+	nodeWatcher := NewKubernetesWatcher(clientset, namespace, "worker", 60*time.Second)
 
 	// Create a memberlist store
 	memberlistStore := NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
@@ -201,7 +201,7 @@ func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_int
 }
 
 func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, expected_memberlist Memberlist) bool {
-	memberlist, err := memberlistStore.GetMemberlist()
+	memberlist, err := memberlistStore.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}

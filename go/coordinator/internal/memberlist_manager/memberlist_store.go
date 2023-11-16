@@ -10,8 +10,8 @@ import (
 )
 
 type IMemberlistStore interface {
-	GetMemberlist() (*Memberlist, error)
-	UpdateMemberlist(memberlist *Memberlist) error
+	GetMemberlist(ctx context.Context) (*Memberlist, error)
+	UpdateMemberlist(ctx context.Context, memberlist *Memberlist) error
 }
 
 type Memberlist []string
@@ -30,9 +30,9 @@ func NewCRMemberlistStore(dynamicClient dynamic.Interface, coordinatorNamespace 
 	}
 }
 
-func (s *CRMemberlistStore) GetMemberlist() (*Memberlist, error) {
+func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (*Memberlist, error) {
 	gvr := getGvr()
-	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Get(context.TODO(), s.memberlistCustomResource, metav1.GetOptions{})
+	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Get(ctx, s.memberlistCustomResource, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -47,10 +47,10 @@ func (s *CRMemberlistStore) GetMemberlist() (*Memberlist, error) {
 	return &memberlist, nil
 }
 
-func (s *CRMemberlistStore) UpdateMemberlist(memberlist *Memberlist) error {
+func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist *Memberlist) error {
 	gvr := getGvr()
 	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource)
-	_, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Update(context.TODO(), unstructured, metav1.UpdateOptions{})
+	_, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Update(ctx, unstructured, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
