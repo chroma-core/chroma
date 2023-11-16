@@ -1,6 +1,6 @@
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError } from "./utils";
+import { handleSuccess, handleError, validateTenantDatabase } from "./utils";
 import { Collection } from './Collection';
 import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
 import {
@@ -63,7 +63,6 @@ export class ChromaClient {
             this.api = new DefaultApi(apiConfig);
         }
 
-        // TODO: include this? we have this in python
         this._adminClient = new AdminClient({
                 path: path,
                 fetchOptions: fetchOptions,
@@ -71,6 +70,12 @@ export class ChromaClient {
                 tenant: tenant,
                 database: database
             });
+
+        console.log("tenant: " + tenant + " database: " + database);
+        // this randomly throws Error: Error: OperationalError('no such table: databases'), Could not connect to database default_database for tenant default_tenant. Are you sure it exists?
+        validateTenantDatabase(this._adminClient, tenant, database).then(() => {
+            console.log("tenant and database are valid");
+        })
 
         this.api.options = fetchOptions ?? {};
     }

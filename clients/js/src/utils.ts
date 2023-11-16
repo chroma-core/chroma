@@ -1,5 +1,6 @@
 import { Api } from "./generated";
 import Count200Response = Api.Count200Response;
+import { AdminClient } from "./AdminClient";
 
 // a function to convert a non-Array object to an Array
 export function toArray<T>(obj: T | Array<T>): Array<T> {
@@ -82,4 +83,19 @@ export async function handleSuccess(
  */
 export async function importOptionalModule(moduleName: string) {
   return Function(`return import("${moduleName}")`)();
+}
+
+
+export async function validateTenantDatabase(adminClient: AdminClient, tenant: string, database: string): Promise<void> {
+    try {
+        await adminClient.getTenant({name: tenant});
+    } catch (error) {
+        throw new Error(`Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`);
+    }
+
+    try {
+        await adminClient.getDatabase({name: database, tenantName: tenant});
+    } catch (error) {
+        throw new Error(`Error: ${error}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`);
+    }
 }

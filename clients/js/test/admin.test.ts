@@ -28,8 +28,23 @@ test("it should create and get a database for a tenant", async () => {
     expect(getDatabase.name).toBe("test");
 })
 
-// test("it should get the version", async () => {
-//     const version = await chroma.version();
-//     expect(version).toBeDefined();
-//     expect(version).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/);
-// });
+// test that it can set the tenant and database
+test("it should set the tenant and database", async () => {
+    // doesnt exist so should throw
+    await expect(adminClient.setTenant({ tenant: "testTenant", database: "testDatabase" })).rejects.toThrow();
+
+    await adminClient.createTenant({ name: "testTenant!" });
+    await adminClient.createDatabase({ name: "test3!", tenantName: "testTenant!" });
+
+    await adminClient.setTenant({ tenant: "testTenant!", database: "test3!" });
+    expect(adminClient.tenant).toBe("testTenant!");
+    expect(adminClient.database).toBe("test3!");
+
+    // doesnt exist so should throw
+    await expect(adminClient.setDatabase({database: "testDatabase2"})).rejects.toThrow();
+
+    await adminClient.createDatabase({ name: "testDatabase2", tenantName: "testTenant!" });
+    await adminClient.setDatabase({database: "testDatabase2"})
+
+    expect(adminClient.database).toBe("testDatabase2");
+})

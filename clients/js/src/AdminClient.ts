@@ -1,5 +1,5 @@
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError } from "./utils";
+import { handleSuccess, handleError, validateTenantDatabase } from "./utils";
 import { ConfigOptions } from './types';
 import {
     AuthOptions,
@@ -26,8 +26,8 @@ export class AdminClient {
      */
     private api: DefaultApi & ConfigOptions;
     private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
-    private tenant: string = DEFAULT_TENANT;
-    private database: string = DEFAULT_DATABASE;
+    public tenant: string = DEFAULT_TENANT;
+    public database: string = DEFAULT_DATABASE;
 
     /**
      * Creates a new AdminClient instance.
@@ -73,6 +73,61 @@ export class AdminClient {
     }
 
     /**
+     * Sets the tenant and database for the client.
+     *
+     * @param {Object} params - The parameters for setting tenant and database.
+     * @param {string} params.tenant - The name of the tenant.
+     * @param {string} params.database - The name of the database.
+     *
+     * @returns {Promise<void>} A promise that returns nothing
+     * @throws {Error} Any issues
+     *
+     * @example
+     * ```typescript
+     * await adminClient.setTenant({
+     *   tenant: "my_tenant",
+     *   database: "my_database",
+     * });
+     * ```
+     */
+    public async setTenant({
+        tenant = DEFAULT_TENANT,
+        database = DEFAULT_DATABASE
+    }: {
+        tenant: string,
+        database?: string,
+    }): Promise<void> {
+        await validateTenantDatabase(this, tenant, database);
+        this.tenant = tenant;
+        this.database = database;
+    }
+
+    /**
+     * Sets the database for the client.
+     *
+     * @param {Object} params - The parameters for setting the database.
+     * @param {string} params.database - The name of the database.
+     *
+     * @returns {Promise<void>} A promise that returns nothing
+     * @throws {Error} Any issues
+     *
+     * @example
+     * ```typescript
+     * await adminClient.setDatabase({
+     *   database: "my_database",
+     * });
+     * ```
+     */
+    public async setDatabase({
+        database = DEFAULT_DATABASE
+    }: {
+        database?: string,
+    }): Promise<void> {
+        await validateTenantDatabase(this, this.tenant, database);
+        this.database = database;
+    }
+
+    /**
      * Creates a new tenant with the specified properties.
      *
      * @param {Object} params - The parameters for creating a new tenant.
@@ -97,11 +152,6 @@ export class AdminClient {
             .createTenant({name}, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
-
-        // TODO: newTenant is null...... is this a bug in the backend API?
-        // if (newTenant.error) {
-        //     throw new Error(newTenant.error);
-        // }
 
         return {name: name} as Tenant
     }
@@ -168,11 +218,6 @@ export class AdminClient {
             .createDatabase(tenantName, {name}, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
-
-        // TODO: newDatabase is null...... is this a bug in the backend API?
-        // if (newDatabase.error) {
-        //     throw new Error(newDatabase.error);
-        // }
 
         return {name: name} as Database
     }
