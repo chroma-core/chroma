@@ -153,6 +153,10 @@ export class AdminClient {
             .then(handleSuccess)
             .catch(handleError);
 
+        if (newTenant.error) {
+            throw new Error(newTenant.error);
+        }
+
         return {name: name} as Tenant
     }
 
@@ -218,6 +222,10 @@ export class AdminClient {
             .createDatabase(tenantName, {name}, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
+
+        if (newDatabase.error) {
+            throw new Error(newDatabase.error);
+        }
 
         return {name: name} as Database
     }
