@@ -1,10 +1,10 @@
 # An implementation of https://en.wikipedia.org/wiki/Rendezvous_hashing
-from typing import Callable, cast
+from typing import Callable, List, cast
 import mmh3
 
 Hasher = Callable[[str, str], int]
 Member = str
-Members = list[str]
+Members = List[str]
 Key = str
 
 
