@@ -9,7 +9,6 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
-	"github.com/chroma/chroma-coordinator/internal/metastore/migrate"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
@@ -75,10 +74,6 @@ func New(config Config) (*Server, error) {
 			MaxOpenConns: config.MaxOpenConns,
 		}
 		db, err := dbcore.Connect(dBConfig)
-		if err != nil {
-			return nil, err
-		}
-		err = migrate.RunMigration(db)
 		if err != nil {
 			return nil, err
 		}

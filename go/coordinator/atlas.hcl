@@ -6,13 +6,13 @@ data "external_schema" "gorm" {
     "ariga.io/atlas-provider-gorm",
     "load",
     "--path", "./internal/metastore/db/dbmodel",
-    "--dialect", "mysql", // | postgres | sqlite
+    "--dialect", "postgres",
   ]
 }
 
 env "gorm" {
   src = data.external_schema.gorm.url
-  dev = "mysql://root:@localhost:3306/dev"
+  dev = "postgres://localhost:5432/dev?sslmode=disable"
   migration {
     dir = "file://migrations"
   }
