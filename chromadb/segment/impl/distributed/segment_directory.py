@@ -193,7 +193,9 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         super().__init__(system)
         self._memberlist_provider = self.require(MemberlistProvider)
         memberlist_name = system.settings.require("worker_memberlist_name")
-        self._chroma_server_grpc_port = system.settings.chroma_server_grpc_port
+        self._chroma_server_grpc_port = system.settings.require("chroma_server_grpc_port")
+        if self._chroma_server_grpc_port is None:
+            self._chroma_server_grpc_port = "50051"
         self._memberlist_provider.set_memberlist_name(memberlist_name)
 
         self._curr_memberlist = None
@@ -219,10 +221,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)
-        if self._chroma_server_grpc_port is not None:
-            assignment = f"{assignment}:{self._chroma_server_grpc_port}"
-        else:
-            assignment = f"{assignment}:50051"
+        assignment = f"{assignment}:{self._chroma_server_grpc_port}"
         return assignment
 
     @override
