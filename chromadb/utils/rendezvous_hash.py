@@ -32,9 +32,6 @@ def assign(key: Key, members: Members, hasher: Hasher) -> Member:
 
 def merge_hashes(x: int, y: int) -> int:
     """murmurhash3 mix 64-bit"""
-    if x.bit_length() != 64 or y.bit_length() != 64:
-        raise ValueError("x and y must be 64-bit integers")
-
     acc = x ^ y
     acc ^= acc >> 33
     acc = (
