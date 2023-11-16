@@ -39,7 +39,7 @@ export function repack(value: unknown): any {
 export async function handleError(error: unknown) {
   if (error instanceof Response) {
     try {
-      const res = await error.json();
+      const res = await (error as Response).json();
       if ("error" in res) {
         return { error: res.error };
       }

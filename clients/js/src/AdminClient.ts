@@ -153,7 +153,8 @@ export class AdminClient {
             .then(handleSuccess)
             .catch(handleError);
 
-        if (newTenant.error) {
+        // newTenant is null if successful
+        if (newTenant && newTenant.error) {
             throw new Error(newTenant.error);
         }
 
@@ -223,7 +224,8 @@ export class AdminClient {
             .then(handleSuccess)
             .catch(handleError);
 
-        if (newDatabase.error) {
+        // newDatabase is null if successful
+        if (newDatabase && newDatabase.error) {
             throw new Error(newDatabase.error);
         }
 
