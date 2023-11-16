@@ -11,6 +11,8 @@ from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 import threading
 
+from chromadb.utils.rendezvous_hash import assign, murmur3hasher
+
 # These could go in config but given that they will rarely change, they are here for now to avoid
 # polluting the config file further.
 WATCH_TIMEOUT_SECONDS = 10
@@ -185,11 +187,13 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     _memberlist_provider: MemberlistProvider
     _curr_memberlist_mutex: threading.Lock
     _curr_memberlist: Optional[Memberlist]
+    _chroma_server_grpc_port: Optional[str]
 
     def __init__(self, system: System):
         super().__init__(system)
         self._memberlist_provider = self.require(MemberlistProvider)
         memberlist_name = system.settings.require("worker_memberlist_name")
+        self._chroma_server_grpc_port = system.settings.chroma_server_grpc_port
         self._memberlist_provider.set_memberlist_name(memberlist_name)
 
         self._curr_memberlist = None
@@ -212,8 +216,15 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
 
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
-        # TODO: This should rendezvous hash the segment ID to a worker given the current memberlist
-        return "segment-worker.chroma:50051"
+        if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
+            raise ValueError("Memberlist is not initialized")
+        assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher)
+
+        if self._chroma_server_grpc_port is not None:
+            assignment = f"{assignment}:{self._chroma_server_grpc_port}"
+        else:
+            assignment = f"{assignment}:50051"
+        return assignment
 
     @override
     def register_updated_segment_callback(
