@@ -6,7 +6,6 @@ import (
 	"github.com/chroma/chroma-coordinator/cmd/flag"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
 	"github.com/chroma/chroma-coordinator/internal/utils"
-
 	"github.com/spf13/cobra"
 )
 
