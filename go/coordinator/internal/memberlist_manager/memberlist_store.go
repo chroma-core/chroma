@@ -32,9 +32,9 @@ func NewCRMemberlistStore(dynamicClient dynamic.Interface, coordinatorNamespace 
 
 func (s *CRMemberlistStore) GetMemberlist() (*Memberlist, error) {
 	gvr := getGvr()
-	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Get(context.TODO(), "worker-memberlist", metav1.GetOptions{}) //.Namespace(m.coordinator_namespace).Get(context.TODO(), m.memberlist_custom_resource, metav1.GetOptions{})
+	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Get(context.TODO(), s.memberlistCustomResource, metav1.GetOptions{})
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 	cr := unstrucuted.UnstructuredContent()
 	members := cr["spec"].(map[string]interface{})["members"]
@@ -49,10 +49,10 @@ func (s *CRMemberlistStore) GetMemberlist() (*Memberlist, error) {
 
 func (s *CRMemberlistStore) UpdateMemberlist(memberlist *Memberlist) error {
 	gvr := getGvr()
-	unstructured := memberlistToCr(memberlist)
-	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.TODO(), unstructured, metav1.UpdateOptions{})
+	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource)
+	_, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Update(context.TODO(), unstructured, metav1.UpdateOptions{})
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 	return nil
 }
@@ -62,7 +62,7 @@ func getGvr() schema.GroupVersionResource {
 	return gvr
 }
 
-func memberlistToCr(memberlist *Memberlist) *unstructured.Unstructured {
+func memberlistToCr(memberlist *Memberlist, namespace string, memberlistName string) *unstructured.Unstructured {
 	members := []interface{}{}
 	for _, member := range *memberlist {
 		members = append(members, map[string]interface{}{
@@ -75,8 +75,8 @@ func memberlistToCr(memberlist *Memberlist) *unstructured.Unstructured {
 			"apiVersion": "chroma.cluster/v1",
 			"kind":       "MemberList",
 			"metadata": map[string]interface{}{
-				"name":      "worker-memberlist",
-				"namespace": "chroma",
+				"name":      memberlistName,
+				"namespace": namespace,
 			},
 			"spec": map[string]interface{}{
 				"members": members,

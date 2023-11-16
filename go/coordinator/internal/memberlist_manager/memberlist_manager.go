@@ -1,24 +1,24 @@
 package memberlist_manager
 
 import (
-	"fmt"
+	"errors"
 
+	"github.com/chroma/chroma-coordinator/internal/common"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"k8s.io/client-go/util/workqueue"
 )
 
-// TODO:
-/*
-- Switch to camel case for all variables and methods
-*/
-
 // A memberlist manager is responsible for managing the memberlist for a
-// coordinator. A memberlist is a CR in the coordinator's namespace that
-// contains a list of all the members in the coordinator's cluster.
-// The memberlist uses k8s watch to monitor changes to pods and then updates a CR
+// coordinator. A memberlist consists of a store and a watcher. The store
+// is responsible for storing the memberlist in a persistent store, and the
+// watcher is responsible for watching the nodes in the cluster and updating
+// the store accordingly. Concretely, the memberlist manager reconciles between these
+// and the store is backed by a Kubernetes custom resource, and the watcher is a
+// kubernetes watch on pods with a given label.
 
 type IMemberlistManager interface {
-	Start() error
-	Stop() error
+	common.Component
 }
 
 type MemberlistManager struct {
@@ -38,8 +38,8 @@ func NewMemberlistManager(nodeWatcher IWatcher, memberlistStore IMemberlistStore
 }
 
 func (m *MemberlistManager) Start() error {
-	m.nodeWatcher.RegisterCallback(func(node_ip string) {
-		m.workqueue.Add(node_ip)
+	m.nodeWatcher.RegisterCallback(func(nodeIp string) {
+		m.workqueue.Add(nodeIp)
 	})
 	err := m.nodeWatcher.Start()
 	if err != nil {
@@ -51,43 +51,65 @@ func (m *MemberlistManager) Start() error {
 
 func (m *MemberlistManager) run() {
 	for {
-		key, shutdown := m.workqueue.Get()
+		interface_key, shutdown := m.workqueue.Get()
 		if shutdown {
-			fmt.Println("Shutting down memberlist manager")
+			log.Info("Shutting down memberlist manager")
 			break
 		}
-		nodeUpdate, err := m.nodeWatcher.GetStatus(key.(string))
-		if err != nil {
+
+		key, ok := interface_key.(string)
+		if !ok {
+			log.Error("Error while asserting workqueue key to string")
 			m.workqueue.Done(key)
 			continue
 		}
-		m.reconcile(key.(string), nodeUpdate)
+
+		nodeUpdate, err := m.nodeWatcher.GetStatus(key)
+		if err != nil {
+			log.Error("Error while getting status of node", zap.Error(err))
+			m.workqueue.Done(key)
+			continue
+		}
+
+		err = m.reconcile(key, nodeUpdate)
+		if err != nil {
+			log.Error("Error while reconciling memberlist", zap.Error(err))
+		}
+
 		m.workqueue.Done(key)
 	}
 }
 
-func (m *MemberlistManager) reconcile(node_ip string, status Status) error {
+func (m *MemberlistManager) reconcile(nodeIp string, status Status) error {
 	memberlist, err := m.memberlistStore.GetMemberlist()
 	if err != nil {
 		return err
 	}
+	if memberlist == nil {
+		return errors.New("Memberlist recieved is nil")
+	}
 	exists := false
-	new_memberlist := Memberlist{}
+	// Loop through the memberlist and generate a new one based on the update
+	// If we find the node in the existing list and the status is Ready, we add it to the new list
+	// If we find the node in the existing list and the status is NotReady, we don't add it to the new list
+	// If we don't find the node in the existing list and the status is Ready, we add it to the new list
+	newMemberlist := Memberlist{}
 	for _, node := range *memberlist {
-		if node == node_ip {
+		if node == nodeIp {
 			if status == Ready {
-				new_memberlist = append(new_memberlist, node)
+				newMemberlist = append(newMemberlist, node)
 			}
+			// Else here implies the node is not ready, so we don't add it to the new memberlist
 			exists = true
 		} else {
 			// This update doesn't pertains to this node, so we just add it to the new memberlist
-			new_memberlist = append(new_memberlist, node)
+			newMemberlist = append(newMemberlist, node)
 		}
 	}
 	if !exists && status == Ready {
-		new_memberlist = append(new_memberlist, node_ip)
+		newMemberlist = append(newMemberlist, nodeIp)
 	}
-	return m.memberlistStore.UpdateMemberlist(&new_memberlist)
+	return m.memberlistStore.UpdateMemberlist(&newMemberlist)
 }
 
 func (m *MemberlistManager) Stop() error {

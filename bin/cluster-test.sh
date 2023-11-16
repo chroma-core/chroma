@@ -53,8 +53,8 @@ echo "Chroma Server is running at port $CHROMA_SERVER_HOST"
 echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
 echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 
-# echo testing: python -m pytest "$@"
-# python -m pytest "$@"
+echo testing: python -m pytest "$@"
+python -m pytest "$@"
 
 export CHROMA_KUBERNETES_INTEGRATION=1
 cd go/coordinator
