@@ -31,6 +31,17 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 
+	// Pulsar config
+	PulsarTenant    string
+	PulsarNamespace string
+
+	// Kubernetes config
+	KubernetesNamespace  string
+	WorkerMemberlistName string
+
+	// Assignment policy config can be "simple" or "rendezvous"
+	AssignmentPolicy string
+
 	// Config for testing
 	Testing bool
 }
@@ -74,9 +85,17 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s := &Server{
 		healthServer: health.NewServer(),
 	}
-	// assignmentPolicy := coordinator.NewSimpleAssignmentPolicy("test-tenant", "test-topic")
-	// TODO: make this configuration, and make the pulsar tenant configuration too
-	assignmentPolicy := coordinator.NewRendezvousAssignmentPolicy("default", "default")
+
+	var assignmentPolicy coordinator.CollectionAssignmentPolicy
+	if config.AssignmentPolicy == "simple" {
+		log.Info("Using simple assignment policy")
+		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
+	} else if config.AssignmentPolicy == "rendezvous" {
+		log.Info("Using rendezvous assignment policy")
+		assignmentPolicy = coordinator.NewRendezvousAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
+	} else {
+		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
+	}
 	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db)
 	if err != nil {
 		return nil, err
@@ -84,21 +103,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		// TODO: Make this configuration
-		log.Info("Starting memberlist manager")
-		memberlist_name := "worker-memberlist"
-		namespace := "chroma"
-		clientset, err := utils.GetKubernetesInterface()
-		if err != nil {
-			return nil, err
-		}
-		dynamicClient, err := utils.GetKubernetesDynamicInterface()
-		if err != nil {
-			return nil, err
-		}
-		nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker")
-		memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
-		memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
+		memberlist_manager, err := createMemberlistManager(config)
 
 		// Start the memberlist manager
 		err = memberlist_manager.Start()
@@ -114,6 +119,25 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		}
 	}
 	return s, nil
+}
+
+func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManager, error) {
+	// TODO: Make this configuration
+	log.Info("Starting memberlist manager")
+	memberlist_name := config.WorkerMemberlistName
+	namespace := config.KubernetesNamespace
+	clientset, err := utils.GetKubernetesInterface()
+	if err != nil {
+		return nil, err
+	}
+	dynamicClient, err := utils.GetKubernetesDynamicInterface()
+	if err != nil {
+		return nil, err
+	}
+	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker")
+	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
+	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
+	return memberlist_manager, nil
 }
 
 func (s *Server) Close() error {
