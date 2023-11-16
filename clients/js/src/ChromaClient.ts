@@ -64,20 +64,18 @@ export class ChromaClient {
         }
 
         this._adminClient = new AdminClient({
-                path: path,
-                fetchOptions: fetchOptions,
-                auth: auth,
-                tenant: tenant,
-                database: database
-            });
-
-        console.log("tenant: " + tenant + " database: " + database);
-        // this randomly throws Error: Error: OperationalError('no such table: databases'), Could not connect to database default_database for tenant default_tenant. Are you sure it exists?
-        validateTenantDatabase(this._adminClient, tenant, database).then(() => {
-            console.log("tenant and database are valid");
-        })
+            path: path,
+            fetchOptions: fetchOptions,
+            auth: auth,
+            tenant: tenant,
+            database: database
+        });
 
         this.api.options = fetchOptions ?? {};
+
+        // TODO in python we validate tenant and database here
+        // the async nature of this is a blocker in the consturctor
+
     }
 
     /**
