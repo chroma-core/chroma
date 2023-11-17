@@ -24,9 +24,9 @@ spec:
                   items:
                     type: object
                     properties:
-                      url:
+                      url: # Rename to ip
                         type: string
-                        pattern: '^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$'
+                        pattern: '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$'
   scope: Namespaced
   names:
     plural: memberlists

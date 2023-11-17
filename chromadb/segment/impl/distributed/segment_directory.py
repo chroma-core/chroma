@@ -13,7 +13,7 @@ import threading
 
 # These could go in config but given that they will rarely change, they are here for now to avoid
 # polluting the config file further.
-WATCH_TIMEOUT_SECONDS = 10
+WATCH_TIMEOUT_SECONDS = 60
 KUBERNETES_NAMESPACE = "chroma"
 KUBERNETES_GROUP = "chroma.cluster"
 
@@ -213,7 +213,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
         # TODO: This should rendezvous hash the segment ID to a worker given the current memberlist
-        return "segment-worker.chroma:50051"
+        return "segment-server.chroma:50051"
 
     @override
     def register_updated_segment_callback(

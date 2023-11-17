@@ -170,12 +170,6 @@ class VectorQueryResults(_message.Message):
     results: _containers.RepeatedCompositeFieldContainer[VectorQueryResult]
     def __init__(self, results: _Optional[_Iterable[_Union[VectorQueryResult, _Mapping]]] = ...) -> None: ...
 
-class SegmentServerResponse(_message.Message):
-    __slots__ = ["success"]
-    SUCCESS_FIELD_NUMBER: _ClassVar[int]
-    success: bool
-    def __init__(self, success: bool = ...) -> None: ...
-
 class GetVectorsRequest(_message.Message):
     __slots__ = ["ids", "segment_id"]
     IDS_FIELD_NUMBER: _ClassVar[int]
