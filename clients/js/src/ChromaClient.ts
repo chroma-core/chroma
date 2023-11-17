@@ -1,6 +1,6 @@
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, handleError, validateTenantDatabase } from "./utils";
+import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
 import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
 import {
@@ -71,15 +71,18 @@ export class ChromaClient {
             database: database
         });
 
-        this.api.options = fetchOptions ?? {};
-
         // do a fetch to getDatabase to validate the tenant and database name
+        this.validateTenantDatabase(path, tenant, database);
+
+        this.api.options = fetchOptions ?? {};
+    }
+
+    private validateTenantDatabase = (path: string, tenant: string, database: string): void => {
         fetch(`${path}/api/v1/databases/${database}?tenant=${tenant}`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
             },
-            ...fetchOptions
         }).then((response) => {
             if (response.status !== 200) {
                 throw new Error(`Error: ${response.statusText}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`);
@@ -87,7 +90,6 @@ export class ChromaClient {
         }).catch((error) => {
             throw new Error(`Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`);
         });
-
     }
 
     /**
