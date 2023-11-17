@@ -3,6 +3,7 @@ package grpccoordinator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
@@ -41,6 +42,9 @@ type Config struct {
 
 	// Assignment policy config can be "simple" or "rendezvous"
 	AssignmentPolicy string
+
+	// Watcher config
+	WatchInterval time.Duration
 
 	// Config for testing
 	Testing bool
@@ -134,7 +138,7 @@ func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManag
 	if err != nil {
 		return nil, err
 	}
-	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker")
+	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, "worker", config.WatchInterval)
 	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlist_name)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
 	return memberlist_manager, nil
