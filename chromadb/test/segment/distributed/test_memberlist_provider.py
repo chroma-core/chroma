@@ -13,7 +13,7 @@ import time
 
 
 # Used for testing to update the memberlist CRD
-def update_memberlist(n: int, memberlist_name: str = "worker-memberlist") -> Memberlist:
+def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Memberlist:
     config.load_config()
     api_instance = client.CustomObjectsApi()
 
@@ -46,7 +46,7 @@ def test_can_get_memberlist() -> None:
     # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 
@@ -65,7 +65,7 @@ def test_can_update_memberlist_multiple_times() -> None:
     # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 
@@ -91,7 +91,7 @@ def test_stop_memberlist_kills_thread() -> None:
     # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 
