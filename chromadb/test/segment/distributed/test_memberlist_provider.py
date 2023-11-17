@@ -2,8 +2,6 @@
 import threading
 from chromadb.test.conftest import skip_if_not_cluster
 from kubernetes import client, config
-import pytest
-import os
 from chromadb.config import System, Settings
 from chromadb.segment.distributed import Memberlist
 from chromadb.segment.impl.distributed.segment_directory import (
@@ -19,7 +17,7 @@ def update_memberlist(n: int, memberlist_name: str = "worker-memberlist") -> Mem
     config.load_config()
     api_instance = client.CustomObjectsApi()
 
-    members = [{"url": f"ip.{i}.com"} for i in range(1, n + 1)]
+    members = [{"url": f"10.0.0.{i}"} for i in range(1, n + 1)]
 
     body = {
         "kind": "MemberList",
