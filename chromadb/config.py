@@ -320,7 +320,7 @@ class System(Component):
                 # Validate
                 if desired_soft > curr_hard:
                     logging.warning(
-                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}"
+                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}. Keeping soft limit at {curr_soft}"
                     )
                 # Apply
                 elif desired_soft > curr_soft:
