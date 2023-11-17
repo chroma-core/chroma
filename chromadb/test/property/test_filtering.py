@@ -1,12 +1,13 @@
 from typing import Any, Dict, List, cast
 from hypothesis import given, settings, HealthCheck
 import pytest
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
     Embedding,
     Embeddings,
+    GetResult,
     IDs,
     Metadata,
     Metadatas,
@@ -165,7 +166,7 @@ recordset_st = st.shared(
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
 )
 def test_filterable_metadata_get(
-    caplog, api: API, collection: strategies.Collection, record_set, filters
+    caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -204,7 +205,7 @@ def test_filterable_metadata_get(
 )
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
-    api: API,
+    api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
@@ -257,7 +258,7 @@ def test_filterable_metadata_query(
         assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 
-def test_empty_filter(api: API) -> None:
+def test_empty_filter(api: ServerAPI) -> None:
     """Test that a filter where no document matches returns an empty result"""
     api.reset()
     coll = api.create_collection(name="test")
@@ -291,7 +292,7 @@ def test_empty_filter(api: API) -> None:
     assert res["metadatas"] == [[], []]
 
 
-def test_boolean_metadata(api: API) -> None:
+def test_boolean_metadata(api: ServerAPI) -> None:
     """Test that metadata with boolean values is correctly filtered"""
     api.reset()
     coll = api.create_collection(name="test")
@@ -305,3 +306,31 @@ def test_boolean_metadata(api: API) -> None:
     res = coll.get(where={"test": True})
 
     assert res["ids"] == ["1", "3"]
+
+
+def test_get_empty(api: ServerAPI) -> None:
+    """Tests that calling get() with empty filters returns nothing"""
+
+    api.reset()
+    coll = api.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_metadatas: Metadatas = [{"test": 10}, {"test": 20}, {"test": 30}]
+
+    def check_empty_res(res: GetResult) -> None:
+        assert len(res["ids"]) == 0
+        assert res["embeddings"] is not None
+        assert len(res["embeddings"]) == 0
+        assert res["documents"] is not None
+        assert len(res["documents"]) == 0
+        assert res["metadatas"] is not None
+
+    coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
+
+    res = coll.get(ids=["nope"], include=["embeddings", "metadatas", "documents"])
+    check_empty_res(res)
+    res = coll.get(
+        include=["embeddings", "metadatas", "documents"], where={"test": 100}
+    )
+    check_empty_res(res)

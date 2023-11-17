@@ -2,7 +2,7 @@ import pytest
 import logging
 import hypothesis.strategies as st
 import chromadb.test.property.strategies as strategies
-from chromadb.api import API
+from chromadb.api import ClientAPI
 import chromadb.api.types as types
 from hypothesis.stateful import (
     Bundle,
@@ -19,19 +19,19 @@ from typing import Dict, Optional
 
 class CollectionStateMachine(RuleBasedStateMachine):
     collections: Bundle[strategies.Collection]
-    model: Dict[str, Optional[types.CollectionMetadata]]
+    _model: Dict[str, Optional[types.CollectionMetadata]]
 
     collections = Bundle("collections")
 
-    def __init__(self, api: API):
+    def __init__(self, api: ClientAPI):
         super().__init__()
-        self.model = {}
+        self._model = {}
         self.api = api
 
     @initialize()
     def initialize(self) -> None:
         self.api.reset()
-        self.model = {}
+        self._model = {}
 
     @rule(target=collections, coll=strategies.collections())
     def create_coll(
@@ -54,10 +54,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
             metadata=coll.metadata,
             embedding_function=coll.embedding_function,
         )
-        self.model[coll.name] = coll.metadata
+        self.set_model(coll.name, coll.metadata)
 
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     @rule(coll=collections)
@@ -65,7 +65,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.name in self.model:
             c = self.api.get_collection(name=coll.name)
             assert c.name == coll.name
-            assert c.metadata == coll.metadata
+            assert c.metadata == self.model[coll.name]
         else:
             with pytest.raises(Exception):
                 self.api.get_collection(name=coll.name)
@@ -74,7 +74,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def delete_coll(self, coll: strategies.Collection) -> None:
         if coll.name in self.model:
             self.api.delete_collection(name=coll.name)
-            del self.model[coll.name]
+            self.delete_from_model(coll.name)
         else:
             with pytest.raises(Exception):
                 self.api.delete_collection(name=coll.name)
@@ -140,7 +140,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
             coll.metadata = (
                 self.model[coll.name] if new_metadata is None else new_metadata
             )
-        self.model[coll.name] = coll.metadata
+        self.set_model(coll.name, coll.metadata)
 
         # Update API
         c = self.api.get_or_create_collection(
@@ -151,7 +151,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         # Check that model and API are in sync
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
     @rule(
@@ -183,7 +183,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
                     )
                 return multiple()
             coll.metadata = new_metadata
-            self.model[coll.name] = coll.metadata
+            self.set_model(coll.name, coll.metadata)
 
         if new_name is not None:
             if new_name in self.model and new_name != coll.name:
@@ -191,18 +191,33 @@ class CollectionStateMachine(RuleBasedStateMachine):
                     c.modify(metadata=new_metadata, name=new_name)
                 return multiple()
 
-            del self.model[coll.name]
-            self.model[new_name] = coll.metadata
+            prev_metadata = self.model[coll.name]
+            self.delete_from_model(coll.name)
+            self.set_model(new_name, prev_metadata)
             coll.name = new_name
 
         c.modify(metadata=new_metadata, name=new_name)
         c = self.api.get_collection(name=coll.name)
 
         assert c.name == coll.name
-        assert c.metadata == coll.metadata
+        assert c.metadata == self.model[coll.name]
         return multiple(coll)
 
+    def set_model(
+        self, name: str, metadata: Optional[types.CollectionMetadata]
+    ) -> None:
+        model = self.model
+        model[name] = metadata
 
-def test_collections(caplog: pytest.LogCaptureFixture, api: API) -> None:
+    def delete_from_model(self, name: str) -> None:
+        model = self.model
+        del model[name]
+
+    @property
+    def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
+        return self._model
+
+
+def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
