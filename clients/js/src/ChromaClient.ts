@@ -73,8 +73,20 @@ export class ChromaClient {
 
         this.api.options = fetchOptions ?? {};
 
-        // TODO in python we validate tenant and database here
-        // the async nature of this is a blocker in the consturctor
+        // do a fetch to getDatabase to validate the tenant and database name
+        fetch(`${path}/api/v1/databases/${database}?tenant=${tenant}`, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            ...fetchOptions
+        }).then((response) => {
+            if (response.status !== 200) {
+                throw new Error(`Error: ${response.statusText}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`);
+            }
+        }).catch((error) => {
+            throw new Error(`Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`);
+        });
 
     }
 
