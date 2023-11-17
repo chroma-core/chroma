@@ -43,7 +43,7 @@ def compare_memberlists(m1: Memberlist, m2: Memberlist) -> bool:
 
 @skip_if_not_cluster()
 def test_can_get_memberlist() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
     provider.set_memberlist_name("test-memberlist")
@@ -62,7 +62,7 @@ def test_can_get_memberlist() -> None:
 
 @skip_if_not_cluster()
 def test_can_update_memberlist_multiple_times() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
     provider.set_memberlist_name("test-memberlist")
@@ -88,7 +88,7 @@ def test_can_update_memberlist_multiple_times() -> None:
 
 @skip_if_not_cluster()
 def test_stop_memberlist_kills_thread() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
     provider.set_memberlist_name("test-memberlist")
