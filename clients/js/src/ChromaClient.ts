@@ -71,25 +71,12 @@ export class ChromaClient {
             database: database
         });
 
-        // do a fetch to getDatabase to validate the tenant and database name
-        this.validateTenantDatabase(path, tenant, database);
+        // TODO: Validate tenant and database on client creation
+        // this got tricky because:
+        // - the constructor is sync but the generated api is async
+        // - we need to inject auth information so a simple rewrite/fetch does not work
 
         this.api.options = fetchOptions ?? {};
-    }
-
-    private validateTenantDatabase = (path: string, tenant: string, database: string): void => {
-        fetch(`${path}/api/v1/databases/${database}?tenant=${tenant}`, {
-            method: "GET",
-            headers: {
-                "Content-Type": "application/json",
-            },
-        }).then((response) => {
-            if (response.status !== 200) {
-                throw new Error(`Error: ${response.statusText}, Could not connect to database ${database} for tenant ${tenant}. Are you sure it exists?`);
-            }
-        }).catch((error) => {
-            throw new Error(`Error: ${error}, Could not connect to tenant ${tenant}. Are you sure it exists?`);
-        });
     }
 
     /**
