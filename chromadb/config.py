@@ -228,6 +228,9 @@ class Settings(BaseSettings):  # type: ignore
     allow_reset: bool = False
 
     migrations: Literal["none", "validate", "apply"] = "apply"
+    # you cannot change the hash_algorithm after migrations have already been applied once
+    # this is intended to be a first-time setup configuration
+    migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not
@@ -316,11 +319,11 @@ class System(Component):
                 desired_soft = settings["chroma_server_nofile"]
                 # Validate
                 if desired_soft > curr_hard:
-                    raise ValueError(
-                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}"
+                    logging.warning(
+                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}. Keeping soft limit at {curr_soft}"
                     )
                 # Apply
-                if desired_soft > curr_soft:
+                elif desired_soft > curr_soft:
                     try:
                         resource.setrlimit(
                             resource.RLIMIT_NOFILE, (desired_soft, curr_hard)

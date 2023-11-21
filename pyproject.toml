@@ -28,6 +28,7 @@ dependencies = [
   'onnxruntime >= 1.14.1',
   'opentelemetry-api>=1.2.0',
   'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
+  'opentelemetry-instrumentation-fastapi>=0.41b0',
   'opentelemetry-sdk>=1.2.0',
   'tokenizers >= 0.13.2',
   'pypika >= 0.48.9',
@@ -41,6 +42,7 @@ dependencies = [
   'kubernetes>=28.1.0',
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
+  'mmh3>=4.0.1',
 ]
 
 [tool.black]

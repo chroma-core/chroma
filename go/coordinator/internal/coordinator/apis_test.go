@@ -214,13 +214,13 @@ func NewMockAssignmentPolicy(collecions []*model.Collection) *MockAssignmentPoli
 	}
 }
 
-func (m *MockAssignmentPolicy) AssignCollection(collectionID types.UniqueID) string {
+func (m *MockAssignmentPolicy) AssignCollection(collectionID types.UniqueID) (string, error) {
 	for _, collection := range m.collections {
 		if collection.ID == collectionID {
-			return collection.Topic
+			return collection.Topic, nil
 		}
 	}
-	return ""
+	return "", common.ErrCollectionNotFound
 }
 
 func TestCreateGetDeleteCollections(t *testing.T) {
