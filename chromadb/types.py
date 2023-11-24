@@ -156,7 +156,9 @@ Where = Dict[
     Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
 ]
 
-WhereDocumentOperator = Union[Literal["$contains"], LogicalOperator]
+WhereDocumentOperator = Union[
+    Literal["$contains"], Literal["$keyword"], LogicalOperator
+]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
 
 

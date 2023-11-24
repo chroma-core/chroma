@@ -65,6 +65,8 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         return key in metadata and metadata_key in val
     elif op == "$nin":
         return key in metadata and metadata_key not in val
+    elif op == "$keyword":
+        return key in metadata and metadata_key == val
 
     # The following conditions only make sense for numeric values
     assert isinstance(metadata_key, int) or isinstance(metadata_key, float)
@@ -100,6 +102,9 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
             expr = expr.replace("%", ".").replace("_", ".")
             return re.search(expr, doc) is not None
         return expr in doc
+    if key == "$keyword":
+        keywords = expr.split(" ")
+        return all(keyword in doc for keyword in keywords)
     else:
         raise ValueError("Unknown operator: {}".format(key))
 

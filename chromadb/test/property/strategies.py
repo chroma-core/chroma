@@ -100,8 +100,17 @@ class Record(TypedDict):
 # TODO: support arbitrary text everywhere so we don't SQL-inject ourselves.
 # TODO: support empty strings everywhere
 sql_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+sql_alphabet_keyword = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 safe_text = st.text(alphabet=sql_alphabet, min_size=1)
+safe_keyword = st.text(
+    alphabet=sql_alphabet_keyword, min_size=3
+)  # keywords must be at least 3 characters
 tenant_database_name = st.text(alphabet=sql_alphabet, min_size=3)
+
+
+def is_word_in_sequence(word, sequence):
+    return all(char in sequence for char in word)
+
 
 # Workaround for FastAPI json encoding peculiarities
 # https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
@@ -324,7 +333,9 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
         sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
-        metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))  # type: ignore
+        metadata.update(
+            draw(st.fixed_dictionaries({}, optional=sampling_dict))
+        )  # type: ignore
     return metadata
 
 
@@ -340,11 +351,15 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     else:
         known_words_st = st.text(
             min_size=1,
-            alphabet=st.characters(blacklist_categories=blacklist_categories),  # type: ignore
+            alphabet=st.characters(
+                blacklist_categories=blacklist_categories
+            ),  # type: ignore
         )
 
     random_words_st = st.text(
-        min_size=1, alphabet=st.characters(blacklist_categories=blacklist_categories)  # type: ignore
+        # type: ignore
+        min_size=1,
+        alphabet=st.characters(blacklist_categories=blacklist_categories),
     )
     words = draw(st.lists(st.one_of(known_words_st, random_words_st), min_size=1))
     return " ".join(words)
@@ -511,13 +526,49 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
         return {key: {op: value}}  # type: ignore
 
 
+# @st.composite
+# def where_doc_clause_contains(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
+#     """Generate a where_document filter that could be used against the given collection"""
+#     if collection.known_document_keywords:
+#         word = draw(st.sampled_from(collection.known_document_keywords))
+#     else:
+#         word = draw(safe_text)
+#     return {"$contains": word}
+
+
+# @st.composite
+# def where_doc_clause_keyword(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
+#     """Generate a where_document filter that could be used against the given collection"""
+#     if collection.known_document_keywords:
+#         word = draw(st.sampled_from(collection.known_document_keywords).filter(
+#             lambda x: is_word_in_sequence(x, sql_alphabet_keyword)).filter(
+#                 lambda x: len(x) > 3
+#         ))
+#         if not word:
+#             return None
+#     else:
+#         word = draw(safe_keyword)
+#     return {"$keyword": word}
+
+
 @st.composite
 def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocument:
     """Generate a where_document filter that could be used against the given collection"""
+    operator = draw(st.sampled_from(["$contains", "$keyword"]))
     if collection.known_document_keywords:
-        word = draw(st.sampled_from(collection.known_document_keywords))
+        word = (
+            draw(st.sampled_from(collection.known_document_keywords))
+            if operator == "$contains"
+            else draw(
+                st.sampled_from(collection.known_document_keywords)
+                .filter(lambda x: is_word_in_sequence(x, sql_alphabet_keyword))
+                .filter(lambda x: len(x) > 3)
+            )
+        )
+        if not word:
+            return None
     else:
-        word = draw(safe_text)
+        word = draw(safe_text) if operator == "$contains" else draw(safe_keyword)
     return {"$contains": word}
 
 

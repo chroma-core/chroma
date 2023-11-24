@@ -6,6 +6,8 @@ from threading import local
 from overrides import override, EnforceOverrides
 import pypika
 import pypika.queries
+from pypika.terms import Field, Term, BasicCriterion
+from pypika.enums import Comparator
 from chromadb.config import System, Component
 from uuid import UUID
 from itertools import islice, count
@@ -190,3 +192,14 @@ def get_sql(
     sql = query.get_sql()
     params = tuple(_context.values)
     return sql, params
+
+
+class ExtendedMatching(Comparator):
+    match = " MATCH "
+
+
+class CustomTerm(Field, Term):
+    def match(self, expr: str) -> BasicCriterion:
+        return BasicCriterion(
+            ExtendedMatching.match, self, self.wrap_constant(expr)  # type: ignore
+        )

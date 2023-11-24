@@ -809,6 +809,18 @@ def test_get_where_document(api):
     items = collection.get(where_document={"$contains": "bad"})
     assert len(items["metadatas"]) == 0
 
+    items = collection.get(where_document={"$keyword": "great"})
+    assert len(items["metadatas"]) == 2
+
+    items = collection.get(where_document={"$keyword": "doc1 OR doc3"})
+    assert len(items["metadatas"]) == 1
+
+    items = collection.get(where_document={"$keyword": "doc1 AND doc3"})
+    assert len(items["metadatas"]) == 0
+
+    items = collection.get(where_document={"$keyword": "doc1 AND great"})
+    assert len(items["metadatas"]) == 1
+
 
 def test_query_where_document(api):
     api.reset()
