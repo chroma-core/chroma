@@ -6,8 +6,7 @@ grpcio>=1.58.0
 importlib-resources
 kubernetes>=28.1.0
 mmh3>=4.0.1
-numpy==1.21.6; python_version < '3.8'
-numpy>=1.22.4; python_version >= '3.8'
+numpy>=1.22.5
 onnxruntime>=1.14.1
 opentelemetry-api>=1.2.0
 opentelemetry-exporter-otlp-proto-grpc>=1.2.0
