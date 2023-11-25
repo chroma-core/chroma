@@ -22,6 +22,7 @@ import importlib
 import inspect
 import sys
 from typing import Optional
+from langchain.embeddings import HuggingFaceEmbeddings
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -30,6 +31,18 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+class LangchainHuggingFace(EmbeddingFunction):
+    def __call__(self, input: Documents) -> Embeddings:
+        model = HuggingFaceEmbeddings()        
+        if isinstance(input, str):
+            # Single document, use embed_query
+            embeddings = model.embed_query(input)
+            return [embeddings]
+        elif isinstance(input, list) and all(isinstance(doc, str) for doc in input):
+            # List of documents, use embed_documents
+            return model.embed_documents(input)
+        else:
+            raise TypeError("Input must be a string or a list of strings")
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
