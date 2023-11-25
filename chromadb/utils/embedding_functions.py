@@ -22,7 +22,7 @@ import importlib
 import inspect
 import sys
 from typing import Optional
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings # import other as well if needed
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -31,16 +31,27 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-class LangchainHuggingFace(EmbeddingFunction):
-    def __call__(self, input: Documents) -> Embeddings:
-        model = HuggingFaceEmbeddings()        
+class LangchainMultiEmbeddings(EmbeddingFunction):
+    def __init__(self, model_type='huggingface'):
+        self.model_type = model_type
+        self.model = self._select_model()
+
+    def _select_model(self):
+        if self.model_type == 'huggingface':
+            return HuggingFaceEmbeddings()
+        
+        # Add additional elif blocks for each embedding model
+        # elif self.model_type == 'name':
+        #     return Model()
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+
+    def __call__(self, input):
         if isinstance(input, str):
-            # Single document, use embed_query
-            embeddings = model.embed_query(input)
+            embeddings = self.model.embed_query(input)
             return [embeddings]
         elif isinstance(input, list) and all(isinstance(doc, str) for doc in input):
-            # List of documents, use embed_documents
-            return model.embed_documents(input)
+            return self.model.embed_documents(input)
         else:
             raise TypeError("Input must be a string or a list of strings")
 
