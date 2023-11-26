@@ -225,12 +225,6 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key (str): Your API key for the HuggingFace API.
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
-        try:
-            import requests
-        except ImportError:
-            raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
-            )
         self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
@@ -272,12 +266,6 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key (str): Your API key for the Jina AI API.
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "jina-embeddings-v2-base-en".
         """
-        try:
-            import requests
-        except ImportError:
-            raise ValueError(
-                "The requests python package is not installed. Please install it with `pip install requests`"
-            )
         self._model_name = model_name
         self._api_url = 'https://api.jina.ai/v1/embeddings'
         self._session = requests.Session()
