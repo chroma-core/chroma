@@ -107,6 +107,14 @@ class DistributedSegmentManager(SegmentManager):
         return cast(S, instance)
 
     @trace_method(
+        "DistributedSegmentManager.unload_segment",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
+    @override
+    def unload_segment(self, collection_id: UUID) -> None:
+        raise NotImplementedError()
+
+    @trace_method(
         "DistributedSegmentManager.hint_use_collection",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )

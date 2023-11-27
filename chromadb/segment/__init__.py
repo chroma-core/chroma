@@ -126,3 +126,8 @@ class SegmentManager(Component):
         it can preload segments as needed. This is only a hint, and implementations are
         free to ignore it."""
         pass
+
+    @abstractmethod
+    def unload_segment(self, collection_id: UUID) -> None:
+        """Unload a segment from memory"""
+        pass

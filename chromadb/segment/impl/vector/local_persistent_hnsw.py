@@ -456,3 +456,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         """Close the persistent index"""
         if self._index is not None:
             self._index.close_file_handles()
+
+    def _unload(self) -> None:
+        """Unload the persistent index"""
+        self.close_persistent_index()
+        self._persist_data = None
+        self._index = None
+
+    @override
+    def stop(self) -> None:
+        self._unload()
+        super().stop()

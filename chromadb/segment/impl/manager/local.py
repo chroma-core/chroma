@@ -160,6 +160,21 @@ class LocalSegmentManager(SegmentManager):
         return cast(S, instance)
 
     @trace_method(
+        "LocalSegmentManager.unload_segment",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
+    @override
+    def unload_segment(self, collection_id: UUID) -> None:
+        """Unload the segment from memory"""
+        if collection_id in self._segment_cache:
+            for scope in self._segment_cache[collection_id]:
+                _seg = self._segment_cache[collection_id][scope]
+                _seg_instance = self._instances[_seg["id"]]
+                _seg_instance.stop()
+                del self._instances[_seg["id"]]
+            del self._segment_cache[collection_id]
+
+    @trace_method(
         "LocalSegmentManager.hint_use_collection",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )

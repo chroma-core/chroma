@@ -2,13 +2,13 @@ import json
 import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
+from urllib.parse import urlparse, urlunparse, quote
 from uuid import UUID
 
 import requests
 from overrides import override
 
 import chromadb.errors as errors
-from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -42,7 +42,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from urllib.parse import urlparse, urlunparse, quote
+from chromadb.types import Database, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +342,21 @@ class FastAPI(ServerAPI):
         """Deletes a collection"""
         resp = self._session.delete(
             self._api_url + "/collections/" + name,
+            params={"tenant": tenant, "database": database},
+        )
+        raise_chroma_error(resp)
+
+    @trace_method("FastAPI._unload", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _unload(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        """Deletes a collection"""
+        resp = self._session.post(
+            self._api_url + "/collections/" + str(collection_id) + "/unload",
             params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)

@@ -465,6 +465,19 @@ class Collection(BaseModel):
             uris=uris,
         )
 
+    def unload(
+        self,
+    ) -> None:
+        """Unload the collection from memory
+
+        Returns:
+            None
+        """
+
+        self._client._unload(
+            collection_id=self.id,
+        )
+
     def delete(
         self,
         ids: Optional[IDs] = None,

@@ -256,6 +256,17 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
         )
 
+    @override
+    def _unload(
+        self,
+        collection_id: UUID,
+    ) -> None:
+        return self._server._unload(
+            collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
     #
     # ITEM METHODS
     #

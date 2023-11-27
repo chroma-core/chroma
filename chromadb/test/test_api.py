@@ -1,8 +1,11 @@
 # type: ignore
+from typing import cast
+
 import requests
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
+from chromadb.api.segment import SegmentAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 import chromadb.server.fastapi
@@ -1426,3 +1429,17 @@ def test_invalid_embeddings(api):
     with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
     assert "embedding" in str(e.value)
+
+
+def test_unload_collection(api):
+    api.reset()
+    collection = api.create_collection("test_unload_collection")
+    collection.add(**records)
+
+    assert len(api.list_collections()) == 1
+    # make sure collection is loaded by querying
+    collection.query(query_embeddings=[records["embeddings"][0]], n_results=1)
+    collection.unload()
+    assert len(api.list_collections()) == 1
+    if isinstance(api, SegmentAPI):
+        _api = cast(SegmentAPI, api)

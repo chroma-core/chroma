@@ -328,6 +328,24 @@ class SegmentAPI(ServerAPI):
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
+    @trace_method("SegmentAPI._unload", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _unload(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        existing = self._sysdb.get_collections(
+            id=collection_id, tenant=tenant, database=database
+        )
+        if existing:
+            self._manager.unload_segment(existing[0]["id"])
+            if existing and existing[0]["id"] in self._collection_cache:
+                del self._collection_cache[existing[0]["id"]]
+        else:
+            raise ValueError(f"Collection {collection_id} does not exist.")
+
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
     def _add(

@@ -190,6 +190,25 @@ class BaseAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    def _unload(
+        self,
+        collection_id: UUID,
+    ) -> None:
+        """Unload a collection from memory by removing it vector and metedata segments.
+        Args:
+            collection_id: The collection name to unload from memory.
+
+        Raises:
+            ValueError: If the collection does not exist.
+
+        Examples:
+            ```python
+            collection.unload()
+            ```
+        """
+        pass
+
     #
     # ITEM METHODS
     #
@@ -552,6 +571,16 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def delete_collection(
         self,
         name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    def _unload(
+        self,
+        collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

@@ -18,6 +18,7 @@ resource_type_action: # This is here just for reference
   - collection:count
   - collection:update
   - collection:upsert
+  - collection:unload
 
 roles_mapping:
   admin:
@@ -42,6 +43,7 @@ roles_mapping:
         "collection:update",
         "collection:upsert",
         "collection:count",
+        "collection:unload",
       ]
   write:
     actions:
@@ -62,6 +64,7 @@ roles_mapping:
         "collection:update",
         "collection:upsert",
         "collection:count",
+        "collection:unload",
       ]
   db_read:
     actions:

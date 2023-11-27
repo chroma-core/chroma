@@ -313,6 +313,7 @@ class AuthzResourceActions(str, Enum):
     UPDATE = "update"
     UPSERT = "upsert"
     RESET = "reset"
+    UNLOAD = "unload"
 
 
 @dataclass
