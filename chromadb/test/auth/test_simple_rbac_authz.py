@@ -265,6 +265,12 @@ api_executors = {
         col := Collection(api, f"{mcol.name}", mcol.id),
         col.count(),
     ),
+    "collection:unload": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-count-{uuid.uuid4()}"),
+        mcol.add(documents=["test"], ids=["1"]),
+        col := Collection(api, f"{mcol.name}", mcol.id),
+        col.unload(),
+    ),
 }
 
 
