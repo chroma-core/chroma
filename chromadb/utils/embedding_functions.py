@@ -11,6 +11,7 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
+from io import BytesIO
 from pathlib import Path
 import os
 import tarfile
@@ -21,6 +22,7 @@ import numpy.typing as npt
 import importlib
 import inspect
 import sys
+import base64
 from typing import Optional
 
 try:
@@ -642,6 +644,53 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                 embeddings.append(self._encode_text(cast(Document, item)))
         return embeddings
 
+
+class RoboflowEmbeddingFunction(EmbeddingFunction[Images]):
+    def __init__(
+        self, api_key: str, api_url = "https://infer.roboflow.com"
+    ) -> None:
+        self._api_url = api_url
+        self._api_key = api_key
+
+    def __call__(self, images: Images = [], prompt: str = None) -> Embeddings:
+        if prompt:
+            infer_clip_payload = {
+                "text": prompt,
+            }
+
+            res = requests.post(
+                f"{self._api_url}/clip/embed_text?api_key={self._api_key}",
+                json=infer_clip_payload,
+            )
+
+            embeddings = res.json()['embeddings']
+
+            return embeddings
+        else:
+            embeddings = []
+
+            for item in images:
+                if item == "images/train/images/000000000009_jpg.rf.856f80d728927e943a5bccfdf49dd677.jpg": print("here")
+                
+                base64_image = base64.b64encode(open(item, "rb").read()).decode("utf-8")
+
+                infer_clip_payload = {
+                    "image": {
+                        "type": "base64",
+                        "value": base64_image,
+                    },
+                }
+
+                res = requests.post(
+                    f"{self._api_url}/clip/embed_image?api_key={self._api_key}",
+                    json=infer_clip_payload,
+                )
+
+                result = res.json()['embeddings']
+
+                embeddings.append(result[0])
+        
+            return embeddings
 
 # List of all classes in this module
 _classes = [
