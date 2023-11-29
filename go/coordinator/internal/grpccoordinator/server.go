@@ -116,13 +116,13 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		memberlist_manager, err := createMemberlistManager(config)
+		// memberlist_manager, err := createMemberlistManager(config)
 
-		// Start the memberlist manager
-		err = memberlist_manager.Start()
-		if err != nil {
-			return nil, err
-		}
+		// // Start the memberlist manager
+		// err = memberlist_manager.Start()
+		// if err != nil {
+		// 	return nil, err
+		// }
 
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.BindAddress, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)

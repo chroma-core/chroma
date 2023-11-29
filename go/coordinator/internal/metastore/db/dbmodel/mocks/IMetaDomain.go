@@ -62,6 +62,22 @@ func (_m *IMetaDomain) DatabaseDb(ctx context.Context) dbmodel.IDatabaseDb {
 	return r0
 }
 
+// NotificationDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) NotificationDb(ctx context.Context) dbmodel.INotificationDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.INotificationDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.INotificationDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.INotificationDb)
+		}
+	}
+
+	return r0
+}
+
 // SegmentDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) SegmentDb(ctx context.Context) dbmodel.ISegmentDb {
 	ret := _m.Called(ctx)

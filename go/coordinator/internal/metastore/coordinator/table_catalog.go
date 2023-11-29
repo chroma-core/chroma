@@ -303,6 +303,15 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 		if err != nil {
 			return err
 		}
+		outBoxRecord := &dbmodel.Notification{
+			CollectionID: collectionID.String(),
+			Type:         dbmodel.NotificationTypeDeleteCollection,
+			Status:       dbmodel.NotificationStatusPending,
+		}
+		err = tc.metaDomain.NotificationDb(txCtx).Insert(outBoxRecord)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 }
