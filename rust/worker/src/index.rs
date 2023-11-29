@@ -12,7 +12,7 @@ struct IndexPtrFFI {
 
 #[repr(C)]
 pub struct Index {
-    ptr: *const IndexPtrFFI, // todo: make this private
+    ptr: *const IndexPtrFFI,
     dim: usize,
 }
 
