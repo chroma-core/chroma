@@ -645,34 +645,30 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
         return embeddings
 
 
-class RoboflowEmbeddingFunction(EmbeddingFunction[Images]):
+class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
         self, api_key: str, api_url = "https://infer.roboflow.com"
     ) -> None:
         self._api_url = api_url
         self._api_key = api_key
 
-    def __call__(self, images: Images = [], prompt: str = None) -> Embeddings:
-        if prompt:
-            infer_clip_payload = {
-                "text": prompt,
-            }
-
-            res = requests.post(
-                f"{self._api_url}/clip/embed_text?api_key={self._api_key}",
-                json=infer_clip_payload,
+        try:
+            self._PILImage = importlib.import_module("PIL.Image")
+        except ImportError:
+            raise ValueError(
+                "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
-            embeddings = res.json()['embeddings']
+    def __call__(self, images: Union[Documents, Images]) -> Embeddings:
+        embeddings = []
 
-            return embeddings
-        else:
-            embeddings = []
+        for item in images:
+            if is_image(item):
+                image = self._PILImage.fromarray(item)
 
-            for item in images:
-                if item == "images/train/images/000000000009_jpg.rf.856f80d728927e943a5bccfdf49dd677.jpg": print("here")
-                
-                base64_image = base64.b64encode(open(item, "rb").read()).decode("utf-8")
+                buffer = BytesIO()
+                image.save(buffer, format="JPEG")
+                base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
                 infer_clip_payload = {
                     "image": {
@@ -689,8 +685,24 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Images]):
                 result = res.json()['embeddings']
 
                 embeddings.append(result[0])
-        
-            return embeddings
+            
+            elif is_document(item):
+                infer_clip_payload = {
+                    "text": images,
+                }
+
+                res = requests.post(
+                    f"{self._api_url}/clip/embed_text?api_key={self._api_key}",
+                    json=infer_clip_payload,
+                )
+
+                print(res.json())
+
+                result = res.json()['embeddings']
+
+                embeddings.append(result[0])
+
+        return embeddings
 
 # List of all classes in this module
 _classes = [
