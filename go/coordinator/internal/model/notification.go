@@ -15,3 +15,9 @@ type Notification struct {
 	Type         string `json:"type"`
 	Status       string `json:"status"`
 }
+
+type Acknowledgement struct {
+	ID           int64  `json:"id"`
+	CollectionID string `json:"collection_id"`
+	From         string `json:"from"`
+}

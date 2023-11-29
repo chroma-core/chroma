@@ -2,9 +2,11 @@ package coordinator
 
 import (
 	"context"
+	"log"
 
-	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
+	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
+	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"gorm.io/gorm"
@@ -19,63 +21,52 @@ type Coordinator struct {
 	ctx                        context.Context
 	collectionAssignmentPolicy CollectionAssignmentPolicy
 	meta                       IMeta
+	notificationProcessor      notification.NotificationProcessor
 }
 
-func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPolicy, db *gorm.DB) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPolicy, db *gorm.DB, notificationStore notification.NotificationStore, notifier notification.Notifier) (*Coordinator, error) {
 	s := &Coordinator{
 		ctx:                        ctx,
 		collectionAssignmentPolicy: assignmentPolicy,
 	}
 
-	notificationStore := notification.NewMemoryNotificationStore()
-	notifier, err := createPulsarNotifer()
-	if err != nil {
-		return nil, err
-	}
-	notificationProcessor := notification.NewSimpleNotificationProcessor(notificationStore, notifier)
+	// catalog := coordinator.NewMemoryCatalog()
+	// catalog := coordinator.NewMemoryCatalogWithNotification(notificationStore)
 
-	catalog := coordinator.NewMemoryCatalog()
+	notificationProcessor := notification.NewSimpleNotificationProcessor(ctx, notificationStore, notifier)
+
+	txnImpl := dbcore.NewTxImpl()
+	metaDomain := dao.NewMetaDomain()
+	catalog := coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
 	meta, err := NewMetaTable(s.ctx, catalog)
 	if err != nil {
 		return nil, err
 	}
 	meta.SetNotificationProcessor(notificationProcessor)
-	notificationProcessor.Start()
+
 	s.meta = meta
+	s.notificationProcessor = notificationProcessor
 
 	return s, nil
 }
 
 func (s *Coordinator) Start() error {
+	err := s.notificationProcessor.Start()
+	if err != nil {
+		log.Printf("Failed to start notification processor: %v", err)
+		return err
+	}
 	return nil
 }
 
 func (s *Coordinator) Stop() error {
+	err := s.notificationProcessor.Stop()
+	if err != nil {
+		log.Printf("Failed to stop notification processor: %v", err)
+	}
 	return nil
 }
 
 func (c *Coordinator) assignCollection(collectionID types.UniqueID) (string, error) {
 	return c.collectionAssignmentPolicy.AssignCollection(collectionID)
-}
-
-func createPulsarNotifer() (*PulsarNotifier, error) {
-	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: "pulsar://localhost:6650",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// defer client.Close()
-
-	producer, err := client.CreateProducer(pulsar.ProducerOptions{
-		Topic: "notification-topic",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// defer producer.Close()
-	notifier := NewPulsarNotifier(producer)
-	return notifier, nil
 }

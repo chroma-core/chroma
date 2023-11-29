@@ -226,6 +226,16 @@ func (mt *MetaTable) AddCollection(ctx context.Context, createCollection *model.
 	}
 	mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID] = collection
 	log.Info("collection added", zap.Any("collection", mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID]))
+
+	triggerMessage := notification.TriggerMessage{
+		Msg: model.Notification{
+			CollectionID: collection.ID.String(),
+			Type:         model.NotificationTypeCreateCollection,
+			Status:       model.NotificationStatusPending,
+		},
+		ResultChan: make(chan error),
+	}
+	mt.notificationProcessor.Trigger(ctx, triggerMessage)
 	return collection, nil
 }
 
@@ -288,11 +298,6 @@ func (mt *MetaTable) DeleteCollection(ctx context.Context, deleteCollection *mod
 		ResultChan: make(chan error),
 	}
 	mt.notificationProcessor.Trigger(ctx, triggerMessage)
-	err := <-triggerMessage.ResultChan
-	if err != nil {
-		log.Error("Failed to trigger notification", zap.Error(err))
-		return err
-	}
 	return nil
 }
 

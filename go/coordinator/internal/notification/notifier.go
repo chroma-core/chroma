@@ -11,12 +11,14 @@ import (
 )
 
 type Notifier interface {
-	Notify(ctx context.Context, msg model.Notification) error
+	Notify(ctx context.Context, notifications []model.Notification) error
 }
 
 type PulsarNotifier struct {
 	producer pulsar.Producer
 }
+
+var _ Notifier = &PulsarNotifier{}
 
 func NewPulsarNotifier(producer pulsar.Producer) *PulsarNotifier {
 	return &PulsarNotifier{
@@ -24,23 +26,58 @@ func NewPulsarNotifier(producer pulsar.Producer) *PulsarNotifier {
 	}
 }
 
-func (p *PulsarNotifier) Notify(ctx context.Context, msg model.Notification) error {
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		log.Error("Failed to marshal notification", zap.Error(err))
-		return err
-	}
-	message := &pulsar.ProducerMessage{
-		Key:     msg.CollectionID,
-		Payload: payload,
-	}
-	p.producer.SendAsync(ctx, message, func(msgID pulsar.MessageID, producerMessage *pulsar.ProducerMessage, err error) {
+func (p *PulsarNotifier) Notify(ctx context.Context, notifications []model.Notification) error {
+	for _, notification := range notifications {
+		payload, err := json.Marshal(notification)
+		if err != nil {
+			log.Error("Failed to marshal notification", zap.Error(err))
+			return err
+		}
+		message := &pulsar.ProducerMessage{
+			Key:     notification.CollectionID,
+			Payload: payload,
+		}
+		// Since the number of notifications is small, we can send them synchronously
+		// for now. This is easy to reason about hte order of notifications.
+		//
+		// As follow up optimizations, we can send them asynchronously in batches and
+		// track failed messages.
+		_, err = p.producer.Send(ctx, message)
 		if err != nil {
 			log.Error("Failed to send message", zap.Error(err))
-		} else {
-			log.Info("Published message", zap.String("messageID", msgID.String()))
+			return err
 		}
-	})
-	p.producer.Flush()
+		log.Info("Published message", zap.Any("message", message))
+
+	}
+	return nil
+}
+
+type MemoryNotifier struct {
+	queue []pulsar.ProducerMessage
+}
+
+var _ Notifier = &MemoryNotifier{}
+
+func NewMemoryNotifier() *MemoryNotifier {
+	return &MemoryNotifier{
+		queue: make([]pulsar.ProducerMessage, 0),
+	}
+}
+
+func (m *MemoryNotifier) Notify(ctx context.Context, notifications []model.Notification) error {
+	for _, notification := range notifications {
+		payload, err := json.Marshal(notification)
+		if err != nil {
+			log.Error("Failed to marshal notification", zap.Error(err))
+			return err
+		}
+		message := pulsar.ProducerMessage{
+			Key:     notification.CollectionID,
+			Payload: payload,
+		}
+		m.queue = append(m.queue, message)
+		log.Info("Published message", zap.Any("message", message))
+	}
 	return nil
 }

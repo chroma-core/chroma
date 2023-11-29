@@ -5,10 +5,13 @@ import (
 	"errors"
 	"time"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/coordinator"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/memberlist_manager"
+	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
+	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
@@ -34,10 +37,16 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 
+	// Notification config
+	NotificationStoreProvider string
+	NotifierProvider          string
+
 	// Pulsar config
-	PulsarAdminURL  string
-	PulsarTenant    string
-	PulsarNamespace string
+	PulsarAdminURL    string
+	PulsarTenant      string
+	PulsarNamespace   string
+	PulsarURL         string
+	NotificationTopic string
 
 	// Kubernetes config
 	KubernetesNamespace  string
@@ -99,7 +108,6 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
 	} else if config.AssignmentPolicy == "rendezvous" {
 		log.Info("Using rendezvous assignment policy")
-
 		err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
 		if err != nil {
 			log.Error("Failed to create topics", zap.Error(err))
@@ -109,20 +117,51 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	} else {
 		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
 	}
-	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db)
+
+	var notificationStore notification.NotificationStore
+	if config.NotificationStoreProvider == "memory" {
+		log.Info("Using memory notification store")
+		notificationStore = notification.NewMemoryNotificationStore()
+	} else if config.NotificationStoreProvider == "database" {
+		txnImpl := dbcore.NewTxImpl()
+		metaDomain := dao.NewMetaDomain()
+		notificationStore = notification.NewDatabaseNotificationStore(txnImpl, metaDomain)
+	} else {
+		return nil, errors.New("invalid notification store provider, only memory and database are supported")
+	}
+
+	var notifier notification.Notifier
+	if config.NotifierProvider == "memory" {
+		log.Info("Using memory notifier")
+		notifier = notification.NewMemoryNotifier()
+	} else if config.NotifierProvider == "pulsar" {
+		log.Info("Using pulsar notifier")
+		pulsarNotifier, err := createPulsarNotifer(config.PulsarURL, config.NotificationTopic)
+		notifier = pulsarNotifier
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, errors.New("invalid notifier provider, only memory and pulsar are supported")
+	}
+
+	coordinator, err := coordinator.NewCoordinator(ctx, assignmentPolicy, db, notificationStore, notifier)
 	if err != nil {
 		return nil, err
 	}
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		// memberlist_manager, err := createMemberlistManager(config)
+		memberlist_manager, err := createMemberlistManager(config)
+		if err != nil {
+			return nil, err
+		}
 
-		// // Start the memberlist manager
-		// err = memberlist_manager.Start()
-		// if err != nil {
-		// 	return nil, err
-		// }
+		// Start the memberlist manager
+		err = memberlist_manager.Start()
+		if err != nil {
+			return nil, err
+		}
 
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.BindAddress, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
@@ -153,7 +192,28 @@ func createMemberlistManager(config Config) (*memberlist_manager.MemberlistManag
 	return memberlist_manager, nil
 }
 
+func createPulsarNotifer(pulsarURL string, notificationTopic string) (*notification.PulsarNotifier, error) {
+	// TODO: find a proper way to manage pulsar client
+	client, err := pulsar.NewClient(pulsar.ClientOptions{
+		URL: pulsarURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	producer, err := client.CreateProducer(pulsar.ProducerOptions{
+		Topic: notificationTopic,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	notifier := notification.NewPulsarNotifier(producer)
+	return notifier, nil
+}
+
 func (s *Server) Close() error {
 	s.healthServer.Shutdown()
+	s.coordinator.Stop()
 	return nil
 }

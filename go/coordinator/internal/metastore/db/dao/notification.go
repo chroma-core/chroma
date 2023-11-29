@@ -15,8 +15,8 @@ func (s *notificationDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Notification{}).Error
 }
 
-func (s *notificationDb) Delete(id int64) error {
-	return s.db.Where("id = ?", id).Delete(&dbmodel.Notification{}).Error
+func (s *notificationDb) Delete(id []int64) error {
+	return s.db.Where("id IN ?", id).Delete(&dbmodel.Notification{}).Error
 }
 
 func (s *notificationDb) Insert(in *dbmodel.Notification) error {
