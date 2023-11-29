@@ -696,8 +696,6 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                     json=infer_clip_payload,
                 )
 
-                print(res.json())
-
                 result = res.json()['embeddings']
 
                 embeddings.append(result[0])
