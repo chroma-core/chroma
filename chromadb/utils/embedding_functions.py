@@ -659,10 +659,10 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
-    def __call__(self, images: Union[Documents, Images]) -> Embeddings:
+    def __call__(self, input: Union[Documents, Images]) -> Embeddings:
         embeddings = []
 
-        for item in images:
+        for item in input:
             if is_image(item):
                 image = self._PILImage.fromarray(item)
 
@@ -688,7 +688,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             
             elif is_document(item):
                 infer_clip_payload = {
-                    "text": images,
+                    "text": input,
                 }
 
                 res = requests.post(
