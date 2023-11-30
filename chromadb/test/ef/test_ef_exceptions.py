@@ -6,12 +6,15 @@ from typing import Generator, Optional
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from dotenv import load_dotenv
 
 from chromadb import EmbeddingFunction
-from chromadb.api import API
 from chromadb.utils.embedding_functions import (
     SentenceTransformerEmbeddingFunction,
     DefaultEmbeddingFunction,
+    OpenAIEmbeddingFunction,
+    HuggingFaceEmbeddingFunction,
+    InstructorEmbeddingFunction,
 )
 
 
@@ -28,40 +31,60 @@ def sentence_transformers_ef() -> Optional[EmbeddingFunction]:
     return SentenceTransformerEmbeddingFunction(model_name="all-mpnet-base-v2")
 
 
+def instructor_ef() -> Optional[EmbeddingFunction]:
+    return InstructorEmbeddingFunction()
+
+
 def default_ef() -> Optional[EmbeddingFunction]:
     return DefaultEmbeddingFunction()
 
 
-@pytest.fixture(scope="function", params=[sentence_transformers_ef, default_ef])
+def openai_ef() -> Optional[EmbeddingFunction]:
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key is None:
+        return None
+    return OpenAIEmbeddingFunction(api_key=api_key)
+
+
+def huggingface_ef() -> Optional[EmbeddingFunction]:
+    load_dotenv()
+    api_key = os.getenv("HUGGINGFACE_API_KEY")
+    if api_key is None:
+        return None
+    return HuggingFaceEmbeddingFunction(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        api_key=api_key,
+    )
+
+
+@pytest.fixture(
+    scope="function",
+    params=[
+        sentence_transformers_ef,
+        default_ef,
+        openai_ef,
+        huggingface_ef,
+        instructor_ef,
+    ],
+)
 def ef(request: pytest.FixtureRequest) -> Generator[EmbeddingFunction, None, None]:
+    if request.param() is None:
+        pytest.skip("No API key provided for this embedding function")
     yield request.param()
 
 
-def test_sentence_transformers_raise_exception(api: API, ef: EmbeddingFunction) -> None:
-    api.reset()
-    os.environ["CHROMA_STRICT_MODE"] = "true"
-    col = api.get_or_create_collection("test", embedding_function=ef)
-    with pytest.raises(ValueError) as e:
-        col.add(
-            ids=["1", "2"],
-            documents=[generate_random_sentence(), "short doc"],
-            metadatas=[{"test": "test"}, {"test": "test"}],
-        )
-    assert "The following documents exceed" in str(e)
-    assert "[0]" in str(e)
-
-
 def test_sentence_transformers_warning(
-    api: API, ef: EmbeddingFunction, caplog: LogCaptureFixture
+    ef: EmbeddingFunction, caplog: LogCaptureFixture
 ) -> None:
-    api.reset()
     caplog.set_level(logging.DEBUG)
-    os.environ["CHROMA_STRICT_MODE"] = "false"
-    col = api.get_or_create_collection("test", embedding_function=ef)
-    col.add(
-        ids=["1", "2"],
-        documents=[generate_random_sentence(), "short doc"],
-        metadatas=[{"test": "test"}, {"test": "test"}],
-    )
-    print(caplog.text)
-    assert "The following documents exceed" in caplog.text
+    text = generate_random_sentence()
+    if isinstance(ef, OpenAIEmbeddingFunction):
+        text = generate_random_sentence(8000)
+    try:
+        ef([text])
+    except Exception as e:
+        # ignore OAI max context length error
+        if "This model's maximum context length is 8192 tokens" not in str(e):
+            raise e
+    assert "WARNING: The following document exceed" in caplog.text
