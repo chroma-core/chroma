@@ -69,9 +69,14 @@ def huggingface_ef() -> Optional[EmbeddingFunction]:
     ],
 )
 def ef(request: pytest.FixtureRequest) -> Generator[EmbeddingFunction, None, None]:
-    if request.param() is None:
-        pytest.skip("No API key provided for this embedding function")
-    yield request.param()
+    try:
+        if request.param() is None:
+            pytest.skip("No API key provided for this embedding function")
+        yield request.param()
+    except Exception as e:
+        pytest.skip(
+            f"Unable to instantiate embedding function, probably due to missing dependencies: {e}"
+        )
 
 
 def test_sentence_transformers_warning(
