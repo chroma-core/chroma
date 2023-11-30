@@ -24,7 +24,7 @@ class EmbeddingFunction(Protocol):
 ```
 
 The purpose of the method is to allow each existing and new Embedding Function to implement a method that will return
-the underlying model's max input sequence (max tokens). The max input sequence can be a fixed number for models like 
+the underlying model's max input sequence (max tokens). The max input sequence can be a fixed number for models like
 OpenAI, Cohere, PaLM etc, for other models like Sentence Transformers, Universal Sentence Encoder, etc. the max input
 sequence is taken from the model's tokenizer. By default, the method's implementation will return -1 which will indicate
 that the EF does not support max input sequence.
