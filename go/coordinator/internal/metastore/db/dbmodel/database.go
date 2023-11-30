@@ -7,13 +7,13 @@ import (
 )
 
 type Database struct {
-	ID        string          `db:"id;primaryKey;unique"`
-	Name      string          `db:"name;not null"`
-	TenantID  string          `db:"tenant_id"`
-	Ts        types.Timestamp `gorm:"ts"`
-	IsDeleted bool            `gorm:"default:false"`
-	CreatedAt time.Time       `gorm:"created_at;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time       `gorm:"created_at;default:CURRENT_TIMESTAMP"`
+	ID        string          `gorm:"id;primaryKey;unique"`
+	Name      string          `gorm:"name;type:varchar(128);not_null;uniqueIndex:idx_tenantid_name"`
+	TenantID  string          `gorm:"tenant_id;type:varchar(128);not_null;uniqueIndex:idx_tenantid_name"`
+	Ts        types.Timestamp `gorm:"ts;type:bigint;default:0"`
+	IsDeleted bool            `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 }
 
 func (v Database) TableName() string {
