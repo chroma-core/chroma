@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Sequence
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
@@ -42,7 +42,7 @@ from chromadb.api.types import (
     validate_where_document,
     validate_n_results,
     validate_embeddings,
-    validate_embedding_function,
+    validate_embedding_function, SqlBackedIndex,
 )
 import logging
 
@@ -585,3 +585,15 @@ class Collection(BaseModel):
                 "https://docs.trychroma.com/embeddings"
             )
         return self._embedding_function(input=input)
+
+    def add_indices(self, indices: Sequence[SqlBackedIndex]) -> None:
+        return self._client._create_collection_indices(self.id, indices)
+
+    def rebuild_indices(self, indices: Sequence[str]=None) -> None:
+        return self._client._rebuild_collection_indices(self.id, indices)
+
+    def drop_indices(self, indices: Optional[Sequence[str]]= None) -> None:
+        return self._client._drop_collection_indices(self.id, indices)
+
+    def list_indices(self) -> Sequence[SqlBackedIndex]:
+        return self._client._list_collection_indices(self.id)

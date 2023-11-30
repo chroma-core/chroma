@@ -1,9 +1,10 @@
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
-from pypika import Table, Column
+from pypika import Table, Column, Criterion
 from itertools import groupby
 
+from chromadb.api import SqlBackedIndex
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
     Cursor,
@@ -14,6 +15,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.db.utils import IndexQuery
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -736,3 +738,97 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         if sql:
             cur.execute(sql, params)
+
+    @override
+    def create_indices(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        segments = Table('segments')
+        embedding_metadata = Table('embedding_metadata')
+
+        segment_id_q = (self.querybuilder()
+                        .from_(segments)
+                        .select(segments.id)
+                        .where(segments.collection == ParameterValue(self.uuid_to_db(collection_id)))
+                        .where(segments.scope == 'METADATA'))
+
+        with self.tx() as cur:
+            segment_id_sql, segment_id_params = get_sql(segment_id_q, self.parameter_format())
+            cur.execute(segment_id_sql, segment_id_params)
+            segment_id = cur.fetchone()[0]
+
+            for index in indices:
+                q = (IndexQuery()
+                     .create_index(f'cust_idx_{index["name"]}')
+                     .on(embedding_metadata)
+                     .columns(embedding_metadata.key, embedding_metadata.segment_id,
+                              *(embedding_metadata[col] for col in index["columns"]))
+                     .where(embedding_metadata.key != 'chroma:document')
+                     .where(embedding_metadata.segment_id == segment_id))
+                if 'keys' in index:
+                    where_clause = None
+                    for key in index["keys"]:
+                        condition = (embedding_metadata.key == key)
+                        where_clause = condition if where_clause is None else (where_clause | condition)
+                    q = q.where(Criterion.any([(embedding_metadata.key == key) for key in index["keys"]]))
+                    print(q.get_sql())
+                cur.execute(q.get_sql())
+
+    @override
+    def drop_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        sql_master = Table('sqlite_master')
+
+        with self.tx() as cur:
+            for index_name in index_names:
+                query_indices = (self.querybuilder()
+                                 .from_(sql_master)
+                                 .select(sql_master.name)
+                                 .where(sql_master.type == 'index')
+                                 .where(sql_master.tbl_name == 'embedding_metadata')
+                                 .where(sql_master.sql.like(f'%cust_idx_{index_name}%')))
+
+                # Execute query to find index
+                cur.execute(query_indices.get_sql())
+                index_to_drop = cur.fetchone()
+
+                # Check if index exists
+                if not index_to_drop:
+                    raise NotFoundError(f"Index {index_name} not found")
+
+                # Build query to drop index
+                q = IndexQuery().drop_index(index_to_drop[0])
+
+                # Execute query to drop index
+                cur.execute(q.get_sql())
+
+
+    @override
+    def rebuild_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        # Define the table for querying index information
+        sql_master = Table('sqlite_master')  # or appropriate table for your database
+        # Start a transaction
+        with self.tx() as cur:
+            for index_name in index_names:
+                # Query to find the index
+                query_indices = (self.querybuilder()
+                                 .from_(sql_master)
+                                 .select(sql_master.name, sql_master.sql)
+                                 .where(sql_master.type == 'index')
+                                 .where(sql_master.tbl_name == 'your_table_name')  # adjust as needed
+                                 .where(sql_master.name == f'cust_idx_{index_name}'))
+                cur.execute(query_indices.get_sql())
+                index_info = cur.fetchone()
+                if index_info:
+                    index_name, index_definition = index_info
+                    drop_query = IndexQuery().drop_index(index_name)
+                    cur.execute(drop_query.get_sql())
+                    cur.execute(index_definition)
+                    print(f"Rebuilt index: {index_name}")
+                else:
+                    # Optionally, log that the index was not found
+                    raise NotFoundError(f"Index {index_name} not found")
+
+
+
+    @override
+    def list_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        print("Getting indices")
+        return []

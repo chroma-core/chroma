@@ -20,7 +20,7 @@ from chromadb.api.types import (
     Where,
     QueryResult,
     GetResult,
-    WhereDocument,
+    WhereDocument, SqlBackedIndex,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -411,6 +411,24 @@ class BaseAPI(ABC):
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
         pass
+
+    @abstractmethod
+    def _create_collection_indices(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        """Create a new index """
+        pass
+
+    @abstractmethod
+    def _drop_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        pass
+
+    @abstractmethod
+    def _list_collection_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        pass
+
+    @abstractmethod
+    def _rebuild_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        pass
+
 
 
 class ClientAPI(BaseAPI, ABC):

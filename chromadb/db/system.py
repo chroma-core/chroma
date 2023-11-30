@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from typing import Optional, Sequence, Tuple
 from uuid import UUID
+
+from chromadb.api import SqlBackedIndex
 from chromadb.types import (
     Collection,
     Database,
@@ -133,4 +135,24 @@ class SysDB(Component):
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
+        pass
+
+    @abstractmethod
+    def create_indices(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        """Create indices for a collection"""
+        pass
+
+    @abstractmethod
+    def drop_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        """Delete all or select indices for a collection"""
+        pass
+
+    @abstractmethod
+    def rebuild_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        """Rebuild all or select indices for a collection"""
+        pass
+
+    @abstractmethod
+    def list_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        """Get all indices for a collection"""
         pass

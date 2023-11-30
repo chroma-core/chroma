@@ -1,4 +1,5 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
+from enum import Enum
+from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast, Set
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -188,6 +189,19 @@ class IndexMetadata(TypedDict):
     total_elements_added: int
     time_created: float
 
+AllowedIndexColumns = Literal["string_value", "int_value", "float_value"]
+
+
+class IndexType(str, Enum):
+    METADATA = "metadata"
+    DOCUMENT = "document"
+
+
+class SqlBackedIndex(TypedDict):
+    name: str
+    columns: Set[AllowedIndexColumns]
+    keys: Optional[Set[str]]
+    index_type: IndexType
 
 Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
