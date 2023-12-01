@@ -24,4 +24,7 @@ tokenizers==0.13.2
 tqdm>=4.65.0
 typer>=0.9.0
 typing_extensions>=4.5.0
+torch==2.0.1
+transformers==4.35.0
+peft==0.6.2
 uvicorn[standard]==0.18.3
