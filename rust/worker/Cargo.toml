@@ -19,6 +19,9 @@ serde = "1.0.193"
 serde_json = "1.0.108"
 schemars = "0.8.16"
 async-trait = "0.1.74"
+pulsar = "6.1.0"
+uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+murmur3 = "0.5.2"
 
 [build-dependencies]
 tonic-build = "0.10"

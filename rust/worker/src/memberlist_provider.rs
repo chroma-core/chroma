@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::Component;
 use async_trait::async_trait;
 use futures::TryStreamExt;
