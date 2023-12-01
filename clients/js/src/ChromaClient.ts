@@ -2,7 +2,7 @@ import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { Configuration, ApiApi as DefaultApi } from "./generated";
 import { handleSuccess, handleError } from "./utils";
 import { Collection } from './Collection';
-import { CollectionMetadata, CollectionType, ConfigOptions } from './types';
+import { ChromaClientParams, CollectionMetadata, CollectionType, ConfigOptions, CreateCollectionParams, DeleteCollectionParams, GetCollectionParams, GetOrCreateCollectionParams, ListCollectionsParams } from './types';
 import {
     AuthOptions,
     ClientAuthProtocolAdapter,
@@ -41,14 +41,8 @@ export class ChromaClient {
         fetchOptions,
         auth,
         tenant = DEFAULT_TENANT,
-        database = DEFAULT_DATABASE
-    }: {
-        path?: string,
-        fetchOptions?: RequestInit,
-        auth?: AuthOptions,
-        tenant?: string,
-        database?: string,
-    } = {}) {
+        database = DEFAULT_DATABASE,
+    }: ChromaClientParams = {}) {
         if (path === undefined) path = "http://localhost:8000";
         this.tenant = tenant;
         this.database = database;
@@ -148,11 +142,7 @@ export class ChromaClient {
         name,
         metadata,
         embeddingFunction
-    }: {
-        name: string,
-        metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
-    }): Promise<Collection> {
+    }: CreateCollectionParams): Promise<Collection> {
         const newCollection = await this.api
             .createCollection(this.tenant, this.database, {
                 name,
@@ -193,11 +183,7 @@ export class ChromaClient {
         name,
         metadata,
         embeddingFunction
-    }: {
-        name: string,
-        metadata?: CollectionMetadata,
-        embeddingFunction?: IEmbeddingFunction
-    }): Promise<Collection> {
+    }: GetOrCreateCollectionParams): Promise<Collection> {
         const newCollection = await this.api
             .createCollection(this.tenant, this.database, {
                 name,
@@ -224,15 +210,44 @@ export class ChromaClient {
      * Lists all collections.
      *
      * @returns {Promise<CollectionType[]>} A promise that resolves to a list of collection names.
+     * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
+     * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
      * @throws {Error} If there is an issue listing the collections.
      *
      * @example
      * ```typescript
-     * const collections = await client.listCollections();
+     * const collections = await client.listCollections({
+     *     limit: 10,
+     *     offset: 0,
+     * });
      * ```
      */
-    public async listCollections(): Promise<CollectionType[]> {
-        const response = await this.api.listCollections(this.tenant, this.database, this.api.options);
+    public async listCollections({
+        limit,
+        offset,
+    }: ListCollectionsParams = {}): Promise<CollectionType[]> {
+        const response = await this.api.listCollections(
+            this.tenant,
+            this.database,
+            limit,
+            offset,
+            this.api.options);
+        return handleSuccess(response);
+    }
+
+    /**
+     * Counts all collections.
+     *
+     * @returns {Promise<number>} A promise that resolves to the number of collections.
+     * @throws {Error} If there is an issue counting the collections.
+     *
+     * @example
+     * ```typescript
+     * const collections = await client.countCollections();
+     * ```
+     */
+    public async countCollections(): Promise<number> {
+        const response = await this.api.countCollections(this.tenant, this.database, this.api.options);
         return handleSuccess(response);
     }
 
@@ -254,10 +269,7 @@ export class ChromaClient {
     public async getCollection({
         name,
         embeddingFunction
-    }: {
-        name: string;
-        embeddingFunction?: IEmbeddingFunction
-    }): Promise<Collection> {
+    }: GetCollectionParams): Promise<Collection> {
         const response = await this.api
             .getCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)
@@ -293,9 +305,7 @@ export class ChromaClient {
      */
     public async deleteCollection({
         name
-    }: {
-        name: string
-    }): Promise<void> {
+    }: DeleteCollectionParams): Promise<void> {
         return await this.api
             .deleteCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)

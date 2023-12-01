@@ -367,6 +367,8 @@ class SqlSysDB(SqlDB, SysDB):
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
 
@@ -426,6 +428,16 @@ class SqlSysDB(SqlDB, SysDB):
                 .where(databases_t.name == ParameterValue(database))
                 .where(databases_t.tenant_id == ParameterValue(tenant))
             )
+
+        # Set default limit if not provided
+        limit = limit or 2**63 - 1
+        # Add the limit to the query
+        q = q.limit(limit)
+
+        # Set default offset if not provided
+        offset = offset or 0
+        # Add the offset to the query
+        q = q.offset(offset)
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())

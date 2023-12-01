@@ -46,6 +46,9 @@ export namespace Api {
 	export interface Count200Response {
 	}
 
+	export interface CountCollections200Response {
+	}
+
 	export interface CreateCollection {
 		name: string;
 		metadata?: Api.CreateCollection.Metadata;

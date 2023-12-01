@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence, Optional
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
+
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
@@ -196,6 +197,12 @@ class FastAPI(chromadb.server.Server):
             response_model=None,
         )
         self.router.add_api_route(
+            "/api/v1/collections/count",
+            self.count_collections,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
             "/api/v1/collections",
             self.create_collection,
             methods=["POST"],
@@ -343,9 +350,33 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
-        return self._api.list_collections(tenant=tenant, database=database)
+        return self._api.list_collections(
+            limit=limit, offset=offset, tenant=tenant, database=database
+        )
+
+    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.COUNT_COLLECTIONS,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        return self._api.count_collections(tenant=tenant, database=database)
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(

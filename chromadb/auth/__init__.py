@@ -300,6 +300,7 @@ class AuthzResourceActions(str, Enum):
     CREATE_TENANT = "create_tenant"
     GET_TENANT = "get_tenant"
     LIST_COLLECTIONS = "list_collections"
+    COUNT_COLLECTIONS = "count_collections"
     GET_COLLECTION = "get_collection"
     CREATE_COLLECTION = "create_collection"
     GET_OR_CREATE_COLLECTION = "get_or_create_collection"

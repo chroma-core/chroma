@@ -186,6 +186,42 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			};
 		},
 		/**
+		 * @summary Count Collections
+		 * @param {string} [tenant]
+		 * @param {string} [database]
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		countCollections(tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
+			let localVarPath = `/api/v1/collections/count`;
+			const localVarPathQueryStart = localVarPath.indexOf("?");
+			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
+			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
+			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+			if (localVarPathQueryStart !== -1) {
+				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			if (tenant !== undefined) {
+				localVarQueryParameter.append('tenant', String(tenant));
+			}
+
+			if (database !== undefined) {
+				localVarQueryParameter.append('database', String(database));
+			}
+
+			localVarRequestOptions.headers = localVarHeaderParameter;
+
+			const localVarQueryParameterString = localVarQueryParameter.toString();
+			if (localVarQueryParameterString) {
+				localVarPath += "?" + localVarQueryParameterString;
+			}
+			return {
+				url: localVarPath,
+				options: localVarRequestOptions,
+			};
+		},
+		/**
 		 * @summary Create Collection
 		 * @param {string} [tenant]
 		 * @param {string} [database]
@@ -537,10 +573,12 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		 * @summary List Collections
 		 * @param {string} [tenant]
 		 * @param {string} [database]
+		 * @param {number} [limit]
+		 * @param {number} [offset]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		listCollections(tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
+		listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options: RequestInit = {}): FetchArgs {
 			let localVarPath = `/api/v1/collections`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
@@ -556,6 +594,14 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 
 			if (database !== undefined) {
 				localVarQueryParameter.append('database', String(database));
+			}
+
+			if (limit !== undefined) {
+				localVarQueryParameter.append('limit', String(limit));
+			}
+
+			if (offset !== undefined) {
+				localVarQueryParameter.append('offset', String(offset));
 			}
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
@@ -931,6 +977,36 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
+		 * @summary Count Collections
+		 * @param {string} [tenant]
+		 * @param {string} [database]
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		countCollections(tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.CountCollections200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).countCollections(tenant, database, options);
+			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+					const contentType = response.headers.get('Content-Type');
+					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+
+					if (response.status === 200) {
+						if (mimeType === 'application/json') {
+							return response.json() as any;
+						}
+						throw response;
+					}
+					if (response.status === 422) {
+						if (mimeType === 'application/json') {
+							throw response;
+						}
+						throw response;
+					}
+					throw response;
+				});
+			};
+		},
+		/**
 		 * @summary Create Collection
 		 * @param {string} [tenant]
 		 * @param {string} [database]
@@ -1197,11 +1273,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		 * @summary List Collections
 		 * @param {string} [tenant]
 		 * @param {string} [database]
+		 * @param {number} [limit]
+		 * @param {number} [offset]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		listCollections(tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ListCollections200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollections(tenant, database, options);
+		listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ListCollections200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollections(tenant, database, limit, offset, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1463,6 +1541,17 @@ export class ApiApi extends BaseAPI {
 	}
 
 	/**
+	 * @summary Count Collections
+	 * @param {string} [tenant]
+	 * @param {string} [database]
+	 * @param {RequestInit} [options] Override http request option.
+	 * @throws {RequiredError}
+	 */
+	public countCollections(tenant: string | undefined, database: string | undefined, options?: RequestInit) {
+		return ApiApiFp(this.configuration).countCollections(tenant, database, options)(this.fetch, this.basePath);
+	}
+
+	/**
 	 * @summary Create Collection
 	 * @param {string} [tenant]
 	 * @param {string} [database]
@@ -1564,11 +1653,13 @@ export class ApiApi extends BaseAPI {
 	 * @summary List Collections
 	 * @param {string} [tenant]
 	 * @param {string} [database]
+	 * @param {number} [limit]
+	 * @param {number} [offset]
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public listCollections(tenant: string | undefined, database: string | undefined, options?: RequestInit) {
-		return ApiApiFp(this.configuration).listCollections(tenant, database, options)(this.fetch, this.basePath);
+	public listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options?: RequestInit) {
+		return ApiApiFp(this.configuration).listCollections(tenant, database, limit, offset, options)(this.fetch, this.basePath);
 	}
 
 	/**
