@@ -2,7 +2,7 @@ import pytest
 import logging
 import hypothesis.strategies as st
 from hypothesis import given
-from typing import Dict, Set, cast, Union, DefaultDict, Any
+from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
@@ -408,7 +408,7 @@ def test_delete_success(api: ServerAPI, kwargs: dict):
 
 @given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
 def test_autocasting_validate_embeddings_for_compatible_types(
-    supported_types: list[Any],
+    supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, supported_types)
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
@@ -428,7 +428,7 @@ def test_autocasting_validate_embeddings_for_compatible_types(
 
 @given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
 def test_autocasting_validate_embeddings_with_ndarray(
-    supported_types: list[Any],
+    supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings_ndarray(10, 10, supported_types)
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
@@ -448,7 +448,7 @@ def test_autocasting_validate_embeddings_with_ndarray(
 
 @given(unsupported_types=st.sampled_from([str, bool]))
 def test_autocasting_validate_embeddings_incompatible_types(
-    unsupported_types: list[Any],
+    unsupported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, unsupported_types)
     with pytest.raises(ValueError) as e:
