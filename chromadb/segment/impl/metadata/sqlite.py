@@ -31,7 +31,7 @@ from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion
-from itertools import islice, groupby
+from itertools import groupby
 from functools import reduce
 import sqlite3
 
@@ -97,8 +97,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(embeddings_t)
             .where(
-                embeddings_t.segment_id == ParameterValue(
-                    self._db.uuid_to_db(self._id))
+                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
             .select(fn.Count(embeddings_t.id))
         )
@@ -107,7 +106,7 @@ class SqliteMetadataSegment(MetadataReader):
             result = cur.execute(sql, params).fetchone()[0]
             return cast(int, result)
 
-    @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
+    # @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
     @override
     def get_metadata(
         self,
@@ -121,6 +120,9 @@ class SqliteMetadataSegment(MetadataReader):
         embeddings_t, metadata_t, fulltext_t = Tables(
             "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
+
+        limit = limit or 2**63 - 1
+        offset = offset or 0
 
         q = (
             (
@@ -140,28 +142,70 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.bool_value,
             )
             .where(
-                embeddings_t.segment_id == ParameterValue(
-                    self._db.uuid_to_db(self._id))
+                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
             .orderby(embeddings_t.id)
         )
 
-        if where:
-            q = q.where(self._where_map_criterion(
-                q, where, embeddings_t, metadata_t))
-        if where_document:
-            q = q.where(
-                self._where_doc_criterion(
-                    q, where_document, embeddings_t, fulltext_t)
+        # If there is a query that touches the metadata table, it uses
+        # where and where_document filters, we treat this case seperately
+        if where is not None or where_document is not None:
+            metadata_q = (
+                self._db.querybuilder()
+                .from_(metadata_t)
+                .select(metadata_t.id)
+                .distinct()  # These are embedding ids
             )
 
-        if ids:
-            q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
+            if where:
+                metadata_q = metadata_q.where(
+                    self._where_map_criterion(metadata_q, where, metadata_t)
+                )
+            if where_document:
+                metadata_q = metadata_q.where(
+                    self._where_doc_criterion(
+                        metadata_q, where_document, metadata_t, fulltext_t
+                    )
+                )
+            if ids is not None:
+                metadata_q = metadata_q.join(embeddings_t).on(
+                    embeddings_t.id == metadata_t.id
+                )
+                metadata_q = metadata_q.where(
+                    embeddings_t.embedding_id.isin(ParameterValue(ids))
+                )
 
-        limit = limit or 2**63 - 1
-        offset = offset or 0
+            metadata_q = metadata_q.limit(limit)
+            metadata_q = metadata_q.offset(offset)
+
+            q = q.where(embeddings_t.id.isin(metadata_q))
+        else:
+            # In the case where we don't use the metadata table
+            # We have to apply limit/offset to embeddings and then join
+            # with metadata
+            embeddings_q = (
+                self._db.querybuilder()
+                .from_(embeddings_t)
+                .select(embeddings_t.id)
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
+                .orderby(embeddings_t.id)
+                .limit(limit)
+                .offset(offset)
+            )
+
+            if ids is not None:
+                embeddings_q = embeddings_q.where(
+                    embeddings_t.embedding_id.isin(ParameterValue(ids))
+                )
+
+            q = q.where(embeddings_t.id.isin(embeddings_q))
+
         with self._db.tx() as cur:
-            return list(islice(self._records(cur, q), offset, offset + limit))
+            # Execute the query with the limit and offset already applied
+            return list(self._records(cur, q))
 
     def _records(
         self, cur: Cursor, q: QueryBuilder
@@ -231,8 +275,7 @@ class SqliteMetadataSegment(MetadataReader):
             if upsert:
                 return self._update_record(cur, record)
             else:
-                logger.warning(
-                    f"Insert of existing embedding ID: {record['id']}")
+                logger.warning(f"Insert of existing embedding ID: {record['id']}")
                 # We are trying to add for a record that already exists. Fail the call.
                 # We don't throw an exception since this is in principal an async path
                 return
@@ -366,8 +409,7 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(
-                f"Delete of nonexisting embedding ID: {record['id']}")
+            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
 
@@ -398,8 +440,7 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(
-                f"Update of nonexisting embedding ID: {record['id']}")
+            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
             if record["metadata"]:
@@ -437,25 +478,24 @@ class SqliteMetadataSegment(MetadataReader):
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
     )
     def _where_map_criterion(
-        self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
+        self, q: QueryBuilder, where: Where, metadata_t: Table
     ) -> Criterion:
         clause: list[Criterion] = []
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x & y, criteria))
             elif k == "$or":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
-                expr = cast(
-                    Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
+                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
                 sq = (
                     self._db.querybuilder()
                     .from_(metadata_t)
@@ -463,7 +503,7 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(metadata_t.key == ParameterValue(k))
                     .where(_where_clause(expr, metadata_t))
                 )
-                clause.append(embeddings_t.id.isin(sq))
+                clause.append(metadata_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
     @trace_method(
@@ -473,19 +513,19 @@ class SqliteMetadataSegment(MetadataReader):
         self,
         q: QueryBuilder,
         where: WhereDocument,
-        embeddings_t: Table,
+        metadata_t: Table,
         fulltext_t: Table,
     ) -> Criterion:
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    self._where_doc_criterion(q, w, metadata_t, fulltext_t)
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x & y, criteria)
             elif k == "$or":
                 criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    self._where_doc_criterion(q, w, metadata_t, fulltext_t)
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
@@ -499,7 +539,7 @@ class SqliteMetadataSegment(MetadataReader):
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
-                return embeddings_t.id.isin(sq)
+                return metadata_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
