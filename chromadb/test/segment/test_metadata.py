@@ -522,3 +522,32 @@ def _test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+def test_limit(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+
+    topic = str(segment_definition["topic"])
+
+    max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    sync(segment, max_id)
+
+    assert segment.count() == 3
+
+    for i in range(3):
+        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+
+    sync(segment, max_id)
+
+    assert segment.count() == 6
+
+    res = segment.get_metadata(limit=3)
+    assert len(res) == 3

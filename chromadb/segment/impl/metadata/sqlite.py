@@ -106,7 +106,7 @@ class SqliteMetadataSegment(MetadataReader):
             result = cur.execute(sql, params).fetchone()[0]
             return cast(int, result)
 
-    # @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
+    @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
     @override
     def get_metadata(
         self,
