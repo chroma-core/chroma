@@ -1,4 +1,6 @@
 from typing import Optional, Union, Sequence, Dict, Mapping, List
+
+import numpy as np
 from typing_extensions import Literal, TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
@@ -73,7 +75,9 @@ class Operation(Enum):
     DELETE = "DELETE"
 
 
-Vector = Union[Sequence[float], Sequence[int]]
+Vector = Union[
+    Sequence[float], Sequence[int], Sequence[np.integer], Sequence[np.floating]
+]
 
 
 class VectorEmbeddingRecord(TypedDict):

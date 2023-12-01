@@ -1,4 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any
+
+import numpy as np
 from pydantic import BaseModel, PrivateAttr
 
 from uuid import UUID
@@ -285,7 +287,11 @@ class Collection(BaseModel):
             validate_where_document(where_document) if where_document else {}
         )
         valid_query_embeddings = (
-            validate_embeddings(maybe_cast_one_to_many_embedding(query_embeddings))
+            validate_embeddings(
+                self._normalize_embeddings(
+                    maybe_cast_one_to_many_embedding(query_embeddings)
+                )
+            )
             if query_embeddings is not None
             else None
         )
@@ -326,7 +332,6 @@ class Collection(BaseModel):
 
         if "data" in include and "uris" not in include:
             valid_include.append("uris")
-
         query_results = self._client._query(
             collection_id=self.id,
             query_embeddings=valid_query_embeddings,
@@ -511,7 +516,9 @@ class Collection(BaseModel):
     ]:
         valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
         valid_embeddings = (
-            validate_embeddings(maybe_cast_one_to_many_embedding(embeddings))
+            validate_embeddings(
+                self._normalize_embeddings(maybe_cast_one_to_many_embedding(embeddings))
+            )
             if embeddings is not None
             else None
         )
@@ -577,6 +584,12 @@ class Collection(BaseModel):
             valid_images,
             valid_uris,
         )
+
+    @staticmethod
+    def _normalize_embeddings(embeddings: Embeddings) -> Embeddings:
+        if isinstance(embeddings, np.ndarray):
+            return embeddings.tolist()
+        return embeddings
 
     def _embed(self, input: Any) -> Embeddings:
         if self._embedding_function is None:

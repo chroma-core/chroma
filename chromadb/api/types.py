@@ -51,7 +51,7 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 
 # Embeddings
 Embedding = Vector
-Embeddings = List[Embedding]
+Embeddings = Union[List[Embedding], np.ndarray]
 
 
 def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:
@@ -213,7 +213,9 @@ def validate_embedding_function(
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
 
+
 L = TypeVar("L", covariant=True)
+
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
@@ -477,7 +479,12 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
     for embedding in embeddings:
-        if not all([isinstance(value, (int, float)) for value in embedding]):
+        if not all(
+            [
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in embedding
+            ]
+        ):
             raise ValueError(
                 f"Expected each value in the embedding to be a int or float, got {embeddings}"
             )
