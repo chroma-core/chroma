@@ -59,7 +59,7 @@ fn it_can_add_and_basic_query() {
     index.init(n, 16, 100, 0, true);
     index.set_ef(100);
 
-    let data = utils::generate_random_data(n, d);
+    let data: Vec<f32> = utils::generate_random_data(n, d);
     let ids: Vec<usize> = (0..n).collect();
 
     (0..n).into_iter().for_each(|i| {

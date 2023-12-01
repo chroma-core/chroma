@@ -10,7 +10,7 @@ struct IndexPtrFFI {
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 
-#[repr(C)]
+// #[repr(C)]
 pub struct Index {
     ptr: *const IndexPtrFFI,
     dim: usize,
