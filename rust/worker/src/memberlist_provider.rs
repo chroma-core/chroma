@@ -10,12 +10,12 @@ use kube::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::pin;
+use tokio::{pin, sync::broadcast::Sender};
 use tokio_util::sync::CancellationToken;
 
 /* =========== Basic Types ============== */
 
-type Memberlist = Vec<String>;
+pub type Memberlist = Vec<String>;
 
 #[async_trait]
 pub trait MemberlistProvider: Component {
@@ -47,12 +47,17 @@ pub struct CustomResourceMemberlistProvider {
     kube_client: Client,
     memberlist_cr_client: Api<MemberListKubeResource>,
     cancellation_token: CancellationToken,
+    channel: Sender<Memberlist>,
+    running: bool,
 }
 
 // TODO: parameterize namespace
 impl CustomResourceMemberlistProvider {
     // TODO: implement builder pattern so that this is not async
-    pub async fn new(memberlist_name: &str) -> CustomResourceMemberlistProvider {
+    pub async fn new(
+        memberlist_name: &str,
+        channel_send: Sender<Memberlist>,
+    ) -> CustomResourceMemberlistProvider {
         let kube_client = Client::try_default().await;
 
         if kube_client.is_err() {
@@ -73,6 +78,8 @@ impl CustomResourceMemberlistProvider {
             kube_client: kube_client,
             memberlist_cr_client: api,
             cancellation_token: cancellation_token,
+            channel: channel_send,
+            running: false,
         };
         return c;
     }
@@ -97,10 +104,14 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 
 impl Component for CustomResourceMemberlistProvider {
     fn start(&self) {
-        let memberlist_name = self.memberlist_name.clone();
+        if self.running {
+            return;
+        }
+
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), "chroma");
         let cancellation_token = self.cancellation_token.clone();
+        let channel = self.channel.clone();
 
         let stream = watcher(memberlist_cr_client, watcher::Config::default())
             .default_backoff()
@@ -128,6 +139,7 @@ impl Component for CustomResourceMemberlistProvider {
                                             .map(|member| member.url.clone())
                                             .collect::<Vec<String>>();
                                         println!("Memberlist: {:?}", memberlist);
+                                        let _ = channel.send(memberlist);
                                     },
                                     None => {
                                         println!("No event");
@@ -145,6 +157,9 @@ impl Component for CustomResourceMemberlistProvider {
     }
 
     fn stop(&self) {
+        if !self.running {
+            return;
+        }
         self.cancellation_token.cancel();
     }
 }
