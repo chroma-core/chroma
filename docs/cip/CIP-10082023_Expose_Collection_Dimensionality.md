@@ -6,13 +6,15 @@ Current status: **Draft**
 
 ## **Motivation**
 
-Currently validation of embedding dimensionality is done on the server-side (or local persistent/ephemeral clients). We believe that by exposing the dimensionality of a collection to the client, we can improve the user experience by allowing the client to validate the dimensionality of the embedding before sending it to the server.
+Currently, validation of embedding dimensionality is done on the server-side (or local persistent/ephemeral clients). 
+We believe that by exposing the dimensionality of a collection to the client, we can improve the user experience by 
+allowing the client to validate the dimensionality of the embedding before sending it to the server.
 
 ## **Public Interfaces**
 
 The following changes are proposed:
 
-- New server API endpoint: `GET /api/v1/collections/{collection}/dimensionality`
+- New server API endpoint: `GET /api/v1/collections/{collection}/dimensions`
 - New method `chromadb.api.API._dimensions` is added to the API class with corresponding FastAPI and SegmentAPI implementations.
 - New `chromadb.api.models.Collection.dimensions` method is added.
 

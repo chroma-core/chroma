@@ -324,6 +324,12 @@ class Client(SharedSystemClient, ClientAPI):
         )
 
     @override
+    def _dimensions(self, collection_id: UUID) -> int:
+        return self._server._dimensions(
+            collection_id=collection_id,
+        )
+
+    @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
         return self._server._peek(
             collection_id=collection_id,
