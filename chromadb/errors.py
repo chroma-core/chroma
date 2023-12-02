@@ -57,10 +57,18 @@ class InvalidUUIDError(ChromaError):
         return "InvalidUUID"
 
 
+class InvalidHTTPVersion(ChromaError):
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InvalidHTTPVersion"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
     "InvalidUUID": InvalidUUIDError,
+    "InvalidHTTPVersion": InvalidHTTPVersion,
 }

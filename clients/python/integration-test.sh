@@ -21,6 +21,7 @@ export CHROMA_INTEGRATION_TEST_ONLY=1
 export CHROMA_API_IMPL=chromadb.api.fastapi.FastAPI
 export CHROMA_SERVER_HOST=localhost
 export CHROMA_SERVER_HTTP_PORT=8000
+export CHROMA_SERVER_NOFILE=65535
 
 echo testing: python -m pytest "$@"
 

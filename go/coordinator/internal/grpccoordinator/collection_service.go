@@ -27,15 +27,6 @@ func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.Chr
 	return res, nil
 }
 
-func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
-	getOrCreate := req.GetGetOrCreate()
-	if getOrCreate {
-		return s.getOrCreateCollection(ctx, req)
-	} else {
-		return s.createCollection(ctx, req)
-	}
-}
-
 // Cases for get_or_create
 
 // Case 0
@@ -58,79 +49,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 
 // The fact that we ignore the metadata of the generated collections is a
 // bit weird, but it is the easiest way to excercise all cases
-func (s *Server) getOrCreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
-	res := &coordinatorpb.CreateCollectionResponse{}
-	name := req.GetName()
-	tenantID := req.GetTenant()
-	databaseName := req.GetDatabase()
-	collections, err := s.coordinator.GetCollections(ctx, types.NilUniqueID(), &name, nil, tenantID, databaseName)
-	if err != nil {
-		log.Error("error getting collections", zap.Error(err))
-		res.Collection = &coordinatorpb.Collection{
-			Id:        req.Id,
-			Name:      req.Name,
-			Dimension: req.Dimension,
-			Metadata:  req.Metadata,
-		}
-		res.Created = false
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
-	}
-	if len(collections) > 0 { // collection exists, need to update the metadata
-		if req.Metadata != nil { // update existing collection with new metadata
-			metadata, err := convertCollectionMetadataToModel(req.Metadata)
-			if err != nil {
-				log.Error("error converting collection metadata to model", zap.Error(err))
-				res.Collection = &coordinatorpb.Collection{
-					Id:        req.Id,
-					Name:      req.Name,
-					Dimension: req.Dimension,
-					Metadata:  req.Metadata,
-				}
-				res.Created = false
-				res.Status = failResponseWithError(err, errorCode)
-				return res, nil
-			}
-			// update collection with new metadata
-			updateCollection := &model.UpdateCollection{
-				ID:       collections[0].ID,
-				Metadata: metadata,
-			}
-			updatedCollection, err := s.coordinator.UpdateCollection(ctx, updateCollection)
-			if err != nil {
-				log.Error("error updating collection", zap.Error(err))
-				res.Collection = &coordinatorpb.Collection{
-					Id:        req.Id,
-					Name:      req.Name,
-					Dimension: req.Dimension,
-					Metadata:  req.Metadata,
-				}
-				res.Created = false
-				res.Status = failResponseWithError(err, errorCode)
-				return res, nil
-			}
-			// sucessfully update the metadata
-			res.Collection = convertCollectionToProto(updatedCollection)
-			res.Created = false
-			res.Status = setResponseStatus(successCode)
-			return res, nil
-		} else { // do nothing, return the existing collection
-			res.Collection = &coordinatorpb.Collection{
-				Id:        req.Id,
-				Name:      req.Name,
-				Dimension: req.Dimension,
-			}
-			res.Collection.Metadata = convertCollectionMetadataToProto(collections[0].Metadata)
-			res.Created = false
-			res.Status = setResponseStatus(successCode)
-			return res, nil
-		}
-	} else { // collection does not exist, need to create it
-		return s.createCollection(ctx, req)
-	}
-}
-
-func (s *Server) createCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
+func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
 	res := &coordinatorpb.CreateCollectionResponse{}
 	createCollection, err := convertToCreateCollectionModel(req)
 	if err != nil {
@@ -140,6 +59,8 @@ func (s *Server) createCollection(ctx context.Context, req *coordinatorpb.Create
 			Name:      req.Name,
 			Dimension: req.Dimension,
 			Metadata:  req.Metadata,
+			Tenant:    req.Tenant,
+			Database:  req.Database,
 		}
 		res.Created = false
 		res.Status = failResponseWithError(err, successCode)
@@ -153,6 +74,8 @@ func (s *Server) createCollection(ctx context.Context, req *coordinatorpb.Create
 			Name:      req.Name,
 			Dimension: req.Dimension,
 			Metadata:  req.Metadata,
+			Tenant:    req.Tenant,
+			Database:  req.Database,
 		}
 		res.Created = false
 		if err == common.ErrCollectionUniqueConstraintViolation {
@@ -163,7 +86,7 @@ func (s *Server) createCollection(ctx context.Context, req *coordinatorpb.Create
 		return res, nil
 	}
 	res.Collection = convertCollectionToProto(collection)
-	res.Created = true
+	res.Created = collection.Created
 	res.Status = setResponseStatus(successCode)
 	return res, nil
 }

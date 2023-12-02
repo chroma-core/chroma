@@ -35,6 +35,7 @@ from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
     InvalidDimensionException,
+    InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -50,6 +51,7 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
@@ -86,6 +88,15 @@ async def catch_exceptions_middleware(
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
+async def check_http_version_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    http_version = request.scope.get("http_version")
+    if http_version not in ["1.1", "2"]:
+        raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
+    return await call_next(request)
+
+
 def _uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
@@ -93,7 +104,7 @@ def _uuid(uuid_str: str) -> UUID:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
-class ChromaAPIRouter(fastapi.APIRouter):
+class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
     # same as URLs without. Docs will only contain URLs without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
@@ -130,6 +141,7 @@ class FastAPI(chromadb.server.Server):
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
         self._system.start()
 
+        self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
             CORSMiddleware,
@@ -266,6 +278,7 @@ class FastAPI(chromadb.server.Server):
         self._app.include_router(self.router)
 
         use_route_names_as_operation_ids(self._app)
+        instrument_fastapi(self._app)
 
     def app(self) -> fastapi.FastAPI:
         return self._app
@@ -335,6 +348,9 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
         ),
     )
     def list_collections(
@@ -344,10 +360,7 @@ class FastAPI(chromadb.server.Server):
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
-        action=[
-            AuthzResourceActions.CREATE_COLLECTION,
-            AuthzResourceActions.GET_OR_CREATE_COLLECTION,
-        ],
+        action=AuthzResourceActions.CREATE_COLLECTION,
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
@@ -446,6 +459,7 @@ class FastAPI(chromadb.server.Server):
                 embeddings=add.embeddings,  # type: ignore
                 metadatas=add.metadatas,  # type: ignore
                 documents=add.documents,  # type: ignore
+                uris=add.uris,  # type: ignore
                 ids=add.ids,
             )
         except InvalidDimensionException as e:
@@ -462,11 +476,12 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        return self._api._update(
+        self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
             documents=add.documents,  # type: ignore
+            uris=add.uris,  # type: ignore
             metadatas=add.metadatas,  # type: ignore
         )
 
@@ -480,11 +495,12 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        return self._api._upsert(
+        self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,  # type: ignore
             documents=upsert.documents,  # type: ignore
+            uris=upsert.uris,  # type: ignore
             metadatas=upsert.metadatas,  # type: ignore
         )
 

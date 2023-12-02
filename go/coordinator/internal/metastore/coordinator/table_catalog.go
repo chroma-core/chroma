@@ -197,7 +197,7 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, error) {
-	var ressult *model.Collection
+	var result *model.Collection
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// insert collection
@@ -211,6 +211,35 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		if len(databases) == 0 {
 			log.Error("database not found", zap.Error(err))
 			return common.ErrDatabaseNotFound
+		}
+
+		collectionName := createCollection.Name
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), &collectionName, nil, tenantID, databaseName)
+		if err != nil {
+			log.Error("error getting collection", zap.Error(err))
+			return err
+		}
+		if len(existing) != 0 {
+			if createCollection.GetOrCreate {
+				collection := convertCollectionToModel(existing)[0]
+				if createCollection.Metadata != nil && !createCollection.Metadata.Equals(collection.Metadata) {
+					updatedCollection, err := tc.UpdateCollection(ctx, &model.UpdateCollection{
+						ID:           collection.ID,
+						Metadata:     createCollection.Metadata,
+						TenantID:     tenantID,
+						DatabaseName: databaseName,
+					}, ts)
+					if err != nil {
+						log.Error("error updating collection", zap.Error(err))
+					}
+					result = updatedCollection
+				} else {
+					result = collection
+				}
+				return nil
+			} else {
+				return common.ErrCollectionUniqueConstraintViolation
+			}
 		}
 
 		dbCollection := &dbmodel.Collection{
@@ -242,15 +271,16 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			log.Error("error getting collection", zap.Error(err))
 			return err
 		}
-		ressult = convertCollectionToModel(collectionList)[0]
+		result = convertCollectionToModel(collectionList)[0]
+		result.Created = true
 		return nil
 	})
 	if err != nil {
 		log.Error("error creating collection", zap.Error(err))
 		return nil, err
 	}
-	log.Info("collection created", zap.Any("collection", ressult))
-	return ressult, nil
+	log.Info("collection created", zap.Any("collection", result))
+	return result, nil
 }
 
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenandID string, databaseName string) ([]*model.Collection, error) {

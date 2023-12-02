@@ -68,7 +68,10 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 }
 
 func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error) {
-	collectionTopic := s.assignCollection(createCollection.ID)
+	collectionTopic, err := s.assignCollection(createCollection.ID)
+	if err != nil {
+		return nil, err
+	}
 	createCollection.Topic = collectionTopic
 	log.Info("apis create collection", zap.Any("collection", createCollection))
 	collection, err := s.meta.AddCollection(ctx, createCollection)
