@@ -5,7 +5,7 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given, settings
 
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.config import System
 from chromadb.test.conftest import _fastapi_fixture
 
@@ -64,7 +64,7 @@ def test_fastapi_server_token_auth(token_config: Dict[str, Any]) -> None:
     )
     _sys: System = next(api)
     _sys.reset_state()
-    _api = _sys.instance(API)
+    _api = _sys.instance(ServerAPI)
     _api.heartbeat()
     assert _api.list_collections() == []
 
@@ -103,7 +103,7 @@ def test_invalid_token(tconf: Dict[str, Any], inval_tok: str) -> None:
     with pytest.raises(Exception) as e:
         _sys: System = next(api)
         _sys.reset_state()
-        _sys.instance(API)
+        _sys.instance(ServerAPI)
     assert "Invalid token" in str(e)
 
 
@@ -131,7 +131,7 @@ def test_fastapi_server_token_auth_wrong_token(
     )
     _sys: System = next(api)
     _sys.reset_state()
-    _api = _sys.instance(API)
+    _api = _sys.instance(ServerAPI)
     _api.heartbeat()
     with pytest.raises(Exception) as e:
         _api.list_collections()

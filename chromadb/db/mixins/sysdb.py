@@ -4,7 +4,7 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
-from chromadb.config import System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
     Cursor,
     SqlDB,
@@ -22,11 +22,13 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.ingest import CollectionAssignmentPolicy, Producer
 from chromadb.types import (
+    Database,
     OptionalArgument,
     Segment,
     Metadata,
     Collection,
     SegmentScope,
+    Tenant,
     Unspecified,
     UpdateMetadata,
 )
@@ -48,6 +50,91 @@ class SqlSysDB(SqlDB, SysDB):
     def start(self) -> None:
         super().start()
         self._producer = self._system.instance(Producer)
+
+    @override
+    def create_database(
+        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        with self.tx() as cur:
+            # Get the tenant id for the tenant name and then insert the database with the id, name and tenant id
+            databases = Table("databases")
+            tenants = Table("tenants")
+            insert_database = (
+                self.querybuilder()
+                .into(databases)
+                .columns(databases.id, databases.name, databases.tenant_id)
+                .insert(
+                    ParameterValue(self.uuid_to_db(id)),
+                    ParameterValue(name),
+                    self.querybuilder()
+                    .select(tenants.id)
+                    .from_(tenants)
+                    .where(tenants.id == ParameterValue(tenant)),
+                )
+            )
+            sql, params = get_sql(insert_database, self.parameter_format())
+            try:
+                cur.execute(sql, params)
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(
+                    f"Database {name} already exists for tenant {tenant}"
+                ) from e
+
+    @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .select(databases.id, databases.name)
+                .where(databases.name == ParameterValue(name))
+                .where(databases.tenant_id == ParameterValue(tenant))
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            row = cur.execute(sql, params).fetchone()
+            if not row:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+            if row[0] is None:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+            id: UUID = cast(UUID, self.uuid_from_db(row[0]))
+            return Database(
+                id=id,
+                name=row[1],
+                tenant=tenant,
+            )
+
+    @override
+    def create_tenant(self, name: str) -> None:
+        with self.tx() as cur:
+            tenants = Table("tenants")
+            insert_tenant = (
+                self.querybuilder()
+                .into(tenants)
+                .columns(tenants.id)
+                .insert(ParameterValue(name))
+            )
+            sql, params = get_sql(insert_tenant, self.parameter_format())
+            try:
+                cur.execute(sql, params)
+            except self.unique_constraint_error() as e:
+                raise UniqueConstraintError(f"Tenant {name} already exists") from e
+
+    @override
+    def get_tenant(self, name: str) -> Tenant:
+        with self.tx() as cur:
+            tenants = Table("tenants")
+            q = (
+                self.querybuilder()
+                .from_(tenants)
+                .select(tenants.id)
+                .where(tenants.id == ParameterValue(name))
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            row = cur.execute(sql, params).fetchone()
+            if not row:
+                raise NotFoundError(f"Tenant {name} not found")
+            return Tenant(name=name)
 
     @override
     def create_segment(self, segment: Segment) -> None:
@@ -106,6 +193,8 @@ class SqlSysDB(SqlDB, SysDB):
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
             raise ValueError("id must be specified if get_or_create is False")
@@ -117,7 +206,7 @@ class SqlSysDB(SqlDB, SysDB):
             }
         )
 
-        existing = self.get_collections(name=name)
+        existing = self.get_collections(name=name, tenant=tenant, database=database)
         if existing:
             if get_or_create:
                 collection = existing[0]
@@ -126,17 +215,30 @@ class SqlSysDB(SqlDB, SysDB):
                         collection["id"],
                         metadata=metadata,
                     )
-                return self.get_collections(id=collection["id"])[0], False
+                return (
+                    self.get_collections(
+                        id=collection["id"], tenant=tenant, database=database
+                    )[0],
+                    False,
+                )
             else:
                 raise UniqueConstraintError(f"Collection {name} already exists")
 
         topic = self._assignment_policy.assign_collection(id)
         collection = Collection(
-            id=id, topic=topic, name=name, metadata=metadata, dimension=dimension
+            id=id,
+            topic=topic,
+            name=name,
+            metadata=metadata,
+            dimension=dimension,
+            tenant=tenant,
+            database=database,
         )
 
         with self.tx() as cur:
             collections = Table("collections")
+            databases = Table("databases")
+
             insert_collection = (
                 self.querybuilder()
                 .into(collections)
@@ -145,12 +247,19 @@ class SqlSysDB(SqlDB, SysDB):
                     collections.topic,
                     collections.name,
                     collections.dimension,
+                    collections.database_id,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["topic"]),
                     ParameterValue(collection["name"]),
                     ParameterValue(collection["dimension"]),
+                    # Get the database id for the database with the given name and tenant
+                    self.querybuilder()
+                    .select(databases.id)
+                    .from_(databases)
+                    .where(databases.name == ParameterValue(database))
+                    .where(databases.tenant_id == ParameterValue(tenant)),
                 )
             )
             sql, params = get_sql(insert_collection, self.parameter_format())
@@ -256,8 +365,16 @@ class SqlSysDB(SqlDB, SysDB):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
+
+        if name is not None and (tenant is None or database is None):
+            raise ValueError(
+                "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+            )
+
         add_attributes_to_current_span(
             {
                 "collection_id": str(id),
@@ -265,8 +382,10 @@ class SqlSysDB(SqlDB, SysDB):
                 "collection_name": name if name else "",
             }
         )
+
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
+        databases_t = Table("databases")
         q = (
             self.querybuilder()
             .from_(collections_t)
@@ -275,6 +394,8 @@ class SqlSysDB(SqlDB, SysDB):
                 collections_t.name,
                 collections_t.topic,
                 collections_t.dimension,
+                databases_t.name,
+                databases_t.tenant_id,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -282,6 +403,8 @@ class SqlSysDB(SqlDB, SysDB):
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
+            .left_join(databases_t)
+            .on(collections_t.database_id == databases_t.id)
             .orderby(collections_t.id)
         )
         if id:
@@ -290,6 +413,19 @@ class SqlSysDB(SqlDB, SysDB):
             q = q.where(collections_t.topic == ParameterValue(topic))
         if name:
             q = q.where(collections_t.name == ParameterValue(name))
+
+        # Only if we have a name, tenant and database do we need to filter databases
+        # Given an id, we can uniquely identify the collection so we don't need to filter databases
+        if id is None and tenant and database:
+            databases_t = Table("databases")
+            q = q.where(
+                collections_t.database_id
+                == self.querybuilder()
+                .select(databases_t.id)
+                .from_(databases_t)
+                .where(databases_t.name == ParameterValue(database))
+                .where(databases_t.tenant_id == ParameterValue(tenant))
+            )
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
@@ -310,6 +446,8 @@ class SqlSysDB(SqlDB, SysDB):
                         name=name,
                         metadata=metadata,
                         dimension=dimension,
+                        tenant=str(rows[0][5]),
+                        database=str(rows[0][4]),
                     )
                 )
 
@@ -341,7 +479,12 @@ class SqlSysDB(SqlDB, SysDB):
 
     @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
-    def delete_collection(self, id: UUID) -> None:
+    def delete_collection(
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
         """Delete a topic and all associated segments from the SysDB"""
         add_attributes_to_current_span(
             {
@@ -349,10 +492,19 @@ class SqlSysDB(SqlDB, SysDB):
             }
         )
         t = Table("collections")
+        databases_t = Table("databases")
         q = (
             self.querybuilder()
             .from_(t)
             .where(t.id == ParameterValue(self.uuid_to_db(id)))
+            .where(
+                t.database_id
+                == self.querybuilder()
+                .select(databases_t.id)
+                .from_(databases_t)
+                .where(databases_t.name == ParameterValue(database))
+                .where(databases_t.tenant_id == ParameterValue(tenant))
+            )
             .delete()
         )
         with self.tx() as cur:
@@ -459,7 +611,10 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
             if sql:  # pypika emits a blank string if nothing to do
-                cur.execute(sql, params)
+                sql = sql + " RETURNING id"
+                result = cur.execute(sql, params)
+                if not result.fetchone():
+                    raise NotFoundError(f"Collection {id} not found")
 
             # TODO: Update to use better semantics where it's possible to update
             # individual keys without wiping all the existing metadata.

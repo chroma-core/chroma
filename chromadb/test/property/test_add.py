@@ -5,7 +5,7 @@ from typing import cast, List, Any, Dict
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.types import Embeddings, Metadatas
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -17,7 +17,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @given(collection=collection_st, record_set=strategies.recordsets(collection_st))
 @settings(deadline=None)
 def test_add(
-    api: API,
+    api: ServerAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
 ) -> None:
@@ -26,7 +26,7 @@ def test_add(
     # TODO: Generative embedding functions
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -64,12 +64,12 @@ def create_large_recordset(
         "metadatas": metadatas,
         "documents": documents,
     }
-    return record_set
+    return cast(strategies.RecordSet, record_set)
 
 
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
-def test_add_large(api: API, collection: strategies.Collection) -> None:
+def test_add_large(api: ServerAPI, collection: strategies.Collection) -> None:
     api.reset()
     record_set = create_large_recordset(
         min_size=api.max_batch_size,
@@ -77,7 +77,7 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
     )
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -99,7 +99,7 @@ def test_add_large(api: API, collection: strategies.Collection) -> None:
 
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
-def test_add_large_exceeding(api: API, collection: strategies.Collection) -> None:
+def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) -> None:
     api.reset()
     record_set = create_large_recordset(
         min_size=api.max_batch_size,
@@ -107,7 +107,7 @@ def test_add_large_exceeding(api: API, collection: strategies.Collection) -> Non
     )
     coll = api.create_collection(
         name=collection.name,
-        metadata=collection.metadata,
+        metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -126,7 +126,7 @@ def test_add_large_exceeding(api: API, collection: strategies.Collection) -> Non
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
 )
-def test_out_of_order_ids(api: API) -> None:
+def test_out_of_order_ids(api: ServerAPI) -> None:
     api.reset()
     ooo_ids = [
         "40",
@@ -157,7 +157,7 @@ def test_out_of_order_ids(api: API) -> None:
     ]
 
     coll = api.create_collection(
-        "test", embedding_function=lambda texts: [[1, 2, 3] for _ in texts]  # type: ignore
+        "test", embedding_function=lambda input: [[1, 2, 3] for _ in input]  # type: ignore
     )
     embeddings: Embeddings = [[1, 2, 3] for _ in ooo_ids]
     coll.add(ids=ooo_ids, embeddings=embeddings)
@@ -165,7 +165,7 @@ def test_out_of_order_ids(api: API) -> None:
     assert get_ids == ooo_ids
 
 
-def test_add_partial(api: API) -> None:
+def test_add_partial(api: ServerAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
 
     api.reset()
@@ -174,7 +174,7 @@ def test_add_partial(api: API) -> None:
     # TODO: We need to clean up the api types to support this typing
     coll.add(
         ids=["1", "2", "3"],
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
         metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
         documents=["a", "b", None],  # type: ignore
     )

@@ -3,7 +3,7 @@ import requests
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult
+from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
@@ -21,7 +21,7 @@ persist_dir = tempfile.mkdtemp()
 
 @pytest.fixture
 def local_persist_api():
-    yield chromadb.Client(
+    client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -33,6 +33,8 @@ def local_persist_api():
             persist_directory=persist_dir,
         ),
     )
+    yield client
+    client.clear_system_cache()
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 
@@ -40,7 +42,7 @@ def local_persist_api():
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
-    yield chromadb.Client(
+    client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -52,6 +54,8 @@ def local_persist_api_cache_bust():
             persist_directory=persist_dir,
         ),
     )
+    yield client
+    client.clear_system_cache()
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 
@@ -76,62 +80,72 @@ def test_persist_index_loading(api_fixture, request):
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
     collection = api2.get_collection("test")
 
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_texts="hello",
         n_results=1,
         include=["embeddings", "documents", "metadatas", "distances"],
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_loading_embedding_function(api_fixture, request):
-    def embedding_function(x):
-        return [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    class TestEF(EmbeddingFunction[Document]):
+        def __call__(self, input):
+            return [[1, 2, 3] for _ in range(len(input))]
 
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.create_collection("test", embedding_function=embedding_function)
+    collection = api.create_collection("test", embedding_function=TestEF())
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test", embedding_function=embedding_function)
+    collection = api2.get_collection("test", embedding_function=TestEF())
 
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_texts="hello",
         n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):
-    def embedding_function(x):
-        return [[1, 2, 3] for _ in range(len(x))]  # noqa E731
+    class TestEF(EmbeddingFunction[Document]):
+        def __call__(self, input):
+            return [[1, 2, 3] for _ in range(len(input))]
 
     api = request.getfixturevalue("local_persist_api")
     api.reset()
-    collection = api.get_or_create_collection(
-        "test", embedding_function=embedding_function
-    )
+    collection = api.get_or_create_collection("test", embedding_function=TestEF())
     collection.add(ids="id1", documents="hello")
 
     api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_or_create_collection(
-        "test", embedding_function=embedding_function
-    )
+    collection = api2.get_or_create_collection("test", embedding_function=TestEF())
 
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_texts="hello",
         n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
 
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
     assert nn["ids"] == [["id1"]]
     assert nn["embeddings"] == [[[1, 2, 3]]]
@@ -239,9 +253,13 @@ def test_get_from_db(api):
     api.reset()
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
-    records = collection.get(include=["embeddings", "documents", "metadatas"])
+    includes = ["embeddings", "documents", "metadatas"]
+    records = collection.get(include=includes)
     for key in records.keys():
-        assert len(records[key]) == 2
+        if (key in includes) or (key == "ids"):
+            assert len(records[key]) == 2
+        else:
+            assert records[key] is None
 
 
 def test_reset_db(api):
@@ -260,32 +278,42 @@ def test_get_nearest_neighbors(api):
     collection = api.create_collection("testspace")
     collection.add(**batch_records)
 
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_embeddings=[1.1, 2.3, 3.2],
         n_results=1,
         where={},
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,
         where={},
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]],
         n_results=1,
         where={},
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 2
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 2
+        else:
+            assert nn[key] is None
 
 
 def test_delete(api):
@@ -398,14 +426,18 @@ def test_increment_index_on(api):
     collection.add(**batch_records)
     assert collection.count() == 2
 
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     # increment index
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
 
 def test_add_a_collection(api):
@@ -454,7 +486,10 @@ def test_peek(api):
     # peek
     peek = collection.peek()
     for key in peek.keys():
-        assert len(peek[key]) == 2
+        if key in ["embeddings", "documents", "metadatas"] or key == "ids":
+            assert len(peek[key]) == 2
+        else:
+            assert peek[key] is None
 
 
 # TEST METADATA AND METADATA FILTERING
@@ -1127,14 +1162,17 @@ def test_persist_index_loading_params(api, request):
     )
 
     assert collection.metadata["hnsw:space"] == "ip"
-
+    includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_texts="hello",
         n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
     for key in nn.keys():
-        assert len(nn[key]) == 1
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        else:
+            assert nn[key] is None
 
 
 def test_add_large(api):
@@ -1241,14 +1279,18 @@ def test_get_nearest_neighbors_where_n_results_more_than_element(api):
     collection = api.create_collection("testspace")
     collection.add(**records)
 
-    results1 = collection.query(
+    includes = ["embeddings", "documents", "metadatas", "distances"]
+    results = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=5,
         where={},
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=includes,
     )
-    for key in results1.keys():
-        assert len(results1[key][0]) == 2
+    for key in results.keys():
+        if key in includes or key == "ids":
+            assert len(results[key][0]) == 2
+        else:
+            assert results[key] is None
 
 
 def test_invalid_n_results_param(api):

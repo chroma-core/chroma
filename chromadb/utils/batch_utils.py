@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, List
-from chromadb.api import API
+from chromadb.api import BaseAPI
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -9,7 +9,7 @@ from chromadb.api.types import (
 
 
 def create_batches(
-    api: API,
+    api: BaseAPI,
     ids: IDs,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,

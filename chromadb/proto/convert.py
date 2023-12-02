@@ -69,7 +69,8 @@ def from_proto_operation(operation: proto.Operation) -> Operation:
     elif operation == proto.Operation.DELETE:
         return Operation.DELETE
     else:
-        raise RuntimeError(f"Unknown operation {operation}")  # TODO: full error
+        # TODO: full error
+        raise RuntimeError(f"Unknown operation {operation}")
 
 
 def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
@@ -121,6 +122,7 @@ def from_proto_submit(
         encoding=encoding,
         metadata=from_proto_update_metadata(submit_embedding_record.metadata),
         operation=from_proto_operation(submit_embedding_record.operation),
+        collection_id=UUID(hex=submit_embedding_record.collection_id),
     )
     return record
 
@@ -200,6 +202,8 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         dimension=collection.dimension
         if collection.HasField("dimension") and collection.dimension
         else None,
+        database=collection.database,
+        tenant=collection.tenant,
     )
 
 
@@ -212,6 +216,8 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
         dimension=collection["dimension"],
+        tenant=collection["tenant"],
+        database=collection["database"],
     )
 
 
@@ -247,6 +253,7 @@ def to_proto_submit(
         vector=vector,
         metadata=metadata,
         operation=to_proto_operation(submit_record["operation"]),
+        collection_id=submit_record["collection_id"].hex,
     )
 
 
