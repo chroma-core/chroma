@@ -44,7 +44,7 @@ pub struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
     memberlist_cr_client: Api<MemberListKubeResource>,
-    cancellation_token: CancellationToken,
+    cancellation_token: CancellationToken, // TODO: cancellation token needs to be refreshed when we strt/stop
     channel: Sender<Memberlist>,
     running: bool,
 }
@@ -88,7 +88,8 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
     async fn get_memberlist(&self) -> Memberlist {
         let memberlist = self.memberlist_cr_client.get(&self.memberlist_name).await;
         if memberlist.is_err() {
-            panic!("Failed to get memberlist: {}", memberlist.err().unwrap());
+            // TODO: log err
+            return Vec::with_capacity(0);
         }
         let memberlist = memberlist.unwrap();
         let memberlist = memberlist.spec.members;
@@ -101,10 +102,12 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 }
 
 impl Component for CustomResourceMemberlistProvider {
-    fn start(&self) {
+    fn start(&mut self) {
         if self.running {
             return;
         }
+
+        // TODO: set running to true
 
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), "chroma");
@@ -154,10 +157,35 @@ impl Component for CustomResourceMemberlistProvider {
         });
     }
 
-    fn stop(&self) {
+    fn stop(&mut self) {
         if !self.running {
             return;
         }
         self.cancellation_token.cancel();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[tokio::test]
+    // async fn it_can_work() {
+    //     let (tx, mut rx) = tokio::sync::broadcast::channel(10); // TODO: what happens if capacity is exceeded?
+    //     let mut provider = CustomResourceMemberlistProvider::new("worker-memberlist", tx).await;
+    //     let list = provider.get_memberlist().await;
+    //     println!("list: {:?}", list);
+
+    //     provider.start();
+
+    //     // sleep to allow time for the watcher to get the initial state
+    //     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+
+    //     let res = rx.recv().await.unwrap();
+    //     println!("GOT FROM CHANNEL: {:?}", res);
+
+    //     provider.stop();
+
+    //     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+    // }
 }
