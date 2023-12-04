@@ -76,7 +76,7 @@
     "cliui": "^8.0.1"
   },
   "peerDependencies": {
-    "cohere-ai": "^5.0.0 || ^6.0.0",
+    "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
