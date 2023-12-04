@@ -181,6 +181,53 @@ def HttpClient(
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
 
+def CloudClient(
+    tenant: str,
+    database: str,
+    api_key: Optional[str] = None,
+    settings: Optional[Settings] = None,
+) -> ClientAPI:
+    """
+    Creates a client to connect to a tennant and database on the Chroma cloud.
+
+    Args:
+        tenant: The tenant to use for this client.
+        database: The database to use for this client.
+        api_key: The api key to use for this client.
+    """
+
+    CLOUD_HOST = "api.trychroma.com"
+    CLOUD_PORT = "443"
+
+    # If no API key is provided, try to load it from the environment variable
+    if api_key is None:
+        import os
+
+        api_key = os.environ.get("CHROMA_API_KEY")
+
+    # If the API key is still not provided, prompt the user
+    if api_key is None:
+        print(
+            "\033[93mDon't have an API key?\033[0m Get one at https://app.trychroma.com"
+        )
+        api_key = input("Please enter your Chroma API key: ")
+
+    if settings is None:
+        settings = Settings()
+
+    settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    settings.chroma_server_host = CLOUD_HOST
+    settings.chroma_server_http_port = CLOUD_PORT
+    # Always use SSL for cloud
+    settings.chroma_server_ssl_enabled = True
+
+    settings.chroma_client_auth_provider = "token"
+    settings.chroma_client_auth_credentials = api_key
+    settings.chroma_client_auth_token_transport_header = "X_CHROMA_TOKEN"
+
+    return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
 def Client(
     settings: Settings = __settings,
     tenant: str = DEFAULT_TENANT,
