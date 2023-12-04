@@ -28,6 +28,7 @@ type Config struct {
 	Username     string
 	Password     string
 	Address      string
+	Port         int
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
@@ -69,6 +70,7 @@ func New(config Config) (*Server, error) {
 			Username:     config.Username,
 			Password:     config.Password,
 			Address:      config.Address,
+			Port:         config.Port,
 			DBName:       config.DBName,
 			MaxIdleConns: config.MaxIdleConns,
 			MaxOpenConns: config.MaxOpenConns,

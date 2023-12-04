@@ -24,14 +24,15 @@ type DBConfig struct {
 	Username     string
 	Password     string
 	Address      string
+	Port         int
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
 }
 
 func Connect(cfg DBConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=true&interpolateParams=true",
-		cfg.Username, cfg.Password, cfg.Address, cfg.DBName)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d",
+		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
