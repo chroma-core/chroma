@@ -11,6 +11,11 @@ from chromadb.segment.impl.vector.local_hnsw import (
     LocalHnswSegment,
 )
 from chromadb.segment.impl.vector.brute_force_index import BruteForceIndex
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     EmbeddingRecord,
     Metadata,
@@ -81,8 +86,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
+    _opentelemtry_client: OpenTelemetryClient
+
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
+
+        self._opentelemtry_client = system.require(OpenTelemetryClient)
 
         self._params = PersistentHnswParams(segment["metadata"] or {})
         self._batch_size = self._params.batch_size
@@ -138,6 +147,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         folder = os.path.join(self._persist_directory, str(self._id))
         return folder
 
+    @trace_method(
+        "PersistentLocalHnswSegment._init_index", OpenTelemetryGranularity.ALL
+    )
     @override
     def _init_index(self, dimensionality: int) -> None:
         index = hnswlib.Index(space=self._params.space, dim=dimensionality)
@@ -172,6 +184,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._dimensionality = dimensionality
         self._index_initialized = True
 
+    @trace_method("PersistentLocalHnswSegment._persist", OpenTelemetryGranularity.ALL)
     def _persist(self) -> None:
         """Persist the index and data to disk"""
         index = cast(hnswlib.Index, self._index)
@@ -193,6 +206,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
 
+    @trace_method(
+        "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
+    )
     @override
     def _apply_batch(self, batch: Batch) -> None:
         super()._apply_batch(batch)
@@ -202,12 +218,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         ):
             self._persist()
 
+    @trace_method(
+        "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
+    )
     @override
     def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:
             raise RuntimeError("Cannot add embeddings to stopped component")
-
         with WriteRWLock(self._lock):
             for record in records:
                 if record["embedding"] is not None:
@@ -268,6 +286,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             - self._curr_batch.delete_count
         )
 
+    @trace_method(
+        "PersistentLocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL
+    )
     @override
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
@@ -311,6 +332,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
 
+    @trace_method(
+        "PersistentLocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL
+    )
     @override
     def query_vectors(
         self, query: VectorQuery
@@ -396,6 +420,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     results.append(curr_results)
             return results
 
+    @trace_method(
+        "PersistentLocalHnswSegment.reset_state", OpenTelemetryGranularity.ALL
+    )
     @override
     def reset_state(self) -> None:
         if self._allow_reset:
@@ -404,6 +431,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self.close_persistent_index()
                 shutil.rmtree(data_path, ignore_errors=True)
 
+    @trace_method("PersistentLocalHnswSegment.delete", OpenTelemetryGranularity.ALL)
     @override
     def delete(self) -> None:
         data_path = self._get_storage_folder()

@@ -14,7 +14,10 @@ index_data
 # Default configuration for persist_directory in chromadb/config.py
 # Currently it's located in "./chroma/"
 chroma/
+chroma_test_data/
+server.htpasswd
 
+.venv
 venv
 .env
 .chroma

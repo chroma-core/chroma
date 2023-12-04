@@ -1,31 +1,46 @@
-import logging
 from typing import Any, Callable, Dict, List, Sequence
-from uuid import UUID
-
 import fastapi
-from fastapi import FastAPI as _FastAPI, Response, Depends
-from fastapi import HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
+
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from starlette.requests import Request
+from fastapi import HTTPException, status
+from uuid import UUID
 import chromadb
-import chromadb.api
-import chromadb.server
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult, SystemInfoFlags
+from chromadb.auth import (
+    AuthzDynamicParams,
+    AuthzResourceActions,
+    AuthzResourceTypes,
+    DynamicAuthzResource,
+)
 from chromadb.auth.fastapi import (
     FastAPIChromaAuthMiddleware,
     FastAPIChromaAuthMiddlewareWrapper,
+    FastAPIChromaAuthzMiddleware,
+    FastAPIChromaAuthzMiddlewareWrapper,
+    authz_context,
 )
-from chromadb.config import Settings
+from chromadb.auth.fastapi_utils import (
+    attr_from_collection_lookup,
+    attr_from_resource_object,
+)
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+import chromadb.server
+import chromadb.api
+from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
     InvalidDimensionException,
+    InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
+    CreateDatabase,
+    CreateTenant,
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
@@ -33,7 +48,17 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
-from chromadb.telemetry import ServerContext, Telemetry
+from starlette.requests import Request
+
+import logging
+from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
+from chromadb.types import Database, Tenant
+from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,31 +88,38 @@ async def catch_exceptions_middleware(
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
+async def check_http_version_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    http_version = request.scope.get("http_version")
+    if http_version not in ["1.1", "2"]:
+        raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
+    return await call_next(request)
+
+
 def _uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
     except ValueError:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
-
 def query_bool(
-    query: str,
-    default: bool,
+        query: str,
+        default: bool,
 ) -> bool:
     if query is None:
         return default
     return query.lower() == "true"
 
-
 async def env_query_params(
-    python_version: bool = True,
-    os_info: bool = True,
-    memory_info: bool = True,
-    cpu_info: bool = True,
-    disk_info: bool = False,
-    network_info: bool = False,
-    env_vars: bool = False,
-    collections_info: bool = False,
+        python_version: bool = True,
+        os_info: bool = True,
+        memory_info: bool = True,
+        cpu_info: bool = True,
+        disk_info: bool = False,
+        network_info: bool = False,
+        env_vars: bool = False,
+        collections_info: bool = False,
 ) -> SystemInfoFlags:
     return SystemInfoFlags(
         python_version=python_version,
@@ -100,8 +132,7 @@ async def env_query_params(
         collections_info=collections_info,
     )
 
-
-class ChromaAPIRouter(fastapi.APIRouter):
+class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
     # same as URLs without. Docs will only contain URLs without trailing "/"s.
     def add_api_route(self, path: str, *args: Any, **kwargs: Any) -> None:
@@ -131,10 +162,14 @@ class ChromaAPIRouter(fastapi.APIRouter):
 class FastAPI(chromadb.server.Server):
     def __init__(self, settings: Settings):
         super().__init__(settings)
-        Telemetry.SERVER_CONTEXT = ServerContext.FASTAPI
+        ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         self._app = fastapi.FastAPI(debug=True)
-        self._api: chromadb.api.API = chromadb.Client(settings)
+        self._system = System(settings)
+        self._api: ServerAPI = self._system.instance(ServerAPI)
+        self._opentelemetry_client = self._api.require(OpenTelemetryClient)
+        self._system.start()
 
+        self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
             CORSMiddleware,
@@ -142,11 +177,17 @@ class FastAPI(chromadb.server.Server):
             allow_origins=settings.chroma_server_cors_allow_origins,
             allow_methods=["*"],
         )
+
+        if settings.chroma_server_authz_provider:
+            self._app.add_middleware(
+                FastAPIChromaAuthzMiddlewareWrapper,
+                authz_middleware=self._api.require(FastAPIChromaAuthzMiddleware),
+            )
+
         if settings.chroma_server_auth_provider:
-            self._auth_middleware = self._api.require(FastAPIChromaAuthMiddleware)
             self._app.add_middleware(
                 FastAPIChromaAuthMiddlewareWrapper,
-                auth_middleware=self._auth_middleware,
+                auth_middleware=self._api.require(FastAPIChromaAuthMiddleware),
             )
 
         self.router = ChromaAPIRouter()
@@ -159,6 +200,34 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
+        )
+
+        self.router.add_api_route(
+            "/api/v1/databases",
+            self.create_database,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/databases/{database}",
+            self.get_database,
+            methods=["GET"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/tenants",
+            self.create_tenant,
+            methods=["POST"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
+            "/api/v1/tenants/{tenant}",
+            self.get_tenant,
+            methods=["GET"],
+            response_model=None,
         )
 
         self.router.add_api_route(
@@ -239,6 +308,7 @@ class FastAPI(chromadb.server.Server):
         self._app.include_router(self.router)
 
         use_route_names_as_operation_ids(self._app)
+        instrument_fastapi(self._app)
 
     def app(self) -> fastapi.FastAPI:
         return self._app
@@ -252,25 +322,134 @@ class FastAPI(chromadb.server.Server):
     def version(self) -> str:
         return self._api.get_version()
 
+    @trace_method("FastAPI.env", OpenTelemetryGranularity.OPERATION)
     def env(
-        self,
-        system_info_flags: SystemInfoFlags = Depends(env_query_params),
+            self,
+            system_info_flags: SystemInfoFlags = Depends(env_query_params),
     ) -> Dict[str, Any]:
         return self._api.env(system_info_flags=system_info_flags)
 
-    def list_collections(self) -> Sequence[Collection]:
-        return self._api.list_collections()
+    @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.CREATE_DATABASE,
+        resource=DynamicAuthzResource(
+            type=AuthzResourceTypes.DB,
+            attributes=attr_from_resource_object(
+                type=AuthzResourceTypes.DB, additional_attrs=["tenant"]
+            ),
+        ),
+    )
+    def create_database(
+        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        return self._api.create_database(database.name, tenant)
 
-    def create_collection(self, collection: CreateCollection) -> Collection:
+    @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.GET_DATABASE,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
+        return self._api.get_database(database, tenant)
+
+    @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.CREATE_TENANT,
+        resource=DynamicAuthzResource(
+            type=AuthzResourceTypes.TENANT,
+        ),
+    )
+    def create_tenant(self, tenant: CreateTenant) -> None:
+        return self._api.create_tenant(tenant.name)
+
+    @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.GET_TENANT,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.TENANT,
+        ),
+    )
+    def get_tenant(self, tenant: str) -> Tenant:
+        return self._api.get_tenant(tenant)
+
+    @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.LIST_COLLECTIONS,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def list_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> Sequence[Collection]:
+        return self._api.list_collections(tenant=tenant, database=database)
+
+    @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.CREATE_COLLECTION,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def create_collection(
+        self,
+        collection: CreateCollection,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
         return self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
             get_or_create=collection.get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
-    def get_collection(self, collection_name: str) -> Collection:
-        return self._api.get_collection(collection_name)
+    @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.GET_COLLECTION,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def get_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Collection:
+        return self._api.get_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
+    @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.UPDATE_COLLECTION,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def update_collection(
         self, collection_id: str, collection: UpdateCollection
     ) -> None:
@@ -280,40 +459,97 @@ class FastAPI(chromadb.server.Server):
             new_metadata=collection.new_metadata,
         )
 
-    def delete_collection(self, collection_name: str) -> None:
-        return self._api.delete_collection(collection_name)
+    @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.DELETE_COLLECTION,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_name"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def delete_collection(
+        self,
+        collection_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        return self._api.delete_collection(
+            collection_name, tenant=tenant, database=database
+        )
 
+    @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.ADD,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def add(self, collection_id: str, add: AddEmbedding) -> None:
         try:
             result = self._api._add(
                 collection_id=_uuid(collection_id),
-                embeddings=add.embeddings,
-                metadatas=add.metadatas,
-                documents=add.documents,
+                embeddings=add.embeddings,  # type: ignore
+                metadatas=add.metadatas,  # type: ignore
+                documents=add.documents,  # type: ignore
+                uris=add.uris,  # type: ignore
                 ids=add.ids,
             )
         except InvalidDimensionException as e:
             raise HTTPException(status_code=500, detail=str(e))
-        return result
+        return result  # type: ignore
 
+    @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.UPDATE,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        return self._api._update(
+        self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
-            documents=add.documents,
-            metadatas=add.metadatas,
+            documents=add.documents,  # type: ignore
+            uris=add.uris,  # type: ignore
+            metadatas=add.metadatas,  # type: ignore
         )
 
+    @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.UPSERT,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        return self._api._upsert(
+        self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
-            embeddings=upsert.embeddings,
-            documents=upsert.documents,
-            metadatas=upsert.metadatas,
+            embeddings=upsert.embeddings,  # type: ignore
+            documents=upsert.documents,  # type: ignore
+            uris=upsert.uris,  # type: ignore
+            metadatas=upsert.metadatas,  # type: ignore
         )
 
+    @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.GET,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def get(self, collection_id: str, get: GetEmbedding) -> GetResult:
         return self._api._get(
             collection_id=_uuid(collection_id),
@@ -326,20 +562,55 @@ class FastAPI(chromadb.server.Server):
             include=get.include,
         )
 
+    @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.DELETE,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def delete(self, collection_id: str, delete: DeleteEmbedding) -> List[UUID]:
         return self._api._delete(
-            where=delete.where,
+            where=delete.where,  # type: ignore
             ids=delete.ids,
             collection_id=_uuid(collection_id),
             where_document=delete.where_document,
         )
 
+    @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.COUNT,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
 
+    @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.RESET,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+        ),
+    )
     def reset(self) -> bool:
         return self._api.reset()
 
+    @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.QUERY,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
     def get_nearest_neighbors(
         self, collection_id: str, query: QueryEmbedding
     ) -> QueryResult:

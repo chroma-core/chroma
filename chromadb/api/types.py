@@ -1,14 +1,6 @@
-from typing import (
-    Optional,
-    Union,
-    Sequence,
-    TypeVar,
-    List,
-    Dict,
-    Any,
-    Tuple,
-    NamedTuple,
-)
+from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, NamedTuple, cast
+from numpy.typing import NDArray
+import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
 import chromadb.errors as errors
 from chromadb.types import (
@@ -23,27 +15,110 @@ from chromadb.types import (
     WhereDocumentOperator,
     WhereDocument,
 )
+from inspect import signature
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
 
+T = TypeVar("T")
+OneOrMany = Union[T, List[T]]
+
+# URIs
+URI = str
+URIs = List[URI]
+
+
+def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
+    if isinstance(target, str):
+        # One URI
+        return cast(URIs, [target])
+    # Already a sequence
+    return cast(URIs, target)
+
+
+# IDs
 ID = str
 IDs = List[ID]
 
+
+def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
+    if isinstance(target, str):
+        # One ID
+        return cast(IDs, [target])
+    # Already a sequence
+    return cast(IDs, target)
+
+
+# Embeddings
 Embedding = Vector
 Embeddings = List[Embedding]
 
+
+def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:
+    if isinstance(target, List):
+        # One Embedding
+        if isinstance(target[0], (int, float)):
+            return cast(Embeddings, [target])
+    # Already a sequence
+    return cast(Embeddings, target)
+
+
+# Metadatas
 Metadatas = List[Metadata]
+
+
+def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
+    # One Metadata dict
+    if isinstance(target, dict):
+        return cast(Metadatas, [target])
+    # Already a sequence
+    return cast(Metadatas, target)
+
 
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+# Documents
 Document = str
 Documents = List[Document]
 
-Parameter = TypeVar("Parameter", Embedding, Document, Metadata, ID)
-T = TypeVar("T")
-OneOrMany = Union[T, List[T]]
+
+def is_document(target: Any) -> bool:
+    if not isinstance(target, str):
+        return False
+    return True
+
+
+def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
+    # One Document
+    if is_document(target):
+        return cast(Documents, [target])
+    # Already a sequence
+    return cast(Documents, target)
+
+
+# Images
+ImageDType = Union[np.uint, np.int_, np.float_]
+Image = NDArray[ImageDType]
+Images = List[Image]
+
+
+def is_image(target: Any) -> bool:
+    if not isinstance(target, np.ndarray):
+        return False
+    if len(target.shape) < 2:
+        return False
+    return True
+
+
+def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
+    if is_image(target):
+        return cast(Images, [target])
+    # Already a sequence
+    return cast(Images, target)
+
+
+Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
@@ -53,6 +128,8 @@ Include = List[
         Literal["embeddings"],
         Literal["metadatas"],
         Literal["distances"],
+        Literal["uris"],
+        Literal["data"],
     ]
 ]
 
@@ -64,11 +141,30 @@ OperatorExpression = OperatorExpression
 Where = Where
 WhereDocumentOperator = WhereDocumentOperator
 
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
+
+
+class EmbeddingFunction(Protocol[D]):
+    def __call__(self, input: D) -> Embeddings:
+        ...
+
+
+Loadable = List[Optional[Image]]
+L = TypeVar("L", covariant=True, bound=Loadable)
+
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
+        ...
+
 
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
     documents: Optional[List[Document]]
+    uris: Optional[URIs]
+    data: Optional[Loadable]
     metadatas: Optional[List[Metadata]]
 
 
@@ -76,6 +172,8 @@ class QueryResult(TypedDict):
     ids: List[IDs]
     embeddings: Optional[List[List[Embedding]]]
     documents: Optional[List[List[Document]]]
+    uris: Optional[List[List[URI]]]
+    data: Optional[List[Loadable]]
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
 
@@ -89,7 +187,6 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
-
 
 class SystemInfoFlags(NamedTuple):
     """
@@ -105,29 +202,35 @@ class SystemInfoFlags(NamedTuple):
     env_vars: bool = False
     collections_info: bool = False
 
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
 
-class EmbeddingFunction(Protocol):
-    def __call__(self, texts: Documents) -> Embeddings:
+
+class EmbeddingFunction(Protocol[D]):
+    def __call__(self, input: D) -> Embeddings:
         ...
 
 
-def maybe_cast_one_to_many(
-    target: OneOrMany[Parameter],
-) -> List[Parameter]:
-    """Infers if target is Embedding, Metadata, or Document and casts it to a many object if its one"""
+def validate_embedding_function(
+    embedding_function: EmbeddingFunction[Embeddable],
+) -> None:
+    function_signature = signature(
+        embedding_function.__class__.__call__
+    ).parameters.keys()
+    protocol_signature = signature(EmbeddingFunction.__call__).parameters.keys()
 
-    if isinstance(target, Sequence):
-        # One Document or ID
-        if isinstance(target, str) and target is not None:
-            return [target]
-        # One Embedding
-        if isinstance(target[0], (int, float)):
-            return [target]  # type: ignore
-    # One Metadata dict
-    if isinstance(target, dict):
-        return [target]
-    # Already a sequence
-    return target  # type: ignore
+    if not function_signature == protocol_signature:
+        raise ValueError(
+            f"Expected EmbeddingFunction.__call__ to have the following signature: {protocol_signature}, got {function_signature}\n"
+            "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
+            "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
+        )
+
+L = TypeVar("L", covariant=True)
+
+class DataLoader(Protocol[L]):
+    def __call__(self, uris: URIs) -> L:
+        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
@@ -350,7 +453,7 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas"]
+        allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
@@ -395,7 +498,13 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 
 
 def validate_batch(
-    batch: Tuple[IDs, Optional[Embeddings], Optional[Metadatas], Optional[Documents]],
+    batch: Tuple[
+        IDs,
+        Optional[Embeddings],
+        Optional[Metadatas],
+        Optional[Documents],
+        Optional[URIs],
+    ],
     limits: Dict[str, Any],
 ) -> None:
     if len(batch[0]) > limits["max_batch_size"]:

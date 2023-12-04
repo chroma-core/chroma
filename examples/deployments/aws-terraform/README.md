@@ -47,15 +47,28 @@ ssh-keygen -t RSA -b 4096 -C "Chroma AWS Key" -N "" -f ./chroma-aws && chmod 400
 Set up your Terraform variables and deploy your instance:
 
 ```bash
-export TF_VAR_AWS_ACCESS_KEY=<AWS_ACCESS_KEY> #take note of this as it must be present in all of the subsequent steps
-export TF_VAR_AWS_SECRET_ACCESS_KEY=<AWS_SECRET_ACCESS_KEY> #take note of this as it must be present in all of the subsequent steps
-export TF_ssh_public_key="./chroma-aws.pub" #path to the public key you generated above (or can be different if you want to use your own key)
-export TF_ssh_private_key="./chroma-aws" #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
-export TF_VAR_chroma_release=0.4.8 #set the chroma release to deploy
-export TF_VAR_region="us-west-1" # AWS region to deploy the chroma instance to
-export TF_VAR_public_access="true" #enable public access to the chroma instance on port 8000
-export TF_VAR_enable_auth="true" #enable basic auth for the chroma instance
-export TF_VAR_auth_type="token" #The auth type to use for the chroma instance (token or basic)
+#AWS access key
+export TF_VAR_AWS_ACCESS_KEY=<AWS_ACCESS_KEY>
+#AWS secret access key
+export TF_VAR_AWS_SECRET_ACCESS_KEY=<AWS_SECRET_ACCESS_KEY>
+#path to the public key you generated above (or can be different if you want to use your own key)
+export TF_ssh_public_key="./chroma-aws.pub"
+#path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
+export TF_ssh_private_key="./chroma-aws"
+#set the chroma release to deploy
+export TF_VAR_chroma_release=0.4.12
+# AWS region to deploy the chroma instance to
+export TF_VAR_region="us-west-1"
+#enable public access to the chroma instance on port 8000
+export TF_VAR_public_access="true"
+#enable basic auth for the chroma instance
+export TF_VAR_enable_auth="true"
+#The auth type to use for the chroma instance (token or basic)
+export TF_VAR_auth_type="token"
+#optional - if you want to restore from a snapshot
+export TF_VAR_chroma_data_restore_from_snapshot_id=""
+#optional - if you want to snapshot the data volume before destroying the instance
+export TF_VAR_chroma_data_volume_snapshot_before_destroy="true"
 terraform apply -auto-approve
 ```
 > Note: Basic Auth is supported by Chroma v0.4.7+
@@ -76,6 +89,31 @@ curl -v http://$instance_public_ip:8000/api/v1/heartbeat
 ```
 
 #### 4.1 Checking Auth
+
+##### Token
+When token auth is enabled you can check the get the credentials from Terraform state by running:
+
+```bash
+terraform output chroma_auth_token
+```
+
+You should see something of the form:
+
+```bash
+PVcQ4qUUnmahXwUgAf3UuYZoMlos6MnF
+```
+
+You can then export these credentials:
+
+```bash
+export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
+```
+
+Using the credentials:
+
+```bash
+curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
+```
 
 ##### Basic
 When basic auth is enabled you can check the get the credentials from Terraform state by running:
@@ -104,33 +142,7 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 
 > Note: Without `-u` you should be getting 401 Unauthorized response
 
-
-##### Token
-When token auth is enabled you can check the get the credentials from Terraform state by running:
-
-```bash
-terraform output chroma_auth_token
-```
-
-You should see something of the form:
-
-```bash
-PVcQ4qUUnmahXwUgAf3UuYZoMlos6MnF
-```
-
-You can then export these credentials:
-
-```bash
-export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
-```
-
-Using the credentials:
-
-```bash
-curl -v http://$instance_public_ip:8000/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
-```
-
-#### 4.2 SSH to your instance
+#### 4.2 Connect (ssh) to your instance
 
 
 To SSH to your instance:
@@ -140,6 +152,9 @@ ssh -i ./chroma-aws ubuntu@$instance_public_ip
 ```
 
 ### 5. Destroy your Chroma instance
+
+You will need to change `prevent_destroy` to `false` in the `aws_ebs_volume` in `chroma.tf`.
+
 ```bash
 terraform destroy -auto-approve
 ```
