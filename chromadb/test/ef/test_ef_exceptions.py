@@ -63,7 +63,6 @@ def huggingface_ef() -> Optional[EmbeddingFunction]:
     params=[
         sentence_transformers_ef,
         default_ef,
-        openai_ef,
         huggingface_ef,
         instructor_ef,
     ],

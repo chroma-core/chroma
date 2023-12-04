@@ -207,23 +207,20 @@ Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
-def _dummy_token_counter(text: str) -> str:
-    """Dummy token counter that just returns the text"""
-    return text
-
-
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
 
-    def max_input_length(self) -> int:
+    def max_token_input_length(self) -> int:
         return -1
 
     def _check_large_inputs(
         self: "EmbeddingFunction",
         inputs: Documents,
-        token_count_function: Callable[..., Any] = _dummy_token_counter,
+        token_count_function: Callable[..., Any] = None,
     ) -> None:
+        if token_count_function is None:
+            return
         if token_count_function is None:
             return
         if not isinstance(inputs, list):

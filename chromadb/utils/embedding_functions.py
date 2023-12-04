@@ -54,7 +54,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
-    def max_input_length(self) -> int:
+    def max_token_input_length(self) -> int:
         return self._model.tokenizer.model_max_length
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -78,7 +78,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self._model = SentenceModel(model_name_or_path=model_name)
 
-    def max_input_length(self) -> int:
+    def max_token_input_length(self) -> int:
         # ref: https://huggingface.co/shibing624/text2vec-base-chinese/blob/main/config.json (max_position_embeddings)
         # text2vec sentenceModel is based on AutoTokenizer from HF transformers
         return self._model.tokenizer.model_max_length
@@ -129,15 +129,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
-        try:
-            import tiktoken
-
-            self._tokenize_function = tiktoken.get_encoding("cl100k_base").encode
-        except ImportError:
-            raise ValueError(
-                "The tiktoken python package is not installed. Please install it with `pip install tiktoken`"
-            )
-            self._tokenize_function = None
         if api_key is not None:
             openai.api_key = api_key
         # If the api key is still not set, raise an error
@@ -177,14 +168,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
         self._deployment_id = deployment_id
 
-    def max_input_length(self) -> int:
-        # Ref: https://platform.openai.com/docs/guides/embeddings/second-generation-models
-        return 8191
-
     def __call__(self, input: Documents) -> Embeddings:
         # replace newlines, which can negatively affect performance.
         input = [t.replace("\n", " ") for t in input]
-        self._check_large_inputs(input, token_count_function=self._tokenize_function)
 
         # Call the OpenAI Embedding API
         if self._v1:
@@ -259,12 +245,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
-        self._max_input_length = None
+        self._max_token_input_length = None
         self._model_name = model_name
 
-    def max_input_length(self) -> int:
-        if self._max_input_length:
-            return self._max_input_length
+    def max_token_input_length(self) -> int:
+        if self._max_token_input_length:
+            return self._max_token_input_length
         try:
             _model_config = requests.get(
                 f"https://huggingface.co/{self._model_name}/raw/main/config.json",
@@ -272,10 +258,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             if _model_config.status_code == 200:
                 _json = _model_config.json()
                 if "max_position_embeddings" in _json:
-                    self._max_input_length = cast(int, _json["max_position_embeddings"])
+                    self._max_token_input_length = cast(
+                        int, _json["max_position_embeddings"]
+                    )
         except Exception as e:
-            self._max_input_length = -1
-        return self._max_input_length
+            self._max_token_input_length = -1
+        return self._max_token_input_length
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -293,7 +281,6 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding API for each document
-        self._check_large_inputs(input)
         return self._session.post(  # type: ignore
             self._api_url, json={"inputs": input, "options": {"wait_for_model": True}}
         ).json()
@@ -370,7 +357,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model.tokenizer.tokenize
         self._instruction = instruction
 
-    def max_input_length(self) -> int:
+    def max_token_input_length(self) -> int:
         return self._model.tokenizer.model_max_length
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -407,7 +394,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         # Import dependencies on demand to mirror other embedding functions. This
         # breaks typechecking, thus the ignores.
         # convert the list to set for unique values
-        self._max_input_length = 256
+        self._max_token_input_length = 256
         self._token_counter = None
         if preferred_providers and not all(
             [isinstance(i, str) for i in preferred_providers]
@@ -507,7 +494,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                     self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
                 )
             )
-            tokenizer.enable_truncation(max_length=self._max_input_length * 2)
+            tokenizer.enable_truncation(max_length=self._max_token_input_length * 2)
             self._token_counter = tokenizer
         return self._token_counter
 
@@ -520,9 +507,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             )
             # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
             # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
-            self.tokenizer.enable_truncation(max_length=self._max_input_length)
+            self.tokenizer.enable_truncation(max_length=self._max_token_input_length)
             self.tokenizer.enable_padding(
-                pad_id=0, pad_token="[PAD]", length=self._max_input_length
+                pad_id=0, pad_token="[PAD]", length=self._max_token_input_length
             )
 
             if self._preferred_providers is None or len(self._preferred_providers) == 0:
@@ -547,8 +534,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 providers=self._preferred_providers,
             )
 
-    def max_input_length(self) -> int:
-        return self._max_input_length
+    def max_token_input_length(self) -> int:
+        return self._max_token_input_length
 
     def __call__(self, input: Documents) -> Embeddings:
         # Only download the model when it is actually used
