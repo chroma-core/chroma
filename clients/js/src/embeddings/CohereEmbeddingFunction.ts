@@ -17,11 +17,11 @@ class CohereAISDK56 implements CohereAIAPI {
 
   private async loadClient() {
     if (this.cohereClient) return;
-    const { cohere } = await import("cohere-ai").then((c) => {
-      return { cohere: c };
-    });
+    //@ts-ignore
+    const { default: cohere } = await import("cohere-ai");
     // @ts-ignore
-    this.cohereClient = cohere.init(this.apiKey);
+    cohere.init(this.apiKey);
+    this.cohereClient = cohere;
   }
 
   public async createEmbedding(params: {
@@ -50,9 +50,11 @@ class CohereAISDK7 implements CohereAIAPI {
 
   private async loadClient() {
     if (this.cohereClient) return;
+    //@ts-ignore
     const cohere = await import("cohere-ai").then((cohere) => {
       return cohere;
     });
+    // @ts-ignore
     this.cohereClient = new cohere.CohereClient({
       token: this.apiKey,
     });
@@ -89,7 +91,9 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
   private async initCohereClient() {
     if (this.cohereAiApi) return;
     try {
+      // @ts-ignore
       this.cohereAiApi = await import("cohere-ai").then((cohere) => {
+        // @ts-ignore
         if (cohere.CohereClient) {
           return new CohereAISDK7({ apiKey: this.apiKey });
         } else {
