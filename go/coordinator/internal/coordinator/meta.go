@@ -235,7 +235,6 @@ func (mt *MetaTable) GetCollections(ctx context.Context, collectionID types.Uniq
 	}
 	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache[tenantID][databaseName]))
 	for _, collection := range mt.tenantDatabaseCollectionCache[tenantID][databaseName] {
-		log.Error("collection", zap.Any("collection", collection))
 		if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
 			collections = append(collections, collection)
 		}

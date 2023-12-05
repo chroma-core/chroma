@@ -10,6 +10,7 @@ from typing import Type, TypeVar, cast
 from overrides import EnforceOverrides
 from overrides import override
 from typing_extensions import Literal
+import platform
 
 
 in_pydantic_v2 = False
@@ -124,6 +125,14 @@ class Settings(BaseSettings):  # type: ignore
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
+    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+    def empty_str_to_none(cls, v: str) -> Optional[str]:
+        if type(v) is str and v.strip() == "":
+            return None
+        return v
+
+    chroma_server_nofile: Optional[int] = None
+
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[str] = "8080"
     pulsar_broker_port: Optional[str] = "6650"
@@ -195,7 +204,7 @@ class Settings(BaseSettings):  # type: ignore
         "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
     )
     def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str  # type: ignore
+        cls: Type["Settings"], v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
@@ -219,6 +228,9 @@ class Settings(BaseSettings):  # type: ignore
     allow_reset: bool = False
 
     migrations: Literal["none", "validate", "apply"] = "apply"
+    # you cannot change the hash_algorithm after migrations have already been applied once
+    # this is intended to be a first-time setup configuration
+    migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
     def require(self, key: str) -> Any:
         """Return the value of a required config key, or raise an exception if it is not
@@ -297,6 +309,39 @@ class System(Component):
         for key in _legacy_config_keys:
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
+
+        # Apply the nofile limit if set
+        if settings["chroma_server_nofile"] is not None:
+            if platform.system() != "Windows":
+                import resource
+
+                curr_soft, curr_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                desired_soft = settings["chroma_server_nofile"]
+                # Validate
+                if desired_soft > curr_hard:
+                    logging.warning(
+                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}. Keeping soft limit at {curr_soft}"
+                    )
+                # Apply
+                elif desired_soft > curr_soft:
+                    try:
+                        resource.setrlimit(
+                            resource.RLIMIT_NOFILE, (desired_soft, curr_hard)
+                        )
+                        logger.info(f"Set chroma_server_nofile to {desired_soft}")
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to set chroma_server_nofile to {desired_soft}: {e} nofile soft limit will remain at {curr_soft}"
+                        )
+                # Don't apply if reducing the limit
+                elif desired_soft < curr_soft:
+                    logger.warning(
+                        f"chroma_server_nofile is set to {desired_soft}, but this is less than current soft limit of {curr_soft}. chroma_server_nofile will not be set."
+                    )
+            else:
+                logger.warning(
+                    "chroma_server_nofile is not supported on Windows. chroma_server_nofile will not be set."
+                )
 
         self.settings = settings
         self._instances = {}
