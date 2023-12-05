@@ -215,18 +215,14 @@ class EmbeddingFunction(Protocol[D]):
         return -1
 
     def _check_large_inputs(
-        self: "EmbeddingFunction",
+        self,
         inputs: Documents,
         token_count_function: Callable[..., Any] = None,
     ) -> None:
         if token_count_function is None:
             return
-        if token_count_function is None:
-            return
-        if not isinstance(inputs, list):
-            return
         # Check if all inputs are strings
-        if not all(isinstance(i, str) for i in inputs):
+        if not all(is_document(i) for i in inputs):
             return
 
         for i, t in enumerate(inputs):

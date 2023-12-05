@@ -8,7 +8,6 @@ mypy-protobuf
 pre-commit
 pytest
 pytest-asyncio
-python-dotenv
 setuptools_scm
 types-protobuf
 types-requests==2.30.0.0
