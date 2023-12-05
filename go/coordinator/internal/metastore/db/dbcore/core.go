@@ -10,7 +10,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -36,7 +36,7 @@ func Connect(cfg DBConfig) (*gorm.DB, error) {
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:          ormLogger,
 		CreateBatchSize: 100,
 	})
