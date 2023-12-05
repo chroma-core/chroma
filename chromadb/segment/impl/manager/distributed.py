@@ -1,8 +1,4 @@
 from threading import Lock
-
-import grpc
-from chromadb.proto.chroma_pb2_grpc import SegmentServerStub  # type: ignore
-from chromadb.proto.convert import to_proto_segment
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
@@ -47,7 +43,7 @@ class DistributedSegmentManager(SegmentManager):
     ]  # collection_id -> scope -> segment
     _segment_directory: SegmentDirectory
     _lock: Lock
-    _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
+    # _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -57,7 +53,6 @@ class DistributedSegmentManager(SegmentManager):
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
         self._segment_cache = defaultdict(dict)
-        self._segment_server_stubs = {}
         self._lock = Lock()
 
     @trace_method(
@@ -131,22 +126,23 @@ class DistributedSegmentManager(SegmentManager):
                 )
                 known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
                 segment = next(filter(lambda s: s["type"] in known_types, segments))
-                grpc_url = self._segment_directory.get_segment_endpoint(segment)
+                # grpc_url = self._segment_directory.get_segment_endpoint(segment)
 
-                if grpc_url not in self._segment_server_stubs:
-                    channel = grpc.insecure_channel(grpc_url)
-                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
+                # if grpc_url not in self._segment_server_stubs:
+                #     channel = grpc.insecure_channel(grpc_url)
+                # self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)  # type: ignore
 
-                self._segment_server_stubs[grpc_url].LoadSegment(
-                    to_proto_segment(segment)
-                )
-                if grpc_url not in self._segment_server_stubs:
-                    channel = grpc.insecure_channel(grpc_url)
-                    self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
+                # TODO: this load is not necessary
+                # self._segment_server_stubs[grpc_url].LoadSegment(
+                #     to_proto_segment(segment)
+                # )
+                # if grpc_url not in self._segment_server_stubs:
+                #     channel = grpc.insecure_channel(grpc_url)
+                #     self._segment_server_stubs[grpc_url] = SegmentServerStub(channel)
 
-                self._segment_server_stubs[grpc_url].LoadSegment(
-                    to_proto_segment(segment)
-                )
+                # self._segment_server_stubs[grpc_url].LoadSegment(
+                #     to_proto_segment(segment)
+                # )
 
     # TODO: rethink duplication from local segment manager
     def _cls(self, segment: Segment) -> Type[SegmentImplementation]:
