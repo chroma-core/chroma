@@ -506,26 +506,26 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction):
         self.model = model_name
         self.get_embeddings = get_embeddings
 
-    def __call__(self, texts: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-        texts (Documents): A list of texts to get embeddings for.
+        input (Documents): A list of texts to get embeddings for.
 
         Returns:
         Embeddings: The embeddings for the texts.
 
         Example:
         >>> voyage_ef = VoyageAIEmbeddingFunction(api_key="your_api_key")
-        >>> texts = ["Hello, world!", "How are you?"]
-        >>> embeddings = voyage_ef(texts)
+        >>> input = ["Hello, world!", "How are you?"]
+        >>> embeddings = voyage_ef(input)
         """
-        iters = range(0, len(texts), self.batch_size)
+        iters = range(0, len(input), self.batch_size)
         embeddings = []
         for i in iters:
             results = self.get_embeddings(
-                texts[i : i + self.batch_size], 
+                input[i : i + self.batch_size], 
                 batch_size=self.batch_size, 
                 model=self.model
             )
