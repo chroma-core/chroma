@@ -235,7 +235,7 @@ class EmbeddingFunction(Protocol[D]):
             if _too_long:
                 logger.warning(
                     "WARNING: The following document exceed the maximum input size of "
-                    f"{self.max_token_input_length()}: id = {i}, text = {t[:50]}..."
+                    f"{self.max_token_input_length()}: {t[:50]}..."
                 )
 
 
