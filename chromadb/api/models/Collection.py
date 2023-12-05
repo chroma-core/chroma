@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Union
 
 import numpy as np
 from pydantic import BaseModel, PrivateAttr
@@ -104,7 +104,13 @@ class Collection(BaseModel):
     def add(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]] = None,
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
@@ -240,7 +246,13 @@ class Collection(BaseModel):
 
     def query(
         self,
-        query_embeddings: Optional[OneOrMany[Embedding]] = None,
+        query_embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
         query_uris: Optional[OneOrMany[URI]] = None,
@@ -380,7 +392,13 @@ class Collection(BaseModel):
     def update(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]] = None,
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
@@ -426,7 +444,13 @@ class Collection(BaseModel):
     def upsert(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]] = None,
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+                OneOrMany[np.ndarray],
+            ]
+        ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
@@ -500,7 +524,13 @@ class Collection(BaseModel):
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[OneOrMany[Embedding]],
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+                OneOrMany[np.ndarray],
+            ]
+        ],
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
