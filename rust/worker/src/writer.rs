@@ -16,6 +16,8 @@ use tokio::sync::Mutex;
 use tokio::{select, sync::broadcast::Receiver};
 use tokio_util::sync::CancellationToken;
 
+// TODO: rename to IngestLog
+
 pub mod chroma {
     tonic::include_proto!("chroma");
 }
@@ -27,6 +29,7 @@ impl DeserializeMessage for SubmitEmbeddingRecord {
         // Its a bit strange to unwrap here, but the pulsar api doesn't give us a way to
         // return an error, so we have to panic if we can't decode the message
         // also we are forced to clone since the api doesn't give us a way to borrow the bytes
+        //TODO: can we not clone?
         let record = SubmitEmbeddingRecord::decode(Bytes::from(payload.data.clone())).unwrap();
         return record;
     }
