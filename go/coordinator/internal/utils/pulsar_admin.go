@@ -10,9 +10,9 @@ import (
 
 // This function creates topics in Pulsar. It takes in a list of topics and creates them in pulsar.
 // It assumes that the tenant and namespace already exist in Pulsar.
-func CreateTopics(pulsarWebServiceURL string, tenant string, namespace string, topics []string) error {
+func CreateTopics(pulsarAdminURL string, tenant string, namespace string, topics []string) error {
 	cfg := &pulsaradmin.Config{
-		WebServiceURL: pulsarWebServiceURL,
+		WebServiceURL: pulsarAdminURL,
 	}
 	admin, err := pulsaradmin.NewClient(cfg)
 	if err != nil {

@@ -35,7 +35,7 @@ type Config struct {
 	MaxOpenConns int
 
 	// Pulsar config
-	WebServiceURL   string
+	PulsarAdminURL  string
 	PulsarTenant    string
 	PulsarNamespace string
 
@@ -100,7 +100,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	} else if config.AssignmentPolicy == "rendezvous" {
 		log.Info("Using rendezvous assignment policy")
 
-		err := utils.CreateTopics(config.WebServiceURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
+		err := utils.CreateTopics(config.PulsarAdminURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
 		if err != nil {
 			log.Error("Failed to create topics", zap.Error(err))
 			return nil, err
