@@ -1,6 +1,10 @@
 package dbmodel
 
-import "context"
+import (
+	"context"
+
+	_ "ariga.io/atlas-provider-gorm/gormschema"
+)
 
 //go:generate mockery --name=IMetaDomain
 type IMetaDomain interface {

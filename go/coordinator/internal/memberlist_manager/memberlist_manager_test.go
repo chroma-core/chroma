@@ -88,13 +88,13 @@ func TestMemberlistStore(t *testing.T) {
 	memberlistName := "test-memberlist"
 	namespace := "chroma"
 	memberlist := &Memberlist{}
-	cr_memberlist := memberlistToCr(memberlist, namespace, memberlistName)
+	cr_memberlist := memberlistToCr(memberlist, namespace, memberlistName, "0")
 
 	// Following the assumptions of the real system, we initialize the CR with no members.
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr_memberlist)
 
 	memberlist_store := NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
-	memberlist, err := memberlist_store.GetMemberlist(context.TODO())
+	memberlist, _, err := memberlist_store.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
@@ -102,8 +102,8 @@ func TestMemberlistStore(t *testing.T) {
 	assert.Equal(t, Memberlist{}, *memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(context.TODO(), &Memberlist{"10.0.0.1", "10.0.0.2"})
-	memberlist, err = memberlist_store.GetMemberlist(context.TODO())
+	memberlist_store.UpdateMemberlist(context.TODO(), &Memberlist{"10.0.0.1", "10.0.0.2"}, "0")
+	memberlist, _, err = memberlist_store.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestMemberlistManager(t *testing.T) {
 	memberlist_name := "test-memberlist"
 	namespace := "chroma"
 	initialMemberlist := &Memberlist{}
-	initialCrMemberlist := memberlistToCr(initialMemberlist, namespace, memberlist_name)
+	initialCrMemberlist := memberlistToCr(initialMemberlist, namespace, memberlist_name, "0")
 
 	// Create a fake kubernetes client
 	clientset, err := utils.GetTestKubenertesInterface()
@@ -201,7 +201,7 @@ func retryUntilCondition(t *testing.T, f func() bool, retry_count int, retry_int
 }
 
 func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, expected_memberlist Memberlist) bool {
-	memberlist, err := memberlistStore.GetMemberlist(context.TODO())
+	memberlist, _, err := memberlistStore.GetMemberlist(context.TODO())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}

@@ -35,6 +35,7 @@ from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
     InvalidDimensionException,
+    InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -87,6 +88,15 @@ async def catch_exceptions_middleware(
         return JSONResponse(content={"error": repr(e)}, status_code=500)
 
 
+async def check_http_version_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    http_version = request.scope.get("http_version")
+    if http_version not in ["1.1", "2"]:
+        raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
+    return await call_next(request)
+
+
 def _uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
@@ -131,6 +141,7 @@ class FastAPI(chromadb.server.Server):
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
         self._system.start()
 
+        self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
             CORSMiddleware,

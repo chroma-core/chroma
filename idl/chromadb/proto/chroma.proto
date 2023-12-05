@@ -106,19 +106,6 @@ message VectorQueryResults {
     repeated VectorQueryResult results = 1;
 }
 
-/* Segment Server Interface */
-
-// TODO: figure out subpackaging, ideally this file is colocated with the segment server implementation
-service SegmentServer {
-    rpc LoadSegment (Segment) returns (SegmentServerResponse) {}
-    rpc ReleaseSegment (Segment) returns (SegmentServerResponse) {} // TODO: this maybe should only take id/type/scope
-}
-
-// TODO: enum of succcess/failure/or already loaded
-message SegmentServerResponse {
-    bool success = 1;
-}
-
 /* Vector Reader Interface */
 
 service VectorReader {

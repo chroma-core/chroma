@@ -5,7 +5,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 func GetTestKubenertesInterface() (kubernetes.Interface, error) {
@@ -14,19 +13,12 @@ func GetTestKubenertesInterface() (kubernetes.Interface, error) {
 }
 
 func getKubernetesConfig() (*rest.Config, error) {
-	// Load the default kubeconfig file
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	config, err := loadingRules.Load()
+	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
 	}
+	return config, nil
 
-	clientConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return clientConfig, nil
 }
 
 func GetKubernetesDynamicInterface() (dynamic.Interface, error) {
@@ -44,20 +36,12 @@ func GetKubernetesDynamicInterface() (dynamic.Interface, error) {
 }
 
 func GetKubernetesInterface() (kubernetes.Interface, error) {
-	// Load the default kubeconfig file
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	config, err := loadingRules.Load()
+	config, err := getKubernetesConfig()
 	if err != nil {
 		return nil, err
 	}
-
-	clientConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-	if err != nil {
-		return nil, err
-	}
-
 	// Create a clientset for the coordinator
-	clientset, err := kubernetes.NewForConfig(clientConfig)
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
 	}

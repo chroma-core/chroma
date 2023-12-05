@@ -7,11 +7,11 @@ import (
 )
 
 type Tenant struct {
-	ID        string          `db:"id;primaryKey"`
-	Ts        types.Timestamp `gorm:"ts"`
-	IsDeleted bool            `gorm:"default:false"`
-	CreatedAt time.Time       `gorm:"created_at;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time       `gorm:"created_at;default:CURRENT_TIMESTAMP"`
+	ID        string          `gorm:"id;primaryKey;unique"`
+	Ts        types.Timestamp `gorm:"ts;type:bigint;default:0"`
+	IsDeleted bool            `gorm:"is_deleted;type:bool;default:false"`
+	CreatedAt time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 }
 
 func (v Tenant) TableName() string {

@@ -43,6 +43,6 @@ func (s *Coordinator) Stop() error {
 	return nil
 }
 
-func (c *Coordinator) assignCollection(collectionID types.UniqueID) string {
+func (c *Coordinator) assignCollection(collectionID types.UniqueID) (string, error) {
 	return c.collectionAssignmentPolicy.AssignCollection(collectionID)
 }
