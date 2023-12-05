@@ -232,14 +232,14 @@ class EmbeddingFunction(Protocol[D]):
         for i, t in enumerate(inputs):
             tokens = token_count_function(t)
             _too_long = (
-                len(tokens) > self.max_input_length()
-                if self.max_input_length() > 0
+                len(tokens) > self.max_token_input_length()
+                if self.max_token_input_length() > 0
                 else False
             )
             if _too_long:
                 logger.warning(
                     "WARNING: The following document exceed the maximum input size of "
-                    f"{self.max_input_length()}: id = {i}, text = {t[:50]}..."
+                    f"{self.max_token_input_length()}: id = {i}, text = {t[:50]}..."
                 )
 
 
