@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package chroma;
 
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+
 message Status {
   string reason = 1;
   int32 code = 2; // TODO: What is the enum of this code?
@@ -53,6 +55,18 @@ message Collection {
   string topic = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
+  string tenant = 6;
+  string database = 7;
+}
+
+message Database {
+    string id = 1;
+    string name = 2;
+    string tenant = 3;
+}
+
+message Tenant {
+    string name = 1;
 }
 
 message UpdateMetadataValue {
@@ -72,6 +86,7 @@ message SubmitEmbeddingRecord {
     optional Vector vector = 2;
     optional UpdateMetadata metadata = 3;
     Operation operation = 4;
+    string collection_id = 5;
 }
 
 message VectorEmbeddingRecord {
@@ -89,19 +104,6 @@ message VectorQueryResult {
 
 message VectorQueryResults {
     repeated VectorQueryResult results = 1;
-}
-
-/* Segment Server Interface */
-
-// TODO: figure out subpackaging, ideally this file is colocated with the segment server implementation
-service SegmentServer {
-    rpc LoadSegment (Segment) returns (SegmentServerResponse) {}
-    rpc ReleaseSegment (Segment) returns (SegmentServerResponse) {} // TODO: this maybe should only take id/type/scope
-}
-
-// TODO: enum of succcess/failure/or already loaded
-message SegmentServerResponse {
-    bool success = 1;
 }
 
 /* Vector Reader Interface */

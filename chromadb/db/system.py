@@ -3,6 +3,8 @@ from typing import Optional, Sequence, Tuple
 from uuid import UUID
 from chromadb.types import (
     Collection,
+    Database,
+    Tenant,
     Metadata,
     Segment,
     SegmentScope,
@@ -10,15 +12,40 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
-from chromadb.config import Component
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component
 
 
 class SysDB(Component):
     """Data interface for Chroma's System database"""
 
     @abstractmethod
+    def create_database(
+        self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
+    ) -> None:
+        """Create a new database in the System database. Raises an Error if the Database
+        already exists."""
+        pass
+
+    @abstractmethod
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        """Get a database by name and tenant. Raises an Error if the Database does not
+        exist."""
+        pass
+
+    @abstractmethod
+    def create_tenant(self, name: str) -> None:
+        """Create a new tenant in the System database. The name must be unique.
+        Raises an Error if the Tenant already exists."""
+        pass
+
+    @abstractmethod
+    def get_tenant(self, name: str) -> Tenant:
+        """Get a tenant by name. Raises an Error if the Tenant does not exist."""
+        pass
+
+    @abstractmethod
     def create_segment(self, segment: Segment) -> None:
-        """Create a new segment in the System database. Raises DuplicateError if the ID
+        """Create a new segment in the System database. Raises an Error if the ID
         already exists."""
         pass
 
@@ -60,6 +87,8 @@ class SysDB(Component):
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         """Create a new collection any associated resources
         (Such as the necessary topics) in the SysDB. If get_or_create is True, the
@@ -73,7 +102,9 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def delete_collection(self, id: UUID) -> None:
+    def delete_collection(
+        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> None:
         """Delete a collection, topic, all associated segments and any associate resources
         from the SysDB and the system at large."""
         pass
@@ -84,8 +115,10 @@ class SysDB(Component):
         id: Optional[UUID] = None,
         topic: Optional[str] = None,
         name: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        """Find collections by id, topic or name"""
+        """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
         pass
 
     @abstractmethod

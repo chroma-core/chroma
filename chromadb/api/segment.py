@@ -1,5 +1,5 @@
-from chromadb.api import API
-from chromadb.config import Settings, System
+from chromadb.api import ServerAPI
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
@@ -16,13 +16,19 @@ from chromadb.errors import InvalidDimensionException, InvalidCollectionExceptio
 import chromadb.utils.embedding_functions as ef
 
 from chromadb.api.types import (
+    URI,
     CollectionMetadata,
+    Embeddable,
+    Document,
     EmbeddingFunction,
+    DataLoader,
     IDs,
     Embeddings,
     Embedding,
+    Loadable,
     Metadatas,
     Documents,
+    URIs,
     Where,
     WhereDocument,
     Include,
@@ -45,7 +51,7 @@ from chromadb.telemetry.product.events import (
 
 import chromadb.types as t
 
-from typing import Optional, Sequence, Generator, List, cast, Set, Dict
+from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
 from overrides import override
 from uuid import UUID, uuid4
 import time
@@ -77,7 +83,7 @@ def check_index_name(index_name: str) -> None:
         raise ValueError(msg)
 
 
-class SegmentAPI(API):
+class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
 
     _settings: Settings
@@ -104,6 +110,34 @@ class SegmentAPI(API):
     def heartbeat(self) -> int:
         return int(time.time_ns())
 
+    @override
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        if len(name) < 3:
+            raise ValueError("Database name must be at least 3 characters long")
+
+        self._sysdb.create_database(
+            id=uuid4(),
+            name=name,
+            tenant=tenant,
+        )
+
+    @override
+    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
+        return self._sysdb.get_database(name=name, tenant=tenant)
+
+    @override
+    def create_tenant(self, name: str) -> None:
+        if len(name) < 3:
+            raise ValueError("Tenant name must be at least 3 characters long")
+
+        self._sysdb.create_tenant(
+            name=name,
+        )
+
+    @override
+    def get_tenant(self, name: str) -> t.Tenant:
+        return self._sysdb.get_tenant(name=name)
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
@@ -113,8 +147,13 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Any]
+        ] = ef.DefaultEmbeddingFunction(),
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         if metadata is not None:
             validate_metadata(metadata)
@@ -130,6 +169,8 @@ class SegmentAPI(API):
             metadata=metadata,
             dimension=None,
             get_or_create=get_or_create,
+            tenant=tenant,
+            database=database,
         )
 
         if created:
@@ -152,6 +193,9 @@ class SegmentAPI(API):
             name=name,
             metadata=coll["metadata"],  # type: ignore
             embedding_function=embedding_function,
+            data_loader=data_loader,
+            tenant=tenant,
+            database=database,
         )
 
     @trace_method(
@@ -162,13 +206,21 @@ class SegmentAPI(API):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            data_loader=data_loader,
             get_or_create=True,
+            tenant=tenant,
+            database=database,
         )
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
@@ -178,10 +230,20 @@ class SegmentAPI(API):
     @override
     def get_collection(
         self,
-        name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        name: Optional[str] = None,
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        existing = self._sysdb.get_collections(name=name)
+        if id is None and name is None or (id is not None and name is not None):
+            raise ValueError("Name or id must be specified, but not both")
+        existing = self._sysdb.get_collections(
+            id=id, name=name, tenant=tenant, database=database
+        )
 
         if existing:
             return Collection(
@@ -190,15 +252,22 @@ class SegmentAPI(API):
                 name=existing[0]["name"],
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
+                data_loader=data_loader,
+                tenant=existing[0]["tenant"],
+                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections()
+        db_collections = self._sysdb.get_collections(tenant=tenant, database=database)
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -206,6 +275,8 @@ class SegmentAPI(API):
                     id=db_collection["id"],
                     name=db_collection["name"],
                     metadata=db_collection["metadata"],  # type: ignore
+                    tenant=db_collection["tenant"],
+                    database=db_collection["database"],
                 )
             )
         return collections
@@ -236,11 +307,20 @@ class SegmentAPI(API):
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    def delete_collection(self, name: str) -> None:
-        existing = self._sysdb.get_collections(name=name)
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        existing = self._sysdb.get_collections(
+            name=name, tenant=tenant, database=database
+        )
 
         if existing:
-            self._sysdb.delete_collection(existing[0]["id"])
+            self._sysdb.delete_collection(
+                existing[0]["id"], tenant=tenant, database=database
+            )
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
             if existing and existing[0]["id"] in self._collection_cache:
@@ -257,20 +337,23 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
         for r in _records(
             t.Operation.ADD,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
@@ -282,6 +365,7 @@ class SegmentAPI(API):
                 add_amount=len(ids),
                 with_metadata=len(ids) if metadatas is not None else 0,
                 with_documents=len(ids) if documents is not None else 0,
+                with_uris=len(ids) if uris is not None else 0,
             )
         )
         return True
@@ -295,20 +379,23 @@ class SegmentAPI(API):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
         for r in _records(
             t.Operation.UPDATE,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
@@ -321,6 +408,7 @@ class SegmentAPI(API):
                 with_embeddings=len(embeddings) if embeddings else 0,
                 with_metadata=len(metadatas) if metadatas else 0,
                 with_documents=len(documents) if documents else 0,
+                with_uris=len(uris) if uris else 0,
             )
         )
 
@@ -335,20 +423,23 @@ class SegmentAPI(API):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
-            (ids, embeddings, metadatas, documents),
+            (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.max_batch_size},
         )
         records_to_submit = []
         for r in _records(
             t.Operation.UPSERT,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            uris=uris,
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
@@ -402,6 +493,17 @@ class SegmentAPI(API):
             offset=offset,
         )
 
+        if len(records) == 0:
+            # Nothing to return if there are no records
+            return GetResult(
+                ids=[],
+                embeddings=[] if "embeddings" in include else None,
+                metadatas=[] if "metadatas" in include else None,
+                documents=[] if "documents" in include else None,
+                uris=[] if "uris" in include else None,
+                data=[] if "data" in include else None,
+            )
+
         vectors: Sequence[t.VectorEmbeddingRecord] = []
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
@@ -417,6 +519,9 @@ class SegmentAPI(API):
         if "documents" in include:
             documents = [_doc(m) for m in metadatas]
 
+        if "uris" in include:
+            uris = [_uri(m) for m in metadatas]
+
         ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionGetEvent(
@@ -425,6 +530,7 @@ class SegmentAPI(API):
                 limit=limit if limit else 0,
                 include_metadata=ids_amount if "metadatas" in include else 0,
                 include_documents=ids_amount if "documents" in include else 0,
+                include_uris=ids_amount if "uris" in include else 0,
             )
         )
 
@@ -433,8 +539,12 @@ class SegmentAPI(API):
             embeddings=[r["embedding"] for r in vectors]
             if "embeddings" in include
             else None,
-            metadatas=_clean_metadatas(metadatas) if "metadatas" in include else None,  # type: ignore
+            metadatas=_clean_metadatas(metadatas)
+            if "metadatas" in include
+            else None,  # type: ignore
             documents=documents if "documents" in include else None,  # type: ignore
+            uris=uris if "uris" in include else None,  # type: ignore
+            data=None,
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -494,7 +604,9 @@ class SegmentAPI(API):
             return []
 
         records_to_submit = []
-        for r in _records(t.Operation.DELETE, ids_to_delete):
+        for r in _records(
+            operation=t.Operation.DELETE, ids=ids_to_delete, collection_id=collection_id
+        ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
@@ -566,7 +678,8 @@ class SegmentAPI(API):
         ids: List[List[str]] = []
         distances: List[List[float]] = []
         embeddings: List[List[Embedding]] = []
-        documents: List[List[str]] = []
+        documents: List[List[Document]] = []
+        uris: List[List[URI]] = []
         metadatas: List[List[t.Metadata]] = []
 
         for result in results:
@@ -576,7 +689,7 @@ class SegmentAPI(API):
             if "embeddings" in include:
                 embeddings.append([cast(Embedding, r["embedding"]) for r in result])
 
-        if "documents" in include or "metadatas" in include:
+        if "documents" in include or "metadatas" in include or "uris" in include:
             all_ids: Set[str] = set()
             for id_list in ids:
                 all_ids.update(id_list)
@@ -598,6 +711,9 @@ class SegmentAPI(API):
                 if "documents" in include:
                     doc_list = [_doc(m) for m in metadata_list]
                     documents.append(doc_list)  # type: ignore
+                if "uris" in include:
+                    uri_list = [_uri(m) for m in metadata_list]
+                    uris.append(uri_list)  # type: ignore
 
         query_amount = len(query_embeddings)
         self._product_telemetry_client.capture(
@@ -609,6 +725,7 @@ class SegmentAPI(API):
                 with_document_filter=query_amount if where_document is not None else 0,
                 include_metadatas=query_amount if "metadatas" in include else 0,
                 include_documents=query_amount if "documents" in include else 0,
+                include_uris=query_amount if "uris" in include else 0,
                 include_distances=query_amount if "distances" in include else 0,
             )
         )
@@ -619,6 +736,8 @@ class SegmentAPI(API):
             metadatas=metadatas if metadatas else None,
             embeddings=embeddings if embeddings else None,
             documents=documents if documents else None,
+            uris=uris if uris else None,
+            data=None,
         )
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
@@ -697,9 +816,11 @@ class SegmentAPI(API):
 def _records(
     operation: t.Operation,
     ids: IDs,
+    collection_id: UUID,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
+    uris: Optional[URIs] = None,
 ) -> Generator[t.SubmitEmbeddingRecord, None, None]:
     """Convert parallel lists of embeddings, metadatas and documents to a sequence of
     SubmitEmbeddingRecords"""
@@ -707,8 +828,6 @@ def _records(
     # Presumes that callers were invoked via  Collection model, which means
     # that we know that the embeddings, metadatas and documents have already been
     # normalized and are guaranteed to be consistently named lists.
-
-    # TODO: Fix API types to make it explicit that they've already been normalized
 
     for i, id in enumerate(ids):
         metadata = None
@@ -722,12 +841,20 @@ def _records(
             else:
                 metadata = {"chroma:document": document}
 
+        if uris:
+            uri = uris[i]
+            if metadata:
+                metadata = {**metadata, "chroma:uri": uri}
+            else:
+                metadata = {"chroma:uri": uri}
+
         record = t.SubmitEmbeddingRecord(
             id=id,
             embedding=embeddings[i] if embeddings else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,
+            collection_id=collection_id,
         )
         yield record
 
@@ -737,6 +864,14 @@ def _doc(metadata: Optional[t.Metadata]) -> Optional[str]:
 
     if metadata and "chroma:document" in metadata:
         return str(metadata["chroma:document"])
+    return None
+
+
+def _uri(metadata: Optional[t.Metadata]) -> Optional[str]:
+    """Retrieve the uri (if any) from a Metadata map"""
+
+    if metadata and "chroma:uri" in metadata:
+        return str(metadata["chroma:uri"])
     return None
 
 

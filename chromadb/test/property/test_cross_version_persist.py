@@ -5,14 +5,14 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Generator, List, Tuple, Dict, Any, Callable
+from typing import Generator, List, Tuple, Dict, Any, Callable, Type
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -98,6 +98,12 @@ def patch_for_version(
             patch_version
         ):
             patch(collection, embeddings, settings)
+
+
+def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
+    if packaging_version.Version(version) <= packaging_version.Version("0.4.14"):
+        return module.api.API  # type: ignore
+    return module.api.ServerAPI  # type: ignore
 
 
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
@@ -198,8 +204,8 @@ def switch_to_version(version: str) -> ModuleType:
     return chromadb
 
 
-class not_implemented_ef(EmbeddingFunction):
-    def __call__(self, texts: Documents) -> Embeddings:
+class not_implemented_ef(EmbeddingFunction[Documents]):
+    def __call__(self, input: Documents) -> Embeddings:
         assert False, "Embedding function should not be called"
 
 
@@ -213,13 +219,13 @@ def persist_generated_data_with_old_version(
     try:
         old_module = switch_to_version(version)
         system = old_module.config.System(settings)
-        api: API = system.instance(API)
+        api = system.instance(api_import_for_version(old_module, version))
         system.start()
 
         api.reset()
         coll = api.create_collection(
             name=collection_strategy.name,
-            metadata=collection_strategy.metadata,  # type: ignore
+            metadata=collection_strategy.metadata,
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
@@ -304,11 +310,11 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     system.start()
     coll = api.get_collection(
         name=collection_strategy.name,
-        embedding_function=not_implemented_ef(),
+        embedding_function=not_implemented_ef(),  # type: ignore
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
