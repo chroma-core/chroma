@@ -480,6 +480,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction):
 
 
 class VoyageAIEmbeddingFunction(EmbeddingFunction):
+    """Embedding function for Voyageai.com"""
     def __init__(self, api_key: str, model_name: str = "voyage-01", batch_size: int = 8):
         """
         Initialize the VoyageAIEmbeddingFunction.
