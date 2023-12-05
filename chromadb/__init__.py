@@ -186,6 +186,9 @@ def CloudClient(
     database: str,
     api_key: Optional[str] = None,
     settings: Optional[Settings] = None,
+    *,  # Following arguments are keyword-only, intended for testing only.
+    cloud_host: str = "api.trychroma.com",
+    cloud_port: str = "8000",
 ) -> ClientAPI:
     """
     Creates a client to connect to a tennant and database on the Chroma cloud.
@@ -195,9 +198,6 @@ def CloudClient(
         database: The database to use for this client.
         api_key: The api key to use for this client.
     """
-
-    CLOUD_HOST = "api.trychroma.com"
-    CLOUD_PORT = "443"
 
     # If no API key is provided, try to load it from the environment variable
     if api_key is None:
@@ -216,8 +216,8 @@ def CloudClient(
         settings = Settings()
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
-    settings.chroma_server_host = CLOUD_HOST
-    settings.chroma_server_http_port = CLOUD_PORT
+    settings.chroma_server_host = cloud_host
+    settings.chroma_server_http_port = cloud_port
     # Always use SSL for cloud
     settings.chroma_server_ssl_enabled = True
 
