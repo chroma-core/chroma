@@ -51,7 +51,7 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 
 # Embeddings
 Embedding = Vector
-Embeddings = Union[List[Embedding]]
+Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(target: OneOrMany[Embedding]) -> Embeddings:

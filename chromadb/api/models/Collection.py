@@ -108,7 +108,6 @@ class Collection(BaseModel):
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
-                OneOrMany[np.ndarray],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
@@ -249,7 +248,6 @@ class Collection(BaseModel):
         query_embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
                 OneOrMany[np.ndarray],
             ]
         ] = None,
@@ -396,7 +394,6 @@ class Collection(BaseModel):
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
-                OneOrMany[np.ndarray],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
@@ -447,7 +444,6 @@ class Collection(BaseModel):
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
                 OneOrMany[np.ndarray],
             ]
         ] = None,
@@ -527,7 +523,6 @@ class Collection(BaseModel):
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
                 OneOrMany[np.ndarray],
             ]
         ],
@@ -616,7 +611,12 @@ class Collection(BaseModel):
         )
 
     @staticmethod
-    def _normalize_embeddings(embeddings: Embeddings) -> Embeddings:
+    def _normalize_embeddings(
+        embeddings: Union[
+            OneOrMany[Embedding],
+            OneOrMany[np.ndarray],
+        ]
+    ) -> Embeddings:
         if isinstance(embeddings, np.ndarray):
             return embeddings.tolist()
         return embeddings
