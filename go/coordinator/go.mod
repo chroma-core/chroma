@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	ariga.io/atlas-provider-gorm v0.1.1
+	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
 	github.com/google/uuid v1.3.1
 	github.com/pingcap/log v1.1.0
 	github.com/rs/zerolog v1.31.0
@@ -19,6 +20,17 @@ require (
 	k8s.io/apimachinery v0.28.3
 	k8s.io/client-go v0.28.3
 	pgregory.net/rapid v1.1.0
+)
+
+require (
+	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
+	github.com/99designs/keyring v1.2.1 // indirect
+	github.com/danieljoos/wincred v1.1.2 // indirect
+	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
+	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
+	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
+	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/mtibben/percent v0.2.1 // indirect
 )
 
 require (
