@@ -27,7 +27,7 @@ from chromadb.types import (
     WhereOperator,
 )
 from uuid import UUID
-from pypika import Table, Tables
+from pypika import Table, Tables, CustomFunction
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion
@@ -38,6 +38,8 @@ import sqlite3
 import logging
 
 logger = logging.getLogger(__name__)
+
+REGEX = CustomFunction('REGEX', ['X', 'Y'])
 
 
 class SqliteMetadataSegment(MetadataReader):
@@ -500,6 +502,16 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return embeddings_t.id.isin(sq)
+            elif k == "$regex":
+                search_term = rf'{v}'
+
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.rowid)
+                    .where(REGEX(search_term, fulltext_t.string_value))
+                )
+                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
@@ -555,7 +567,7 @@ def _value_criterion(
 ) -> Criterion:
     """Return a criterion to compare a value with the appropriate columns given its type
     and the operation type."""
-    if isinstance(value, str):
+    if isinstance(value, str) and op not in ["$like", "$regex"]:
         cols = [table.string_value]
     # isinstance(True, int) evaluates to True, so we need to check for bools separately
     elif isinstance(value, bool) and op in ("$eq", "$ne"):
@@ -601,6 +613,12 @@ def _value_criterion(
             if op == "$in"
             else table.float_value.notin(ParameterValue(value)),
         ]
+    elif isinstance(value, str) and op == '$like':
+        col_exprs = [
+            table.string_value.like(ParameterValue(value))]
+    elif isinstance(value, str) and op == '$regex':
+        col_exprs = [
+            REGEX(value, table.string_value)]
     else:
         cols = [table.int_value, table.float_value]
 

@@ -204,7 +204,8 @@ def validate_embedding_function(
     function_signature = signature(
         embedding_function.__class__.__call__
     ).parameters.keys()
-    protocol_signature = signature(EmbeddingFunction.__call__).parameters.keys()
+    protocol_signature = signature(
+        EmbeddingFunction.__call__).parameters.keys()
 
     if not function_signature == protocol_signature:
         raise ValueError(
@@ -213,7 +214,9 @@ def validate_embedding_function(
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
 
+
 L = TypeVar("L", covariant=True)
+
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
@@ -259,11 +262,13 @@ def validate_ids(ids: IDs) -> IDs:
 def validate_metadata(metadata: Metadata) -> Metadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
     if not isinstance(metadata, dict) and metadata is not None:
-        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a dict or None, got {metadata}")
     if metadata is None:
         return metadata
     if len(metadata) == 0:
-        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(
@@ -280,11 +285,13 @@ def validate_metadata(metadata: Metadata) -> Metadata:
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
     if not isinstance(metadata, dict) and metadata is not None:
-        raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a dict or None, got {metadata}")
     if metadata is None:
         return metadata
     if len(metadata) == 0:
-        raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
+        raise ValueError(
+            f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected metadata key to be a str, got {key}")
@@ -315,7 +322,8 @@ def validate_where(where: Where) -> Where:
     if not isinstance(where, dict):
         raise ValueError(f"Expected where to be a dict, got {where}")
     if len(where) != 1:
-        raise ValueError(f"Expected where to have exactly one operator, got {where}")
+        raise ValueError(
+            f"Expected where to have exactly one operator, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
@@ -324,6 +332,8 @@ def validate_where(where: Where) -> Where:
             and key != "$or"
             and key != "$in"
             and key != "$nin"
+            and key != "$like"
+            and key != "$regex"
             and not isinstance(value, (str, int, float, dict))
         ):
             raise ValueError(
@@ -360,6 +370,11 @@ def validate_where(where: Where) -> Where:
                         raise ValueError(
                             f"Expected operand value to be an list for operator {operator}, got {operand}"
                         )
+                if operator in ["$like", "$regex"]:
+                    if not isinstance(operand, str):
+                        raise ValueError(
+                            f"Expected operand value to be a string for operator {operator}, got {operand}"
+                        )
                 if operator not in [
                     "$gt",
                     "$gte",
@@ -369,6 +384,8 @@ def validate_where(where: Where) -> Where:
                     "$eq",
                     "$in",
                     "$nin",
+                    "$like",
+                    "$regex"
                 ]:
                     raise ValueError(
                         f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
@@ -404,7 +421,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
             f"Expected where document to have exactly one operator, got {where_document}"
         )
     for operator, operand in where_document.items():
-        if operator not in ["$contains", "$and", "$or"]:
+        if operator not in ["$contains", "$and", "$or", "$regex"]:
             raise ValueError(
                 f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
             )
@@ -440,7 +457,8 @@ def validate_include(include: Include, allow_distances: bool) -> Include:
     for item in include:
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
-        allowed_values = ["embeddings", "documents", "metadatas", "uris", "data"]
+        allowed_values = ["embeddings", "documents",
+                          "metadatas", "uris", "data"]
         if allow_distances:
             allowed_values.append("distances")
         if item not in allowed_values:
