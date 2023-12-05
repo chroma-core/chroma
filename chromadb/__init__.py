@@ -223,7 +223,7 @@ def CloudClient(
 
     settings.chroma_client_auth_provider = "token"
     settings.chroma_client_auth_credentials = api_key
-    settings.chroma_client_auth_token_transport_header = "X_CHROMA_TOKEN"
+    settings.chroma_client_auth_token_transport_header = "x-chroma-token"
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
