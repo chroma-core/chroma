@@ -12,6 +12,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"gorm.io/gorm"
@@ -34,6 +35,7 @@ type Config struct {
 	MaxOpenConns int
 
 	// Pulsar config
+	WebServiceURL   string
 	PulsarTenant    string
 	PulsarNamespace string
 
@@ -83,7 +85,6 @@ func New(config Config) (*Server, error) {
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
 	}
-
 }
 
 func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gorm.DB) (*Server, error) {
@@ -98,6 +99,12 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		assignmentPolicy = coordinator.NewSimpleAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
 	} else if config.AssignmentPolicy == "rendezvous" {
 		log.Info("Using rendezvous assignment policy")
+
+		err := utils.CreateTopics(config.WebServiceURL, config.PulsarTenant, config.PulsarNamespace, coordinator.Topics[:])
+		if err != nil {
+			log.Error("Failed to create topics", zap.Error(err))
+			return nil, err
+		}
 		assignmentPolicy = coordinator.NewRendezvousAssignmentPolicy(config.PulsarTenant, config.PulsarNamespace)
 	} else {
 		return nil, errors.New("invalid assignment policy, only simple and rendezvous are supported")
