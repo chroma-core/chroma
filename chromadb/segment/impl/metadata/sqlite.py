@@ -97,8 +97,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(embeddings_t)
             .where(
-                embeddings_t.segment_id == ParameterValue(
-                    self._db.uuid_to_db(self._id))
+                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
             .select(fn.Count(embeddings_t.id))
         )
@@ -140,19 +139,16 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.bool_value,
             )
             .where(
-                embeddings_t.segment_id == ParameterValue(
-                    self._db.uuid_to_db(self._id))
+                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
             )
             .orderby(embeddings_t.id)
         )
 
         if where:
-            q = q.where(self._where_map_criterion(
-                q, where, embeddings_t, metadata_t))
+            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
         if where_document:
             q = q.where(
-                self._where_doc_criterion(
-                    q, where_document, embeddings_t, fulltext_t)
+                self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
             )
 
         if ids:
@@ -231,8 +227,7 @@ class SqliteMetadataSegment(MetadataReader):
             if upsert:
                 return self._update_record(cur, record)
             else:
-                logger.warning(
-                    f"Insert of existing embedding ID: {record['id']}")
+                logger.warning(f"Insert of existing embedding ID: {record['id']}")
                 # We are trying to add for a record that already exists. Fail the call.
                 # We don't throw an exception since this is in principal an async path
                 return
@@ -366,8 +361,7 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(
-                f"Delete of nonexisting embedding ID: {record['id']}")
+            logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
 
@@ -398,8 +392,7 @@ class SqliteMetadataSegment(MetadataReader):
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
-            logger.warning(
-                f"Update of nonexisting embedding ID: {record['id']}")
+            logger.warning(f"Update of nonexisting embedding ID: {record['id']}")
         else:
             id = result[0]
             if record["metadata"]:
@@ -454,8 +447,7 @@ class SqliteMetadataSegment(MetadataReader):
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
-                expr = cast(
-                    Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
+                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
                 sq = (
                     self._db.querybuilder()
                     .from_(metadata_t)
@@ -498,6 +490,19 @@ class SqliteMetadataSegment(MetadataReader):
                     .from_(fulltext_t)
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
+                )
+                return embeddings_t.id.isin(sq)
+            elif k == "$not_contains":
+                v = cast(str, v)
+                search_term = f"%{v}%"
+
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.rowid)
+                    .where(
+                        fulltext_t.string_value.not_like(ParameterValue(search_term))
+                    )
                 )
                 return embeddings_t.id.isin(sq)
             else:

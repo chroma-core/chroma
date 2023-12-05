@@ -518,7 +518,13 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
         word = draw(st.sampled_from(collection.known_document_keywords))
     else:
         word = draw(safe_text)
-    return {"$contains": word}
+
+    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    if op == "$contains":
+        return {"$contains": word}
+    else:
+        assert op == "$not_contains"
+        return {"$not_contains": word}
 
 
 def binary_operator_clause(

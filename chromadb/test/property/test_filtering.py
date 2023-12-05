@@ -100,6 +100,13 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
             expr = expr.replace("%", ".").replace("_", ".")
             return re.search(expr, doc) is not None
         return expr in doc
+    elif key == "$not_contains":
+        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
+        # treat them as wildcards
+        if "%" in expr or "_" in expr:
+            expr = expr.replace("%", ".").replace("_", ".")
+            return doc and re.search(expr, doc) is None
+        return doc and expr not in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
@@ -118,6 +125,7 @@ def _filter_embedding_set(
     ids = set(normalized_record_set["ids"])
 
     filter_ids = filter["ids"]
+
     if filter_ids is not None:
         filter_ids = invariants.wrap(filter_ids)
         assert filter_ids is not None
@@ -309,7 +317,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
 
 
 def test_get_empty(api: ServerAPI) -> None:
-    """Tests that calling get() with empty filters returns nothing"""
+    """Tests that calling get() with empty filters returns Fhing"""
 
     api.reset()
     coll = api.create_collection(name="test")
