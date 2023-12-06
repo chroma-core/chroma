@@ -3,13 +3,13 @@ from typing import Any, Dict, Generator, Optional, Tuple
 import pytest
 from chromadb import CloudClient
 from chromadb.api import ServerAPI
-from chromadb.api.client import AdminClient
 from chromadb.auth.token import TokenTransportHeader
-from chromadb.config import Settings, System
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
 from chromadb.test.conftest import _await_server, _run_server, find_free_port
 
 TOKEN_TRANSPORT_HEADER = TokenTransportHeader.X_CHROMA_TOKEN.name
+TEST_CLOUD_HOST = "localhost"
 
 
 @pytest.fixture(scope="module")
@@ -59,13 +59,11 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
 
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_host="localhost",
+        chroma_server_host=TEST_CLOUD_HOST,
         chroma_server_http_port=str(port),
-        allow_reset=True,
         chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
         chroma_client_auth_credentials=valid_token,
         chroma_client_auth_token_transport_header=TOKEN_TRANSPORT_HEADER,
-        chroma_server_ssl_enabled=True,
     )
 
     system = System(settings)
@@ -78,16 +76,14 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
 
 
 def test_cloud_client(mock_cloud_server: System, valid_token: str) -> None:
-    # Create a new database in the default tenant
-    admin_client = AdminClient.from_system(mock_cloud_server)
-    admin_client.create_database("test_db")
-
+    # Connect to the default tenant and database
     client = CloudClient(
-        tenant="test_tenant",
-        database="test_db",
+        tenant=DEFAULT_TENANT,
+        database=DEFAULT_DATABASE,
         api_key=valid_token,
-        cloud_host="localhost",
+        cloud_host=TEST_CLOUD_HOST,
         cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
+        enable_ssl=False,
     )
 
     client.get_version()
