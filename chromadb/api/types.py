@@ -78,6 +78,11 @@ def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+
+class CollectionInfo(TypedDict):
+    dimensionality: int
+
+
 # Documents
 Document = str
 Documents = List[Document]
@@ -213,7 +218,9 @@ def validate_embedding_function(
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
 
+
 L = TypeVar("L", covariant=True)
+
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:

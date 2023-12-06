@@ -43,6 +43,7 @@ from chromadb.api.types import (
     validate_n_results,
     validate_embeddings,
     validate_embedding_function,
+    CollectionInfo,
 )
 import logging
 
@@ -99,14 +100,14 @@ class Collection(BaseModel):
         """
         return self._client._count(collection_id=self.id)
 
-    def dimensions(self) -> int:
-        """The number of dimensions of the embeddings
+    def describe(self) -> CollectionInfo:
+        """Describes the collection details.
 
         Returns:
-            int: The number of dimensions of the embeddings
+            CollectionInfo: A CollectionInfo object containing the collection details.
 
         """
-        return self._client._dimensions(collection_id=self.id)
+        return self._client._describe(collection_id=self.id)
 
     def add(
         self,

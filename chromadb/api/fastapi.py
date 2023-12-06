@@ -29,6 +29,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    CollectionInfo,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -359,15 +360,15 @@ class FastAPI(ServerAPI):
         raise_chroma_error(resp)
         return cast(int, resp.json())
 
-    @trace_method("FastAPI._dimensions", OpenTelemetryGranularity.OPERATION)
+    @trace_method("FastAPI._describe", OpenTelemetryGranularity.OPERATION)
     @override
-    def _dimensions(self, collection_id: UUID) -> int:
+    def _describe(self, collection_id: UUID) -> CollectionInfo:
         """Returns the dimensionality of the embeddings in the collection"""
         resp = self._session.get(
-            self._api_url + "/collections/" + str(collection_id) + "/dimensions"
+            self._api_url + "/collections/" + str(collection_id) + "/describe"
         )
         raise_chroma_error(resp)
-        return cast(int, resp.json())
+        return cast(CollectionInfo, resp.json())
 
     @trace_method("FastAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override

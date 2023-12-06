@@ -342,14 +342,16 @@ def test_count(api):
     assert collection.count() == 2
 
 
-def test_dimensions(api):
+def test_describe(api):
     api.reset()
     collection = api.create_collection("testspace")
     assert collection.count() == 0
-    assert collection.dimensions() == -1
+    assert collection.describe() == {"dimensionality": -1}
     collection.add(**batch_records)
     assert collection.count() == 2
-    assert collection.dimensions() == len(batch_records["embeddings"][0])
+    assert collection.describe()["dimensionality"] == len(
+        batch_records["embeddings"][0]
+    )
 
 
 def test_modify(api):

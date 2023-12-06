@@ -21,6 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    CollectionInfo,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -282,17 +283,14 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _dimensions(self, collection_id: UUID) -> int:
-        """[Internal] Returns the number of dimensions of the embeddings in a collection
-        specified by UUID.
+    def _describe(self, collection_id: UUID) -> CollectionInfo:
+        """Returns collection information specified by UUID.
 
         Args:
-            collection_id: The UUID of the collection to get the dimensions of the
-            embeddings in.
+            collection_id: The UUID of the collection
 
         Returns:
-            int: The number of dimensions of the embeddings in the collection. If the
-            collection has no embeddings, returns -1.
+            CollectionInfo: The collection detailed information
 
         """
         pass

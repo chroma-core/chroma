@@ -313,7 +313,7 @@ class AuthzResourceActions(str, Enum):
     UPDATE = "update"
     UPSERT = "upsert"
     RESET = "reset"
-    DIMENSIONS = "dimensions"
+    DESCRIBE = "describe"
 
 
 @dataclass

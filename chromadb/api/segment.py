@@ -39,6 +39,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    CollectionInfo,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -625,11 +626,15 @@ class SegmentAPI(ServerAPI):
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
         return metadata_segment.count()
 
-    @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    @trace_method("SegmentAPI._describe", OpenTelemetryGranularity.OPERATION)
     @override
-    def _dimensions(self, collection_id: UUID) -> int:
+    def _describe(self, collection_id: UUID) -> CollectionInfo:
         coll = self._get_collection(collection_id)
-        return cast(int, coll["dimension"]) if coll["dimension"] is not None else -1
+        return CollectionInfo(
+            dimensionality=cast(int, coll["dimension"])
+            if coll["dimension"] is not None
+            else -1
+        )
 
     @override
     def _query(

@@ -33,7 +33,7 @@ valid_action_space = [
     "collection:update",
     "collection:upsert",
     "collection:count",
-    "collection:dimensions",
+    "collection:describe",
 ]
 
 role_name = st.text(alphabet=string.ascii_letters, min_size=1, max_size=20)
@@ -88,7 +88,7 @@ def user_role_config(draw: st.DrawFn) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             "collection:update",
             "collection:upsert",
             "collection:count",
-            "collection:dimensions",
+            "collection:describe",
         ]
     ):
         actions_list.append("collection:get_collection")
@@ -265,11 +265,11 @@ api_executors = {
         col := Collection(api, f"{mcol.name}", mcol.id),
         col.count(),
     ),
-    "collection:dimensions": lambda api, mapi, _: (
-        mcol := mapi.create_collection(f"test-dimensions-{uuid.uuid4()}"),
+    "collection:describe": lambda api, mapi, _: (
+        mcol := mapi.create_collection(f"test-describe-{uuid.uuid4()}"),
         mcol.add(documents=["test"], ids=["1"]),
         col := Collection(api, f"{mcol.name}", mcol.id),
-        col.dimensions(),
+        col.describe(),
     ),
 }
 
