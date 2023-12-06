@@ -1,10 +1,11 @@
 import array
 from uuid import UUID
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, cast
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.utils.messageid import bytes_to_int, int_to_bytes
 from chromadb.types import (
+    Collection,
     EmbeddingRecord,
     Metadata,
     Operation,
@@ -13,6 +14,7 @@ from chromadb.types import (
     SegmentScope,
     SeqId,
     SubmitEmbeddingRecord,
+    UpdateMetadata,
     Vector,
     VectorEmbeddingRecord,
     VectorQueryResult,
@@ -67,13 +69,28 @@ def from_proto_operation(operation: proto.Operation) -> Operation:
     elif operation == proto.Operation.DELETE:
         return Operation.DELETE
     else:
-        raise RuntimeError(f"Unknown operation {operation}")  # TODO: full error
+        # TODO: full error
+        raise RuntimeError(f"Unknown operation {operation}")
 
 
 def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
+    return cast(Optional[Metadata], _from_proto_metadata_handle_none(metadata, False))
+
+
+def from_proto_update_metadata(
+    metadata: proto.UpdateMetadata,
+) -> Optional[UpdateMetadata]:
+    return cast(
+        Optional[UpdateMetadata], _from_proto_metadata_handle_none(metadata, True)
+    )
+
+
+def _from_proto_metadata_handle_none(
+    metadata: proto.UpdateMetadata, is_update: bool
+) -> Optional[Union[UpdateMetadata, Metadata]]:
     if not metadata.metadata:
         return None
-    out_metadata: Dict[str, Union[str, int, float]] = {}
+    out_metadata: Dict[str, Union[str, int, float, None]] = {}
     for key, value in metadata.metadata.items():
         if value.HasField("string_value"):
             out_metadata[key] = value.string_value
@@ -81,9 +98,17 @@ def from_proto_metadata(metadata: proto.UpdateMetadata) -> Optional[Metadata]:
             out_metadata[key] = value.int_value
         elif value.HasField("float_value"):
             out_metadata[key] = value.float_value
+        elif is_update:
+            out_metadata[key] = None
         else:
-            raise RuntimeError(f"Unknown metadata value type {value}")
+            raise ValueError(f"Metadata key {key} value cannot be None")
     return out_metadata
+
+
+def to_proto_update_metadata(metadata: UpdateMetadata) -> proto.UpdateMetadata:
+    return proto.UpdateMetadata(
+        metadata={k: to_proto_metadata_update_value(v) for k, v in metadata.items()}
+    )
 
 
 def from_proto_submit(
@@ -95,8 +120,9 @@ def from_proto_submit(
         seq_id=seq_id,
         embedding=embedding,
         encoding=encoding,
-        metadata=from_proto_metadata(submit_embedding_record.metadata),
+        metadata=from_proto_update_metadata(submit_embedding_record.metadata),
         operation=from_proto_operation(submit_embedding_record.operation),
+        collection_id=UUID(hex=submit_embedding_record.collection_id),
     )
     return record
 
@@ -106,11 +132,13 @@ def from_proto_segment(segment: proto.Segment) -> Segment:
         id=UUID(hex=segment.id),
         type=segment.type,
         scope=from_proto_segment_scope(segment.scope),
-        topic=segment.topic,
+        topic=segment.topic if segment.HasField("topic") else None,
         collection=None
         if not segment.HasField("collection")
         else UUID(hex=segment.collection),
-        metadata=from_proto_metadata(segment.metadata),
+        metadata=from_proto_metadata(segment.metadata)
+        if segment.HasField("metadata")
+        else None,
     )
 
 
@@ -123,9 +151,7 @@ def to_proto_segment(segment: Segment) -> proto.Segment:
         collection=None if segment["collection"] is None else segment["collection"].hex,
         metadata=None
         if segment["metadata"] is None
-        else {
-            k: to_proto_metadata_update_value(v) for k, v in segment["metadata"].items()
-        },  # TODO: refactor out to_proto_metadata
+        else to_proto_update_metadata(segment["metadata"]),
     )
 
 
@@ -165,6 +191,36 @@ def to_proto_metadata_update_value(
         )
 
 
+def from_proto_collection(collection: proto.Collection) -> Collection:
+    return Collection(
+        id=UUID(hex=collection.id),
+        name=collection.name,
+        topic=collection.topic,
+        metadata=from_proto_metadata(collection.metadata)
+        if collection.HasField("metadata")
+        else None,
+        dimension=collection.dimension
+        if collection.HasField("dimension") and collection.dimension
+        else None,
+        database=collection.database,
+        tenant=collection.tenant,
+    )
+
+
+def to_proto_collection(collection: Collection) -> proto.Collection:
+    return proto.Collection(
+        id=collection["id"].hex,
+        name=collection["name"],
+        topic=collection["topic"],
+        metadata=None
+        if collection["metadata"] is None
+        else to_proto_update_metadata(collection["metadata"]),
+        dimension=collection["dimension"],
+        tenant=collection["tenant"],
+        database=collection["database"],
+    )
+
+
 def to_proto_operation(operation: Operation) -> proto.Operation:
     if operation == Operation.ADD:
         return proto.Operation.ADD
@@ -190,18 +246,14 @@ def to_proto_submit(
 
     metadata = None
     if submit_record["metadata"] is not None:
-        metadata = {
-            k: to_proto_metadata_update_value(v)
-            for k, v in submit_record["metadata"].items()
-        }
+        metadata = to_proto_update_metadata(submit_record["metadata"])
 
     return proto.SubmitEmbeddingRecord(
         id=submit_record["id"],
         vector=vector,
-        metadata=proto.UpdateMetadata(metadata=metadata)
-        if metadata is not None
-        else None,
+        metadata=metadata,
         operation=to_proto_operation(submit_record["operation"]),
+        collection_id=submit_record["collection_id"].hex,
     )
 
 
