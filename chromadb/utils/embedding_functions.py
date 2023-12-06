@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import Any, Dict, List, Mapping, Union, cast
+from typing import Any, Dict, List, Mapping, Union, cast, Literal
 import numpy as np
 import numpy.typing as npt
 import importlib
@@ -40,7 +40,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        device: Optional[Literal["cpu", "cuda"]] = "cpu",
+        device: Optional[Literal["cpu", "cuda", "mps"]] = "cpu",
         normalize_embeddings: bool = False,
     ):
         """
@@ -49,8 +49,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         Args:
             model_name (str, optional): The name of the model to use for text
                 embeddings. Defaults to "all-MiniLM-L6-v2".
-            device (str, optional): Device ("cuda" / "cpu") that should be
-                used for computation. If None, checks if a GPU can be used.
+            device (str, optional): Device ("cpu" / "cuda" / "mps") that should be
+                used for computation. If None, checks if a "cuda" can be used.
                 Defaults to "cpu".
         """
         if model_name not in self.models:
@@ -154,13 +154,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key,
                     api_version=api_version,
                     azure_endpoint=api_base,
-                    default_headers=default_headers
+                    default_headers=default_headers,
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key,
-                    base_url=api_base,
-                    default_headers=default_headers
+                    api_key=api_key, base_url=api_base, default_headers=default_headers
                 ).embeddings
         else:
             self._client = openai.Embedding
@@ -179,8 +177,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
             # Sort resulting embeddings by index
             sorted_embeddings = sorted(
-                embeddings, key=lambda e: e.index
-            )  # type: ignore
+                embeddings, key=lambda e: e.index  # type: ignore
+            )
 
             # Return just the embeddings
             return [result.embedding for result in sorted_embeddings]
@@ -196,8 +194,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
             # Sort resulting embeddings by index
             sorted_embeddings = sorted(
-                embeddings, key=lambda e: e["index"]
-            )  # type: ignore
+                embeddings, key=lambda e: e["index"]  # type: ignore
+            )
 
             # Return just the embeddings
             return [result["embedding"] for result in sorted_embeddings]
@@ -219,7 +217,9 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call Cohere Embedding API for each document.
         return [
             embeddings
-            for embeddings in self._client.embed(texts=input, model=self._model_name, input_type="search_document")
+            for embeddings in self._client.embed(
+                texts=input, model=self._model_name, input_type="search_document"
+            )
         ]
 
 
@@ -270,9 +270,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
     """
 
-    def __init__(
-            self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"
-    ):
+    def __init__(self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"):
         """
         Initialize the JinaEmbeddingFunction.
 
@@ -281,9 +279,11 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "jina-embeddings-v2-base-en".
         """
         self._model_name = model_name
-        self._api_url = 'https://api.jina.ai/v1/embeddings'
+        self._api_url = "https://api.jina.ai/v1/embeddings"
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"})
+        self._session.headers.update(
+            {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -301,7 +301,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = jina_ai_fn(input)
         """
         # Call Jina AI Embedding API
-        resp = self._session.post(  # type: ignore
+        resp = self._session.post(
             self._api_url, json={"input": input, "model": self._model_name}
         ).json()
         if "data" not in resp:
@@ -339,8 +339,8 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
             return self._model.encode(input).tolist()  # type: ignore
 
         texts_with_instructions = [[self._instruction, text] for text in input]
-        # type: ignore
-        return self._model.encode(texts_with_instructions).tolist()
+
+        return self._model.encode(texts_with_instructions).tolist()  # type: ignore
 
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
@@ -420,8 +420,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         norm[norm == 0] = 1e-12
         return v / norm[:, np.newaxis]  # type: ignore
 
-    # type: ignore
-    def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
+    def _forward(
+        self, documents: List[str], batch_size: int = 32
+    ) -> npt.NDArray[np.float32]:
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
         self.tokenizer = cast(self.Tokenizer, self.tokenizer)  # type: ignore
         self.model = cast(self.ort.InferenceSession, self.model)  # type: ignore
