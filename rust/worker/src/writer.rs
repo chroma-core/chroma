@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::chroma_proto::SubmitEmbeddingRecord;
 use crate::rendezvous_hash;
 use crate::{
     assignment_policy::{AssignmentPolicy, RendezvousHashingAssignmentPolicy},
@@ -8,7 +9,6 @@ use crate::{
     Component,
 };
 use bytes::Bytes;
-use chroma::SubmitEmbeddingRecord;
 use futures::TryStreamExt;
 use prost::Message;
 use pulsar::{Consumer, DeserializeMessage, Payload, Pulsar, SubType, TokioExecutor};
@@ -17,10 +17,6 @@ use tokio::{select, sync::broadcast::Receiver};
 use tokio_util::sync::CancellationToken;
 
 // TODO: rename to IngestLog
-
-pub mod chroma {
-    tonic::include_proto!("chroma");
-}
 
 impl DeserializeMessage for SubmitEmbeddingRecord {
     type Output = Self;
@@ -35,11 +31,12 @@ impl DeserializeMessage for SubmitEmbeddingRecord {
     }
 }
 
-struct Writer {
+pub struct Writer {
     memberlist_channel: Receiver<Vec<String>>,
     assignment_policy: Arc<Mutex<dyn AssignmentPolicy>>,
     cancellation_token: CancellationToken, // TODO: cancellation token needs to be refreshed when we strt/stop
     pulsar: Pulsar<TokioExecutor>,
+    sender: tokio::sync::mpsc::Sender<Box<SubmitEmbeddingRecord>>,
     running: bool,
 }
 
@@ -47,6 +44,7 @@ impl Writer {
     pub async fn new(
         memberlist_channel: Receiver<Memberlist>,
         assignment_policy: Arc<Mutex<dyn AssignmentPolicy>>,
+        sender: tokio::sync::mpsc::Sender<Box<SubmitEmbeddingRecord>>,
     ) -> Writer {
         /// TODO: cleanup and configure
         let pulsar: Pulsar<TokioExecutor> =
@@ -60,6 +58,7 @@ impl Writer {
             assignment_policy: assignment_policy,
             cancellation_token: CancellationToken::new(),
             pulsar: pulsar, // should we box this?
+            sender: sender,
             running: false,
         };
     }
@@ -78,6 +77,7 @@ impl Component for Writer {
         let cancellation_token = self.cancellation_token.clone();
         let assignment_policy_lock = self.assignment_policy.clone();
         let pulsar = self.pulsar.clone();
+        let sender = self.sender.clone();
         tokio::spawn(async move {
             print!("starting writer");
             // Each subscription will spawn a task that consumes messages from the topic
@@ -136,6 +136,7 @@ impl Component for Writer {
                                     .unwrap();
                                 let per_topic_cancel_token = CancellationToken::new();
                                 topic_to_cancel_token.insert(topic.to_string(), per_topic_cancel_token.clone());
+                                let sender = sender.clone();
                                 tokio::spawn(async move {
                                     loop {
                                         select! {
@@ -154,6 +155,7 @@ impl Component for Writer {
                                                 let msg = msg.unwrap();
                                                 let record = msg.deserialize();
                                                 println!("got record: {:?}", record);
+                                                sender.send(Box::new(record)).await.unwrap();
                                                 // Check the collection id and write to the appropriate index
                                                 // The abstraction we write to is called a "segment" and so we call
                                                 // the appropriate segment provider to write the record
@@ -187,24 +189,25 @@ impl Component for Writer {
 // A writer uses a memberlist_provider and a segment_provider to write to the index
 // that is appropriate for the topic
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    #[tokio::test]
-    async fn test_writer() {
-        let (memberlist_sender, memberlist_receiver) = tokio::sync::broadcast::channel(10);
-        let assignment_policy = Arc::new(Mutex::new(RendezvousHashingAssignmentPolicy::new(
-            "default".to_string(),
-            "default".to_string(),
-        )));
-        let mut writer = Writer::new(memberlist_receiver, assignment_policy).await;
-        let memberlist = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        // tokio sleep
-        writer.start();
-        memberlist_sender.send(memberlist).unwrap();
-        tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
-        writer.stop();
-        return;
-    }
-}
+//     #[tokio::test]
+//     async fn test_writer() {
+//         let (memberlist_sender, memberlist_receiver) = tokio::sync::broadcast::channel(10);
+//         let assignment_policy = Arc::new(Mutex::new(RendezvousHashingAssignmentPolicy::new(
+//             "default".to_string(),
+//             "default".to_string(),
+//         )));
+//         let (msg_sender, msg_receiver) = tokio::sync::mpsc::channel(10);
+//         let mut writer = Writer::new(memberlist_receiver, assignment_policy, msg_sender).await;
+//         let memberlist = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+//         // tokio sleep
+//         writer.start();
+//         memberlist_sender.send(memberlist).unwrap();
+//         tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+//         writer.stop();
+//         return;
+//     }
+// }

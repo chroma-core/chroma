@@ -23,6 +23,7 @@ pulsar = "6.1.0"
 uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 murmur3 = "0.5.2"
 bytes = "1.5.0"
+async-channel = "2.1.1"
 
 [build-dependencies]
 tonic-build = "0.10"

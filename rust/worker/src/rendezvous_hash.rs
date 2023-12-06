@@ -3,11 +3,11 @@ use std::io::Cursor;
 
 use murmur3::murmur3_x64_128;
 
-trait Hasher {
+pub trait Hasher {
     fn hash(&self, member: &str, key: &str) -> Result<u64, &'static str>;
 }
 
-pub(crate) fn assign<H: Hasher>(
+pub fn assign<H: Hasher>(
     key: &str,
     members: impl IntoIterator<Item = impl AsRef<str>>,
     hasher: &H,
@@ -55,7 +55,7 @@ fn merge_hashes(x: u64, y: u64) -> u64 {
     acc
 }
 
-pub(crate) struct Murmur3Hasher {}
+pub struct Murmur3Hasher {}
 
 impl Hasher for Murmur3Hasher {
     fn hash(&self, member: &str, key: &str) -> Result<u64, &'static str> {

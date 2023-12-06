@@ -1,5 +1,12 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::compile_protos("../../idl/chromadb/proto/chroma.proto")?;
+    // tonic_build::compile_protos("../../idl/chromadb/proto/chroma.proto")?;
+    tonic_build::configure().compile(
+        &[
+            "../../idl/chromadb/proto/chroma.proto",
+            "../../idl/chromadb/proto/coordinator.proto",
+        ],
+        &["../../idl/"],
+    )?;
     cc::Build::new()
         .cpp(true)
         .file("bindings.cpp")
