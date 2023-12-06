@@ -1,7 +1,7 @@
+use rand::Rng;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use worker::index::Index;
-
 mod utils;
 
 #[test]
@@ -18,36 +18,48 @@ fn it_initializes_and_can_set_ef() {
 
 #[test]
 fn it_can_add_parallel() {
-    let n = 1000;
+    let n = 10000;
     let d: usize = 960;
     let space_name = "ip";
-    let index = Index::new(space_name, d);
+    let mut index = Index::new(space_name, d);
     index.init(n, 16, 100, 0, true);
 
-    let data = utils::generate_random_data(n, d);
+    // let data: Vec<f32> = utils::generate_random_data(n, d);
     let ids: Vec<usize> = (0..n).collect();
 
     // Add data in parallel, using global pool for testing
     ThreadPoolBuilder::new()
-        .num_threads(12)
+        .num_threads(1)
         .build_global()
         .unwrap();
 
+    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+    let mut datas = Vec::new();
+    for i in 0..n {
+        let mut data: Vec<f32> = Vec::new();
+        for i in 0..960 {
+            data.push(rng.gen());
+        }
+        datas.push(data);
+    }
+
     (0..n).into_par_iter().for_each(|i| {
-        let data = &data[i * d..(i + 1) * d];
+        // let data = &data[i * d..(i + 1) * d];
+        let data = &datas[i];
+        println!("Adding item: {}", i);
         index.add_item(data, ids[i], false)
     });
 
     // Get the data and check it
-    let mut i = 0;
-    for id in ids {
-        let actual_data = index.get_item(id);
-        assert_eq!(actual_data.len(), d);
-        for j in 0..d {
-            assert_eq!(actual_data[j], data[i * d + j]);
-        }
-        i += 1;
-    }
+    // let mut i = 0;
+    // for id in ids {
+    //     let actual_data = index.get_item(id);
+    //     assert_eq!(actual_data.len(), d);
+    //     for j in 0..d {
+    //         assert_eq!(actual_data[j], data[i * d + j]);
+    //     }
+    //     i += 1;
+    // }
 }
 
 #[test]

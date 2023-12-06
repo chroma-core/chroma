@@ -54,6 +54,7 @@ public:
         // if (index_inited) {
         //     // TODO: ERROR HANDLE!
         // }
+        std::cout << "init_new_index in c++" << std::endl;
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, max_elements, M, ef_construction, random_seed, allow_replace_deleted);
         appr_alg->ef_ = ef_search;
         index_inited = true;
@@ -175,7 +176,10 @@ extern "C"
 
     void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted)
     {
+        std::cout << "init_index" << std::endl;
+        std::cout << "Pointer: " << index << std::endl;
         index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted);
+        std::cout << "init_index done" << std::endl;
     }
 
     // void save_index(Index<float> *index, const char *path_to_index)

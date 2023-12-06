@@ -14,10 +14,12 @@ struct IndexPtrFFI {
 pub struct Index {
     ptr: *const IndexPtrFFI,
     dim: usize,
+    pub initialized: bool,
 }
 
 // Make index sync, we should wrap index so that it is sync in the way we expect but for now this implements the trait
 unsafe impl Sync for Index {}
+unsafe impl Send for Index {}
 
 // Index impl that is public and wraps the private index extern "C" struct
 impl Index {
@@ -26,9 +28,11 @@ impl Index {
         // TODO: enum for spaces
         let space_name = CString::new(space_name).unwrap();
         let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
+        println!("Pointer to index: {:?}", index);
         return Index {
             ptr: index,
             dim: dim,
+            initialized: false,
         };
     }
 
@@ -40,6 +44,11 @@ impl Index {
         random_seed: usize,
         allow_replace_deleted: bool,
     ) {
+        if self.initialized {
+            return;
+        }
+        println!("Initializing index in rust");
+        println!("Pointer to index: {:?}", self.ptr);
         unsafe {
             init_index(
                 self.ptr,

@@ -1753,6 +1753,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "608e7659b5c3d7cba262d894801b9ec9d00de989e8a82bd4bef91d08da45cdc0"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-bigint-dig"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3677,6 +3688,8 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "murmur3",
+ "num-bigint",
+ "num-traits",
  "prost 0.12.1",
  "pulsar",
  "rand",
