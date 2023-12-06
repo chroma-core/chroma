@@ -117,6 +117,15 @@ segment_definition = Segment(
     metadata=None,
 )
 
+segment_definition2 = Segment(
+    id=uuid.uuid4(),
+    type="test_type",
+    scope=SegmentScope.METADATA,
+    topic="persistent://test/test/test_topic_2",
+    collection=None,
+    metadata=None,
+)
+
 
 def sync(segment: MetadataReader, seq_id: SeqId) -> None:
     # Try for up to 5 seconds, then throw a TimeoutError
@@ -523,6 +532,7 @@ def _test_update(
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
 
+
 def test_limit(
     system: System,
     sample_embeddings: Iterator[SubmitEmbeddingRecord],
@@ -532,13 +542,19 @@ def test_limit(
     system.reset_state()
 
     topic = str(segment_definition["topic"])
-
     max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+
+    topic2 = str(segment_definition2["topic"])
+    max_id2 = produce_fns(producer, topic2, sample_embeddings, 3)[1][-1]
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
 
+    segment2 = SqliteMetadataSegment(system, segment_definition2)
+    segment2.start()
+
     sync(segment, max_id)
+    sync(segment2, max_id2)
 
     assert segment.count() == 3
 

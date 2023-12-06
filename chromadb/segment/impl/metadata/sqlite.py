@@ -141,10 +141,7 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.float_value,
                 metadata_t.bool_value,
             )
-            .where(
-                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-            )
-            .orderby(embeddings_t.id)
+            .orderby(embeddings_t.embedding_id)
         )
 
         # If there is a query that touches the metadata table, it uses
@@ -154,23 +151,29 @@ class SqliteMetadataSegment(MetadataReader):
                 self._db.querybuilder()
                 .from_(metadata_t)
                 .select(metadata_t.id)
+                .join(embeddings_t)
+                .on(embeddings_t.id == metadata_t.id)
+                .orderby(embeddings_t.embedding_id)
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
                 .distinct()  # These are embedding ids
             )
 
             if where:
                 metadata_q = metadata_q.where(
-                    self._where_map_criterion(metadata_q, where, metadata_t)
+                    self._where_map_criterion(
+                        metadata_q, where, metadata_t, embeddings_t
+                    )
                 )
             if where_document:
                 metadata_q = metadata_q.where(
                     self._where_doc_criterion(
-                        metadata_q, where_document, metadata_t, fulltext_t
+                        metadata_q, where_document, metadata_t, fulltext_t, embeddings_t
                     )
                 )
             if ids is not None:
-                metadata_q = metadata_q.join(embeddings_t).on(
-                    embeddings_t.id == metadata_t.id
-                )
                 metadata_q = metadata_q.where(
                     embeddings_t.embedding_id.isin(ParameterValue(ids))
                 )
@@ -191,7 +194,7 @@ class SqliteMetadataSegment(MetadataReader):
                     embeddings_t.segment_id
                     == ParameterValue(self._db.uuid_to_db(self._id))
                 )
-                .orderby(embeddings_t.id)
+                .orderby(embeddings_t.embedding_id)
                 .limit(limit)
                 .offset(offset)
             )
@@ -478,19 +481,19 @@ class SqliteMetadataSegment(MetadataReader):
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
     )
     def _where_map_criterion(
-        self, q: QueryBuilder, where: Where, metadata_t: Table
+        self, q: QueryBuilder, where: Where, metadata_t: Table, embeddings_t: Table
     ) -> Criterion:
         clause: list[Criterion] = []
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_map_criterion(q, w, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t, embeddings_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x & y, criteria))
             elif k == "$or":
                 criteria = [
-                    self._where_map_criterion(q, w, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t, embeddings_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
@@ -515,17 +518,22 @@ class SqliteMetadataSegment(MetadataReader):
         where: WhereDocument,
         metadata_t: Table,
         fulltext_t: Table,
+        embeddings_t: Table,
     ) -> Criterion:
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_doc_criterion(q, w, metadata_t, fulltext_t)
+                    self._where_doc_criterion(
+                        q, w, metadata_t, fulltext_t, embeddings_t
+                    )
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x & y, criteria)
             elif k == "$or":
                 criteria = [
-                    self._where_doc_criterion(q, w, metadata_t, fulltext_t)
+                    self._where_doc_criterion(
+                        q, w, metadata_t, fulltext_t, embeddings_t
+                    )
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
