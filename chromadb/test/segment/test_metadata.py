@@ -296,9 +296,21 @@ def test_fulltext(
     result = segment.get_metadata(where_document={"$contains": "four two"})
     assert len(result) == 1
 
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "four two"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "four two" not in _build_document(i)]
+    )
+
     # Test many results
     result = segment.get_metadata(where_document={"$contains": "zero"})
     assert len(result) == 9
+
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "zero"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "zero" not in _build_document(i)]
+    )
 
     # test $and
     result = segment.get_metadata(
@@ -306,6 +318,17 @@ def test_fulltext(
     )
     assert len(result) == 2
     assert set([r["id"] for r in result]) == {"embedding_42", "embedding_24"}
+
+    result = segment.get_metadata(
+        where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "four" not in _build_document(i) and "two" not in _build_document(i)
+        ]
+    )
 
     # test $or
     result = segment.get_metadata(
@@ -315,6 +338,17 @@ def test_fulltext(
     zeros = [i for i in range(1, 100) if "zero" in _build_document(i)]
     expected = set([f"embedding_{i}" for i in set(ones + zeros)])
     assert set([r["id"] for r in result]) == expected
+
+    result = segment.get_metadata(
+        where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "zero" not in _build_document(i) or "one" not in _build_document(i)
+        ]
+    )
 
     # test combo with where clause (negative case)
     result = segment.get_metadata(

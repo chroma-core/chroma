@@ -492,6 +492,19 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return embeddings_t.id.isin(sq)
+            elif k == "$not_contains":
+                v = cast(str, v)
+                search_term = f"%{v}%"
+
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.rowid)
+                    .where(
+                        fulltext_t.string_value.not_like(ParameterValue(search_term))
+                    )
+                )
+                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
