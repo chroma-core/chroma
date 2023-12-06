@@ -1,4 +1,4 @@
-from typing import ClassVar, Dict, Optional, Sequence
+from typing import ClassVar, Dict, Optional, Sequence, Any
 from uuid import UUID
 
 from overrides import override
@@ -18,14 +18,16 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    SystemInfoFlags,
 )
-from chromadb.config import Settings, System
+from chromadb.config import Settings, System, get_fqn
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
+from chromadb.utils.system_info_utils import system_info
 
 
 class SharedSystemClient:
@@ -397,6 +399,28 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def get_version(self) -> str:
         return self._server.get_version()
+
+    @override
+    def env(
+        self,
+        system_info_flags: Optional[SystemInfoFlags] = None,
+    ) -> Dict[str, Any]:
+        _env = self._server.env(system_info_flags=system_info_flags)
+        _response = {}
+        # check by fqdn lookup isinstance requires circular import
+        if get_fqn(type(self._server)) == "chromadb.api.segment.SegmentAPI":
+            _env["mode"] = (
+                "persistent"
+                if self._server.get_settings().is_persistent
+                else "ephemeral"
+            )
+            _response["client"] = _env
+        else:
+            _local_env = system_info(self._server, system_info_flags=system_info_flags)
+            _local_env["mode"] = "http"
+            _response["client"] = _local_env
+            _response["server"] = _env
+        return _response
 
     @override
     def get_settings(self) -> Settings:

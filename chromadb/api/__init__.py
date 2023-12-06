@@ -406,19 +406,6 @@ class BaseAPI(ABC):
         """
         pass
 
-    @abstractmethod
-    def env(
-        self,
-        system_info_flags: Optional[SystemInfoFlags] = None,
-    ) -> Dict[str, Any]:
-        """Get system info of the Chroma server.
-
-        Returns:
-            dict: The system info of the Chroma server.
-
-        """
-        pass
-
     @property
     @abstractmethod
     def max_batch_size(self) -> int:
@@ -437,13 +424,6 @@ class BaseAPI(ABC):
             dict: The system info of the Chroma server.
 
         """
-        pass
-
-    @property
-    @abstractmethod
-    def max_batch_size(self) -> int:
-        """Return the maximum number of records that can be submitted in a single call
-        to submit_embeddings."""
         pass
 
 

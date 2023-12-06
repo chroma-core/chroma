@@ -816,7 +816,7 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._env", OpenTelemetryGranularity.ALL)
     @override
-    def _env(
+    def env(
         self, system_info_flags: Optional[SystemInfoFlags] = None
     ) -> Dict[str, Any]:
         return system_info_utils.system_info(

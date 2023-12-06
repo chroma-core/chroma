@@ -2,13 +2,12 @@ import datetime
 import logging
 import os
 import platform
-import socket
 from typing import Dict, Any, Optional, cast
 import re
 import chromadb
 from chromadb.api.types import SystemInfoFlags
 from chromadb.config import Settings
-from chromadb.api import API
+from chromadb.api import ServerAPI as API
 
 logger = logging.getLogger(__name__)
 
@@ -81,17 +80,19 @@ def sanitize_settings(settings: Settings) -> Dict[str, Any]:
 
 
 def system_info(
-    api: Optional[API] = None,
+    api: API,
     system_info_flags: Optional[SystemInfoFlags] = None,
 ) -> Dict[str, Any]:
     _flags = system_info_flags or SystemInfoFlags()
+    print(_flags)
     data: Dict[str, Any] = {
         "chroma_version": chromadb.__version__,
-        "chroma_settings": sanitize_settings(api.get_settings()) if api else {},
+        "is_persistent": api.get_settings().is_persistent,
+        "api": api.get_settings().chroma_api_impl,
         "datetime": datetime.datetime.now().isoformat(),
     }
 
-    if os.environ.get("PERSIST_DIRECTORY") or api:
+    if os.environ.get("PERSIST_DIRECTORY") or api.get_settings().is_persistent:
         data["persist_directory"] = os.environ.get("PERSIST_DIRECTORY") or (
             api.get_settings().persist_directory if api else ""
         )
@@ -125,32 +126,17 @@ def system_info(
         if PSUTIL_INSTALLED:
             data["cpu_info"]["cpu_usage"] = psutil.cpu_percent(interval=1)
 
-    if _flags.disk_info and PSUTIL_INSTALLED:
-        disk = psutil.disk_usage("/")
+    if (
+        _flags.disk_info
+        and PSUTIL_INSTALLED
+        and api
+        and api.get_settings().is_persistent
+    ):
+        disk = psutil.disk_usage(api.get_settings().persist_directory)
         data["disk_info"] = {
             "total_space": disk.total,
             "used_space": disk.used,
             "free_space": disk.free,
         }
 
-    if _flags.network_info and PSUTIL_INSTALLED:
-        ip_info = {
-            interface: [addr.address for addr in addrs if addr.family == socket.AF_INET]
-            for interface, addrs in psutil.net_if_addrs().items()
-        }
-        data["network_info"] = ip_info
-
-    if _flags.env_vars:
-        data["env_vars"] = sanitized_environ()
-
-    if _flags.collections_info and api:
-        data["collections_info"] = [
-            {
-                "name": collection.name,
-                "id": collection.id,
-                "count": api._count(collection.id),
-                "metadata": collection.metadata,
-            }
-            for collection in api.list_collections()
-        ]
     return data

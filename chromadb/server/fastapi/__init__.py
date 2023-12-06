@@ -1,6 +1,6 @@
 from typing import Any, Callable, Dict, List, Sequence
 import fastapi
-from fastapi import FastAPI as _FastAPI, Response
+from fastapi import FastAPI as _FastAPI, Response, Depends
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,23 +103,22 @@ def _uuid(uuid_str: str) -> UUID:
     except ValueError:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
+
 def query_bool(
-        query: str,
-        default: bool,
+    query: str,
+    default: bool,
 ) -> bool:
     if query is None:
         return default
     return query.lower() == "true"
 
+
 async def env_query_params(
-        python_version: bool = True,
-        os_info: bool = True,
-        memory_info: bool = True,
-        cpu_info: bool = True,
-        disk_info: bool = False,
-        network_info: bool = False,
-        env_vars: bool = False,
-        collections_info: bool = False,
+    python_version: bool = True,
+    os_info: bool = True,
+    memory_info: bool = True,
+    cpu_info: bool = True,
+    disk_info: bool = False,
 ) -> SystemInfoFlags:
     return SystemInfoFlags(
         python_version=python_version,
@@ -127,10 +126,8 @@ async def env_query_params(
         memory_info=memory_info,
         cpu_info=cpu_info,
         disk_info=disk_info,
-        network_info=network_info,
-        env_vars=env_vars,
-        collections_info=collections_info,
     )
+
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
@@ -324,8 +321,8 @@ class FastAPI(chromadb.server.Server):
 
     @trace_method("FastAPI.env", OpenTelemetryGranularity.OPERATION)
     def env(
-            self,
-            system_info_flags: SystemInfoFlags = Depends(env_query_params),
+        self,
+        system_info_flags: SystemInfoFlags = Depends(env_query_params),
     ) -> Dict[str, Any]:
         return self._api.env(system_info_flags=system_info_flags)
 

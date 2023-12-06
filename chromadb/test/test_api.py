@@ -1433,13 +1433,17 @@ def test_system_info(api_obs):
         _env = api_obs.env()
         assert _env is not None
         assert _env["chroma_version"] is not None
-        assert _env["chroma_settings"] is not None
-    elif api_obs.get_settings().chroma_server_env_endpoint_enabled:
-        resp = requests.get(f"{api_obs._api_url}/env")
-        assert resp.status_code == 200
-        assert resp.json() is not None
-        assert resp.json()["chroma_version"] is not None
-        assert resp.json()["chroma_settings"] is not None
     else:
-        resp = requests.get(f"{api_obs._api_url}/env")
-        assert resp.status_code == 404
+        _env = api_obs.env()
+        assert _env["chroma_version"] is not None
+
+
+def test_system_info_env_endpoint_disabled(api):
+    if isinstance(api, chromadb.api.fastapi.FastAPI):
+        with pytest.raises(Exception) as e:
+            api.env()
+        assert "Not Found" in str(e.value)
+    else:
+        _env = api.env()
+        assert _env is not None
+        assert _env["chroma_version"] is not None

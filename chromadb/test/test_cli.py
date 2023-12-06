@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from typing import List, Dict
 
 import pytest
@@ -73,8 +75,6 @@ dicts_list = [
     {"--memory-info": ["memory_info"]},
     {"--cpu-info": ["cpu_info"]},
     {"--disk-info": ["disk_info"]},
-    {"--network-info": ["network_info"]},
-    {"--env-vars": ["env_vars"]},
 ]
 
 
@@ -89,11 +89,11 @@ def test_system_info_with_flags(flags_dict: List[Dict[str, List[str]]]) -> None:
     for di in flags_dict:
         flags.append(list(di.keys())[0])
         check_response_flags.extend(list(di.values())[0])
-
+    persist_directory = tempfile.mkdtemp()
     result = runner.invoke(
         app,
-        ["env", "info", *flags],
+        ["env", "info", "--path", f"{persist_directory}", *flags],
     )
-
+    shutil.rmtree(persist_directory, ignore_errors=True)
     for flag in check_response_flags:
         assert flag in result.stdout

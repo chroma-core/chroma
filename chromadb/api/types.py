@@ -1,4 +1,15 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, NamedTuple, cast
+from typing import (
+    Optional,
+    Sequence,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    NamedTuple,
+    cast,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -188,6 +199,7 @@ class IndexMetadata(TypedDict):
     total_elements_added: int
     time_created: float
 
+
 class SystemInfoFlags(NamedTuple):
     """
     Flags for the system info endpoint
@@ -197,10 +209,8 @@ class SystemInfoFlags(NamedTuple):
     os_info: bool = True
     memory_info: bool = True
     cpu_info: bool = True
-    disk_info: bool = False
-    network_info: bool = False
-    env_vars: bool = False
-    collections_info: bool = False
+    disk_info: bool = True
+
 
 Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
@@ -226,7 +236,9 @@ def validate_embedding_function(
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
 
+
 L = TypeVar("L", covariant=True)
+
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:

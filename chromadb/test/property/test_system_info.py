@@ -4,7 +4,7 @@ import requests
 
 from typing import List, Dict
 from chromadb.api.fastapi import FastAPI
-from chromadb.api import API
+from chromadb.api import ServerAPI as API
 from chromadb.api.types import SystemInfoFlags
 from hypothesis import given, strategies as st
 

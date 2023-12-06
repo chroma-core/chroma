@@ -179,7 +179,7 @@ def _fastapi_fixture(
     ] = (
         port,
         False,
-        False,
+        chroma_server_env_endpoint_enabled,
         None,
         chroma_server_auth_provider,
         chroma_server_auth_credentials_provider,
@@ -334,14 +334,18 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
 
 
 def fastapi_server_env_endpoint_enabled() -> Generator[System, None, None]:
-    settings = Settings(
+    return _fastapi_fixture(
+        is_persistent=True,
         chroma_server_env_endpoint_enabled=True,
-        allow_reset=True,
     )
-    system = System(settings)
-    system.start()
-    yield system
-    system.stop()
+    # settings = Settings(
+    #     chroma_server_env_endpoint_enabled=True,
+    #     allow_reset=True,
+    # )
+    # system = System(settings)
+    # system.start()
+    # yield system
+    # system.stop()
 
 
 def integration() -> Generator[System, None, None]:
@@ -405,7 +409,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
 
 
 def system_fixture_observability() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, sqlite, fastapi_server_env_endpoint_enabled]
+    fixtures = [sqlite, sqlite_persistent, fastapi_server_env_endpoint_enabled]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
