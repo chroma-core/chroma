@@ -510,7 +510,7 @@ class FastAPI(ServerAPI):
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return True
 
     @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
@@ -533,7 +533,7 @@ class FastAPI(ServerAPI):
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return True
 
     @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)
