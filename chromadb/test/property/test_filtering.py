@@ -94,6 +94,8 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     # Simple $contains clause
     assert isinstance(expr, str)
     if key == "$contains":
+        if not doc:
+            return False
         # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
         # treat them as wildcards
         if "%" in expr or "_" in expr:
@@ -101,12 +103,14 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
             return re.search(expr, doc) is not None
         return expr in doc
     elif key == "$not_contains":
+        if not doc:
+            return False
         # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
         # treat them as wildcards
         if "%" in expr or "_" in expr:
             expr = expr.replace("%", ".").replace("_", ".")
-            return doc and re.search(expr, doc) is None
-        return doc and expr not in doc
+            return re.search(expr, doc) is None
+        return expr not in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
 
@@ -317,7 +321,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
 
 
 def test_get_empty(api: ServerAPI) -> None:
-    """Tests that calling get() with empty filters returns Fhing"""
+    """Tests that calling get() with empty filters returns nothing"""
 
     api.reset()
     coll = api.create_collection(name="test")
