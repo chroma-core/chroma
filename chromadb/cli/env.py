@@ -28,7 +28,9 @@ def info(
     path: str = typer.Option(None, help="The path to local persistence directory."),
 ) -> None:
     if remote:
-        client = chromadb.HttpClient(host=remote)
+        client = chromadb.HttpClient(
+            host=remote, port=f"{os.environ.get('CHROMA_SERVER_HTTP_PORT', 8000)}"
+        )
     elif path:
         typer.echo(f"Local persistent client with path: {path}")
         if not os.path.exists(path):

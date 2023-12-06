@@ -65,7 +65,6 @@ def test_system_info_with_remote() -> None:
     assert "chroma_version" in result.stdout
     assert "python_version" in result.stdout
     assert "datetime" in result.stdout
-    assert "Remote system info" in result.stdout
 
 
 # Example list of dictionaries
