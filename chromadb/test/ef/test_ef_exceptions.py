@@ -6,7 +6,6 @@ from typing import Generator, Optional
 
 import pytest
 from _pytest.logging import LogCaptureFixture
-from dotenv import load_dotenv
 
 from chromadb import EmbeddingFunction
 from chromadb.utils.embedding_functions import (
@@ -40,7 +39,6 @@ def default_ef() -> Optional[EmbeddingFunction]:
 
 
 def openai_ef() -> Optional[EmbeddingFunction]:
-    load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key is None:
         return None
@@ -48,7 +46,6 @@ def openai_ef() -> Optional[EmbeddingFunction]:
 
 
 def huggingface_ef() -> Optional[EmbeddingFunction]:
-    load_dotenv()
     api_key = os.getenv("HUGGINGFACE_API_KEY")
     if api_key is None:
         return None
@@ -58,6 +55,7 @@ def huggingface_ef() -> Optional[EmbeddingFunction]:
     )
 
 
+# skipping OpenAIEmbeddingFunction as it already throws an error when exceeding max token length
 @pytest.fixture(
     scope="function",
     params=[
