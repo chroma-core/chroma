@@ -76,8 +76,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
 
 
 def test_cloud_client(mock_cloud_server: System, valid_token: str) -> None:
-    # Connect to the default tenant and database
-    client = CloudClient(
+    valid_client = CloudClient(
         tenant=DEFAULT_TENANT,
         database=DEFAULT_DATABASE,
         api_key=valid_token,
@@ -86,4 +85,17 @@ def test_cloud_client(mock_cloud_server: System, valid_token: str) -> None:
         enable_ssl=False,
     )
 
-    client.get_version()
+    assert valid_client.heartbeat()
+
+    # Try to connect to the default tenant and database with an invalid token
+    invalid_token = valid_token + "_invalid"
+    client = CloudClient(
+        tenant=DEFAULT_TENANT,
+        database=DEFAULT_DATABASE,
+        api_key=invalid_token,
+        cloud_host=TEST_CLOUD_HOST,
+        cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
+        enable_ssl=False,
+    )
+
+    print(client.list_collections())
