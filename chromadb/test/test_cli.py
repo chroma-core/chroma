@@ -8,9 +8,15 @@ import requests
 from hypothesis import given, strategies as st, settings
 from typer.testing import CliRunner
 
+from chromadb.api.client import SharedSystemClient
 from chromadb.cli.cli import app
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def reset_client_settings() -> None:
+    SharedSystemClient._identifer_to_system = {}
 
 
 def test_app() -> None:
@@ -96,6 +102,8 @@ def tempdir() -> Generator[str, None, None]:
 def test_system_info_with_flags(
     tempdir: str, flags_dict: List[Dict[str, List[str]]]
 ) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping integration tests")
     flags = []
     check_response_flags = []
     for di in flags_dict:
@@ -106,6 +114,5 @@ def test_system_info_with_flags(
         app,
         ["env", "info", "--path", f"{tempdir}", *flags],
     )
-    print(result.stdout)
     for flag in check_response_flags:
         assert flag in result.stdout

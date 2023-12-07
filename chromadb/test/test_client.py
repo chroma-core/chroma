@@ -1,11 +1,17 @@
 from typing import Generator
 from unittest.mock import patch
 import chromadb
+from chromadb.api.client import SharedSystemClient
 from chromadb.config import Settings
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 import pytest
 import tempfile
+
+
+@pytest.fixture(autouse=True)
+def reset_client_settings() -> None:
+    SharedSystemClient._identifer_to_system = {}
 
 
 @pytest.fixture
