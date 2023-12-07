@@ -85,7 +85,7 @@ class SharedSystemClient:
             )
         else:
             raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
-
+        print("identifier", identifier)
         return identifier
 
     @staticmethod

@@ -106,5 +106,6 @@ def test_system_info_with_flags(
         app,
         ["env", "info", "--path", f"{tempdir}", *flags],
     )
+    print(result.stdout)
     for flag in check_response_flags:
         assert flag in result.stdout
