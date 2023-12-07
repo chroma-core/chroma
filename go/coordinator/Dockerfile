@@ -10,7 +10,7 @@ RUN cd /src/chroma-coordinator \
 
 FROM alpine:3.17.3
 
-RUN apk add --no-cache bash bash-completion
+RUN apk add --no-cache atlas bash bash-completion
 
 RUN mkdir /chroma-coordinator
 WORKDIR /chroma-coordinator
@@ -18,6 +18,6 @@ WORKDIR /chroma-coordinator
 COPY --from=build /src/chroma-coordinator/bin/chroma /chroma-coordinator/bin/chroma
 ENV PATH=$PATH:/chroma-coordinator/bin
 
-RUN chroma completion bash > ~/.bashrc
+COPY --from=build /src/chroma-coordinator/migrations /chroma-coordinator/migrations
 
 CMD /bin/bash
