@@ -428,16 +428,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .where(databases_t.name == ParameterValue(database))
                 .where(databases_t.tenant_id == ParameterValue(tenant))
             )
-
-        # Set default limit if not provided
-        limit = limit or 2**63 - 1
-        # Add the limit to the query
-        q = q.limit(limit)
-
-        # Set default offset if not provided
-        offset = offset or 0
-        # Add the offset to the query
-        q = q.offset(offset)
+        # cant set limit and offset here because this is metadata and we havent reduced yet
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
@@ -462,6 +453,12 @@ class SqlSysDB(SqlDB, SysDB):
                         database=str(rows[0][4]),
                     )
                 )
+
+            # apply limit and offset
+            if limit is not None:
+                collections = collections[offset:offset+limit]
+            else:
+                collections = collections[offset:]
 
             return collections
 
