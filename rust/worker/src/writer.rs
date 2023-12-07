@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::chroma_proto::SubmitEmbeddingRecord;
+use crate::convert::from_proto_submit;
+use crate::messageid::pulsar_to_int;
 use crate::rendezvous_hash;
 use crate::types::EmbeddingRecord;
 use crate::{
@@ -156,7 +158,19 @@ impl Component for Writer {
                                                 let msg = msg.unwrap();
                                                 let record = msg.deserialize();
                                                 println!("got record: {:?}", record);
-                                                sender.send(Box::new(record)).await.unwrap();
+                                                let maybe_seq_id = pulsar_to_int(msg.message_id());
+                                                match maybe_seq_id {
+                                                    Ok(seq_id) => {
+                                                        let record = from_proto_submit(record, seq_id);
+                                                        match record {
+                                                            Ok(record) => {
+                                                                sender.send(Box::new(record)).await.unwrap();
+                                                            }
+                                                            Err(_) => {}
+                                                        }
+                                                    }
+                                                    Err(_) => {}
+                                                }
                                                 // Check the collection id and write to the appropriate index
                                                 // The abstraction we write to is called a "segment" and so we call
                                                 // the appropriate segment provider to write the record
