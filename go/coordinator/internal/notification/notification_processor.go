@@ -2,7 +2,7 @@ package notification
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/model"
@@ -17,13 +17,12 @@ type NotificationProcessor interface {
 }
 
 type SimpleNotificationProcessor struct {
-	mu          sync.Mutex
 	ctx         context.Context
 	store       NotificationStore
 	notifer     Notifier
 	channel     chan TriggerMessage
 	doneChannel chan bool
-	running     bool
+	running     atomic.Bool
 }
 
 type TriggerMessage struct {
@@ -42,7 +41,6 @@ func NewSimpleNotificationProcessor(ctx context.Context, store NotificationStore
 		notifer:     notifier,
 		channel:     make(chan TriggerMessage, triggerChannelSize),
 		doneChannel: make(chan bool),
-		running:     false,
 	}
 }
 
@@ -54,17 +52,13 @@ func (n *SimpleNotificationProcessor) Start() error {
 		log.Error("Failed to send pending notifications", zap.Error(err))
 		return err
 	}
-	n.mu.Lock()
-	n.running = true
-	n.mu.Unlock()
+	n.running.Store(true)
 	go n.Process(n.ctx)
 	return nil
 }
 
 func (n *SimpleNotificationProcessor) Stop() error {
-	n.mu.Lock()
-	n.running = false
-	n.mu.Unlock()
+	n.running.Store(false)
 	n.doneChannel <- true
 	return nil
 }
@@ -78,7 +72,7 @@ func (n *SimpleNotificationProcessor) Process(ctx context.Context) error {
 			log.Info("Received notification", zap.Any("msg", msg))
 
 			// We need to block here until the notifications are sent successfully
-			for n.running {
+			for n.running.Load() {
 				// Check the notification store if this notification is already processed
 				// If it is already processed, just return
 				// If it is not processed, send notifications and remove from the store
