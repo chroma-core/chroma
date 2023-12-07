@@ -7,13 +7,6 @@ pub(crate) fn from_proto_submit(
     proto_submit: chroma_proto::SubmitEmbeddingRecord,
     seq_id: SeqId,
 ) -> Result<EmbeddingRecord, &'static str> {
-    let record_id = proto_submit.id;
-    let maybe_record_id = Uuid::parse_str(&record_id);
-    if maybe_record_id.is_err() {
-        return Err("Failed to parse record id");
-    }
-    let record_uuid = maybe_record_id.unwrap();
-
     let maybe_op = from_proto_operation(proto_submit.operation);
     if maybe_op.is_err() {
         return Err("Failed to parse operation");
@@ -42,7 +35,7 @@ pub(crate) fn from_proto_submit(
     }
 
     let out_record = EmbeddingRecord {
-        id: record_uuid,
+        id: proto_submit.id,
         seq_id: seq_id,
         embedding: embedding,
         encoding: encoding,

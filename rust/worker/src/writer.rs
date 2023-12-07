@@ -158,19 +158,18 @@ impl Component for Writer {
                                                 let msg = msg.unwrap();
                                                 let record = msg.deserialize();
                                                 println!("got record: {:?}", record);
-                                                let maybe_seq_id = pulsar_to_int(msg.message_id());
-                                                match maybe_seq_id {
-                                                    Ok(seq_id) => {
-                                                        let record = from_proto_submit(record, seq_id);
-                                                        match record {
-                                                            Ok(record) => {
-                                                                sender.send(Box::new(record)).await.unwrap();
-                                                            }
-                                                            Err(_) => {}
-                                                        }
+                                                let seq_id = pulsar_to_int(msg.message_id());
+                                                let record = from_proto_submit(record, seq_id);
+                                                match record {
+                                                    Ok(record) => {
+                                                        println!("writer.rs sending record: {:?}", record.id);
+                                                        sender.send(Box::new(record)).await.unwrap();
                                                     }
-                                                    Err(_) => {}
+                                                    Err(_) => {
+                                                        println!("Error parsing record");
+                                                    }
                                                 }
+
                                                 // Check the collection id and write to the appropriate index
                                                 // The abstraction we write to is called a "segment" and so we call
                                                 // the appropriate segment provider to write the record

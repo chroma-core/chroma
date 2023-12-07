@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicI64, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
-use crate::chroma_proto::{self, Operation};
 use crate::index::Index;
+use crate::types::{EmbeddingRecord, Operation};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<Index>>,
@@ -26,7 +26,7 @@ impl DistributedHNSWSegment {
         // TODO: lazy init so we can track the dim correctly
     }
 
-    pub(crate) fn write_records(&self, records: Vec<Box<chroma_proto::SubmitEmbeddingRecord>>) {
+    pub(crate) fn write_records(&self, records: Vec<Box<EmbeddingRecord>>) {
         for record in records {
             let op = Operation::try_from(record.operation);
             match op {
@@ -35,25 +35,13 @@ impl DistributedHNSWSegment {
                     // TODO: make lock xor lock
                     let index_res = self.index.read();
                     match index_res {
-                        Ok(mut index) => match record.vector {
+                        Ok(mut index) => match record.embedding {
                             Some(vector) => {
                                 // Parse the bytes into a vector
-                                let vector = vector.vector;
-                                let vector = vec_to_f32(&vector);
-                                match vector {
-                                    Some(vector) => {
-                                        // TOOD: id management
-                                        println!("Adding item to index with id: {}", record.id);
-                                        let next_id = self
-                                            .id
-                                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                                        // println!("Vector: {:?}", vector);
-                                        index.add_item(vector, next_id, false);
-                                    }
-                                    None => {
-                                        println!("Error parsing vector");
-                                    }
-                                }
+                                let next_id =
+                                    self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                println!("Adding item: {}", next_id);
+                                index.add_item(&vector, next_id, false);
                             }
                             None => {
                                 // TODO: log an error

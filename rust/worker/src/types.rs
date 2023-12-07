@@ -30,7 +30,7 @@ pub(crate) enum MetadataValue {
 pub(crate) type UpdateMetadata = HashMap<String, MetadataValue>;
 
 pub(crate) struct EmbeddingRecord {
-    pub(crate) id: Uuid,
+    pub(crate) id: String,
     pub(crate) seq_id: SeqId,
     pub(crate) embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now
     pub(crate) encoding: Option<ScalarEncoding>,

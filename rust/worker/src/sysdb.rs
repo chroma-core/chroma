@@ -11,7 +11,7 @@ const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
 #[async_trait]
-trait SysDb {
+pub(crate) trait SysDb: Send + Sync {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
@@ -34,12 +34,12 @@ trait SysDb {
 #[derive(Clone)]
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
-struct GrpcSysDb {
+pub(crate) struct GrpcSysDb {
     client: sys_db_client::SysDbClient<tonic::transport::Channel>,
 }
 
 impl GrpcSysDb {
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let client = sys_db_client::SysDbClient::connect("http://[::1]:50051").await;
         match client {
             Ok(client) => {
