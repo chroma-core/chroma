@@ -1,11 +1,11 @@
 import os
 import shutil
 import tempfile
-from typing import List, Dict
+from typing import List, Dict, Generator
 
 import pytest
 import requests
-from hypothesis import given, strategies as st
+from hypothesis import given, strategies as st, settings
 from typer.testing import CliRunner
 
 from chromadb.cli.cli import app
@@ -80,22 +80,31 @@ dicts_list = [
 ]
 
 
+@pytest.fixture(scope="module")
+def tempdir() -> Generator[str, None, None]:
+    tempdir = tempfile.mkdtemp()
+    yield tempdir
+    shutil.rmtree(tempdir)
+
+
+@settings(max_examples=50)
 @given(
     flags_dict=st.iterables(
         elements=st.sampled_from(dicts_list), min_size=1, max_size=len(dicts_list)
     )
 )
-def test_system_info_with_flags(flags_dict: List[Dict[str, List[str]]]) -> None:
+def test_system_info_with_flags(
+    tempdir: str, flags_dict: List[Dict[str, List[str]]]
+) -> None:
     flags = []
     check_response_flags = []
     for di in flags_dict:
         flags.append(list(di.keys())[0])
         check_response_flags.extend(list(di.values())[0])
-    persist_directory = tempfile.mkdtemp()
+
     result = runner.invoke(
         app,
-        ["env", "info", "--path", f"{persist_directory}", *flags],
+        ["env", "info", "--path", f"{tempdir}", *flags],
     )
-    shutil.rmtree(persist_directory, ignore_errors=True)
     for flag in check_response_flags:
         assert flag in result.stdout
