@@ -95,6 +95,16 @@ class EmbeddingRecord(TypedDict):
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
+    # The collection the operation is being performed on
+    # This is optional because in the single node version,
+    # topics are 1:1 with collections. So consumers of the ingest queue
+    # implicitly know this mapping. However, in the multi-node version,
+    # topics are shared between collections, so we need to explicitly
+    # specify the collection.
+    # For backwards compatability reasons, we can't make this a required field on
+    # single node, since data written with older versions of the code won't be able to
+    # populate it.
+    collection_id: Optional[UUID]
 
 
 class SubmitEmbeddingRecord(TypedDict):
@@ -103,6 +113,7 @@ class SubmitEmbeddingRecord(TypedDict):
     encoding: Optional[ScalarEncoding]
     metadata: Optional[UpdateMetadata]
     operation: Operation
+    collection_id: UUID  # The collection the operation is being performed on
 
 
 class VectorQuery(TypedDict):

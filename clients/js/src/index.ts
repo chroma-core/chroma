@@ -35,3 +35,4 @@ export {
     PeekParams,
     DeleteParams
 } from './types';
+export { HuggingFaceEmbeddingServerFunction } from './embeddings/HuggingFaceEmbeddingServerFunction';

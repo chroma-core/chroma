@@ -2,8 +2,6 @@
 import threading
 from chromadb.test.conftest import skip_if_not_cluster
 from kubernetes import client, config
-import pytest
-import os
 from chromadb.config import System, Settings
 from chromadb.segment.distributed import Memberlist
 from chromadb.segment.impl.distributed.segment_directory import (
@@ -15,11 +13,11 @@ import time
 
 
 # Used for testing to update the memberlist CRD
-def update_memberlist(n: int, memberlist_name: str = "worker-memberlist") -> Memberlist:
+def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Memberlist:
     config.load_config()
     api_instance = client.CustomObjectsApi()
 
-    members = [{"url": f"ip.{i}.com"} for i in range(1, n + 1)]
+    members = [{"url": f"10.0.0.{i}"} for i in range(1, n + 1)]
 
     body = {
         "kind": "MemberList",
@@ -45,10 +43,10 @@ def compare_memberlists(m1: Memberlist, m2: Memberlist) -> bool:
 
 @skip_if_not_cluster()
 def test_can_get_memberlist() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 
@@ -64,10 +62,10 @@ def test_can_get_memberlist() -> None:
 
 @skip_if_not_cluster()
 def test_can_update_memberlist_multiple_times() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 
@@ -90,10 +88,10 @@ def test_can_update_memberlist_multiple_times() -> None:
 
 @skip_if_not_cluster()
 def test_stop_memberlist_kills_thread() -> None:
-    # This test assumes that the memberlist CRD is already created with the name "worker-memberlist"
+    # This test assumes that the memberlist CRD is already created with the name "test-memberlist"
     system = System(Settings(allow_reset=True))
     provider = system.instance(CustomResourceMemberlistProvider)
-    provider.set_memberlist_name("worker-memberlist")
+    provider.set_memberlist_name("test-memberlist")
     system.reset_state()
     system.start()
 

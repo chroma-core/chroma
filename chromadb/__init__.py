@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.17"
+__version__ = "0.4.18"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
@@ -156,6 +156,7 @@ def HttpClient(
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
+        settings: A dictionary of settings to communicate with the chroma server.
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
@@ -164,7 +165,15 @@ def HttpClient(
         settings = Settings()
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    if settings.chroma_server_host and settings.chroma_server_host != host:
+        raise ValueError(
+            f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
+        )
     settings.chroma_server_host = host
+    if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
+        raise ValueError(
+            f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
+        )
     settings.chroma_server_http_port = port
     settings.chroma_server_ssl_enabled = ssl
     settings.chroma_server_headers = headers
