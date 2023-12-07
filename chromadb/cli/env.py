@@ -1,6 +1,8 @@
 import json
 import os
 import time
+import traceback
+
 import typer
 import chromadb
 from chromadb.api.types import SystemInfoFlags
@@ -66,7 +68,8 @@ def info(
                 "================================== End local system info =================================="
             )
     except Exception as e:
-        typer.echo(f"Failed to get system info: {str(e)}")
+        traceback.print_exc()
+        typer.echo(f"Failed to get system info {type(client)}: {str(e)}")
 
 
 @env_app.command(help="Remote chroma continuous monitoring. Prints out CPU and memory usage")  # type: ignore

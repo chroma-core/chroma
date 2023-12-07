@@ -61,6 +61,9 @@ def test_system_info_with_remote() -> None:
             "--remote",
             f"http://localhost:{os.environ.get('CHROMA_SERVER_HTTP_PORT', 8000)}",
         ],
+        env={
+            "CHROMA_SERVER_HOST": f"http://localhost:{os.environ.get('CHROMA_SERVER_HTTP_PORT', 8000)}"
+        },
     )
     assert "chroma_version" in result.stdout
     assert "python_version" in result.stdout

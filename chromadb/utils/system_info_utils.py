@@ -84,7 +84,6 @@ def system_info(
     system_info_flags: Optional[SystemInfoFlags] = None,
 ) -> Dict[str, Any]:
     _flags = system_info_flags or SystemInfoFlags()
-    print(_flags)
     data: Dict[str, Any] = {
         "chroma_version": chromadb.__version__,
         "is_persistent": api.get_settings().is_persistent,
@@ -131,6 +130,8 @@ def system_info(
         and PSUTIL_INSTALLED
         and api
         and api.get_settings().is_persistent
+        and api.get_settings().persist_directory
+        and os.path.exists(api.get_settings().persist_directory)
     ):
         disk = psutil.disk_usage(api.get_settings().persist_directory)
         data["disk_info"] = {
