@@ -116,7 +116,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -266,7 +266,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:
