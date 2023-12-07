@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::chroma_proto::SubmitEmbeddingRecord;
 use crate::rendezvous_hash;
+use crate::types::EmbeddingRecord;
 use crate::{
     assignment_policy::{AssignmentPolicy, RendezvousHashingAssignmentPolicy},
     memberlist_provider::Memberlist,
@@ -36,7 +37,7 @@ pub struct Writer {
     assignment_policy: Arc<Mutex<dyn AssignmentPolicy>>,
     cancellation_token: CancellationToken, // TODO: cancellation token needs to be refreshed when we strt/stop
     pulsar: Pulsar<TokioExecutor>,
-    sender: tokio::sync::mpsc::Sender<Box<SubmitEmbeddingRecord>>,
+    sender: tokio::sync::mpsc::Sender<Box<EmbeddingRecord>>,
     running: bool,
 }
 
@@ -44,7 +45,7 @@ impl Writer {
     pub async fn new(
         memberlist_channel: Receiver<Memberlist>,
         assignment_policy: Arc<Mutex<dyn AssignmentPolicy>>,
-        sender: tokio::sync::mpsc::Sender<Box<SubmitEmbeddingRecord>>,
+        sender: tokio::sync::mpsc::Sender<Box<EmbeddingRecord>>,
     ) -> Writer {
         /// TODO: cleanup and configure
         let pulsar: Pulsar<TokioExecutor> =
