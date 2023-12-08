@@ -233,7 +233,7 @@ class FastAPI(ServerAPI):
     ) -> int:
         """Returns a count of collections"""
         resp = self._session.get(
-            self._api_url + "/collections/count",
+            self._api_url + "/count_collections",
             params={"tenant": tenant, "database": database},
         )
         raise_chroma_error(resp)

@@ -208,7 +208,7 @@ class FastAPI(chromadb.server.Server):
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v1/collections/count",
+            "/api/v1/count_collections",
             self.count_collections,
             methods=["GET"],
             response_model=None,

@@ -193,7 +193,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		 * @throws {RequiredError}
 		 */
 		countCollections(tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
-			let localVarPath = `/api/v1/collections/count`;
+			let localVarPath = `/api/v1/count_collections`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
@@ -765,7 +765,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			localVarHeaderParameter.set('Content-Type', 'application/json');
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
-
+	
 			if (request !== undefined) {
 				localVarRequestOptions.body = JSON.stringify(request || {});
 			}
@@ -808,7 +808,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			localVarHeaderParameter.set('Content-Type', 'application/json');
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
-
+	
 			if (request !== undefined) {
 				localVarRequestOptions.body = JSON.stringify(request || {});
 			}
@@ -870,7 +870,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 201) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -900,7 +900,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -930,7 +930,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -959,7 +959,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -989,7 +989,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1020,7 +1020,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1050,7 +1050,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1079,7 +1079,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1110,7 +1110,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1141,7 +1141,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1171,7 +1171,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1201,7 +1201,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1230,7 +1230,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1258,7 +1258,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1284,7 +1284,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1312,7 +1312,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1334,7 +1334,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1356,7 +1356,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1380,7 +1380,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1410,7 +1410,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1440,7 +1440,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
@@ -1468,7 +1468,7 @@ export const ApiApiFp = function(configuration?: Configuration) {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
 					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
+					
 					if (response.status === 200) {
 						if (mimeType === 'application/json') {
 							return response.json() as any;
