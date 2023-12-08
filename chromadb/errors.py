@@ -74,7 +74,7 @@ class InvalidHTTPVersion(ChromaError):
 class AuthorizationError(ChromaError):
     @overrides
     def code(self) -> int:
-        return 403
+        return 401
 
     @classmethod
     @overrides
