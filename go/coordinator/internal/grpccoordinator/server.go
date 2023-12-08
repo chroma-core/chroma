@@ -40,13 +40,13 @@ type Config struct {
 	// Notification config
 	NotificationStoreProvider string
 	NotifierProvider          string
+	NotificationTopic         string
 
 	// Pulsar config
-	PulsarAdminURL    string
-	PulsarTenant      string
-	PulsarNamespace   string
-	PulsarURL         string
-	NotificationTopic string
+	PulsarAdminURL  string
+	PulsarURL       string
+	PulsarTenant    string
+	PulsarNamespace string
 
 	// Kubernetes config
 	KubernetesNamespace  string
