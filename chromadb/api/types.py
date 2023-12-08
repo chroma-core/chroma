@@ -479,7 +479,12 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
     for embedding in embeddings:
-        if not all([isinstance(value, (int, float)) for value in embedding]):
+        if not all(
+            [
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in embedding
+            ]
+        ):
             raise ValueError(
                 f"Expected each value in the embedding to be a int or float, got {embeddings}"
             )
