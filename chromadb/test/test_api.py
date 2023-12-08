@@ -1439,8 +1439,30 @@ def test_system_info(api_obs) -> None:
 
 
 def test_system_info_env_endpoint_disabled(
-    fastapi_server_env_endpoint_disabled,
+        fastapi_server_env_endpoint_disabled,
 ) -> None:
     with pytest.raises(Exception) as e:
         fastapi_server_env_endpoint_disabled.env()
     assert "Not Found" in str(e.value)
+
+# test to make sure update shows exception for bad dimensionality
+
+def test_dimensionality_exception_update(api):
+    api.reset()
+    collection = api.create_collection("test_dimensionality_update_exception")
+    collection.add(**minimal_records)
+
+    with pytest.raises(Exception) as e:
+        collection.update(**bad_dimensionality_records)
+    assert "dimensionality" in str(e.value)
+
+# test to make sure upsert shows exception for bad dimensionality
+
+def test_dimensionality_exception_upsert(api):
+    api.reset()
+    collection = api.create_collection("test_dimensionality_upsert_exception")
+    collection.add(**minimal_records)
+
+    with pytest.raises(Exception) as e:
+        collection.upsert(**bad_dimensionality_records)
+    assert "dimensionality" in str(e.value)
