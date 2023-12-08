@@ -2,12 +2,13 @@ package notification
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 type Notifier interface {
@@ -28,7 +29,12 @@ func NewPulsarNotifier(producer pulsar.Producer) *PulsarNotifier {
 
 func (p *PulsarNotifier) Notify(ctx context.Context, notifications []model.Notification) error {
 	for _, notification := range notifications {
-		payload, err := json.Marshal(notification)
+		notificationPb := coordinatorpb.Notification{
+			CollectionId: notification.CollectionID,
+			Type:         notification.Type,
+			Status:       notification.Status,
+		}
+		payload, err := proto.Marshal(&notificationPb)
 		if err != nil {
 			log.Error("Failed to marshal notification", zap.Error(err))
 			return err
@@ -67,7 +73,12 @@ func NewMemoryNotifier() *MemoryNotifier {
 
 func (m *MemoryNotifier) Notify(ctx context.Context, notifications []model.Notification) error {
 	for _, notification := range notifications {
-		payload, err := json.Marshal(notification)
+		notificationPb := coordinatorpb.Notification{
+			CollectionId: notification.CollectionID,
+			Type:         notification.Type,
+			Status:       notification.Status,
+		}
+		payload, err := proto.Marshal(&notificationPb)
 		if err != nil {
 			log.Error("Failed to marshal notification", zap.Error(err))
 			return err

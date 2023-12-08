@@ -10,14 +10,8 @@ const (
 )
 
 type Notification struct {
-	ID           int64  `json:"id"`
-	CollectionID string `json:"collection_id"`
-	Type         string `json:"type"`
-	Status       string `json:"status"`
-}
-
-type Acknowledgement struct {
-	ID           int64  `json:"id"`
-	CollectionID string `json:"collection_id"`
-	From         string `json:"from"`
+	ID           int64
+	CollectionID string
+	Type         string
+	Status       string
 }

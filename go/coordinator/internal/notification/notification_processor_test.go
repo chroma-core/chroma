@@ -2,13 +2,14 @@ package notification
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -38,8 +39,16 @@ func TestSimpleNotificationProcessor(t *testing.T) {
 	notificationProcessor.Trigger(ctx, triggerMsg)
 
 	for _, msg := range notifier.queue {
-		newMsg := model.Notification{}
-		err := json.Unmarshal(msg.Payload, &newMsg)
+		newMsgPb := coordinatorpb.Notification{}
+		err := proto.Unmarshal(msg.Payload, &newMsgPb)
+		if err != nil {
+			t.Errorf("Failed to unmarshal message %v", err)
+		}
+		newMsg := model.Notification{
+			CollectionID: newMsgPb.CollectionId,
+			Type:         newMsgPb.Type,
+			Status:       newMsgPb.Status,
+		}
 		if err != nil {
 			t.Errorf("Failed to unmarshal message %v", err)
 		}
@@ -77,10 +86,15 @@ func TestSimpleNotificationProcessorWithExistingNotification(t *testing.T) {
 	notificationProcessor.Start()
 
 	for _, msg := range notifier.queue {
-		newMsg := model.Notification{}
-		err := json.Unmarshal(msg.Payload, &newMsg)
+		newMsgPb := coordinatorpb.Notification{}
+		err := proto.Unmarshal(msg.Payload, &newMsgPb)
 		if err != nil {
 			t.Errorf("Failed to unmarshal message %v", err)
+		}
+		newMsg := model.Notification{
+			CollectionID: newMsgPb.CollectionId,
+			Type:         newMsgPb.Type,
+			Status:       newMsgPb.Status,
 		}
 		if newMsg.CollectionID != notification.CollectionID {
 			t.Errorf("CollectionID is not equal %v, %v", newMsg.CollectionID, notification.CollectionID)
@@ -118,10 +132,15 @@ func TestSimpleNotificationProcessorCleanShutdown(t *testing.T) {
 	notificationProcessor.Stop()
 
 	for _, msg := range notifier.queue {
-		newMsg := model.Notification{}
-		err := json.Unmarshal(msg.Payload, &newMsg)
+		newMsgPb := coordinatorpb.Notification{}
+		err := proto.Unmarshal(msg.Payload, &newMsgPb)
 		if err != nil {
 			t.Errorf("Failed to unmarshal message %v", err)
+		}
+		newMsg := model.Notification{
+			CollectionID: newMsgPb.CollectionId,
+			Type:         newMsgPb.Type,
+			Status:       newMsgPb.Status,
 		}
 		if newMsg.CollectionID != notification.CollectionID {
 			t.Errorf("CollectionID is not equal %v, %v", newMsg.CollectionID, notification.CollectionID)

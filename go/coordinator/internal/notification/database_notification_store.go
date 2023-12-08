@@ -36,7 +36,7 @@ func (d *DatabaseNotificationStore) GetAllPendingNotifications(ctx context.Conte
 			Type:         notification.Type,
 			Status:       notification.Status,
 		})
-		// sort notifications by ID
+		// sort notifications by ID, this is ok because of the small number of notifications
 		sort.Slice(notificationMap[notification.CollectionID], func(i, j int) bool {
 			return notificationMap[notification.CollectionID][i].ID < notificationMap[notification.CollectionID][j].ID
 		})
@@ -59,7 +59,7 @@ func (d *DatabaseNotificationStore) GetNotifications(ctx context.Context, collec
 			Status:       notification.Status,
 		})
 	}
-	// sort notifications by ID
+	// sort notifications by ID, this is ok because of the small number of notifications
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].ID < result[j].ID
 	})
