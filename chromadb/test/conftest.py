@@ -341,13 +341,15 @@ def fastapi_server_env_endpoint_enabled() -> Generator[System, None, None]:
 
 
 @pytest.fixture(scope="module")
-def fastapi_server_env_endpoint_disabled() -> System:
-    return next(
+def fastapi_server_env_endpoint_disabled() -> ServerAPI:
+    _sys = next(
         _fastapi_fixture(
             is_persistent=True,
             chroma_server_env_endpoint_enabled=False,
         )
     )
+    _sys.start()
+    return _sys.instance(ServerAPI)
 
 
 def integration() -> Generator[System, None, None]:
