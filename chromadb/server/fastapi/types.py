@@ -46,11 +46,6 @@ class GetEmbedding(BaseModel):
     include: Include = ["metadatas", "documents"]
 
 
-class ListCollections(BaseModel):
-    limit: Optional[int] = None
-    offset: Optional[int] = None
-
-
 class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None

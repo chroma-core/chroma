@@ -3,9 +3,6 @@ import {chromaBasic} from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
 import { ChromaClient } from "../src/ChromaClient";
 
-const PORT = process.env.PORT || "8000";
-const URL = "http://localhost:" + PORT;
-
 test("it should get the version without auth needed", async () => {
     const version = await chromaNoAuth.version();
     expect(version).toBeDefined();

@@ -95,20 +95,14 @@ class CollectionStateMachine(RuleBasedStateMachine):
         offset=st.integers(min_value=0, max_value=5),
     )
     def list_collections_with_limit_offset(self, limit: int, offset: int) -> None:
-        print("limt: ", limit, "offset: ", offset)
-        colls_no_filter = self.api.list_collections()
         colls = self.api.list_collections(limit=limit, offset=offset)
         total_collections = self.api.count_collections()
-
-        print(f"total_collections: {total_collections}", f"max(total_collections - offset, 0) {max(total_collections - offset, 0)}")
-        print(f"(colls_no_filter): {(colls_no_filter)}", f"(colls): {(colls)}")
 
         # given limit and offset, make various assertions regarding the total number of collections
         if limit + offset > total_collections:
             assert len(colls) == max(total_collections - offset, 0)
         else:
             assert len(colls) == limit
-
 
     @rule(
         target=collections,
