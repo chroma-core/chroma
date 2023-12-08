@@ -190,6 +190,7 @@ spec:
         - command:
             - "chroma"
             - "coordinator"
+            - "--pulsar-admin-url=http://pulsar.chroma:8080"
           image: chroma-coordinator
           imagePullPolicy: IfNotPresent
           name: coordinator
