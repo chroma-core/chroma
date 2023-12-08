@@ -251,22 +251,6 @@ class Settings(BaseSettings):  # type: ignore
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    # We override equality to ignore values which may differ between instances
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Settings):
-            return False
-
-        _whitelist = {"chroma_client_auth_credentials"}
-
-        # Check for equality of all attributes except those in the whitelist
-        for attr in self.__dict__:
-            if attr in _whitelist:
-                continue
-            if getattr(self, attr) != getattr(other, attr):
-                return False
-
-        return True
-
 
 T = TypeVar("T", bound="Component")
 
