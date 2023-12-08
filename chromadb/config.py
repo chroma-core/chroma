@@ -188,7 +188,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_client_auth_credentials: Optional[str] = None
     chroma_client_auth_token_transport_header: Optional[str] = None
     chroma_server_auth_token_transport_header: Optional[str] = None
-    chroma_server_env_endpoint_enabled: bool = False
+    chroma_server_env_endpoint_enabled: bool = True
 
     chroma_server_authz_provider: Optional[str] = None
 

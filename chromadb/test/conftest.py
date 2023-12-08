@@ -68,7 +68,7 @@ def find_free_port() -> int:
 def _run_server(
     port: int,
     is_persistent: bool = False,
-    chroma_server_env_endpoint_enabled: bool = False,
+    chroma_server_env_endpoint_enabled: bool = True,
     persist_directory: Optional[str] = None,
     chroma_server_auth_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
@@ -144,7 +144,7 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
 
 def _fastapi_fixture(
     is_persistent: bool = False,
-    chroma_server_env_endpoint_enabled: bool = False,
+    chroma_server_env_endpoint_enabled: bool = True,
     chroma_server_auth_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
@@ -333,13 +333,6 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
     os.remove(server_auth_file)
 
 
-def fastapi_server_env_endpoint_enabled() -> Generator[System, None, None]:
-    return _fastapi_fixture(
-        is_persistent=True,
-        chroma_server_env_endpoint_enabled=True,
-    )
-
-
 @pytest.fixture(scope="module")
 def fastapi_server_env_endpoint_disabled() -> ServerAPI:
     _sys = next(
@@ -413,7 +406,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
 
 
 def system_fixture_observability() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [sqlite, sqlite_persistent, fastapi_server_env_endpoint_enabled]
+    fixtures = [sqlite, sqlite_persistent, fastapi, fastapi_persistent]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
