@@ -162,6 +162,7 @@ def authz_context(
         @wraps(f)
         def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
             _dynamic_kwargs = {
+                "api": args[0]._api,
                 "function": f,
                 "function_args": args,
                 "function_kwargs": kwargs,
@@ -190,6 +191,9 @@ def authz_context(
                             tenant=request.state.user_identity.get_user_tenant()
                             if hasattr(request.state, "user_identity")
                             else DEFAULT_TENANT,
+                            attributes=request.state.user_identity.get_user_attributes()
+                            if hasattr(request.state, "user_identity")
+                            else {},
                         ),
                         resource=_resource,
                         action=_action,

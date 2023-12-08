@@ -318,6 +318,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             topic=self._assignment_policy.assign_collection(id),
+            database=database,
+            tenant=tenant,
         )
         collections[request.id] = new_collection
         return CreateCollectionResponse(

@@ -127,3 +127,8 @@ class CollectionAssignmentPolicy(Component):
     def assign_collection(self, collection_id: UUID) -> str:
         """Return the topic that should be used for the given collection"""
         pass
+
+    @abstractmethod
+    def get_topics(self) -> Sequence[str]:
+        """Return the list of topics that this policy is currently using"""
+        pass

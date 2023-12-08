@@ -55,3 +55,7 @@ echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 
 echo testing: python -m pytest "$@"
 python -m pytest "$@"
+
+export CHROMA_KUBERNETES_INTEGRATION=1
+cd go/coordinator
+go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma/chroma-coordinator/internal/memberlist_manager

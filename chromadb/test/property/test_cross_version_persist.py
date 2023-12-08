@@ -204,8 +204,8 @@ def switch_to_version(version: str) -> ModuleType:
     return chromadb
 
 
-class not_implemented_ef(EmbeddingFunction):
-    def __call__(self, texts: Documents) -> Embeddings:
+class not_implemented_ef(EmbeddingFunction[Documents]):
+    def __call__(self, input: Documents) -> Embeddings:
         assert False, "Embedding function should not be called"
 
 
@@ -314,7 +314,7 @@ def test_cycle_versions(
     system.start()
     coll = api.get_collection(
         name=collection_strategy.name,
-        embedding_function=not_implemented_ef(),
+        embedding_function=not_implemented_ef(),  # type: ignore
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
