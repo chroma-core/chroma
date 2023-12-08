@@ -3690,6 +3690,7 @@ dependencies = [
  "murmur3",
  "num-bigint",
  "num-traits",
+ "parking_lot",
  "prost 0.12.1",
  "pulsar",
  "rand",

@@ -3,15 +3,17 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::chroma_proto::{
-    sys_db_client, Collection, GetCollectionsRequest, GetSegmentsRequest, Segment, SegmentScope,
+use crate::{
+    chroma_proto::{sys_db_client, GetCollectionsRequest, GetSegmentsRequest},
+    convert::{from_proto_collection, from_proto_segment},
+    types::{Collection, Segment, SegmentScope},
 }; // TODO: should we use the proto generated structs or our own structs?
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
 #[async_trait]
-pub(crate) trait SysDb: Send + Sync {
+pub(crate) trait SysDb: Send + Sync + SysDbClone {
     async fn get_collections(
         &mut self,
         collection_id: Option<Uuid>,
@@ -29,6 +31,28 @@ pub(crate) trait SysDb: Send + Sync {
         topic: Option<String>,
         collection: Option<Uuid>,
     ) -> Result<Vec<Segment>, tonic::Status>;
+}
+
+// We'd like to be able to clone the trait object, so we need to use the
+// "clone box" pattern. See https://stackoverflow.com/questions/30353462/how-to-clone-a-struct-storing-a-boxed-trait-object#comment48814207_30353928
+// https://chat.openai.com/share/b3eae92f-0b80-446f-b79d-6287762a2420
+trait SysDbClone {
+    fn clone_box(&self) -> Box<dyn SysDb>;
+}
+
+impl<T> SysDbClone for T
+where
+    T: 'static + SysDb + Clone,
+{
+    fn clone_box(&self) -> Box<dyn SysDb> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn SysDb> {
+    fn clone(&self) -> Box<dyn SysDb> {
+        self.clone_box()
+    }
 }
 
 #[derive(Clone)]
@@ -96,7 +120,24 @@ impl SysDb for GrpcSysDb {
         match res {
             Ok(res) => {
                 let collections = res.into_inner().collections;
-                return Ok(collections);
+
+                // map from_proto_collections over collections and if any of them fail, return an error
+                let collections = collections
+                    .into_iter()
+                    .map(|proto_collection| from_proto_collection(proto_collection))
+                    .collect::<Result<Vec<Collection>, &'static str>>();
+
+                match collections {
+                    Ok(collections) => {
+                        return Ok(collections);
+                    }
+                    Err(e) => {
+                        return Err(tonic::Status::new(
+                            tonic::Code::Internal,
+                            format!("Failed to convert proto collection: {}", e),
+                        ));
+                    }
+                }
             }
             Err(e) => {
                 return Err(e);
@@ -135,11 +176,28 @@ impl SysDb for GrpcSysDb {
                 },
             })
             .await;
-
+        println!("get_segments: {:?}", res);
         match res {
             Ok(res) => {
                 let segments = res.into_inner().segments;
-                return Ok(segments);
+                let converted_segments = segments
+                    .into_iter()
+                    .map(|proto_segment| from_proto_segment(proto_segment))
+                    .collect::<Result<Vec<Segment>, &'static str>>();
+
+                match converted_segments {
+                    Ok(segments) => {
+                        println!("returning segments");
+                        return Ok(segments);
+                    }
+                    Err(e) => {
+                        println!("failed to convert segments: {}", e);
+                        return Err(tonic::Status::new(
+                            tonic::Code::Internal,
+                            format!("Failed to convert proto segment: {}", e),
+                        ));
+                    }
+                }
             }
             Err(e) => {
                 return Err(e);

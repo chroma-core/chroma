@@ -26,6 +26,7 @@ bytes = "1.5.0"
 async-channel = "2.1.1"
 num-bigint = "0.4.4"
 num-traits = "0.2.17"
+parking_lot = "0.12.1"
 
 [build-dependencies]
 tonic-build = "0.10"

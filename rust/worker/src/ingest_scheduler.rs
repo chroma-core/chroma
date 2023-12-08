@@ -1,7 +1,7 @@
-use crate::sysdb::SysDb;
+use crate::segment_manager::SegmentManager;
+use crate::sysdb::{GrpcSysDb, SysDb};
 use crate::types::EmbeddingRecord;
 use crate::Component;
-use crate::{segment_manager::SegmentManager, sysdb};
 use rand::Rng;
 use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Builder;
@@ -218,7 +218,8 @@ async fn run_ingest_dispatcher(mut ingest_dispatcher: IngestDispatcher) {
                     //     msg,
                     //     std::thread::current().id()
                     // );
-                    ingest_dispatcher.segment_manager.write_record(msg);
+                    // TODO: IS AWAITING HERE OK? SINCE WE NEED ORDERING?
+                    ingest_dispatcher.segment_manager.write_record(msg).await;
                 }
                 Err(e) => {
                     // TODO: check error type
@@ -375,10 +376,9 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_end_to_end() {
-        let dispatch_count = 12;
-        let segment_manager = SegmentManager::new();
-
-        let sysdb = Box::new(sysdb::GrpcSysDb::new().await);
+        let dispatch_count = 1;
+        let sysdb: Box<dyn SysDb> = Box::new(GrpcSysDb::new().await);
+        let segment_manager = SegmentManager::new(sysdb.clone());
 
         let mut dispatchers = Vec::new();
         for _ in 0..dispatch_count {
