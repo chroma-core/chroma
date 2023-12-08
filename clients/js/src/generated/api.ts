@@ -1248,6 +1248,35 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
+		 * @summary Get Tenant
+		 * @param {string} tenant
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		getTenant(tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetTenant200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getTenant(tenant, options);
+			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+					const contentType = response.headers.get('Content-Type');
+					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+
+					if (response.status === 200) {
+						if (mimeType === 'application/json') {
+							return response.json() as any;
+						}
+						throw response;
+					}
+					if (response.status === 422) {
+						if (mimeType === 'application/json') {
+							throw response;
+						}
+						throw response;
+					}
+					throw response;
+				});
+			};
+		},
+		/**
 		 * @summary Heartbeat
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}

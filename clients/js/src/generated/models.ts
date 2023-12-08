@@ -140,7 +140,7 @@ export namespace Api {
 		}
 	
 		export type Include = Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4 | Api.GetEmbedding.Include.EnumValueEnum5 | Api.GetEmbedding.Include.EnumValueEnum6;
-		
+
 		/**
 		 * @export
 		 * @namespace Include
@@ -169,7 +169,7 @@ export namespace Api {
 			export enum EnumValueEnum6 {
 				Data = 'data'
 			}
-		
+
 		}
 	
 	}
@@ -238,15 +238,15 @@ export namespace Api {
 			export enum EnumValueEnum4 {
 				Distances = 'distances'
 			}
-		
+
 			export enum EnumValueEnum5 {
 				Uris = 'uris'
 			}
-		
+
 			export enum EnumValueEnum6 {
 				Data = 'data'
 			}
-		
+
 		}
 	
 	}
