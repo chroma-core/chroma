@@ -338,14 +338,14 @@ def fastapi_server_env_endpoint_enabled() -> Generator[System, None, None]:
         is_persistent=True,
         chroma_server_env_endpoint_enabled=True,
     )
-    # settings = Settings(
-    #     chroma_server_env_endpoint_enabled=True,
-    #     allow_reset=True,
-    # )
-    # system = System(settings)
-    # system.start()
-    # yield system
-    # system.stop()
+
+
+@pytest.fixture(scope="module")
+def fastapi_server_env_endpoint_disabled() -> Generator[System, None, None]:
+    yield _fastapi_fixture(
+        is_persistent=True,
+        chroma_server_env_endpoint_enabled=False,
+    )
 
 
 def integration() -> Generator[System, None, None]:

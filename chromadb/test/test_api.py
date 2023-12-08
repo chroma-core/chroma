@@ -1428,7 +1428,7 @@ def test_invalid_embeddings(api):
     assert "embedding" in str(e.value)
 
 
-def test_system_info(api_obs):
+def test_system_info(api_obs) -> None:
     if not isinstance(api_obs, chromadb.api.fastapi.FastAPI):
         _env = api_obs.env()
         assert _env is not None
@@ -1438,12 +1438,9 @@ def test_system_info(api_obs):
         assert _env["chroma_version"] is not None
 
 
-def test_system_info_env_endpoint_disabled(api):
-    if isinstance(api, chromadb.api.fastapi.FastAPI):
-        with pytest.raises(Exception) as e:
-            api.env()
-        assert "Not Found" in str(e.value)
-    else:
-        _env = api.env()
-        assert _env is not None
-        assert _env["chroma_version"] is not None
+def test_system_info_env_endpoint_disabled(
+    fastapi_server_env_endpoint_disabled,
+) -> None:
+    with pytest.raises(Exception) as e:
+        fastapi_server_env_endpoint_disabled.env()
+    assert "Not Found" in str(e.value)

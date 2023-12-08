@@ -90,7 +90,7 @@ dicts_list = [
 def tempdir() -> Generator[str, None, None]:
     tempdir = tempfile.mkdtemp()
     yield tempdir
-    shutil.rmtree(tempdir)
+    shutil.rmtree(tempdir, ignore_errors=True)
 
 
 @settings(max_examples=50)
