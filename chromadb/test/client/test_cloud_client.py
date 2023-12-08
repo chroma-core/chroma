@@ -5,6 +5,7 @@ from chromadb import CloudClient
 from chromadb.api import ServerAPI
 from chromadb.auth.token import TokenTransportHeader
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.errors import AuthorizationError
 
 from chromadb.test.conftest import _await_server, _run_server, find_free_port
 
@@ -75,7 +76,7 @@ def mock_cloud_server(valid_token: str) -> Generator[System, None, None]:
     proc.kill()
 
 
-def test_cloud_client(mock_cloud_server: System, valid_token: str) -> None:
+def test_valid_key(mock_cloud_server: System, valid_token: str) -> None:
     valid_client = CloudClient(
         tenant=DEFAULT_TENANT,
         database=DEFAULT_DATABASE,
@@ -87,15 +88,17 @@ def test_cloud_client(mock_cloud_server: System, valid_token: str) -> None:
 
     assert valid_client.heartbeat()
 
+
+def test_invalid_key(mock_cloud_server: System, valid_token: str) -> None:
     # Try to connect to the default tenant and database with an invalid token
     invalid_token = valid_token + "_invalid"
-    client = CloudClient(
-        tenant=DEFAULT_TENANT,
-        database=DEFAULT_DATABASE,
-        api_key=invalid_token,
-        cloud_host=TEST_CLOUD_HOST,
-        cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
-        enable_ssl=False,
-    )
-
-    print(client.list_collections())
+    with pytest.raises(AuthorizationError):
+        client = CloudClient(
+            tenant=DEFAULT_TENANT,
+            database=DEFAULT_DATABASE,
+            api_key=invalid_token,
+            cloud_host=TEST_CLOUD_HOST,
+            cloud_port=mock_cloud_server.settings.chroma_server_http_port,  # type: ignore
+            enable_ssl=False,
+        )
+        client.heartbeat()
