@@ -37,8 +37,8 @@ func init() {
 
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")
-	Cmd.Flags().StringVar(&conf.PulsarURL, "pulsar-url", "localhost:6650", "Pulsar url")
-	Cmd.Flags().StringVar(&conf.PulsarTenant, "pulsar-tenant", "default", "Pulsar tenant")
+	Cmd.Flags().StringVar(&conf.PulsarURL, "pulsar-url", "pulsar://localhost:6650", "Pulsar url")
+	Cmd.Flags().StringVar(&conf.PulsarTenant, "pulsar-tenant", "public", "Pulsar tenant")
 	Cmd.Flags().StringVar(&conf.PulsarNamespace, "pulsar-namespace", "default", "Pulsar namespace")
 
 	// Notification

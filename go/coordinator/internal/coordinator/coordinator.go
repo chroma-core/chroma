@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/chroma/chroma-coordinator/internal/metastore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/coordinator"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dao"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbcore"
@@ -30,14 +31,17 @@ func NewCoordinator(ctx context.Context, assignmentPolicy CollectionAssignmentPo
 		collectionAssignmentPolicy: assignmentPolicy,
 	}
 
-	// catalog := coordinator.NewMemoryCatalog()
-	// catalog := coordinator.NewMemoryCatalogWithNotification(notificationStore)
-
 	notificationProcessor := notification.NewSimpleNotificationProcessor(ctx, notificationStore, notifier)
 
-	txnImpl := dbcore.NewTxImpl()
-	metaDomain := dao.NewMetaDomain()
-	catalog := coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
+	var catalog metastore.Catalog
+	// TODO: move this to server.go
+	if db == nil {
+		catalog = coordinator.NewMemoryCatalogWithNotification(notificationStore)
+	} else {
+		txnImpl := dbcore.NewTxImpl()
+		metaDomain := dao.NewMetaDomain()
+		catalog = coordinator.NewTableCatalogWithNotification(txnImpl, metaDomain, notificationStore)
+	}
 	meta, err := NewMetaTable(s.ctx, catalog)
 	if err != nil {
 		return nil, err

@@ -191,7 +191,7 @@ spec:
             - "chroma"
             - "coordinator"
             - "--pulsar-admin-url=http://pulsar.chroma:8080"
-            - "--pulsar-url=http://pulsar.chroma:6650"
+            - "--pulsar-url=pulsar://pulsar.chroma:6650"
             - "--notifier-provider=pulsar"
           image: chroma-coordinator
           imagePullPolicy: IfNotPresent
