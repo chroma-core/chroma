@@ -38,7 +38,7 @@ from chromadb.api.types import (
     validate_update_metadata,
     validate_where,
     validate_where_document,
-    validate_batch,
+    validate_batch, SqlBackedIndex,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -767,6 +767,24 @@ class SegmentAPI(ServerAPI):
     @override
     def max_batch_size(self) -> int:
         return self._producer.max_batch_size
+
+    @override
+    def _create_collection_indices(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        """Create a new index """
+        return self._sysdb.create_indices(collection_id, indices)
+
+    @override
+    def _drop_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        return self._sysdb.drop_indices(collection_id, index_names)
+
+    @override
+    def _list_collection_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        return self._sysdb.list_indices(collection_id)
+
+    @override
+    def _rebuild_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        return self._sysdb.rebuild_indices(collection_id, index_names)
+
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.

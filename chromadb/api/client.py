@@ -17,7 +17,7 @@ from chromadb.api.types import (
     Loadable,
     Metadatas,
     QueryResult,
-    URIs,
+    URIs, SqlBackedIndex,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -444,6 +444,22 @@ class Client(SharedSystemClient, ClientAPI):
             raise ValueError(
                 f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
             )
+    @override
+    def _create_collection_indices(self, collection_id: UUID, indices: Sequence[SqlBackedIndex]) -> None:
+        """Create a new index """
+        pass
+
+    @override
+    def _drop_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        pass
+
+    @override
+    def _list_collection_indices(self, collection_id: UUID) -> Sequence[SqlBackedIndex]:
+        pass
+
+    @override
+    def _rebuild_collection_indices(self, collection_id: UUID, index_names: Optional[Sequence[str]]) -> None:
+        pass
 
     # endregion
 
