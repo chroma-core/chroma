@@ -13,23 +13,23 @@ from typing_extensions import Literal
 import platform
 
 
-in_pydantic_v2 = False
+IN_PYDANTIC_V2 = False
 try:
     from pydantic import BaseSettings
 except ImportError:
-    in_pydantic_v2 = True
+    IN_PYDANTIC_V2 = True
     from pydantic.v1 import BaseSettings
     from pydantic.v1 import validator
 
-if not in_pydantic_v2:
+if not IN_PYDANTIC_V2:
     from pydantic import validator  # type: ignore # noqa
 
 # The thin client will have a flag to control which implementations to use
-is_thin_client = False
+IS_THIN_CLIENT = False
 try:
-    from chromadb.is_thin_client import is_thin_client  # type: ignore
+    from chromadb.IS_THIN_CLIENT import IS_THIN_CLIENT  # type: ignore
 except ImportError:
-    is_thin_client = False
+    IS_THIN_CLIENT = False
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ class System(Component):
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
-        if is_thin_client:
+        if IS_THIN_CLIENT:
             # The thin client is a system with only the API component
             if settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
                 raise RuntimeError(
