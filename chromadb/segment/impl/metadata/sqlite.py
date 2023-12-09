@@ -548,13 +548,61 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return metadata_t.id.isin(sq)
+            elif k == "$not_contains":
+                v = cast(str, v)
+                search_term = f"%{v}%"
+
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.rowid)
+                    .where(
+                        fulltext_t.string_value.not_like(ParameterValue(search_term))
+                    )
+                )
+                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
 
+    @trace_method("SqliteMetadataSegment.delete", OpenTelemetryGranularity.ALL)
     @override
     def delete(self) -> None:
-        raise NotImplementedError()
+        t = Table("embeddings")
+        t1 = Table("embedding_metadata")
+        q0 = (
+            self._db.querybuilder()
+            .from_(t1)
+            .delete()
+            .where(
+                t1.id.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
+        q = (
+            self._db.querybuilder()
+            .from_(t)
+            .delete()
+            .where(
+                t.id.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
+        with self._db.tx() as cur:
+            cur.execute(*get_sql(q0))
+            cur.execute(*get_sql(q))
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
