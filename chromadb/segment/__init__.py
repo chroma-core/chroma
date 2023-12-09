@@ -106,6 +106,12 @@ class VectorReader(SegmentImplementation):
         query."""
         pass
 
+    @classmethod
+    @override
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        """Delete the segment and all its data without instantiating the segment"""
+        pass
+
 
 class SegmentManager(Component):
     """Interface for a pluggable strategy for creating, retrieving and instantiating
