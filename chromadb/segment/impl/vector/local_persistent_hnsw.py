@@ -1,6 +1,8 @@
 import os
 import platform
 import shutil
+import subprocess
+
 from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
@@ -484,9 +486,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         if os.path.exists(data_path):
             self.close_persistent_index()
             if platform.system() == "Windows":
-                remove_index_dir_win(data_path)
+                os.system('rmdir /S /Q "{}"'.format(data_path))
+                try:
+                    shutil.rmtree(data_path, ignore_errors=False)
+                except Exception:
+                    command = f"PowerShell -Command \"Move-Item '{data_path}' -Destination 'C:\\$Recycle.Bin'\""
+                    subprocess.run(command, shell=True)
             else:
                 shutil.rmtree(data_path, ignore_errors=True)
+
+    @classmethod
+    @override
+    def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
+        data_path = os.path.join(persistent_dir, str(segment["id"]))
+        shutil.rmtree(data_path, ignore_errors=True)
 
     @staticmethod
     def get_file_handle_count() -> int:

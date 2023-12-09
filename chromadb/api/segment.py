@@ -317,7 +317,6 @@ class SegmentAPI(ServerAPI):
             name=name, tenant=tenant, database=database
         )
         if existing:
-            self._manager.hint_use_collection(existing[0]["id"], t.Operation.DELETE)
             self._sysdb.delete_collection(
                 existing[0]["id"], tenant=tenant, database=database
             )
