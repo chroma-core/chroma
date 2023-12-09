@@ -165,10 +165,20 @@ class ServerSettings(BaseSettings):  # type: ignore
         if v and not os.path.isfile(os.path.join(v)):
             raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
         return v
-
     chroma_server_authz_config_provider: Optional[
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
+
+
+class ClientSettings(BaseSettings): # type: ignore
+
+    chroma_client_auth_credentials_provider: Optional[str] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
+    chroma_client_auth_protocol_adapter: Optional[str] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
+    chroma_client_auth_credentials_file: Optional[str] = None
+    chroma_client_auth_credentials: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
+
+    chroma_client_auth_provider: Optional[str] = None
 
     anonymized_telemetry: bool = True
 
@@ -177,7 +187,42 @@ class ServerSettings(BaseSettings):  # type: ignore
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
 
+
+class SettingsBase(BaseSettings): # type: ignore
+    environment: str = ""
     allow_reset: bool = False
+
+    # Legacy config has to be kept around because pydantic will error
+    # on nonexisting keys
+    chroma_db_impl: Optional[str] = None
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
+    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
+    # Required for backwards compatibility
+    chroma_telemetry_impl: str = chroma_product_telemetry_impl
+
+    # New architecture components
+    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
+    chroma_segment_manager_impl: str = (
+        "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
+
+    # Distributed architecture specific components
+    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
+    chroma_collection_assignment_policy_impl: str = (
+        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
+    )
+    worker_memberlist_name: str = "worker-memberlist"
+    chroma_coordinator_host = "localhost"
+
+    tenant_id: str = "default"
+    topic_namespace: str = "default"
+
+    is_persistent: bool = False
+    persist_directory: str = "./chroma"
 
     migrations: Literal["none", "validate", "apply"] = "apply"
     # you cannot change the hash_algorithm after migrations have already been applied once
@@ -185,12 +230,15 @@ class ServerSettings(BaseSettings):  # type: ignore
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
     def require(self, key: str) -> Any:
-        """Return the value of a required config key, or raise an exception if it is not
-        set"""
-        val = self[key]
-        if val is None:
+        """
+        Return the value of a required config key, or raise an exception if it is not set
+        """
+        value = self[key]
+        # Raise an exception if the value is None
+        if value is None:
             raise ValueError(f"Missing required config value '{key}'")
-        return val
+        return value
+
 
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
@@ -203,6 +251,8 @@ class ServerSettings(BaseSettings):  # type: ignore
         env_file = ".env"
         env_file_encoding = "utf-8"
 
+class Settings(SettingsBase, ClientSettings, ServerSettings):
+    ...
 
 T = TypeVar("T", bound="Component")
 
