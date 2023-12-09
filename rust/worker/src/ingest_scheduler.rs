@@ -376,7 +376,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_end_to_end() {
-        let dispatch_count = 1;
+        let dispatch_count = 12;
         let sysdb: Box<dyn SysDb> = Box::new(GrpcSysDb::new().await);
         let segment_manager = SegmentManager::new(sysdb.clone());
 

@@ -17,9 +17,13 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
-from typing import Dict, Type, Sequence, Optional, cast
+from typing import Dict, Type, Sequence, Optional, Union, cast
 from uuid import UUID, uuid4
 from collections import defaultdict
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 # TODO: it is odd that the segment manager is different for distributed vs local
 # implementations.  This should be refactored to be more consistent and shared.
@@ -61,13 +65,45 @@ class DistributedSegmentManager(SegmentManager):
     )
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
-        vector_segment = _segment(
+        # The distributed hnsw segment type is composed of a root vector segment and
+        # a metadata segment. the root vector segment is a container for all the
+        # vector segments that are part of the collection.
+        # We initialize the root vector segment with one child segment, which is the
+        # first active segment for the collection.
+        vector_segment_root = _segment(
+            SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
+        )
+        vector_segment_child = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )
         metadata_segment = _segment(
             SegmentType.SQLITE, SegmentScope.METADATA, collection
         )
-        return [vector_segment, metadata_segment]
+
+        if vector_segment_root["metadata"] is None:
+            vector_segment_root["metadata"] = {}
+        if vector_segment_child["metadata"] is None:
+            vector_segment_child["metadata"] = {}
+
+        child_metadata = cast(
+            Dict[str, Union[str, int, bool]], vector_segment_child["metadata"]
+        )
+        root_metadata = cast(
+            Dict[str, Union[str, int, bool]], vector_segment_root["metadata"]
+        )
+
+        root_metadata[
+            "segment_state"
+        ] = "ROOT"  # TODO: make enum in DistributedHNSWSegmentImpl
+        child_metadata[
+            "segment_state"
+        ] = "ACTIVE"  # TODO: make enum in DistributedHNSWSegmentImpl
+        root_metadata["parent_segment_id"] = vector_segment_root["id"].hex
+        child_metadata["last_flush_offset"] = 0
+        child_metadata["flushed"] = False
+        child_metadata["storage_path"] = ""
+
+        return [vector_segment_root, vector_segment_child, metadata_segment]
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:

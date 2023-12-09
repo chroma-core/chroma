@@ -35,9 +35,8 @@ impl DistributedHNSWSegment {
                     // TODO: make lock xor lock
                     let index_res = self.index.read();
                     match index_res {
-                        Ok(mut index) => match record.embedding {
+                        Ok(index) => match record.embedding {
                             Some(vector) => {
-                                // Parse the bytes into a vector
                                 let next_id =
                                     self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 println!("Adding item: {}", next_id);

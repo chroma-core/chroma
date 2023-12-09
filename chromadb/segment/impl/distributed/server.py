@@ -181,12 +181,12 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     system = System(Settings())
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    segment_server = SegmentServer(system)
-    # add_SegmentServerServicer_to_server(segment_server, server)  # type: ignore
-    add_VectorReaderServicer_to_server(segment_server, server)  # type: ignore
-    server.add_insecure_port(
-        f"[::]:{system.settings.require('chroma_server_grpc_port')}"
-    )
-    system.start()
+    # segment_server = SegmentServer(system)
+    # # add_SegmentServerServicer_to_server(segment_server, server)  # type: ignore
+    # add_VectorReaderServicer_to_server(segment_server, server)  # type: ignore
+    # server.add_insecure_port(
+    #     f"[::]:{system.settings.require('chroma_server_grpc_port')}"
+    # )
+    # system.start()
     server.start()
     server.wait_for_termination()

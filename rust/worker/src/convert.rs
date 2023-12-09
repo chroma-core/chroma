@@ -1,7 +1,8 @@
 // Conversions from protobuf to rust types.
 use crate::chroma_proto;
 use crate::types::{
-    Collection, EmbeddingRecord, Operation, ScalarEncoding, Segment, SegmentScope, SeqId,
+    Collection, EmbeddingRecord, Metadata, MetadataValue, Operation, ScalarEncoding, Segment,
+    SegmentScope, SeqId, UpdateMetadata, UpdateMetadataValue,
 };
 use uuid::Uuid;
 
@@ -45,6 +46,15 @@ pub(crate) fn from_proto_segment(
     }
     let collection_uuid = collection_uuid.unwrap();
 
+    let mut metadata = None;
+    if proto_segment.metadata.is_some() {
+        let maybe_metadata = from_proto_metadata(proto_segment.metadata.unwrap());
+        if maybe_metadata.is_err() {
+            return Err("Failed to parse metadata");
+        }
+        metadata = Some(maybe_metadata.unwrap());
+    }
+
     let scope = from_proto_segment_scope(proto_segment.scope);
     match scope {
         Ok(scope) => Ok(Segment {
@@ -53,7 +63,7 @@ pub(crate) fn from_proto_segment(
             scope: scope,
             topic: proto_segment.topic,
             collection: Some(collection_uuid),
-            metadata: None, // TODO: implement metadata
+            metadata: metadata,
         }),
         Err(e) => Err(e),
     }
@@ -69,6 +79,71 @@ pub(crate) fn from_proto_segment_scope(proto_scope: i32) -> Result<SegmentScope,
         },
         Err(_) => Err("Failed to decode segment scope"),
     }
+}
+
+pub(crate) fn from_proto_metadata(
+    proto_metadata: chroma_proto::UpdateMetadata,
+) -> Result<Metadata, &'static str> {
+    let mut metadata = Metadata::new();
+    for (key, value) in proto_metadata.metadata.iter() {
+        let maybe_value = from_proto_metadata_value(value);
+        if maybe_value.is_err() {
+            return Err("Failed to parse metadata value");
+        }
+        let value = maybe_value.unwrap();
+        metadata.insert(key.clone(), value);
+    }
+    Ok(metadata)
+}
+
+pub(crate) fn from_proto_update_metadata(
+    proto_metadata: chroma_proto::UpdateMetadata,
+) -> Result<UpdateMetadata, &'static str> {
+    let mut metadata = UpdateMetadata::new();
+    for (key, value) in proto_metadata.metadata.iter() {
+        let maybe_value = from_proto_update_metadata_value(value);
+        if maybe_value.is_err() {
+            return Err("Failed to parse metadata value");
+        }
+        let value = maybe_value.unwrap();
+        metadata.insert(key.clone(), value);
+    }
+    Ok(metadata)
+}
+
+pub(crate) fn from_proto_metadata_value(
+    proto_value: &chroma_proto::UpdateMetadataValue,
+) -> Result<MetadataValue, &'static str> {
+    match &proto_value.value {
+        Some(chroma_proto::update_metadata_value::Value::IntValue(value)) => {
+            return Ok(MetadataValue::Int(*value as i32))
+        }
+        Some(chroma_proto::update_metadata_value::Value::FloatValue(value)) => {
+            return Ok(MetadataValue::Float(*value))
+        }
+        Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
+            return Ok(MetadataValue::Str(value.clone()))
+        }
+        _ => return Err("Invalid metadata value"),
+    };
+}
+
+pub(crate) fn from_proto_update_metadata_value(
+    proto_value: &chroma_proto::UpdateMetadataValue,
+) -> Result<UpdateMetadataValue, &'static str> {
+    match &proto_value.value {
+        Some(chroma_proto::update_metadata_value::Value::IntValue(value)) => {
+            return Ok(UpdateMetadataValue::Int(*value as i32))
+        }
+        Some(chroma_proto::update_metadata_value::Value::FloatValue(value)) => {
+            return Ok(UpdateMetadataValue::Float(*value))
+        }
+        Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
+            return Ok(UpdateMetadataValue::Str(value.clone()))
+        }
+        None => return Ok(UpdateMetadataValue::None),
+        _ => return Err("Invalid metadata value"),
+    };
 }
 
 pub(crate) fn from_proto_submit(

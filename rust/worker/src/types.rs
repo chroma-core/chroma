@@ -26,7 +26,7 @@ pub(crate) enum SegmentScope {
 }
 
 #[derive(Debug)]
-pub(crate) enum MetadataValue {
+pub(crate) enum UpdateMetadataValue {
     Int(i32),
     Float(f64),
     Str(String),
@@ -35,11 +35,19 @@ pub(crate) enum MetadataValue {
 }
 
 #[derive(Debug)]
+pub(crate) enum MetadataValue {
+    Int(i32),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+}
+
+#[derive(Debug)]
 pub(crate) struct Collection {
     pub(crate) id: Uuid,
     pub(crate) name: String,
     pub(crate) topic: String,
-    pub(crate) metadata: Option<UpdateMetadata>,
+    pub(crate) metadata: Option<Metadata>,
     pub(crate) dimension: Option<i32>,
     pub(crate) tenant: String,
     pub(crate) database: String,
@@ -52,11 +60,12 @@ pub(crate) struct Segment {
     pub(crate) scope: SegmentScope,
     pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
-    pub(crate) metadata: Option<UpdateMetadata>,
+    pub(crate) metadata: Option<Metadata>,
 }
 
 // Type alias for the UpdateMetadata
-pub(crate) type UpdateMetadata = HashMap<String, MetadataValue>;
+pub(crate) type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
+pub(crate) type Metadata = HashMap<String, MetadataValue>;
 
 #[derive(Debug)]
 pub(crate) struct EmbeddingRecord {

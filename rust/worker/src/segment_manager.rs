@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::distributed_hnsw_segment::DistributedHNSWSegment;
-use crate::types::{EmbeddingRecord, Segment, SegmentScope};
+use crate::types::{EmbeddingRecord, MetadataValue, Segment, SegmentScope};
 
 #[derive(Clone)]
 pub(crate) struct SegmentManager {
@@ -43,10 +43,27 @@ impl SegmentManager {
                     // Find the active segment, load the segment, and write the record to it
                     let mut ret_id = None;
                     for segment in segments.iter() {
-                        match segment.scope {
-                            SegmentScope::VECTOR => ret_id = Some(segment.id),
-                            SegmentScope::METADATA => ret_id = None, // TODO: implement metadata
-                        };
+                        // Try to get the vector segment
+                        if matches!(segment.scope, SegmentScope::VECTOR) {
+                            let segment_metadata = segment.metadata.as_ref();
+                            if segment_metadata.is_none() {
+                                continue;
+                            }
+                            let segment_metadata = segment_metadata.unwrap();
+                            let state = segment_metadata.get("segment_state");
+                            match state {
+                                Some(MetadataValue::Str(state)) => {
+                                    if state == "ACTIVE" {
+                                        println!("Found active segment: {}", segment.id);
+                                        ret_id = Some(segment.id.clone());
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            };
+                        } else if matches!(segment.scope, SegmentScope::METADATA) {
+                            todo!("Handle metadata segments");
+                        }
                     }
                     ret_id
                 }
@@ -62,7 +79,7 @@ impl SegmentManager {
 
         // TODO: don't assume 1:1 mapping between collection and segment
         let segment_cache = self.inner.vector_segments.upgradable_read();
-        match segment_cache.get(&collection_id) {
+        match segment_cache.get(&target_segment_id) {
             Some(segment) => {
                 segment.write_records(vec![record]);
             }
@@ -98,6 +115,8 @@ impl SegmentManager {
             Err(_) => {
                 // Data was not in the cache, so we need to get it from the database
                 // Drop the lock since we need to upgrade it
+                // Mappable locks cannot be upgraded, so we need to drop the lock and re-acquire it
+                // https://github.com/Amanieu/parking_lot/issues/83
                 drop(segments);
 
                 let segments = self

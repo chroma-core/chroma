@@ -1,7 +1,7 @@
 import multiprocessing
 import re
 from typing import Any, Callable, Dict, Union
-
+from enum import Enum
 from chromadb.types import Metadata
 
 
@@ -28,7 +28,7 @@ class Params:
     def _select(metadata: Metadata) -> Dict[str, Any]:
         segment_metadata = {}
         for param, value in metadata.items():
-            if param.startswith("hnsw:"):
+            if param.startswith("hnsw:") or param.startswith("distributed_hnsw:"):
                 segment_metadata[param] = value
         return segment_metadata
 
