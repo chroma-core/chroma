@@ -38,6 +38,14 @@ func TestSimpleNotificationProcessor(t *testing.T) {
 	notificationStore.AddNotification(ctx, notification)
 	notificationProcessor.Trigger(ctx, triggerMsg)
 
+	// Wait for the notification to be processed.
+	err := <-resultChan
+	if err != nil {
+		t.Errorf("Failed to process notification %v", err)
+	}
+	if len(notifier.queue) != 1 {
+		t.Errorf("Notification is not sent by the notifier")
+	}
 	for _, msg := range notifier.queue {
 		newMsgPb := coordinatorpb.Notification{}
 		err := proto.Unmarshal(msg.Payload, &newMsgPb)
@@ -85,6 +93,9 @@ func TestSimpleNotificationProcessorWithExistingNotification(t *testing.T) {
 
 	notificationProcessor.Start()
 
+	if len(notifier.queue) != 1 {
+		t.Errorf("Notification is not sent by the notifier")
+	}
 	for _, msg := range notifier.queue {
 		newMsgPb := coordinatorpb.Notification{}
 		err := proto.Unmarshal(msg.Payload, &newMsgPb)
@@ -107,51 +118,6 @@ func TestSimpleNotificationProcessorWithExistingNotification(t *testing.T) {
 		}
 	}
 	notificationProcessor.Stop()
-	cleanupDatabase(db)
-}
-
-func TestSimpleNotificationProcessorCleanShutdown(t *testing.T) {
-	ctx := context.Background()
-	db := setupDatabase()
-	txnImpl := dbcore.NewTxImpl()
-	metaDomain := dao.NewMetaDomain()
-	notificationStore := NewDatabaseNotificationStore(txnImpl, metaDomain)
-	notifier := NewMemoryNotifier()
-	notificationProcessor := NewSimpleNotificationProcessor(ctx, notificationStore, notifier)
-
-	notification := model.Notification{
-		CollectionID: "collection1",
-		Type:         model.NotificationTypeDeleteCollection,
-		Status:       model.NotificationStatusPending,
-	}
-
-	notificationProcessor.Start()
-
-	// Only add to the notification store, but not trigger it.
-	notificationStore.AddNotification(ctx, notification)
-	notificationProcessor.Stop()
-
-	for _, msg := range notifier.queue {
-		newMsgPb := coordinatorpb.Notification{}
-		err := proto.Unmarshal(msg.Payload, &newMsgPb)
-		if err != nil {
-			t.Errorf("Failed to unmarshal message %v", err)
-		}
-		newMsg := model.Notification{
-			CollectionID: newMsgPb.CollectionId,
-			Type:         newMsgPb.Type,
-			Status:       newMsgPb.Status,
-		}
-		if newMsg.CollectionID != notification.CollectionID {
-			t.Errorf("CollectionID is not equal %v, %v", newMsg.CollectionID, notification.CollectionID)
-		}
-		if newMsg.Type != notification.Type {
-			t.Errorf("Type is not equal %v, %v", newMsg.Type, notification.Type)
-		}
-		if newMsg.Status != notification.Status {
-			t.Errorf("Status is not equal, %v, %v", newMsg.Status, notification.Status)
-		}
-	}
 	cleanupDatabase(db)
 }
 

@@ -70,9 +70,10 @@ func (n *SimpleNotificationProcessor) Process(ctx context.Context) error {
 		case triggerMsg := <-n.channel:
 			msg := triggerMsg.Msg
 			log.Info("Received notification", zap.Any("msg", msg))
-
+			running := n.running.Load()
+			log.Info("Notification processor is running", zap.Bool("running", running))
 			// We need to block here until the notifications are sent successfully
-			for n.running.Load() {
+			for running {
 				// Check the notification store if this notification is already processed
 				// If it is already processed, just return
 				// If it is not processed, send notifications and remove from the store
@@ -93,7 +94,8 @@ func (n *SimpleNotificationProcessor) Process(ctx context.Context) error {
 					log.Error("Failed to send pending notifications", zap.Error(err))
 				} else {
 					n.store.RemoveNotifications(ctx, notifications)
-					triggerMsg.ResultChan <- err
+					log.Info("Rmove notifications from notification store", zap.Any("notifications", notifications))
+					triggerMsg.ResultChan <- nil
 					break
 				}
 			}
