@@ -124,6 +124,9 @@ class SqliteMetadataSegment(MetadataReader):
         limit = limit or 2**63 - 1
         offset = offset or 0
 
+        if limit < 0:
+            raise ValueError("Limit cannot be negative")
+
         q = (
             (
                 self._db.querybuilder()

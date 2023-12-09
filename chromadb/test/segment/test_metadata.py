@@ -613,9 +613,9 @@ def test_limit(
     res = segment.get_metadata(limit=3)
     assert len(res) == 3
 
-    # if limit is negative, return all results
-    res = segment.get_metadata(limit=-1)
-    assert len(res) == 6
+    # if limit is negative, throw error
+    with pytest.raises(ValueError):
+        segment.get_metadata(limit=-1)
 
     # if offset is more than number of results, return empty list
     res = segment.get_metadata(limit=3, offset=10)
