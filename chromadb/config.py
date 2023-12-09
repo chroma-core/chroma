@@ -319,11 +319,11 @@ class System(Component):
                 desired_soft = settings["chroma_server_nofile"]
                 # Validate
                 if desired_soft > curr_hard:
-                    raise ValueError(
-                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}"
+                    logging.warning(
+                        f"chroma_server_nofile cannot be set to a value greater than the current hard limit of {curr_hard}. Keeping soft limit at {curr_soft}"
                     )
                 # Apply
-                if desired_soft > curr_soft:
+                elif desired_soft > curr_soft:
                     try:
                         resource.setrlimit(
                             resource.RLIMIT_NOFILE, (desired_soft, curr_hard)

@@ -12,9 +12,9 @@ type SegmentMetadata struct {
 	StrValue   *string         `gorm:"str_value"`
 	IntValue   *int64          `gorm:"int_value"`
 	FloatValue *float64        `gorm:"float_value"`
-	Ts         types.Timestamp `gorm:"ts"`
-	CreatedAt  time.Time       `gorm:"created_at"`
-	UpdatedAt  time.Time       `gorm:"updated_at"`
+	Ts         types.Timestamp `gorm:"ts;type:bigint;default:0"`
+	CreatedAt  time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
+	UpdatedAt  time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 }
 
 func (SegmentMetadata) TableName() string {

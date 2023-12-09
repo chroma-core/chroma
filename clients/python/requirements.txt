@@ -1,0 +1,9 @@
+numpy >= 1.22.5
+opentelemetry-api>=1.2.0
+opentelemetry-exporter-otlp-proto-grpc>=1.2.0
+opentelemetry-sdk>=1.2.0
+overrides >= 7.3.1
+posthog >= 2.4.0
+pydantic>=1.9
+requests >= 2.28
+typing_extensions >= 4.5.0

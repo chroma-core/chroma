@@ -35,6 +35,7 @@ from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
     InvalidDimensionException,
+    InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -79,12 +80,19 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return JSONResponse(
-            content={"error": e.name(), "message": e.message()}, status_code=e.code()
-        )
+        return e.fastapi_json_response()
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
+
+
+async def check_http_version_middleware(
+    request: Request, call_next: Callable[[Request], Any]
+) -> Response:
+    http_version = request.scope.get("http_version")
+    if http_version not in ["1.1", "2"]:
+        raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
+    return await call_next(request)
 
 
 def _uuid(uuid_str: str) -> UUID:
@@ -131,6 +139,7 @@ class FastAPI(chromadb.server.Server):
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
         self._system.start()
 
+        self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.add_middleware(
             CORSMiddleware,
@@ -349,10 +358,7 @@ class FastAPI(chromadb.server.Server):
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
-        action=[
-            AuthzResourceActions.CREATE_COLLECTION,
-            AuthzResourceActions.GET_OR_CREATE_COLLECTION,
-        ],
+        action=AuthzResourceActions.CREATE_COLLECTION,
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.DB,
