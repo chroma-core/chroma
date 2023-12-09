@@ -81,41 +81,7 @@ DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
 
-class Settings(BaseSettings):  # type: ignore
-    environment: str = ""
-
-    # Legacy config has to be kept around because pydantic will error
-    # on nonexisting keys
-    chroma_db_impl: Optional[str] = None
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
-    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.posthog.Posthog"
-    # Required for backwards compatibility
-    chroma_telemetry_impl: str = chroma_product_telemetry_impl
-
-    # New architecture components
-    chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_producer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_consumer_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
-    chroma_segment_manager_impl: str = (
-        "chromadb.segment.impl.manager.local.LocalSegmentManager"
-    )
-
-    # Distributed architecture specific components
-    chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
-    chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
-    chroma_collection_assignment_policy_impl: str = (
-        "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
-    )
-    worker_memberlist_name: str = "worker-memberlist"
-    chroma_coordinator_host = "localhost"
-
-    tenant_id: str = "default"
-    topic_namespace: str = "default"
-
-    is_persistent: bool = False
-    persist_directory: str = "./chroma"
-
+class ServerSettings(BaseSettings): # type: ignore
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
@@ -141,7 +107,7 @@ class Settings(BaseSettings):  # type: ignore
 
     @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
     def chroma_server_auth_provider_non_empty(
-        cls: Type["Settings"], v: str
+        cls: type, v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
@@ -159,7 +125,7 @@ class Settings(BaseSettings):  # type: ignore
         "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
     )
     def chroma_server_auth_credentials_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
+        cls: type, v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
@@ -171,40 +137,28 @@ class Settings(BaseSettings):  # type: ignore
             )
         return v
 
-    chroma_client_auth_provider: Optional[str] = None
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
 
-    chroma_client_auth_credentials_provider: Optional[
-        str
-    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    chroma_client_auth_protocol_adapter: Optional[
-        str
-    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
-    chroma_client_auth_credentials_file: Optional[str] = None
-    chroma_client_auth_credentials: Optional[str] = None
-    chroma_client_auth_token_transport_header: Optional[str] = None
     chroma_server_auth_token_transport_header: Optional[str] = None
-
     chroma_server_authz_provider: Optional[str] = None
+    chroma_server_authz_config_file: Optional[str] = None
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None
 
     chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
         "/api/v1": ["GET"],
         "/api/v1/heartbeat": ["GET"],
         "/api/v1/version": ["GET"],
     }
-    chroma_server_authz_config_file: Optional[str] = None
-
-    chroma_server_authz_config: Optional[Dict[str, Any]] = None
 
     @validator(
         "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
     )
     def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
+        cls: type, v: str
     ) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
