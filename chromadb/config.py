@@ -81,7 +81,7 @@ DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
 
-class ServerSettings(BaseSettings): # type: ignore
+class ServerSettings(BaseSettings):  # type: ignore
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
@@ -106,9 +106,7 @@ class ServerSettings(BaseSettings): # type: ignore
     chroma_server_auth_provider: Optional[str] = None
 
     @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
-    def chroma_server_auth_provider_non_empty(
-        cls: type, v: str
-    ) -> Optional[str]:
+    def chroma_server_auth_provider_non_empty(cls: type, v: str) -> Optional[str]:
         if v and not v.strip():
             raise ValueError(
                 "chroma_server_auth_provider cannot be empty or just whitespace"
