@@ -12,8 +12,9 @@ struct IndexPtrFFI {
 
 // #[repr(C)]
 pub struct Index {
-    ptr: *const IndexPtrFFI,
-    dim: usize,
+    ptr: Option<*const IndexPtrFFI>,
+    dim: Option<usize>,
+    space_name: String,
     pub initialized: bool,
 }
 
@@ -23,81 +24,110 @@ unsafe impl Send for Index {}
 
 // Index impl that is public and wraps the private index extern "C" struct
 impl Index {
-    pub fn new(space_name: &str, dim: usize) -> Index {
-        // TODO: handle unwrap panic
+    pub fn new(space_name: &str) -> Index {
         // TODO: enum for spaces
-        let space_name = CString::new(space_name).unwrap();
-        let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
-        println!("Pointer to index: {:?}", index);
         return Index {
-            ptr: index,
-            dim: dim,
+            ptr: None,
+            dim: None,
+            space_name: space_name.to_string(),
             initialized: false,
         };
     }
 
+    // TODO: move the not lazy params into a struct and into main constructor
     pub fn init(
-        &self, // Init will not mutate the index ptr so we can borrow it
+        &mut self,
+        dim: usize,
         max_elements: usize,
         m: usize,
         ef_construction: usize,
         random_seed: usize,
         allow_replace_deleted: bool,
+        is_peristent: bool,
+        persist_path: &str,
     ) {
         if self.initialized {
             return;
         }
-        println!("Initializing index in rust");
-        println!("Pointer to index: {:?}", self.ptr);
+        self.dim = Some(dim);
+        let space_name = CString::new(self.space_name.to_string()).unwrap();
+        let persist_path = CString::new(persist_path).unwrap();
+        let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
+        self.ptr = Some(index);
         unsafe {
             init_index(
-                self.ptr,
+                index,
                 max_elements,
                 m,
                 ef_construction,
                 random_seed,
                 allow_replace_deleted,
+                is_peristent,
+                persist_path.as_ptr(),
             );
         }
+        self.initialized = true;
     }
 
     pub fn get_ef(&self) -> i32 {
-        unsafe { get_ef(self.ptr) }
+        // TODO: return result and error for all methods
+        match self.ptr {
+            None => return 0,
+            Some(ptr) => unsafe { get_ef(ptr) },
+        }
     }
 
     pub fn set_ef(&self, ef: i32) {
-        unsafe {
-            set_ef(self.ptr, ef);
+        match self.ptr {
+            None => return,
+            Some(ptr) => unsafe { set_ef(ptr, ef) },
         }
     }
 
     pub fn add_item(&self, data: &[f32], id: usize, replace_deleted: bool) {
-        unsafe {
-            add_item(self.ptr, data.as_ptr(), id, replace_deleted);
+        match self.ptr {
+            None => return,
+            Some(ptr) => unsafe { add_item(ptr, data.as_ptr(), id, replace_deleted) },
         }
     }
 
     pub fn get_item(&self, id: usize) -> Vec<f32> {
-        let mut data = vec![0.0f32; self.dim];
-        unsafe {
-            get_item(self.ptr, id, data.as_mut_ptr());
+        match (self.ptr, self.dim) {
+            (None, _) => {
+                // TODO: return Result
+                let mut data: Vec<f32> = vec![0.0f32; 0];
+                return data;
+            }
+            (Some(ptr), None) => {
+                let mut data: Vec<f32> = vec![0.0f32; 0];
+                return data;
+            }
+            (Some(ptr), Some(dim)) => unsafe {
+                let mut data: Vec<f32> = vec![0.0f32; dim];
+                get_item(ptr, id, data.as_mut_ptr());
+                return data;
+            },
         }
-        return data;
     }
 
     pub fn knn_query(&self, query_vector: &[f32], k: usize) -> (Vec<i32>, Vec<f32>) {
         let mut ids = vec![0i32; k];
         let mut distance = vec![0.0f32; k];
-        unsafe {
-            knn_query(
-                self.ptr,
-                query_vector.as_ptr(),
-                k,
-                ids.as_mut_ptr(),
-                distance.as_mut_ptr(),
-            );
+        match self.ptr {
+            None => return (ids, distance),
+            Some(ptr) => {
+                unsafe {
+                    knn_query(
+                        ptr,
+                        query_vector.as_ptr(),
+                        k,
+                        ids.as_mut_ptr(),
+                        distance.as_mut_ptr(),
+                    );
+                }
+                return (ids, distance);
+            }
         }
-        return (ids, distance);
     }
 }
 
@@ -112,6 +142,8 @@ extern "C" {
         ef_construction: usize,
         random_seed: usize,
         allow_replace_deleted: bool,
+        is_persistent: bool,
+        path: *const c_char,
     );
 
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);

@@ -86,7 +86,13 @@ impl SegmentManager {
             None => {
                 let mut segment_cache = RwLockUpgradableReadGuard::upgrade(segment_cache);
                 // Parse metadata from the segment and hydrate the params for the segment
-                let new_segment = Box::new(DistributedHNSWSegment::new("ip".to_string(), 100000));
+                let new_segment = Box::new(DistributedHNSWSegment::new(
+                    "ip".to_string(),
+                    100000,
+                    "./test/".to_string(),
+                    100,
+                    10000,
+                ));
                 segment_cache.insert(target_segment_id.clone(), new_segment);
                 let segment_cache = RwLockWriteGuard::downgrade(segment_cache);
                 let segment = RwLockReadGuard::map(segment_cache, |cache| {

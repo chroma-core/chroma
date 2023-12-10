@@ -1,4 +1,4 @@
-#include "/Users/hammad/Documents/index/hnswlib/hnswlib/hnswlib.h" // TODO: move hnswlib into rust/worker
+#include "/Users/hammad/Documents/chroma_hnswlib/hnswlib/hnswlib.h" // TODO: move hnswlib into rust/worker
 
 // HACK: copied from my java bindings
 // TODO: redo this / clean it up
@@ -49,13 +49,13 @@ public:
         }
     }
 
-    void init_new_index(size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted)
+    void init_new_index(size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, std::string persistence_location)
     {
         // if (index_inited) {
         //     // TODO: ERROR HANDLE!
         // }
-        std::cout << "init_new_index in c++" << std::endl;
-        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, max_elements, M, ef_construction, random_seed, allow_replace_deleted);
+        std::cout << "init_new_index" << std::endl;
+        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, max_elements, M, ef_construction, random_seed, allow_replace_deleted, normalize, is_persistent_index, persistence_location);
         appr_alg->ef_ = ef_search;
         index_inited = true;
     }
@@ -78,6 +78,13 @@ public:
         // Use 0 for the max_elements since hnswlib will read it from the file and we don't want to override it
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted);
         index_inited = true;
+    }
+
+    void persist_dirty()
+    {
+        // check if index is inited
+        // persist dirty
+        appr_alg->persistDirty();
     }
 
     void add_item(data_t *data, hnswlib::labeltype id, bool replace_deleted = false)
@@ -174,12 +181,9 @@ extern "C"
         return new Index<float>(space_name, dim);
     }
 
-    void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted)
+    void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, std::string persistence_location)
     {
-        std::cout << "init_index" << std::endl;
-        std::cout << "Pointer: " << index << std::endl;
-        index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted);
-        std::cout << "init_index done" << std::endl;
+        index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
     }
 
     // void save_index(Index<float> *index, const char *path_to_index)
@@ -192,6 +196,11 @@ extern "C"
     //     // max_elements, M, ef_construction, random_seed are stored by hnswlib so we don't need to pass them
     //     index->loadIndex(path_to_index, allow_replace_deleted);
     // }
+
+    void persist_dirty(Index<float> *index)
+    {
+        index->persist_dirty();
+    }
 
     void add_item(Index<float> *index, float *data, hnswlib::labeltype id, bool replace_deleted)
     {

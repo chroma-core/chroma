@@ -1,5 +1,6 @@
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::index::Index;
 use crate::types::{EmbeddingRecord, Operation};
@@ -7,21 +8,31 @@ use crate::types::{EmbeddingRecord, Operation};
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<Index>>,
     id: AtomicUsize,
+    persist_path: String,
+    persist_interval: usize,
+    flush_interval: usize,
+    max_records: usize,
     // TODO: additional bookkeeping of the index
     // TODO: switch from Rwlock to xor lock that allows multiple readers or multiple writers
 }
 
 impl DistributedHNSWSegment {
     // TODO: load from path
-    pub(crate) fn new(space_name: String, max_records: usize) -> Self {
-        let index = Arc::new(RwLock::new(Index::new("ip", 1)));
-        let index_guard = index.write();
-        let index_handle = index_guard.unwrap();
-        println!("Initializing index");
-        index_handle.init(max_records, 16, 200, 0, true);
+    pub(crate) fn new(
+        space_name: String,
+        max_records: usize,
+        persist_path: String,
+        persist_interval: usize,
+        flush_interval: usize,
+    ) -> Self {
+        let index = Arc::new(RwLock::new(Index::new("ip")));
         return DistributedHNSWSegment {
-            index: index.clone(),
+            index: index,
             id: AtomicUsize::new(0),
+            persist_path: persist_path,
+            persist_interval: persist_interval,
+            flush_interval: flush_interval,
+            max_records: max_records,
         };
         // TODO: lazy init so we can track the dim correctly
     }
@@ -33,22 +44,38 @@ impl DistributedHNSWSegment {
                 Ok(Operation::Add) => {
                     // TODO: hold the lock for the shortest amount of time possible
                     // TODO: make lock xor lock
-                    let index_res = self.index.read();
-                    match index_res {
-                        Ok(index) => match record.embedding {
-                            Some(vector) => {
+                    match record.embedding {
+                        Some(vector) => {
+                            let index = self.index.upgradable_read();
+                            if index.initialized == false {
+                                // The index is not initialized yet, we need to lazily initialize it
+                                // so that we can infer the dimensionality
+                                let dim = vector.len();
+                                let mut index = RwLockUpgradableReadGuard::upgrade(index);
+                                index.init(
+                                    dim,
+                                    self.max_records,
+                                    16,
+                                    200,
+                                    0,
+                                    false,
+                                    true,
+                                    &self.persist_path,
+                                );
+                                let next_id =
+                                    self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                println!("Adding item: {}", next_id);
+                                index.add_item(&vector, next_id, false);
+                            } else {
                                 let next_id =
                                     self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 println!("Adding item: {}", next_id);
                                 index.add_item(&vector, next_id, false);
                             }
-                            None => {
-                                // TODO: log an error
-                                println!("No vector found in record");
-                            }
-                        },
-                        Err(_) => {
-                            println!("Error getting write lock on index");
+                        }
+                        None => {
+                            // TODO: log an error
+                            println!("No vector found in record");
                         }
                     }
                 }

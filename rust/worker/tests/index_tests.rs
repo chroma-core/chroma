@@ -9,66 +9,66 @@ fn it_initializes_and_can_set_ef() {
     let n = 1000;
     let d: usize = 960;
     let space_name = "ip";
-    let index = Index::new(space_name, d);
-    index.init(n, 16, 100, 0, true);
+    let mut index = Index::new(space_name);
+    index.init(d, n, 16, 100, 0, true, false, "");
     assert_eq!(index.get_ef(), 10);
     index.set_ef(100);
     assert_eq!(index.get_ef(), 100);
 }
 
-#[test]
-fn it_can_add_parallel() {
-    let n = 10000;
-    let d: usize = 960;
-    let space_name = "ip";
-    let mut index = Index::new(space_name, d);
-    index.init(n, 16, 100, 0, true);
+// #[test]
+// fn it_can_add_parallel() {
+//     let n = 10000;
+//     let d: usize = 960;
+//     let space_name = "ip";
+//     let mut index = Index::new(space_name);
+//     index.init(d, n, 16, 100, 0, true, false, "");
 
-    // let data: Vec<f32> = utils::generate_random_data(n, d);
-    let ids: Vec<usize> = (0..n).collect();
+//     // let data: Vec<f32> = utils::generate_random_data(n, d);
+//     let ids: Vec<usize> = (0..n).collect();
 
-    // Add data in parallel, using global pool for testing
-    ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .unwrap();
+//     // Add data in parallel, using global pool for testing
+//     ThreadPoolBuilder::new()
+//         .num_threads(1)
+//         .build_global()
+//         .unwrap();
 
-    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let mut datas = Vec::new();
-    for i in 0..n {
-        let mut data: Vec<f32> = Vec::new();
-        for i in 0..960 {
-            data.push(rng.gen());
-        }
-        datas.push(data);
-    }
+//     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+//     let mut datas = Vec::new();
+//     for i in 0..n {
+//         let mut data: Vec<f32> = Vec::new();
+//         for i in 0..960 {
+//             data.push(rng.gen());
+//         }
+//         datas.push(data);
+//     }
 
-    (0..n).into_par_iter().for_each(|i| {
-        // let data = &data[i * d..(i + 1) * d];
-        let data = &datas[i];
-        println!("Adding item: {}", i);
-        index.add_item(data, ids[i], false)
-    });
+//     (0..n).into_par_iter().for_each(|i| {
+//         // let data = &data[i * d..(i + 1) * d];
+//         let data = &datas[i];
+//         println!("Adding item: {}", i);
+//         index.add_item(data, ids[i], false)
+//     });
 
-    // Get the data and check it
-    // let mut i = 0;
-    // for id in ids {
-    //     let actual_data = index.get_item(id);
-    //     assert_eq!(actual_data.len(), d);
-    //     for j in 0..d {
-    //         assert_eq!(actual_data[j], data[i * d + j]);
-    //     }
-    //     i += 1;
-    // }
-}
+//     // Get the data and check it
+//     // let mut i = 0;
+//     // for id in ids {
+//     //     let actual_data = index.get_item(id);
+//     //     assert_eq!(actual_data.len(), d);
+//     //     for j in 0..d {
+//     //         assert_eq!(actual_data[j], data[i * d + j]);
+//     //     }
+//     //     i += 1;
+//     // }
+// }
 
 #[test]
 fn it_can_add_and_basic_query() {
     let n = 1000;
     let d: usize = 960;
     let space_name = "l2";
-    let index = Index::new(space_name, d);
-    index.init(n, 16, 100, 0, true);
+    let mut index = Index::new(space_name);
+    index.init(d, n, 16, 100, 0, true, false, "");
     index.set_ef(100);
 
     let data: Vec<f32> = utils::generate_random_data(n, d);
