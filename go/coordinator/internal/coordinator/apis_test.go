@@ -20,7 +20,7 @@ func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewSimpleAssignmentPolicy("test-tenant", "test-topic")
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -76,7 +76,7 @@ func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewSimpleAssignmentPolicy("test-tenant", "test-topic")
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestCreateGetDeleteCollections(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestUpdateCollections(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestCreateUpdateWithDatabase(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestGetMultipleWithDatabase(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestCreateDatabaseWithTenants(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestCreateGetDeleteTenants(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(nil)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -827,7 +827,7 @@ func TestUpdateSegment(t *testing.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
-	c, err := NewCoordinator(ctx, assignmentPolicy, db)
+	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}

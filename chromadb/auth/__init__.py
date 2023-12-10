@@ -438,14 +438,3 @@ class ServerAuthorizationConfigurationProvider(Component, Generic[T]):
     @abstractmethod
     def get_configuration(self) -> T:
         pass
-
-
-class AuthorizationError(ChromaError):
-    @override
-    def code(self) -> int:
-        return 403
-
-    @classmethod
-    @override
-    def name(cls) -> str:
-        return "AuthorizationError"

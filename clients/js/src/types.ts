@@ -80,3 +80,12 @@ export type CollectionMetadata = Record<string, unknown>;
 export type ConfigOptions = {
   options?: RequestInit;
 };
+
+export type GetParams = {
+  ids?: ID | IDs,
+  where?: Where,
+  limit?: PositiveInteger,
+  offset?: PositiveInteger,
+  include?: IncludeEnum[],
+  whereDocument?: WhereDocument
+}
