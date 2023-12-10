@@ -165,15 +165,19 @@ class ServerSettings(BaseSettings):  # type: ignore
         if v and not os.path.isfile(os.path.join(v)):
             raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
         return v
+
     chroma_server_authz_config_provider: Optional[
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
 
-class ClientSettings(BaseSettings): # type: ignore
-
-    chroma_client_auth_credentials_provider: Optional[str] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    chroma_client_auth_protocol_adapter: Optional[str] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
+class ClientSettings(BaseSettings):  # type: ignore
+    chroma_client_auth_credentials_provider: Optional[
+        str
+    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
+    chroma_client_auth_protocol_adapter: Optional[
+        str
+    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
     chroma_client_auth_credentials_file: Optional[str] = None
     chroma_client_auth_credentials: Optional[str] = None
     chroma_client_auth_token_transport_header: Optional[str] = None
@@ -188,7 +192,7 @@ class ClientSettings(BaseSettings): # type: ignore
     chroma_otel_granularity: Optional[str] = None
 
 
-class SettingsBase(BaseSettings): # type: ignore
+class SettingsBase(BaseSettings):  # type: ignore
     environment: str = ""
     allow_reset: bool = False
 
@@ -229,6 +233,8 @@ class SettingsBase(BaseSettings): # type: ignore
     # this is intended to be a first-time setup configuration
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
+
+class Settings(SettingsBase, ClientSettings, ServerSettings):
     def require(self, key: str) -> Any:
         """
         Return the value of a required config key, or raise an exception if it is not set
@@ -238,7 +244,6 @@ class SettingsBase(BaseSettings): # type: ignore
         if value is None:
             raise ValueError(f"Missing required config value '{key}'")
         return value
-
 
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
@@ -251,8 +256,6 @@ class SettingsBase(BaseSettings): # type: ignore
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-class Settings(SettingsBase, ClientSettings, ServerSettings):
-    ...
 
 T = TypeVar("T", bound="Component")
 
