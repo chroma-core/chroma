@@ -18,7 +18,7 @@ export namespace Api {
 
 	export interface AddEmbedding {
 		embeddings?: Api.AddEmbedding.Embedding[];
-		metadatas?: Api.AddEmbedding.Metadata[];
+		metadatas?: Api.AddEmbedding.Metadatum[];
 		documents?: string[];
 		uris?: string[];
 		ids: string[];
@@ -32,7 +32,7 @@ export namespace Api {
 		export interface Embedding {
 		}
 	
-		export interface Metadata {
+		export interface Metadatum {
 		}
 	
 	}
@@ -140,7 +140,7 @@ export namespace Api {
 		}
 	
 		export type Include = Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4 | Api.GetEmbedding.Include.EnumValueEnum5 | Api.GetEmbedding.Include.EnumValueEnum6;
-
+		
 		/**
 		 * @export
 		 * @namespace Include
@@ -169,7 +169,7 @@ export namespace Api {
 			export enum EnumValueEnum6 {
 				Data = 'data'
 			}
-
+		
 		}
 	
 	}
@@ -238,15 +238,15 @@ export namespace Api {
 			export enum EnumValueEnum4 {
 				Distances = 'distances'
 			}
-
+		
 			export enum EnumValueEnum5 {
 				Uris = 'uris'
 			}
-
+		
 			export enum EnumValueEnum6 {
 				Data = 'data'
 			}
-
+		
 		}
 	
 	}
@@ -274,7 +274,7 @@ export namespace Api {
 
 	export interface UpdateEmbedding {
 		embeddings?: Api.UpdateEmbedding.Embedding[];
-		metadatas?: Api.UpdateEmbedding.Metadata[];
+		metadatas?: Api.UpdateEmbedding.Metadatum[];
 		documents?: string[];
 		uris?: string[];
 		ids: string[];
@@ -288,7 +288,7 @@ export namespace Api {
 		export interface Embedding {
 		}
 	
-		export interface Metadata {
+		export interface Metadatum {
 		}
 	
 	}
