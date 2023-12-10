@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import (
     Optional,
     Sequence,
@@ -7,7 +8,6 @@ from typing import (
     Dict,
     Any,
     Tuple,
-    NamedTuple,
     cast,
 )
 from numpy.typing import NDArray
@@ -200,16 +200,38 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-class SystemInfoFlags(NamedTuple):
-    """
-    Flags for the system info endpoint
-    """
+class ChromaMode(str, Enum):
+    PERSISTENT_CLIENT = "persistent client"
+    EPHEMERAL_CLIENT = "ephemeral client"
+    SERVER_SINGLE_NODE = "client/server single node"
+    SERVER_DISTRIBUTED = "client/server distributed"
 
-    python_version: bool = True
-    os_info: bool = True
-    memory_info: bool = True
-    cpu_info: bool = True
-    disk_info: bool = True
+
+class SystemInfo(TypedDict):
+    chroma_version: str
+    python_version: str
+    is_persistent: bool
+    api: str
+    datetime: str
+    os: str
+    os_version: str
+    os_release: Optional[str]
+    cpu_architecture: Optional[str]
+    cpu_count: Optional[int]
+    cpu_usage: Optional[float]
+    memory_free: Optional[int]
+    memory_total: Optional[int]
+    process_memory_rss: Optional[int]
+    process_memory_vms: Optional[int]
+    persistent_disk_total: Optional[int]
+    persistent_disk_used: Optional[int]
+    persistent_disk_free: Optional[int]
+    mode: ChromaMode
+
+
+class ClientServerSystemInfo(TypedDict):
+    server: Optional[SystemInfo]
+    client: Optional[SystemInfo]
 
 
 Embeddable = Union[Documents, Images]

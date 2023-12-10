@@ -68,7 +68,6 @@ def find_free_port() -> int:
 def _run_server(
     port: int,
     is_persistent: bool = False,
-    chroma_server_env_endpoint_enabled: bool = True,
     persist_directory: Optional[str] = None,
     chroma_server_auth_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
@@ -87,7 +86,6 @@ def _run_server(
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            chroma_server_env_endpoint_enabled=chroma_server_env_endpoint_enabled,
             is_persistent=is_persistent,
             persist_directory=persist_directory,
             allow_reset=True,
@@ -107,7 +105,6 @@ def _run_server(
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            chroma_server_env_endpoint_enabled=chroma_server_env_endpoint_enabled,
             is_persistent=False,
             allow_reset=True,
             chroma_server_auth_provider=chroma_server_auth_provider,
@@ -144,7 +141,6 @@ def _await_server(api: ServerAPI, attempts: int = 0) -> None:
 
 def _fastapi_fixture(
     is_persistent: bool = False,
-    chroma_server_env_endpoint_enabled: bool = True,
     chroma_server_auth_provider: Optional[str] = None,
     chroma_server_auth_credentials_provider: Optional[str] = None,
     chroma_client_auth_provider: Optional[str] = None,
@@ -166,7 +162,6 @@ def _fastapi_fixture(
     args: Tuple[
         int,
         bool,
-        bool,
         Optional[str],
         Optional[str],
         Optional[str],
@@ -179,7 +174,6 @@ def _fastapi_fixture(
     ] = (
         port,
         False,
-        chroma_server_env_endpoint_enabled,
         None,
         chroma_server_auth_provider,
         chroma_server_auth_credentials_provider,
@@ -196,7 +190,6 @@ def _fastapi_fixture(
         args = (
             port,
             is_persistent,
-            chroma_server_env_endpoint_enabled,
             persist_directory,
             chroma_server_auth_provider,
             chroma_server_auth_credentials_provider,
@@ -331,18 +324,6 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
     ):
         yield item
     os.remove(server_auth_file)
-
-
-@pytest.fixture(scope="module")
-def fastapi_server_env_endpoint_disabled() -> ServerAPI:
-    _sys = next(
-        _fastapi_fixture(
-            is_persistent=True,
-            chroma_server_env_endpoint_enabled=False,
-        )
-    )
-    _sys.start()
-    return _sys.instance(ServerAPI)
 
 
 def integration() -> Generator[System, None, None]:

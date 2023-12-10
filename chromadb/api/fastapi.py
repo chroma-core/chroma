@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, cast, Tuple, Dict, Any
+from typing import Optional, cast, Tuple
 from typing import Sequence
 from uuid import UUID
 
@@ -29,7 +29,8 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
-    SystemInfoFlags,
+    ClientServerSystemInfo,
+    SystemInfo,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -44,6 +45,8 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from urllib.parse import urlparse, urlunparse, quote
+
+from chromadb.utils.system_info_utils import system_info
 
 logger = logging.getLogger(__name__)
 
@@ -597,15 +600,13 @@ class FastAPI(ServerAPI):
         return self._settings
 
     @override
-    def env(
-        self, system_info_flags: Optional[SystemInfoFlags] = None
-    ) -> Dict[str, Any]:
+    def env(self) -> ClientServerSystemInfo:
         """Returns the system info of the server"""
-        _sys_flags = system_info_flags or SystemInfoFlags()
-        params = {field: getattr(_sys_flags, field) for field in _sys_flags._fields}
-        resp = self._session.get(self._api_url + "/env", params=params)
+        resp = self._session.get(self._api_url + "/env")
         raise_chroma_error(resp)
-        return cast(Dict[str, Any], resp.json())
+        return ClientServerSystemInfo(
+            server=cast(SystemInfo, resp.json()), client=system_info(self)
+        )
 
     @property
     @trace_method("FastAPI.max_batch_size", OpenTelemetryGranularity.OPERATION)

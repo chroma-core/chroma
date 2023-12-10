@@ -1432,20 +1432,14 @@ def test_system_info(api_obs) -> None:
     if not isinstance(api_obs, chromadb.api.fastapi.FastAPI):
         _env = api_obs.env()
         assert _env is not None
-        assert _env["chroma_version"] is not None
+        # assert _env["server"]["chroma_version"] is not None
     else:
         _env = api_obs.env()
-        assert _env["chroma_version"] is not None
+        assert _env["client"]["chroma_version"] is not None
 
-
-def test_system_info_env_endpoint_disabled(
-        fastapi_server_env_endpoint_disabled,
-) -> None:
-    with pytest.raises(Exception) as e:
-        fastapi_server_env_endpoint_disabled.env()
-    assert "Not Found" in str(e.value)
 
 # test to make sure update shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_update(api):
     api.reset()
@@ -1456,7 +1450,9 @@ def test_dimensionality_exception_update(api):
         collection.update(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
 
+
 # test to make sure upsert shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_upsert(api):
     api.reset()

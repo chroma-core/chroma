@@ -1,6 +1,6 @@
 from typing import Any, Callable, Dict, List, Sequence
 import fastapi
-from fastapi import FastAPI as _FastAPI, Response, Depends
+from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +9,12 @@ from fastapi import HTTPException, status
 from uuid import UUID
 import chromadb
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult, SystemInfoFlags
+from chromadb.api.types import (
+    GetResult,
+    QueryResult,
+    ChromaMode,
+    SystemInfo,
+)
 from chromadb.auth import (
     AuthzDynamicParams,
     AuthzResourceActions,
@@ -104,31 +109,6 @@ def _uuid(uuid_str: str) -> UUID:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
-def query_bool(
-    query: str,
-    default: bool,
-) -> bool:
-    if query is None:
-        return default
-    return query.lower() == "true"
-
-
-async def env_query_params(
-    python_version: bool = True,
-    os_info: bool = True,
-    memory_info: bool = True,
-    cpu_info: bool = True,
-    disk_info: bool = False,
-) -> SystemInfoFlags:
-    return SystemInfoFlags(
-        python_version=python_version,
-        os_info=os_info,
-        memory_info=memory_info,
-        cpu_info=cpu_info,
-        disk_info=disk_info,
-    )
-
-
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a trailing "/" the
     # same as URLs without. Docs will only contain URLs without trailing "/"s.
@@ -192,8 +172,7 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
-        if settings.chroma_server_env_endpoint_enabled:
-            self.router.add_api_route("/api/v1/env", self.env, methods=["GET"])
+        self.router.add_api_route("/api/v1/env", self.env, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
@@ -320,11 +299,22 @@ class FastAPI(chromadb.server.Server):
         return self._api.get_version()
 
     @trace_method("FastAPI.env", OpenTelemetryGranularity.OPERATION)
-    def env(
-        self,
-        system_info_flags: SystemInfoFlags = Depends(env_query_params),
-    ) -> Dict[str, Any]:
-        return self._api.env(system_info_flags=system_info_flags)
+    @authz_context(
+        action=AuthzResourceActions.ENV,
+        resource=DynamicAuthzResource(
+            type=AuthzResourceTypes.API,
+        ),
+    )
+    def env(self) -> SystemInfo:
+        _local_env = self._api.env()
+        if not _local_env or not _local_env.get("client"):
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to get system info.",
+            )
+        # this can be done better
+        _local_env["client"]["mode"] = ChromaMode.SERVER_SINGLE_NODE
+        return _local_env["client"]
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @authz_context(

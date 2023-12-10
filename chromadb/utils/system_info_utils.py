@@ -2,11 +2,11 @@ import datetime
 import logging
 import os
 import platform
-from typing import Dict, Any, Optional, cast
+import psutil
+from typing import Dict, cast, Any
 import re
 import chromadb
-from chromadb.api.types import SystemInfoFlags
-from chromadb.config import Settings
+from chromadb.api.types import SystemInfo, ChromaMode
 from chromadb.api import ServerAPI as API
 
 logger = logging.getLogger(__name__)
@@ -24,17 +24,6 @@ def format_size(size_in_bytes: int) -> str:
     return f"{size:.2f} {units[unit_index]}"
 
 
-try:
-    import psutil
-
-    PSUTIL_INSTALLED = True
-except ImportError:
-    PSUTIL_INSTALLED = False
-    logger.warning(
-        "psutil is not installed. Some system info won't be available. To install psutil, run "
-        "'pip install psutil'."
-    )
-
 SENSITIVE_VARS_PATTERNS = [".*PASSWORD.*", ".*KEY.*", ".*AUTH.*"]
 SENSITIVE_SETTINGS_PATTERNS = [".*credentials.*"]
 
@@ -48,14 +37,18 @@ def sanitized_environ() -> Dict[str, str]:
 
 
 def get_release_info(system: str) -> str:
+    release = f"Unknown OS Release {platform.release()}"
     if system == "Linux":
-        with open("/etc/os-release") as f:
-            for line in f:
-                if line.startswith("PRETTY_NAME"):
-                    return line.split("=")[1].strip().strip('"')
-        return "Unknown Linux Distro"
+        try:
+            with open("/etc/os-release") as f:
+                for line in f:
+                    if line.startswith("PRETTY_NAME"):
+                        release = line.split("=")[1].strip().strip('"')
+                        break
+        except Exception:
+            pass
     elif system == "Darwin":
-        return (
+        release = (
             os.popen("sw_vers")
             .read()
             .strip()
@@ -64,80 +57,47 @@ def get_release_info(system: str) -> str:
             .replace("\n", " ")
         )
     elif system == "Windows":
-        return platform.release()
-    else:
-        return "Unknown OS"
+        release = platform.release()
+    return release
 
 
-def sanitize_settings(settings: Settings) -> Dict[str, Any]:
-    _settings_dict = settings.dict()
-    for key in _settings_dict.keys():
-        if any(re.match(pattern, key) for pattern in SENSITIVE_VARS_PATTERNS):
-            _settings_dict[key] = "*****"
-        if any(re.match(pattern, key) for pattern in SENSITIVE_SETTINGS_PATTERNS):
-            _settings_dict[key] = "*****"
-    return cast(Dict[str, Any], _settings_dict)
-
-
-def system_info(
-    api: API,
-    system_info_flags: Optional[SystemInfoFlags] = None,
-) -> Dict[str, Any]:
-    _flags = system_info_flags or SystemInfoFlags()
-    data: Dict[str, Any] = {
-        "chroma_version": chromadb.__version__,
-        "is_persistent": api.get_settings().is_persistent,
-        "api": api.get_settings().chroma_api_impl,
-        "datetime": datetime.datetime.now().isoformat(),
-    }
-
-    if os.environ.get("PERSIST_DIRECTORY") or api.get_settings().is_persistent:
-        data["persist_directory"] = os.environ.get("PERSIST_DIRECTORY") or (
-            api.get_settings().persist_directory if api else ""
-        )
-
-    if _flags.python_version:
-        data["python_version"] = platform.python_version()
-
-    if _flags.os_info:
-        data["os"] = platform.system()
-        data["os_version"] = platform.release()
-        data["os_release"] = get_release_info(system=platform.system())
-
-    if _flags.memory_info and PSUTIL_INSTALLED:
-        mem = psutil.virtual_memory()
-        process = psutil.Process(os.getpid())
-        memory_info = process.memory_info()
-        data["memory_info"] = {
-            "free_memory": mem.available,
-            "total_memory": mem.total,
-        }
-        data["memory_info"]["process_memory"] = {
-            "rss": memory_info.rss,
-            "vms": memory_info.vms,
-        }
-
-    if _flags.cpu_info:
-        data["cpu_info"] = {
-            "architecture": platform.machine(),
-            "number_of_cpus": os.cpu_count(),
-        }
-        if PSUTIL_INSTALLED:
-            data["cpu_info"]["cpu_usage"] = psutil.cpu_percent(interval=1)
-
+def system_info(api: API) -> SystemInfo:
+    data: Dict[str, Any] = dict()
+    data["chroma_version"] = chromadb.__version__
+    data["python_version"] = platform.python_version()
+    data["is_persistent"] = api.get_settings().is_persistent
+    data["api"] = api.get_settings().chroma_api_impl
+    data["datetime"] = datetime.datetime.now().isoformat()
+    data["os"] = platform.system()
+    data["os_version"] = platform.release()
+    data["os_release"] = get_release_info(system=platform.system())
+    mem = psutil.virtual_memory()
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    data["memory_free"] = mem.available
+    data["memory_total"] = mem.total
+    data["process_memory_rss"] = memory_info.rss
+    data["process_memory_vms"] = memory_info.vms
+    data["cpu_architecture"] = platform.machine()
+    data["cpu_count"] = os.cpu_count()
+    data["cpu_usage"] = psutil.cpu_percent(interval=1)
+    disk_info = None
     if (
-        _flags.disk_info
-        and PSUTIL_INSTALLED
-        and api
+        api
         and api.get_settings().is_persistent
         and api.get_settings().persist_directory
         and os.path.exists(api.get_settings().persist_directory)
     ):
-        disk = psutil.disk_usage(api.get_settings().persist_directory)
-        data["disk_info"] = {
-            "total_space": disk.total,
-            "used_space": disk.used,
-            "free_space": disk.free,
-        }
+        disk_info = psutil.disk_usage(api.get_settings().persist_directory)
 
-    return data
+    data["persistent_disk_free"] = disk_info.free if disk_info else None
+    data["persistent_disk_total"] = disk_info.total if disk_info else None
+    data["persistent_disk_used"] = disk_info.used if disk_info else None
+
+    # local mode either to the server or the client, TBD for distributed - perhaps we can check on api impl
+    data["mode"] = (
+        ChromaMode.PERSISTENT_CLIENT
+        if api.get_settings().is_persistent
+        else ChromaMode.EPHEMERAL_CLIENT
+    )
+    return cast(SystemInfo, data)

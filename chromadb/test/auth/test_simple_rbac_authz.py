@@ -33,6 +33,7 @@ valid_action_space = [
     "collection:update",
     "collection:upsert",
     "collection:count",
+    "api:env",
 ]
 
 role_name = st.text(alphabet=string.ascii_letters, min_size=1, max_size=20)
@@ -263,6 +264,7 @@ api_executors = {
         col := Collection(api, f"{mcol.name}", mcol.id),
         col.count(),
     ),
+    "api:env": lambda api, mapi, _: (api.env(),),
 }
 
 

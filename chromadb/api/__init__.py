@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional, Any, Dict
+from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
@@ -21,7 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
-    SystemInfoFlags,
+    ClientServerSystemInfo,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -414,10 +414,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def env(
-        self,
-        system_info_flags: Optional[SystemInfoFlags] = None,
-    ) -> Dict[str, Any]:
+    def env(self) -> ClientServerSystemInfo:
         """Get system info of the Chroma server.
 
         Returns:

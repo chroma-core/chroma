@@ -1,12 +1,9 @@
 import json
 import os
-import time
 import traceback
 
 import typer
 import chromadb
-from chromadb.api.types import SystemInfoFlags
-from chromadb.utils import system_info_utils
 
 env_app = typer.Typer()
 
@@ -22,11 +19,6 @@ def info(
         None,
         help="Remote Chroma server to connect to.",
     ),
-    python_version: bool = typer.Option(True, help="Show python version."),
-    os_info: bool = typer.Option(True, help="Show os info."),
-    memory_info: bool = typer.Option(True, help="Show memory info."),
-    cpu_info: bool = typer.Option(True, help="Show cpu info."),
-    disk_info: bool = typer.Option(True, help="Show disk info."),
     path: str = typer.Option(None, help="The path to local persistence directory."),
 ) -> None:
     if remote:
@@ -42,15 +34,7 @@ def info(
     else:
         client = chromadb.Client()
     try:
-        _env = client.env(
-            system_info_flags=SystemInfoFlags(
-                python_version=python_version,
-                os_info=os_info,
-                memory_info=memory_info,
-                cpu_info=cpu_info,
-                disk_info=disk_info,
-            ),
-        )
+        _env = client.env()
         if "server" in _env.keys():
             typer.echo(
                 "================================== Remote Sever system info =================================="
@@ -70,31 +54,3 @@ def info(
     except Exception as e:
         traceback.print_exc()
         typer.echo(f"Failed to get system info {type(client)}: {str(e)}")
-
-
-@env_app.command(help="Remote chroma continuous monitoring. Prints out CPU and memory usage")  # type: ignore
-def rstat(
-    remote: str = typer.Option(..., help="Remote Chroma server to connect to."),
-    interval: int = typer.Option(1, help="Interval in seconds."),
-) -> None:
-    system_info_flags = SystemInfoFlags(
-        python_version=False,
-        os_info=True,
-        memory_info=True,
-        cpu_info=True,
-        disk_info=True,
-    )
-    client = chromadb.HttpClient(host=remote)
-
-    while True:
-        try:
-            remote_response = client.env(system_info_flags=system_info_flags)
-            if "server" in remote_response.keys():
-                rprint(
-                    f'{remote_response["server"]["cpu_info"]["cpu_usage"]} % \t'
-                    f'{system_info_utils.format_size(remote_response["server"]["memory_info"]["process_memory"]["rss"])}'
-                )
-            time.sleep(interval)
-        except Exception as e:
-            typer.echo(f"Failed to get system info: {e}")
-            raise typer.Exit(code=1)

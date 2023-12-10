@@ -11,7 +11,7 @@ import tempfile
 
 @pytest.fixture(autouse=True)
 def reset_client_settings() -> None:
-    SharedSystemClient._identifer_to_system = {}
+    SharedSystemClient.clear_system_cache()
 
 
 @pytest.fixture
