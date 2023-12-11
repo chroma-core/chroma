@@ -430,6 +430,20 @@ class Client(SharedSystemClient, ClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
+        except requests.exceptions.HTTPError as ex:
+            if ex.response.status_code in [401, 403]:
+                raise ValueError(
+                    "Authentication error. Have you configured your client to use authentication?"
+                )
+            if ex.response.status_code == 404:
+                raise ValueError(
+                    f"It appears your Chroma server is running an older version of Chroma {self.get_version()}. "
+                    "Please upgrade to the latest version."
+                )
+            else:
+                raise ValueError(
+                    f"Could not connect to tenant {tenant}. Are you sure it exists?"
+                )
         # Propagate ChromaErrors
         except ChromaError as e:
             raise e
