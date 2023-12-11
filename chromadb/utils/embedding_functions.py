@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 from chromadb.api.types import (
@@ -29,6 +30,16 @@ except ImportError:
     is_thin_client = False
 
 logger = logging.getLogger(__name__)
+
+
+def _verify_sha256(fname: str, expected_sha256: str) -> bool:
+    sha256_hash = hashlib.sha256()
+    with open(fname, "rb") as f:
+        # Read and update hash in chunks to avoid using too much memory
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest() == expected_sha256
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -144,13 +155,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key,
                     api_version=api_version,
                     azure_endpoint=api_base,
-                    default_headers=default_headers
+                    default_headers=default_headers,
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key,
-                    base_url=api_base,
-                    default_headers=default_headers
+                    api_key=api_key, base_url=api_base, default_headers=default_headers
                 ).embeddings
         else:
             self._client = openai.Embedding
@@ -209,7 +218,9 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call Cohere Embedding API for each document.
         return [
             embeddings
-            for embeddings in self._client.embed(texts=input, model=self._model_name, input_type="search_document")
+            for embeddings in self._client.embed(
+                texts=input, model=self._model_name, input_type="search_document"
+            )
         ]
 
 
@@ -260,9 +271,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
     """
 
-    def __init__(
-            self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"
-    ):
+    def __init__(self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"):
         """
         Initialize the JinaEmbeddingFunction.
 
@@ -271,9 +280,11 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "jina-embeddings-v2-base-en".
         """
         self._model_name = model_name
-        self._api_url = 'https://api.jina.ai/v1/embeddings'
+        self._api_url = "https://api.jina.ai/v1/embeddings"
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"})
+        self._session.headers.update(
+            {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -346,6 +357,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_DOWNLOAD_URL = (
         "https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz"
     )
+    _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
     tokenizer = None
     model = None
 
@@ -402,6 +414,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             for data in resp.iter_content(chunk_size=chunk_size):
                 size = file.write(data)
                 bar.update(size)
+        if not _verify_sha256(fname, self._MODEL_SHA256):
+            # if the integrity of the file is not verified, remove it
+            os.remove(fname)
+            raise ValueError(
+                f"Downloaded file {fname} does not match expected SHA256 hash. Corrupted download or malicious file."
+            )
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html

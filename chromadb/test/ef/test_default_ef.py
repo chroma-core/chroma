@@ -1,9 +1,10 @@
+import shutil
 from typing import List, Hashable
 
 import hypothesis.strategies as st
 import onnxruntime
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
@@ -11,7 +12,7 @@ from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 def unique_by(x: Hashable) -> Hashable:
     return x
 
-
+@settings(deadline=None)
 @given(
     providers=st.lists(
         st.sampled_from(onnxruntime.get_all_providers()).filter(
@@ -60,3 +61,12 @@ def test_provider_repeating(providers: List[str]) -> None:
         ef = ONNXMiniLM_L6_V2(preferred_providers=providers)
         ef(["test"])
     assert "Preferred providers must be unique" in str(e.value)
+
+
+def test_invalid_sha256() -> None:
+    ef = ONNXMiniLM_L6_V2()
+    shutil.rmtree(ef.DOWNLOAD_PATH)  # clean up any existing models
+    with pytest.raises(ValueError) as e:
+        ef._MODEL_SHA256 = "invalid"
+        ef(["test"])
+    assert "does not match expected SHA256 hash" in str(e.value)
