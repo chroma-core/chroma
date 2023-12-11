@@ -218,6 +218,9 @@ class Settings(BaseSettings):  # type: ignore
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
+    # TODO comment
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+
     anonymized_telemetry: bool = True
 
     chroma_otel_collection_endpoint: Optional[str] = ""

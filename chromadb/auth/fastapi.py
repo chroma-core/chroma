@@ -203,6 +203,8 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
+                if TODO_THING:
+                    # TODO overwrite
             return f(*args, **kwargs)
 
         return wrapped
