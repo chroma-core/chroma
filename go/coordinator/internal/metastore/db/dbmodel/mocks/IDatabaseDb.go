@@ -52,17 +52,17 @@ func (_m *IDatabaseDb) GetAllDatabases() ([]*dbmodel.Database, error) {
 	return r0, r1
 }
 
-// GetDatabases provides a mock function with given fields: databaseName, tenantID
-func (_m *IDatabaseDb) GetDatabases(databaseName string, tenantID string) ([]*dbmodel.Database, error) {
-	ret := _m.Called(databaseName, tenantID)
+// GetDatabases provides a mock function with given fields: tenantID, databaseName
+func (_m *IDatabaseDb) GetDatabases(tenantID string, databaseName string) ([]*dbmodel.Database, error) {
+	ret := _m.Called(tenantID, databaseName)
 
 	var r0 []*dbmodel.Database
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string) ([]*dbmodel.Database, error)); ok {
-		return rf(databaseName, tenantID)
+		return rf(tenantID, databaseName)
 	}
 	if rf, ok := ret.Get(0).(func(string, string) []*dbmodel.Database); ok {
-		r0 = rf(databaseName, tenantID)
+		r0 = rf(tenantID, databaseName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.Database)
@@ -70,7 +70,7 @@ func (_m *IDatabaseDb) GetDatabases(databaseName string, tenantID string) ([]*db
 	}
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(databaseName, tenantID)
+		r1 = rf(tenantID, databaseName)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -80,9 +80,7 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return JSONResponse(
-            content={"error": e.name(), "message": e.message()}, status_code=e.code()
-        )
+        return e.fastapi_json_response()
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)

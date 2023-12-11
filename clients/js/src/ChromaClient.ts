@@ -8,7 +8,10 @@ import {
     ClientAuthProtocolAdapter,
     IsomorphicFetchClientAuthProtocolAdapter
 } from "./auth";
+import { AdminClient } from './AdminClient';
 
+const DEFAULT_TENANT = "default_tenant"
+const DEFAULT_DATABASE = "default_database"
 
 export class ChromaClient {
     /**
@@ -16,6 +19,9 @@ export class ChromaClient {
      */
     private api: DefaultApi & ConfigOptions;
     private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
+    private tenant: string = DEFAULT_TENANT;
+    private database: string = DEFAULT_DATABASE;
+    private _adminClient?: AdminClient
 
     /**
      * Creates a new ChromaClient instance.
@@ -34,12 +40,19 @@ export class ChromaClient {
         path,
         fetchOptions,
         auth,
+        tenant = DEFAULT_TENANT,
+        database = DEFAULT_DATABASE
     }: {
         path?: string,
         fetchOptions?: RequestInit,
         auth?: AuthOptions,
+        tenant?: string,
+        database?: string,
     } = {}) {
         if (path === undefined) path = "http://localhost:8000";
+        this.tenant = tenant;
+        this.database = database;
+
         const apiConfig: Configuration = new Configuration({
             basePath: path,
         });
@@ -49,6 +62,19 @@ export class ChromaClient {
         } else {
             this.api = new DefaultApi(apiConfig);
         }
+
+        this._adminClient = new AdminClient({
+            path: path,
+            fetchOptions: fetchOptions,
+            auth: auth,
+            tenant: tenant,
+            database: database
+        });
+
+        // TODO: Validate tenant and database on client creation
+        // this got tricky because:
+        // - the constructor is sync but the generated api is async
+        // - we need to inject auth information so a simple rewrite/fetch does not work
 
         this.api.options = fetchOptions ?? {};
     }
@@ -128,7 +154,7 @@ export class ChromaClient {
         embeddingFunction?: IEmbeddingFunction
     }): Promise<Collection> {
         const newCollection = await this.api
-            .createCollection({
+            .createCollection(this.tenant, this.database, {
                 name,
                 metadata,
             }, this.api.options)
@@ -173,7 +199,7 @@ export class ChromaClient {
         embeddingFunction?: IEmbeddingFunction
     }): Promise<Collection> {
         const newCollection = await this.api
-            .createCollection({
+            .createCollection(this.tenant, this.database, {
                 name,
                 metadata,
                 'get_or_create': true
@@ -206,7 +232,7 @@ export class ChromaClient {
      * ```
      */
     public async listCollections(): Promise<CollectionType[]> {
-        const response = await this.api.listCollections(this.api.options);
+        const response = await this.api.listCollections(this.tenant, this.database, this.api.options);
         return handleSuccess(response);
     }
 
@@ -233,7 +259,7 @@ export class ChromaClient {
         embeddingFunction?: IEmbeddingFunction
     }): Promise<Collection> {
         const response = await this.api
-            .getCollection(name, this.api.options)
+            .getCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -271,7 +297,7 @@ export class ChromaClient {
         name: string
     }): Promise<void> {
         return await this.api
-            .deleteCollection(name, this.api.options)
+            .deleteCollection(name, this.tenant, this.database, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
     }
