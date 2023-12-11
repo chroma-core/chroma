@@ -1,20 +1,20 @@
-from chromadb.api import ServerAPI
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.db.system import SysDB
-from chromadb.segment import SegmentManager, MetadataReader, VectorReader
-from chromadb.telemetry.opentelemetry import (
-    add_attributes_to_current_span,
-    OpenTelemetryClient,
-    OpenTelemetryGranularity,
-    trace_method,
-)
-from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.ingest import Producer
-from chromadb.api.models.Collection import Collection
-from chromadb import __version__
-from chromadb.errors import InvalidDimensionException, InvalidCollectionException
-import chromadb.utils.embedding_functions as ef
+import logging
+import re
+import time
+from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
+from uuid import UUID, uuid4
 
+from overrides import override
+
+import chromadb.types as t
+import chromadb.utils.embedding_functions as ef
+from chromadb import __version__
+from chromadb.api import ServerAPI
+from chromadb.api.configurable import (
+    Configurable,
+    _get_configurable_from_metadata,
+)
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -40,6 +40,18 @@ from chromadb.api.types import (
     validate_where_document,
     validate_batch,
 )
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.db.system import SysDB
+from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+from chromadb.ingest import Producer
+from chromadb.segment import SegmentManager, MetadataReader, VectorReader
+from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
+from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
     CollectionDeleteEvent,
@@ -48,16 +60,6 @@ from chromadb.telemetry.product.events import (
     CollectionQueryEvent,
     ClientCreateCollectionEvent,
 )
-
-import chromadb.types as t
-
-from typing import Any, Optional, Sequence, Generator, List, cast, Set, Dict
-from overrides import override
-from uuid import UUID, uuid4
-import time
-import logging
-import re
-
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,7 @@ class SegmentAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Any]
         ] = ef.DefaultEmbeddingFunction(),
@@ -162,6 +165,9 @@ class SegmentAPI(ServerAPI):
         check_index_name(name)
 
         id = uuid4()
+
+        if configurable is not None:
+            metadata = configurable.add_not_persisted_to_metadata(metadata)
 
         coll, created = self._sysdb.create_collection(
             id=id,
@@ -196,6 +202,7 @@ class SegmentAPI(ServerAPI):
             data_loader=data_loader,
             tenant=tenant,
             database=database,
+            configurable=_get_configurable_from_metadata(coll["metadata"]),  # type: ignore
         )
 
     @trace_method(
@@ -206,6 +213,7 @@ class SegmentAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -216,6 +224,7 @@ class SegmentAPI(ServerAPI):
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
+            configurable=configurable,
             embedding_function=embedding_function,
             data_loader=data_loader,
             get_or_create=True,
@@ -251,6 +260,7 @@ class SegmentAPI(ServerAPI):
                 id=existing[0]["id"],
                 name=existing[0]["name"],
                 metadata=existing[0]["metadata"],  # type: ignore
+                configurable=_get_configurable_from_metadata(existing[0]["metadata"]),  # type: ignore
                 embedding_function=embedding_function,
                 data_loader=data_loader,
                 tenant=existing[0]["tenant"],
@@ -277,6 +287,9 @@ class SegmentAPI(ServerAPI):
                     metadata=db_collection["metadata"],  # type: ignore
                     tenant=db_collection["tenant"],
                     database=db_collection["database"],
+                    configurable=_get_configurable_from_metadata(
+                        db_collection["metadata"]
+                    ),  # type: ignore
                 )
             )
         return collections

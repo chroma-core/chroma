@@ -1,17 +1,20 @@
 # type: ignore
+import os
+import shutil
+import tempfile
+from datetime import datetime, timedelta
+
+import numpy as np
+import pytest
 import requests
 
 import chromadb
+import chromadb.server.fastapi
+from chromadb.api import Configurable
+from chromadb.api.configurable import ParameterOverride
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
-import chromadb.server.fastapi
-import pytest
-import tempfile
-import numpy as np
-import os
-import shutil
-from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
@@ -219,7 +222,9 @@ def test_add(api):
 def test_get_or_create(api):
     api.reset()
 
-    collection = api.create_collection("testspace")
+    collection = api.create_collection(
+        name="testspace", configurable=Configurable([ParameterOverride("space", "ip")])
+    )
 
     collection.add(**batch_records)
 
@@ -231,6 +236,7 @@ def test_get_or_create(api):
     collection = api.get_or_create_collection("testspace")
 
     assert collection.count() == 2
+    assert collection.configurable["space"] == "ip"
 
 
 minimal_records = {
@@ -364,17 +370,26 @@ def test_modify_error_on_existing_name(api):
 def test_metadata_cru(api):
     api.reset()
     metadata_a = {"a": 1, "b": 2}
+    configuration = Configurable(
+        [ParameterOverride("space", "ip"), ParameterOverride("search_ef", 5)]
+    )
     # Test create metatdata
-    collection = api.create_collection("testspace", metadata=metadata_a)
+    collection = api.create_collection(
+        "testspace", metadata=metadata_a, configurable=configuration
+    )
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
+    assert collection.configurable["space"].value == "ip"
+    assert collection.configurable["search_ef"].value == 5
 
     # Test get metatdata
     collection = api.get_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
+    assert collection.configurable["space"].value == "ip"
+    assert collection.configurable["search_ef"].value == 5
 
     # Test modify metatdata
     collection.modify(metadata={"a": 2, "c": 3})
@@ -382,18 +397,29 @@ def test_metadata_cru(api):
     assert collection.metadata["c"] == 3
     assert "b" not in collection.metadata
 
+    # Test modify parameter
+    configuration = Configurable([ParameterOverride("search_ef", 15)])
+    collection.modify(configurable=configuration)
+    assert collection.configurable["space"].value == "ip"
+    assert collection.configurable["search_ef"].value == 15
+
     # Test get after modify metatdata
     collection = api.get_collection("testspace")
     assert collection.metadata is not None
+    # this won't work now because backend is replacing the metadata
     assert collection.metadata["a"] == 2
     assert collection.metadata["c"] == 3
     assert "b" not in collection.metadata
+    assert collection.configurable["space"].value == "ip"
+    assert collection.configurable["search_ef"].value == 15
 
     # Test name exists get_or_create_metadata
     collection = api.get_or_create_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 2
     assert collection.metadata["c"] == 3
+    assert collection.configurable["space"].value == "ip"
+    assert collection.configurable["search_ef"].value == 15
 
     # Test name exists create metadata
     collection = api.get_or_create_collection("testspace2")
@@ -406,6 +432,8 @@ def test_metadata_cru(api):
             assert collection.metadata is not None
             assert collection.metadata["a"] == 2
             assert collection.metadata["c"] == 3
+            assert collection.configurable["space"].value == "ip"
+            assert collection.configurable["search_ef"].value == 15
         elif collection.name == "testspace2":
             assert collection.metadata is None
 

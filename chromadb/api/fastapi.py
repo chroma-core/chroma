@@ -2,15 +2,16 @@ import json
 import logging
 from typing import Optional, cast, Tuple
 from typing import Sequence
+from urllib.parse import urlparse, urlunparse, quote
 from uuid import UUID
 
 import requests
 from overrides import override
 
 import chromadb.errors as errors
-from chromadb.types import Database, Tenant
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
+from chromadb.api.configurable import _get_configurable_from_metadata
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     DataLoader,
@@ -29,6 +30,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    Configurable,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -42,7 +44,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from urllib.parse import urlparse, urlunparse, quote
+from chromadb.types import Database, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +225,7 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -231,6 +234,8 @@ class FastAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
+        if configurable is not None:
+            metadata = configurable.add_not_persisted_to_metadata(metadata)
         """Creates a collection"""
         resp = self._session.post(
             self._api_url + "/collections",
@@ -252,6 +257,7 @@ class FastAPI(ServerAPI):
             embedding_function=embedding_function,
             data_loader=data_loader,
             metadata=resp_json["metadata"],
+            configurable=_get_configurable_from_metadata(resp_json["metadata"]),
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -286,6 +292,7 @@ class FastAPI(ServerAPI):
             embedding_function=embedding_function,
             data_loader=data_loader,
             metadata=resp_json["metadata"],
+            configurable=_get_configurable_from_metadata(resp_json["metadata"]),
         )
 
     @trace_method(
@@ -296,6 +303,7 @@ class FastAPI(ServerAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -308,6 +316,7 @@ class FastAPI(ServerAPI):
             self.create_collection(
                 name=name,
                 metadata=metadata,
+                configurable=configurable,
                 embedding_function=embedding_function,
                 data_loader=data_loader,
                 get_or_create=True,

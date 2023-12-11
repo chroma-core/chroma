@@ -1,8 +1,13 @@
+from inspect import signature
 from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
-from numpy.typing import NDArray
+
 import numpy as np
+from numpy.typing import NDArray
 from typing_extensions import Literal, TypedDict, Protocol
+
 import chromadb.errors as errors
+from chromadb.api.configurable import Configurable, _validate_set_parameter
+from chromadb.api.parameters import ParameterDict
 from chromadb.types import (
     Metadata,
     UpdateMetadata,
@@ -15,10 +20,15 @@ from chromadb.types import (
     WhereDocumentOperator,
     WhereDocument,
 )
-from inspect import signature
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "Configurable",
+]
 
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -279,7 +289,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
     return metadata
 
 
-def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
+def validate_update_metadata(
+    metadata: UpdateMetadata, on_creation: bool = False
+) -> UpdateMetadata:
     """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats or bools"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(f"Expected metadata to be a dict or None, got {metadata}")
@@ -297,6 +309,10 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
             raise ValueError(
                 f"Expected metadata value to be a str, int, or float, got {value}"
             )
+        # validate if trying to set a parameter
+        if key in ParameterDict.parameter_dict.keys():
+            _validate_set_parameter(key, value, on_creation)
+
     return metadata
 
 

@@ -1,9 +1,13 @@
 from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 
-from overrides import override
 import requests
+from overrides import override
+
+import chromadb.utils.embedding_functions as ef
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.configurable import Configurable
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     DataLoader,
@@ -19,13 +23,11 @@ from chromadb.api.types import (
     QueryResult,
     URIs,
 )
-from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
-from chromadb.api.models.Collection import Collection
+from chromadb.config import Settings, System
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
-import chromadb.utils.embedding_functions as ef
 
 
 class SharedSystemClient:
@@ -178,12 +180,15 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        if configurable is not None:
+            metadata = configurable.add_not_persisted_to_metadata(metadata)
         return self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -218,6 +223,7 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore

@@ -1,9 +1,11 @@
+import logging
 from typing import TYPE_CHECKING, Optional, Tuple, Any
+from uuid import UUID
+
 from pydantic import BaseModel, PrivateAttr
 
-from uuid import UUID
 import chromadb.utils.embedding_functions as ef
-
+from chromadb.api.configurable import Configurable, ParameterOverride
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -44,7 +46,6 @@ from chromadb.api.types import (
     validate_embeddings,
     validate_embedding_function,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI
 
 
-class Collection(BaseModel):
+class Collection(BaseModel, Configurable):
     name: str
     id: UUID
     metadata: Optional[CollectionMetadata] = None
@@ -74,13 +75,22 @@ class Collection(BaseModel):
         tenant: Optional[str] = None,
         database: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
     ):
         super().__init__(
-            name=name, metadata=metadata, id=id, tenant=tenant, database=database
+            name=name,
+            metadata=metadata,
+            id=id,
+            tenant=tenant,
+            database=database,
         )
+        # TODO: remove this when we have a better way to handle this, this is a hack to get around pydantic's validation
+        ParameterOverride(" ", " ")
+        Configurable.__init__(self, configurable=configurable)
         self._client = client
 
-        # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
+        # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction
+        # protocol
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
 
@@ -352,19 +362,27 @@ class Collection(BaseModel):
         return query_results
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
     ) -> None:
         """Modify the collection name or metadata
 
         Args:
             name: The updated name for the collection. Optional.
             metadata: The updated metadata for the collection. Optional.
+            configurable: Parameter overrides for the collection. Optional.
 
         Returns:
             None
         """
         if metadata is not None:
             validate_metadata(metadata)
+
+        if configurable is not None:
+            self.set_configurable(configurable)
+            metadata = self.add_not_persisted_to_metadata(metadata)
 
         self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
         if name:

@@ -3,7 +3,8 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
-from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
+
+import chromadb.utils.embedding_functions as ef
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
@@ -21,10 +22,11 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    Configurable,
 )
 from chromadb.config import Component, Settings
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.types import Database, Tenant
-import chromadb.utils.embedding_functions as ef
 
 
 class BaseAPI(ABC):
@@ -62,6 +64,7 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -129,6 +132,7 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -507,6 +511,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -538,6 +543,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
+        configurable: Optional[Configurable] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
