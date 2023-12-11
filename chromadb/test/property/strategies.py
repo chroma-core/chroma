@@ -184,6 +184,18 @@ def create_embeddings(
     return embeddings
 
 
+def create_embeddings_ndarray(
+    dim: int,
+    count: int,
+    dtype: npt.DTypeLike,
+) -> np.typing.NDArray[Any]:
+    return np.random.uniform(
+        low=-1.0,
+        high=1.0,
+        size=(count, dim),
+    ).astype(dtype)
+
+
 class hashing_embedding_function(types.EmbeddingFunction[Documents]):
     def __init__(self, dim: int, dtype: npt.DTypeLike) -> None:
         self.dim = dim
@@ -518,7 +530,13 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
         word = draw(st.sampled_from(collection.known_document_keywords))
     else:
         word = draw(safe_text)
-    return {"$contains": word}
+
+    op: WhereOperator = draw(st.sampled_from(["$contains", "$not_contains"]))
+    if op == "$contains":
+        return {"$contains": word}
+    else:
+        assert op == "$not_contains"
+        return {"$not_contains": word}
 
 
 def binary_operator_clause(

@@ -37,7 +37,7 @@ func createTopicName(tenantID string, topicNS string, log_name string) string {
 // For now it assumes there are 16 topics and uses the rendezvous hashing algorithm to
 // assign a collection to a topic.
 
-var topics = [16]string{
+var Topics = [16]string{
 	"chroma_log_0",
 	"chroma_log_1",
 	"chroma_log_2",
@@ -69,7 +69,7 @@ func NewRendezvousAssignmentPolicy(tenantID string, topicNS string) *RendezvousA
 }
 
 func (r *RendezvousAssignmentPolicy) AssignCollection(collectionID types.UniqueID) (string, error) {
-	assignment, error := utils.Assign(collectionID.String(), topics[:], utils.Murmur3Hasher)
+	assignment, error := utils.Assign(collectionID.String(), Topics[:], utils.Murmur3Hasher)
 	if error != nil {
 		return "", error
 	}

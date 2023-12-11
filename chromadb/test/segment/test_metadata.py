@@ -4,6 +4,8 @@ import tempfile
 import pytest
 from typing import Generator, List, Callable, Iterator, Dict, Optional, Union, Sequence
 from chromadb.config import System, Settings
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     SubmitEmbeddingRecord,
@@ -14,6 +16,7 @@ from chromadb.types import (
     SegmentScope,
     SeqId,
 )
+from pypika import Table
 from chromadb.ingest import Producer
 from chromadb.segment import MetadataReader
 import uuid
@@ -293,9 +296,21 @@ def test_fulltext(
     result = segment.get_metadata(where_document={"$contains": "four two"})
     assert len(result) == 1
 
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "four two"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "four two" not in _build_document(i)]
+    )
+
     # Test many results
     result = segment.get_metadata(where_document={"$contains": "zero"})
     assert len(result) == 9
+
+    # Test not_contains
+    result = segment.get_metadata(where_document={"$not_contains": "zero"})
+    assert len(result) == len(
+        [i for i in range(1, 100) if "zero" not in _build_document(i)]
+    )
 
     # test $and
     result = segment.get_metadata(
@@ -303,6 +318,17 @@ def test_fulltext(
     )
     assert len(result) == 2
     assert set([r["id"] for r in result]) == {"embedding_42", "embedding_24"}
+
+    result = segment.get_metadata(
+        where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "four" not in _build_document(i) and "two" not in _build_document(i)
+        ]
+    )
 
     # test $or
     result = segment.get_metadata(
@@ -312,6 +338,17 @@ def test_fulltext(
     zeros = [i for i in range(1, 100) if "zero" in _build_document(i)]
     expected = set([f"embedding_{i}" for i in set(ones + zeros)])
     assert set([r["id"] for r in result]) == expected
+
+    result = segment.get_metadata(
+        where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]}
+    )
+    assert len(result) == len(
+        [
+            i
+            for i in range(1, 100)
+            if "zero" not in _build_document(i) or "one" not in _build_document(i)
+        ]
+    )
 
     # test combo with where clause (negative case)
     result = segment.get_metadata(
@@ -530,3 +567,40 @@ def _test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+
+def test_delete_segment(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    topic = str(segment_definition["topic"])
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, topic, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+    _id = segment._id
+    segment.delete()
+    _db = system.instance(SqliteDB)
+    t = Table("embeddings")
+    q = (
+        _db.querybuilder()
+        .from_(t)
+        .select(t.id)
+        .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+    )
+    sql, params = get_sql(q)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that the segment is gone
+        assert len(res.fetchall()) == 0
