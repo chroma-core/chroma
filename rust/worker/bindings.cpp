@@ -49,7 +49,7 @@ public:
         }
     }
 
-    void init_new_index(size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, std::string persistence_location)
+    void init_new_index(size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, const std::string &persistence_location)
     {
         // if (index_inited) {
         //     // TODO: ERROR HANDLE!
@@ -60,23 +60,14 @@ public:
         index_inited = true;
     }
 
-    void saveIndex(const std::string &path_to_index)
-    {
-        // check if index is inited
-        // check if path is valid
-        // save index
-        // return success
-        appr_alg->saveIndex(path_to_index);
-    }
-
-    void loadIndex(const std::string &path_to_index, bool allow_replace_deleted)
+    void load_index(const std::string &path_to_index, bool allow_replace_deleted, bool is_persistent_index)
     {
         // check if index is inited and error if it is
         // check if path is valid
         // load index
         // return success
         // Use 0 for the max_elements since hnswlib will read it from the file and we don't want to override it
-        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted);
+        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted, normalize, is_persistent_index);
         index_inited = true;
     }
 
@@ -178,24 +169,23 @@ extern "C"
 {
     Index<float> *create_index(const char *space_name, const int dim)
     {
+        std::cout << "create_index in c++" << std::endl;
+        std::cout << "c++: space_name: " << space_name << std::endl;
+        std::cout << "c++: dim: " << dim << std::endl;
         return new Index<float>(space_name, dim);
     }
 
-    void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, std::string persistence_location)
+    void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, const char *persistence_location)
     {
+        std::cout << "c++: Path to inited index: " << persistence_location << std::endl;
         index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
     }
 
-    // void save_index(Index<float> *index, const char *path_to_index)
-    // {
-    //     index->saveIndex(path_to_index);
-    // }
-
-    // void load_index(Index<float> *index, const char *path_to_index, bool allow_replace_deleted)
-    // {
-    //     // max_elements, M, ef_construction, random_seed are stored by hnswlib so we don't need to pass them
-    //     index->loadIndex(path_to_index, allow_replace_deleted);
-    // }
+    void load_index(Index<float> *index, const char *path_to_index, bool allow_replace_deleted, bool is_persistent_index)
+    {
+        std::cout << "load_index in c++ from: " << path_to_index << std::endl;
+        index->load_index(path_to_index, allow_replace_deleted, is_persistent_index);
+    }
 
     void persist_dirty(Index<float> *index)
     {

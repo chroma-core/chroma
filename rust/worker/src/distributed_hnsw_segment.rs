@@ -12,6 +12,8 @@ pub(crate) struct DistributedHNSWSegment {
     persist_interval: usize,
     flush_interval: usize,
     max_records: usize,
+    // TODO: make a segment trait (can use vector reader, metadata reader), and then implement it for hnsw segment
+    // TODO: make the redudant data between index and segment implemented with nested gets
     // TODO: additional bookkeeping of the index
     // TODO: switch from Rwlock to xor lock that allows multiple readers or multiple writers
 }
@@ -25,7 +27,9 @@ impl DistributedHNSWSegment {
         persist_interval: usize,
         flush_interval: usize,
     ) -> Self {
-        let index = Arc::new(RwLock::new(Index::new("ip")));
+        let index = Arc::new(RwLock::new(Index::new(
+            "ip", 1000, 16, 100, 0, false, true, "",
+        )));
         return DistributedHNSWSegment {
             index: index,
             id: AtomicUsize::new(0),
@@ -34,7 +38,6 @@ impl DistributedHNSWSegment {
             flush_interval: flush_interval,
             max_records: max_records,
         };
-        // TODO: lazy init so we can track the dim correctly
     }
 
     pub(crate) fn write_records(&self, records: Vec<Box<EmbeddingRecord>>) {
@@ -52,16 +55,7 @@ impl DistributedHNSWSegment {
                                 // so that we can infer the dimensionality
                                 let dim = vector.len();
                                 let mut index = RwLockUpgradableReadGuard::upgrade(index);
-                                index.init(
-                                    dim,
-                                    self.max_records,
-                                    16,
-                                    200,
-                                    0,
-                                    false,
-                                    true,
-                                    &self.persist_path,
-                                );
+                                index.init(dim);
                                 let next_id =
                                     self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                 println!("Adding item: {}", next_id);

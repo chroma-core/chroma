@@ -10,11 +10,20 @@ struct IndexPtrFFI {
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 
-// #[repr(C)]
+#[repr(C)]
 pub struct Index {
     ptr: Option<*const IndexPtrFFI>,
+    // TOOD: put configuration in a struct
+    // make a trait Configurable
     dim: Option<usize>,
+    max_elements: usize,
+    m: usize,
+    ef_construction: usize,
+    random_seed: usize,
+    allow_replace_deleted: bool,
     space_name: String,
+    is_persistent: bool,
+    persist_path: String,
     pub initialized: bool,
 }
 
@@ -24,45 +33,55 @@ unsafe impl Send for Index {}
 
 // Index impl that is public and wraps the private index extern "C" struct
 impl Index {
-    pub fn new(space_name: &str) -> Index {
-        // TODO: enum for spaces
-        return Index {
-            ptr: None,
-            dim: None,
-            space_name: space_name.to_string(),
-            initialized: false,
-        };
-    }
-
-    // TODO: move the not lazy params into a struct and into main constructor
-    pub fn init(
-        &mut self,
-        dim: usize,
+    pub fn new(
+        space_name: &str,
         max_elements: usize,
         m: usize,
         ef_construction: usize,
         random_seed: usize,
         allow_replace_deleted: bool,
-        is_peristent: bool,
+        is_persistent: bool,
         persist_path: &str,
+    ) -> Index {
+        println!("Creating index in rust");
+        // TODO: enum for spaces
+        return Index {
+            ptr: None,
+            dim: None,
+            max_elements: max_elements,
+            m: m,
+            ef_construction: ef_construction,
+            random_seed: random_seed,
+            allow_replace_deleted: allow_replace_deleted,
+            is_persistent: is_persistent,
+            persist_path: persist_path.to_string(),
+            space_name: space_name.to_string(),
+            initialized: false,
+        };
+    }
+
+    pub fn init(
+        &mut self,
+        dim: usize, // The dimen
     ) {
         if self.initialized {
             return;
         }
         self.dim = Some(dim);
         let space_name = CString::new(self.space_name.to_string()).unwrap();
-        let persist_path = CString::new(persist_path).unwrap();
+        let persist_path = CString::new(self.persist_path.to_string()).unwrap();
         let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
         self.ptr = Some(index);
+        println!("Initializing index in rust");
         unsafe {
             init_index(
                 index,
-                max_elements,
-                m,
-                ef_construction,
-                random_seed,
-                allow_replace_deleted,
-                is_peristent,
+                self.max_elements,
+                self.m,
+                self.ef_construction,
+                self.random_seed,
+                self.allow_replace_deleted,
+                self.is_persistent,
                 persist_path.as_ptr(),
             );
         }
@@ -129,6 +148,38 @@ impl Index {
             }
         }
     }
+
+    pub fn persist_dirty(&self) {
+        // TODO: return result, error if not initialized
+        match self.ptr {
+            None => return,
+            Some(ptr) => unsafe { persist_dirty(ptr) },
+        }
+    }
+
+    // TODO: clean up this clunkiness where we have to pass in the dimensionality
+    pub fn load(&mut self, dim: usize) {
+        if self.initialized {
+            return;
+        }
+        let space_name = CString::new(self.space_name.to_string()).unwrap();
+        self.dim = Some(dim);
+        let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
+        self.ptr = Some(index);
+        match self.ptr {
+            None => return,
+            Some(ptr) => unsafe {
+                let persist_path = CString::new(self.persist_path.to_string()).unwrap();
+                println!("RUST IS LOADING INDEX from {}", self.persist_path);
+                load_index(
+                    ptr,
+                    persist_path.as_ptr(),
+                    self.allow_replace_deleted,
+                    self.is_persistent,
+                )
+            },
+        }
+    }
 }
 
 #[link(name = "bindings", kind = "static")]
@@ -159,4 +210,12 @@ extern "C" {
 
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
+
+    fn persist_dirty(index: *const IndexPtrFFI);
+    fn load_index(
+        index: *const IndexPtrFFI,
+        path: *const c_char,
+        allow_replace_deleted: bool,
+        is_persistent_index: bool,
+    );
 }

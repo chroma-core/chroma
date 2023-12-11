@@ -156,7 +156,7 @@ impl Component for Writer {
                                                     break;
                                                 }
                                                 let msg = msg.unwrap();
-                                                // consumer.ack(&msg).await.unwrap(); TODO: ack on flush
+                                                // consumer.ack(&msg).await.unwrap(); // TODO: ack on flush
                                                 let record = msg.deserialize();
                                                 println!("got record: {:?}", record);
                                                 let seq_id = pulsar_to_int(msg.message_id());
