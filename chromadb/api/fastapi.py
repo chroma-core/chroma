@@ -6,9 +6,11 @@ from uuid import UUID
 
 import requests
 from overrides import override
+from chromadb.api.configuration import CollectionConfiguration
 
 import chromadb.errors as errors
 from chromadb.types import Database, Tenant
+import chromadb.types as t
 import chromadb.utils.embedding_functions as ef
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
@@ -213,7 +215,9 @@ class FastAPI(ServerAPI):
         json_collections = resp.json()
         collections = []
         for json_collection in json_collections:
-            collections.append(Collection(self, **json_collection))
+            model = t.Collection.from_json(json_collection)
+            collection = Collection(self, model=model)
+            collections.append(collection)
 
         return collections
 
@@ -228,6 +232,7 @@ class FastAPI(ServerAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -238,6 +243,7 @@ class FastAPI(ServerAPI):
                 {
                     "name": name,
                     "metadata": metadata,
+                    "configuration": configuration,  # TODO: support json serialization of configuration
                     "get_or_create": get_or_create,
                 }
             ),
@@ -245,13 +251,12 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
+        model = t.Collection.from_json(resp_json)
         return Collection(
             client=self,
-            id=resp_json["id"],
-            name=resp_json["name"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -279,13 +284,12 @@ class FastAPI(ServerAPI):
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
+        model = t.Collection.from_json(resp_json)
         return Collection(
             client=self,
-            name=resp_json["name"],
-            id=resp_json["id"],
+            model=model,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            metadata=resp_json["metadata"],
         )
 
     @trace_method(
@@ -300,6 +304,7 @@ class FastAPI(ServerAPI):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

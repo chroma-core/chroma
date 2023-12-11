@@ -1,4 +1,5 @@
 from chromadb.api import ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
@@ -152,6 +153,7 @@ class SegmentAPI(ServerAPI):
         ] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -163,11 +165,22 @@ class SegmentAPI(ServerAPI):
 
         id = uuid4()
 
-        coll, created = self._sysdb.create_collection(
+        model = t.Collection.with_configuration(
             id=id,
             name=name,
             metadata=metadata,
-            dimension=None,
+            tenant=tenant,
+            database=database,
+            configuration=configuration or CollectionConfiguration(),
+            topic=None,  # This will be populated by the SysDB service
+            dimension=None,  # This will be lazily populated upon the first add
+        )
+
+        coll, created = self._sysdb.create_collection(
+            id=model.id,
+            name=model.name,
+            metadata=model.metadata,
+            dimension=model.dimension,
             get_or_create=get_or_create,
             tenant=tenant,
             database=database,
@@ -189,13 +202,9 @@ class SegmentAPI(ServerAPI):
 
         return Collection(
             client=self,
-            id=coll["id"],
-            name=name,
-            metadata=coll["metadata"],  # type: ignore
+            model=coll,
             embedding_function=embedding_function,
             data_loader=data_loader,
-            tenant=tenant,
-            database=database,
         )
 
     @trace_method(
@@ -210,6 +219,7 @@ class SegmentAPI(ServerAPI):
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
+        configuration: Optional[CollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -248,13 +258,9 @@ class SegmentAPI(ServerAPI):
         if existing:
             return Collection(
                 client=self,
-                id=existing[0]["id"],
-                name=existing[0]["name"],
-                metadata=existing[0]["metadata"],  # type: ignore
+                model=existing[0],
                 embedding_function=embedding_function,
                 data_loader=data_loader,
-                tenant=existing[0]["tenant"],
-                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
@@ -272,11 +278,7 @@ class SegmentAPI(ServerAPI):
             collections.append(
                 Collection(
                     client=self,
-                    id=db_collection["id"],
-                    name=db_collection["name"],
-                    metadata=db_collection["metadata"],  # type: ignore
-                    tenant=db_collection["tenant"],
-                    database=db_collection["database"],
+                    model=db_collection,
                 )
             )
         return collections
@@ -319,12 +321,12 @@ class SegmentAPI(ServerAPI):
 
         if existing:
             self._sysdb.delete_collection(
-                existing[0]["id"], tenant=tenant, database=database
+                existing[0].id, tenant=tenant, database=database
             )
-            for s in self._manager.delete_segments(existing[0]["id"]):
+            for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(s)
-            if existing and existing[0]["id"] in self._collection_cache:
-                del self._collection_cache[existing[0]["id"]]
+            if existing and existing[0].id in self._collection_cache:
+                del self._collection_cache[existing[0].id]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -790,7 +792,7 @@ class SegmentAPI(ServerAPI):
         dimension."""
         if collection["dimension"] is None:
             if update:
-                id = collection["id"]
+                id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
                 self._collection_cache[id]["dimension"] = dim
         elif collection["dimension"] != dim:

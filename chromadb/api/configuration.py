@@ -2,6 +2,8 @@ from abc import abstractmethod
 from typing import ClassVar, Dict, List, Optional, Protocol, Union
 from multiprocessing import cpu_count
 
+# TODO: move out of API
+
 
 class StaticParameterError(Exception):
     """Represents an error that occurs when a static parameter is set."""
@@ -52,6 +54,9 @@ class ConfigurationParameter:
         self.name = name
         self.value = value
 
+    def __repr__(self) -> str:
+        return f"ConfigurationParameter({self.name}, {self.value})"
+
 
 class Configuration:
     """Represents an abstract configuration."""
@@ -61,21 +66,32 @@ class Configuration:
     parameter_map: Dict[str, ConfigurationParameter]
     definitions: ClassVar[Dict[str, ConfigurationDefinition]]
 
-    def __init__(self, parameters: List[ConfigurationParameter]):
-        """Initializes a new instance of the Configuration class."""
+    def __init__(self, parameters: Optional[List[ConfigurationParameter]] = None):
+        """Initializes a new instance of the Configuration class. Respecting defaults and
+        validators."""
         self.parameter_map = {}
-        for parameter in parameters:
-            if parameter.name not in self.definitions:
-                raise ValueError(f"Invalid parameter name: {parameter.name}")
+        if parameters is not None:
+            for parameter in parameters:
+                if parameter.name not in self.definitions:
+                    raise ValueError(f"Invalid parameter name: {parameter.name}")
 
-            definition = self.definitions[parameter.name]
-            if not isinstance(parameter.value, type(definition.default_value)):
-                raise ValueError(f"Invalid parameter value: {parameter.value}")
+                definition = self.definitions[parameter.name]
+                if not isinstance(parameter.value, type(definition.default_value)):
+                    raise ValueError(f"Invalid parameter value: {parameter.value}")
 
-            validator = definition.validator
-            if not validator(parameter.value):
-                raise ValueError(f"Invalid parameter value: {parameter.value}")
-            self.parameter_map[parameter.name] = parameter
+                validator = definition.validator
+                if not validator(parameter.value):
+                    raise ValueError(f"Invalid parameter value: {parameter.value}")
+                self.parameter_map[parameter.name] = parameter
+        # Apply the defaults for any missing parameters
+        for name, definition in self.definitions.items():
+            if name not in self.parameter_map:
+                self.parameter_map[name] = ConfigurationParameter(
+                    name=name, value=definition.default_value
+                )
+
+    def __repr__(self) -> str:
+        return f"Configuration({self.parameter_map.values()})"
 
     def get_parameters(self) -> List[ConfigurationParameter]:
         """Returns the parameters of the configuration."""
@@ -125,7 +141,7 @@ class CollectionConfiguration(Configuration):
             name="num_threads",
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=False,
-            default_value=cpu_count(),
+            default_value=cpu_count(),  # By default use all cores available
         ),
         "M": ConfigurationDefinition(
             name="M",

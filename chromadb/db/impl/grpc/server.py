@@ -310,7 +310,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                     code=409, reason=f"Collection {request.name} already exists"
                 )
             )
-
+        print("Assigning using: {}".format(type(self._assignment_policy)))
         id = UUID(hex=request.id)
         new_collection = Collection(
             id=id,
