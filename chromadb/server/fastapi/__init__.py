@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 import chromadb
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzDynamicParams,
@@ -377,6 +378,7 @@ class FastAPI(chromadb.server.Server):
         api_collection = self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
+            configuration=CollectionConfiguration.from_json(collection.configuration) if collection.configuration else None,
             get_or_create=collection.get_or_create,
             tenant=tenant,
             database=database,

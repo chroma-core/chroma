@@ -171,7 +171,7 @@ class SegmentAPI(ServerAPI):
             metadata=metadata,
             tenant=tenant,
             database=database,
-            configuration=configuration or CollectionConfiguration(),
+            configuration=configuration if configuration else CollectionConfiguration(),
             topic=None,  # This will be populated by the SysDB service
             dimension=None,  # This will be lazily populated upon the first add
         )
@@ -226,6 +226,7 @@ class SegmentAPI(ServerAPI):
         return self.create_collection(  # type: ignore
             name=name,
             metadata=metadata,
+            configuration=configuration,
             embedding_function=embedding_function,
             data_loader=data_loader,
             get_or_create=True,

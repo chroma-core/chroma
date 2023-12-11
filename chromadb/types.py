@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union, Sequence, Dict, Mapping, List, cast
+from typing import Any, Optional, Union, Sequence, Dict, Mapping, List, cast, Generic
 
-from typing_extensions import Literal, TypedDict, TypeVar
+from typing_extensions import Literal, TypedDict, TypeVar, Protocol
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
 
-from chromadb.api.configuration import CollectionConfiguration, Configuration
+from chromadb.api.configuration import CollectionConfiguration, Configuration, ConfigurationParameter
+from chromadb.serde import BaseModelJSONSerializable
 
 
 Metadata = Mapping[str, Union[str, int, float, bool]]
@@ -27,39 +28,25 @@ class SegmentScope(Enum):
     METADATA = "METADATA"
 
 
-class JSONSerializable(ABC):
-    """A mixin that allows a class to be serialized to JSON"""
-
-    @abstractmethod
-    def to_json(self) -> str:
-        """Serializes the object to JSON"""
-        raise NotImplementedError()
-
-    @classmethod
-    @abstractmethod
-    def from_json(cls, json: Dict[str, Any]) -> "JSONSerializable":
-        """Deserializes the object from JSON"""
-        raise NotImplementedError()
+C = TypeVar('C', bound='Configuration')
 
 
-class Configurable:
+class Configurable(Generic[C], ABC):
     """A mixin that allows a class to be configured with a configuration object"""
 
-    _configuration: Optional[Configuration] = None
+    @abstractmethod
+    def get_configuration(self) -> C:
+        raise NotImplementedError()
 
-    @property
-    def configuration(self) -> Optional[Configuration]:
-        return self._configuration
-
-    @configuration.setter
-    def configuration(self, configuration: Configuration) -> None:
-        self._configuration = configuration
+    @abstractmethod
+    def set_configuration(self, configuration: C) -> None:
+        raise NotImplementedError()
 
 
 CONFIGURATION_METADATA_PREFIX = "chroma:"
 
 
-class Collection(BaseModel, Configurable, JSONSerializable):
+class Collection(BaseModel, Configurable[CollectionConfiguration], BaseModelJSONSerializable):
     """A model of a collection used for transport, serialization, and storage"""
 
     id: UUID
@@ -69,6 +56,9 @@ class Collection(BaseModel, Configurable, JSONSerializable):
     dimension: Optional[int]
     tenant: str
     database: str
+
+    def __init__(self, id: UUID, name: str, topic: Optional[str], metadata: Optional[Metadata], dimension: Optional[int], tenant: str, database: str):
+        super().__init__(id=id, name=name, topic=topic, metadata=metadata, dimension=dimension, tenant=tenant, database=database)
 
     def modify(
         self,
@@ -88,10 +78,9 @@ class Collection(BaseModel, Configurable, JSONSerializable):
         if configuration is not None:
             self.configuration = configuration
         if metadata is not None:
-            if self._configuration is not None:
-                metadata = Collection.populate_metadata_from_configuration(
-                    metadata, cast(CollectionConfiguration, self._configuration)
-                )
+            Collection._populate_metadata_from_configuration(
+                metadata, cast(CollectionConfiguration, self.get_configuration())
+            )
             self.metadata = metadata
             # TODO: do the update rules allow metadata to be None
 
@@ -106,16 +95,14 @@ class Collection(BaseModel, Configurable, JSONSerializable):
             raise ValueError(
                 "A argument to metadata, even if none, must be provided when creating a collection with a configuration"
             )
-        metadata = kwargs["metadata"]
-        if metadata is None:
-            metadata = {}
-        Collection.populate_metadata_from_configuration(metadata, configuration)
+        if kwargs["metadata"] is None:
+            kwargs["metadata"] = {}
+        Collection._populate_metadata_from_configuration(kwargs["metadata"], configuration)
         instance = Collection(**kwargs)
-        instance.configuration = configuration
         return instance
 
     @staticmethod
-    def populate_metadata_from_configuration(
+    def _populate_metadata_from_configuration(
         metadata: Metadata, configuration: CollectionConfiguration
     ) -> None:
         """Collections store their configuration in their metadata field in order to preserve flexibility
@@ -127,6 +114,21 @@ class Collection(BaseModel, Configurable, JSONSerializable):
             metadata[  # type: ignore
                 f"{CONFIGURATION_METADATA_PREFIX}{parameter.name}"
             ] = parameter.value
+    
+    @staticmethod
+    def _extract_configuration_from_metadata(
+        metadata: Metadata,
+    ) -> CollectionConfiguration:
+        """Extracts the configuration from the metadata field, if it exists"""
+        configuration_parameters = []
+        for key, value in metadata.items():
+            if key.startswith(CONFIGURATION_METADATA_PREFIX):
+                configuration_parameters.append(
+                    ConfigurationParameter(
+                        name=key[len(CONFIGURATION_METADATA_PREFIX):], value=value
+                    )
+                )
+        return CollectionConfiguration(configuration_parameters)
 
     @property
     def sanitized_metadata(self) -> Optional[Metadata]:
@@ -170,14 +172,19 @@ class Collection(BaseModel, Configurable, JSONSerializable):
                 return False
         return True
 
-    def to_json(self) -> str:
-        """Serializes the collection to JSON"""
-        return self.model_dump_json()
+    def get_configuration(self) -> CollectionConfiguration:
+        """Returns the configuration of the collection"""
+        if self.metadata is None:
+            return CollectionConfiguration()
+        return Collection._extract_configuration_from_metadata(self.metadata)
 
-    @classmethod
-    def from_json(cls, json_dict: Dict[str, Any]) -> "Collection":
-        """Deserializes the collection from JSON"""
-        return cls(**json_dict)
+    def set_configuration(self, configuration: Configuration) -> None:
+        """Sets the configuration of the collection"""
+        if self.metadata is None:
+            self.metadata = {}
+        Collection._populate_metadata_from_configuration(
+            self.metadata, cast(CollectionConfiguration, configuration)
+        )
 
 
 class Database(TypedDict):

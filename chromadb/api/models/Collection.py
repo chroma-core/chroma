@@ -112,7 +112,7 @@ class Collection:
 
     @property
     def configuration(self) -> Optional[CollectionConfiguration]:
-        return self._model.configuration
+        return self._model.get_configuration()
 
     @property
     def tenant(self) -> str:

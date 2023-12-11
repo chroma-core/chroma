@@ -1,6 +1,10 @@
 from abc import abstractmethod
-from typing import ClassVar, Dict, List, Optional, Protocol, Union
+import json
+from overrides import override
+from typing import Any, ClassVar, Dict, List, Optional, Protocol, Union, Generic, TypeVar
 from multiprocessing import cpu_count
+
+from chromadb.serde import JSONSerializable
 
 # TODO: move out of API
 
@@ -56,9 +60,17 @@ class ConfigurationParameter:
 
     def __repr__(self) -> str:
         return f"ConfigurationParameter({self.name}, {self.value})"
+    
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, ConfigurationParameter):
+            return NotImplemented
+        return self.name == __value.name and self.value == __value.value
 
 
-class Configuration:
+T = TypeVar("T", bound="Configuration")
+
+
+class Configuration(JSONSerializable[T]):
     """Represents an abstract configuration."""
 
     # The internal data structure used to store the parameters
@@ -92,6 +104,11 @@ class Configuration:
 
     def __repr__(self) -> str:
         return f"Configuration({self.parameter_map.values()})"
+    
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, Configuration):
+            return NotImplemented
+        return self.parameter_map == __value.parameter_map
 
     def get_parameters(self) -> List[ConfigurationParameter]:
         """Returns the parameters of the configuration."""
@@ -113,8 +130,27 @@ class Configuration:
             raise ValueError(f"Invalid value for parameter {name}: {value}")
         parameter.value = value
 
+    @override
+    def to_json_str(self) -> str:
+        """Returns the JSON representation of the configuration."""
+        return json.dumps(self.to_json())
 
-class CollectionConfiguration(Configuration):
+    @override
+    def to_json(self) -> Dict[str, Any]:
+        """Returns the JSON compatible dictionary representation of the configuration."""
+        return {name: parameter.value for name, parameter in self.parameter_map.items()}
+
+    @classmethod
+    @override
+    def from_json(cls, json_map: Dict[str, Any]) -> T:
+        """Returns a configuration from the given JSON string."""
+        parameters = []
+        for name, value in json_map.items():
+            parameters.append(ConfigurationParameter(name=name, value=value))
+        return cls(parameters=parameters)
+
+
+class CollectionConfiguration(Configuration["CollectionConfiguration"]):
     """The configuration for a collection."""
 
     definitions = {

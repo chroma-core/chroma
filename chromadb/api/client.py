@@ -191,6 +191,7 @@ class Client(SharedSystemClient, ClientAPI):
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
+            configuration=configuration,
             data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,

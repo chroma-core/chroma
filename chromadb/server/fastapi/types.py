@@ -55,6 +55,7 @@ class DeleteEmbedding(BaseModel):
 class CreateCollection(BaseModel):
     name: str
     metadata: Optional[CollectionMetadata] = None
+    configuration: Optional[Dict[str, Any]] = None
     get_or_create: bool = False
 
 

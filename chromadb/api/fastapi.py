@@ -243,7 +243,7 @@ class FastAPI(ServerAPI):
                 {
                     "name": name,
                     "metadata": metadata,
-                    "configuration": configuration,  # TODO: support json serialization of configuration
+                    "configuration": configuration.to_json() if configuration else None,
                     "get_or_create": get_or_create,
                 }
             ),
