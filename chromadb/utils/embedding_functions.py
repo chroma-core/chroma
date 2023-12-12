@@ -1,6 +1,8 @@
 import hashlib
 import logging
 
+from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
+
 from chromadb.api.types import (
     Document,
     Documents,
@@ -401,6 +403,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_random(min=1, max=3),
+        retry=retry_if_exception(lambda e: "does not match expected SHA256" in str(e)),
+    )
     def _download(self, url: str, fname: str, chunk_size: int = 1024) -> None:
         resp = requests.get(url, stream=True)
         total = int(resp.headers.get("content-length", 0))
