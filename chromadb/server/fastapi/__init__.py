@@ -22,6 +22,7 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthzMiddleware,
     FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
+    set_overwrite_singleton_tenant_database_access_from_auth,
 )
 from chromadb.auth.fastapi_utils import (
     attr_from_collection_lookup,
@@ -161,6 +162,9 @@ class FastAPI(chromadb.server.Server):
                 FastAPIChromaAuthMiddlewareWrapper,
                 auth_middleware=self._api.require(FastAPIChromaAuthMiddleware),
             )
+        set_overwrite_singleton_tenant_database_access_from_auth(
+            settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+        )
 
         self.router = ChromaAPIRouter()
 

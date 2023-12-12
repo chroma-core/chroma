@@ -153,6 +153,15 @@ authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
 
+# This needs to be module-level config, since it's used in authz_context() where we
+# don't have a system (so don't have easy access to the settings).
+overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+
+def set_overwrite_singleton_tenant_database_access_from_auth(overwrite: bool = False) -> None:
+    global overwrite_singleton_tenant_database_access_from_auth
+    overwrite_singleton_tenant_database_access_from_auth = overwrite
+
 
 def authz_context(
     action: Union[str, AuthzResourceActions, List[str], List[AuthzResourceActions]],
@@ -203,8 +212,12 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
-                if TODO_THING:
-                    # TODO overwrite
+                if overwrite_singleton_tenant_database_access_from_auth:
+                    if "tenant" in kwargs:
+                        kwargs["tenant"] = request.state.user_identity.get_user_tenant()
+                    databases = request.state.user_identity.get_user_databases()
+                    if len(databases) == 1 and "database" in kwargs:
+                        kwargs["database"] = databases[0]
             return f(*args, **kwargs)
 
         return wrapped
