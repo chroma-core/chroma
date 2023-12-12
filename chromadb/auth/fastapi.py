@@ -212,6 +212,9 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
+                # In a multi-tenant environment, we may want to allow users to send
+                # requests without configuring a tenant and DB. If so, they can set
+                # the request tenant and DB however they like and we simply overwrite it.
                 if overwrite_singleton_tenant_database_access_from_auth:
                     if "tenant" in kwargs:
                         kwargs["tenant"] = request.state.user_identity.get_user_tenant()
