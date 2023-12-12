@@ -200,7 +200,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-class ChromaMode(str, Enum):
+class OperatingMode(str, Enum):
     PERSISTENT_CLIENT = "persistent client"
     EPHEMERAL_CLIENT = "ephemeral client"
     SERVER_SINGLE_NODE = "client/server single node"
@@ -226,7 +226,7 @@ class SystemInfo(TypedDict):
     persistent_disk_total: Optional[int]
     persistent_disk_used: Optional[int]
     persistent_disk_free: Optional[int]
-    mode: ChromaMode
+    mode: OperatingMode
 
 
 class ClientServerSystemInfo(TypedDict):

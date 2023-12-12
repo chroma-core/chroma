@@ -1,9 +1,11 @@
 # type: ignore
+from typing import Dict
+
 import requests
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult, EmbeddingFunction, Document
+from chromadb.api.types import QueryResult, EmbeddingFunction, Document, SystemInfo
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
@@ -1428,14 +1430,19 @@ def test_invalid_embeddings(api):
     assert "embedding" in str(e.value)
 
 
+def get_property_types() -> Dict[str, str]:
+    return {key: value.__name__ for key, value in SystemInfo.__annotations__.items()}
+
+
 def test_system_info(api_obs) -> None:
-    if not isinstance(api_obs, chromadb.api.fastapi.FastAPI):
-        _env = api_obs.env()
-        assert _env is not None
-        # assert _env["server"]["chroma_version"] is not None
-    else:
-        _env = api_obs.env()
-        assert _env["client"]["chroma_version"] is not None
+    _env = api_obs.env()
+    assert _env is not None
+    for key, _type in get_property_types().items():
+        if _type != "Optional":
+            if "client" in _env.keys() and _env["client"] is not None:
+                assert _env["client"][key] is not None
+            if "server" in _env.keys() and _env["server"] is not None:
+                assert _env["server"][key] is not None
 
 
 # test to make sure update shows exception for bad dimensionality

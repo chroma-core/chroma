@@ -1,4 +1,4 @@
-# CIP-7: System Info
+# CIP-12062023: System Info
 
 ## Status
 
@@ -15,28 +15,13 @@ to provide this information.
 This proposal introduces a new `API` endpoint `/api/v1/env` that will return a dictionary with system information based
 on flags provided by the user.
 
-The endpoint will accept the following flags:
 
-- `python_version` - Shows Python related information. Possible values `True` or `False` (default `True`)
-- `os_info` - Shows OS related information. Possible values `True` or `False` (default `True`)
-- `memory_info` - Shows memory related information. Possible values `True` or `False` (default `True`)
-- `cpu_info` - Shows CPU related information. Possible values `True` or `False` (default `True`)
-- `disk_info` - Shows disk related information. Possible values `True` or `False` (default `False`)
-
-By default, the endpoint will display the following information (example below):
-
-- `chroma_version` - The version of Chroma
-- `chroma_settings` - The settings used to start Chroma
-- `datetime` - The current date and time
-- `persist_directory` - The directory where Chroma is storing its data
-
-For security reasons the endpoint will be disabled by default. It can be enabled by setting
-the `CHROMA_SERVER_ENV_ENDPOINT_ENABLED=1` on the server.
+For security reasons the endpoint will be protected by auth. It is recommended to always enable auth when running
+Chroma in production or otherwise publicly exposed environment.
 
 We also suggest the introduction of two cli commands:
 
-- `chroma env info` that will print the system information to the console.
-- `chroma env rstat` that will continuously print CPU and memory usage statistics to the console.
+- `chroma env` that will print the system information to the console.
 
 ### Example Usage
 
@@ -87,7 +72,7 @@ Producing the following output:
 #### CLI
 
 ```bash
-chroma env info --remote http://localhost:8000
+chroma env --remote http://localhost:8000
 ================================== Remote Sever system info ==================================
 {
     "chroma_version": "0.4.18",
@@ -181,16 +166,6 @@ curl "http://localhost:8000/api/v1/env?python_version=True&os_info=True&memory_i
     "free_space": 107981352960
   }
 }
-```
-
-```bash
-chroma env rstat --remote http://localhost:8000 --interval 5
-0.3 %   77.79 MB
-0.3 %   77.79 MB
-0.2 %   77.79 MB
-0.3 %   77.79 MB
-^C
-Aborted.
 ```
 
 ## Proposed Changes

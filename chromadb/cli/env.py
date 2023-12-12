@@ -13,7 +13,6 @@ except ImportError:
     rprint = typer.echo
 
 
-@env_app.command(help="Local and remote Chroma system information")  # type: ignore
 def info(
     remote: str = typer.Option(
         None,
@@ -35,22 +34,19 @@ def info(
         client = chromadb.Client()
     try:
         _env = client.env()
-        if "server" in _env.keys():
+        if "server" in _env.keys() and _env["server"] is not None:
             typer.echo(
-                "================================== Remote Sever system info =================================="
+                "================================== Remote Sever system info ======================================"
             )
             rprint(json.dumps(_env["server"], indent=4))
-            typer.echo(
-                "================================== End Remote Sever system info =================================="
-            )
         if "client" in _env.keys():
             typer.echo(
-                "================================== Local client system info =================================="
+                "================================== Local client system info ======================================"
             )
             rprint(json.dumps(_env["client"], indent=4))
-            typer.echo(
-                "================================== End local system info =================================="
-            )
+        typer.echo(
+            "=================================================================================================="
+        )
     except Exception as e:
         traceback.print_exc()
         typer.echo(f"Failed to get system info {type(client)}: {str(e)}")

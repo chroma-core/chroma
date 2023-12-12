@@ -12,7 +12,7 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     GetResult,
     QueryResult,
-    ChromaMode,
+    OperatingMode,
     SystemInfo,
 )
 from chromadb.auth import (
@@ -305,13 +305,13 @@ class FastAPI(chromadb.server.Server):
     )
     def env(self) -> SystemInfo:
         _local_env = self._api.env()
-        if not _local_env or not _local_env.get("client"):
+        if not _local_env or "client" not in _local_env or not _local_env["client"]:
             raise HTTPException(
                 status_code=500,
                 detail="Unable to get system info.",
             )
-        # this can be done better
-        _local_env["client"]["mode"] = ChromaMode.SERVER_SINGLE_NODE
+        # this can be done better for distributed mode
+        _local_env["client"]["mode"] = OperatingMode.SERVER_SINGLE_NODE
         return _local_env["client"]
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)

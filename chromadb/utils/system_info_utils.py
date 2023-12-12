@@ -4,9 +4,8 @@ import os
 import platform
 import psutil
 from typing import Dict, cast, Any
-import re
 import chromadb
-from chromadb.api.types import SystemInfo, ChromaMode
+from chromadb.api.types import SystemInfo, OperatingMode
 from chromadb.api import ServerAPI as API
 
 logger = logging.getLogger(__name__)
@@ -17,23 +16,11 @@ def format_size(size_in_bytes: int) -> str:
     unit_index = 0
     size = float(size_in_bytes)
 
-    while size > 1024 and unit_index < 4:
+    while size > 1024 and unit_index < len(units) - 1:
         size /= 1024.0
         unit_index += 1
 
     return f"{size:.2f} {units[unit_index]}"
-
-
-SENSITIVE_VARS_PATTERNS = [".*PASSWORD.*", ".*KEY.*", ".*AUTH.*"]
-SENSITIVE_SETTINGS_PATTERNS = [".*credentials.*"]
-
-
-def sanitized_environ() -> Dict[str, str]:
-    env = dict(os.environ)
-    for key in env.keys():
-        if any(re.match(pattern, key) for pattern in SENSITIVE_VARS_PATTERNS):
-            env[key] = "*****"
-    return env
 
 
 def get_release_info(system: str) -> str:
@@ -96,8 +83,8 @@ def system_info(api: API) -> SystemInfo:
 
     # local mode either to the server or the client, TBD for distributed - perhaps we can check on api impl
     data["mode"] = (
-        ChromaMode.PERSISTENT_CLIENT
+        OperatingMode.PERSISTENT_CLIENT
         if api.get_settings().is_persistent
-        else ChromaMode.EPHEMERAL_CLIENT
+        else OperatingMode.EPHEMERAL_CLIENT
     )
     return cast(SystemInfo, data)

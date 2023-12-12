@@ -5,11 +5,11 @@ import uvicorn
 import os
 import webbrowser
 
-from chromadb.cli.env import env_app
+from chromadb.cli.env import info as env_info
 
 app = typer.Typer()
 
-app.add_typer(env_app, name="env", help="Provide environment information subcommands.")
+app.command(help="Local and remote Chroma system information", name="env")(env_info)
 
 _logo = """
                 \033[38;5;069m(((((((((    \033[38;5;203m(((((\033[38;5;220m####
