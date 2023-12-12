@@ -13,8 +13,8 @@ use aws_sdk_s3;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_smithy_types::byte_stream::ByteStream;
+use std::clone::Clone;
 use std::io::Write;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 #[async_trait]
 trait Storage {
@@ -22,6 +22,7 @@ trait Storage {
     async fn put(&self, key: &str, path: &str) -> Result<(), String>;
 }
 
+#[derive(Clone)]
 struct S3Storage {
     bucket: String,
     client: aws_sdk_s3::Client,
