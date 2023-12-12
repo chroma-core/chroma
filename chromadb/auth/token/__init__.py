@@ -21,7 +21,6 @@ from chromadb.auth import (
     SimpleServerAuthenticationResponse,
     SimpleUserIdentity,
 )
-from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -83,7 +82,6 @@ def check_token(token: str) -> None:
         raise ValueError("Invalid token. Must contain only ASCII letters and digits.")
 
 
-@register_provider("token_config")
 class TokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     _token: SecretStr
 
@@ -126,7 +124,6 @@ class User(TypedDict):
     tokens: List[Token]
 
 
-@register_provider("user_token_config")
 class UserTokenConfigServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
     _users: List[User]
     _token_user_mapping: Dict[str, str]  # reverse mapping of token to user
@@ -216,7 +213,6 @@ class TokenAuthCredentials(SecretStrAbstractCredentials):
         return TokenAuthCredentials(SecretStr(token))
 
 
-@register_provider("token")
 class TokenAuthServerProvider(ServerAuthProvider):
     _credentials_provider: ServerAuthCredentialsProvider
     _token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION
@@ -225,15 +221,7 @@ class TokenAuthServerProvider(ServerAuthProvider):
         super().__init__(system)
         self._settings = system.settings
         system.settings.require("chroma_server_auth_credentials_provider")
-        self._credentials_provider = cast(
-            ServerAuthCredentialsProvider,
-            system.require(
-                resolve_provider(
-                    str(system.settings.chroma_server_auth_credentials_provider),
-                    ServerAuthCredentialsProvider,
-                )
-            ),
-        )
+        self._credentials_provider = system.require(ServerAuthCredentialsProvider)
         if system.settings.chroma_server_auth_token_transport_header:
             self._token_transport_header = TokenTransportHeader[
                 str(system.settings.chroma_server_auth_token_transport_header)
@@ -260,7 +248,6 @@ class TokenAuthServerProvider(ServerAuthProvider):
             return SimpleServerAuthenticationResponse(False, None)
 
 
-@register_provider("token")
 class TokenAuthClientProvider(ClientAuthProvider):
     _credentials_provider: ClientAuthCredentialsProvider[Any]
     _token_transport_header: TokenTransportHeader = TokenTransportHeader.AUTHORIZATION

@@ -7,7 +7,6 @@ from chromadb.auth import (
     ServerAuthorizationConfigurationProvider,
     ServerAuthorizationProvider,
 )
-from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import DEFAULT_TENANT, System
 
 from chromadb.telemetry.opentelemetry import (
@@ -18,7 +17,6 @@ from chromadb.telemetry.opentelemetry import (
 logger = logging.getLogger(__name__)
 
 
-@register_provider("local_authz_config")
 class LocalUserConfigAuthorizationConfigurationProvider(
     ServerAuthorizationConfigurationProvider[Dict[str, Any]]
 ):
@@ -46,7 +44,6 @@ class LocalUserConfigAuthorizationConfigurationProvider(
         return self._config
 
 
-@register_provider("simple_rbac")
 class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
     _authz_config_provider: ServerAuthorizationConfigurationProvider[Dict[str, Any]]
 
@@ -55,13 +52,8 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
         self._settings = system.settings
         system.settings.require("chroma_server_authz_config_provider")
         if self._settings.chroma_server_authz_config_provider:
-            _cls = resolve_provider(
-                self._settings.chroma_server_authz_config_provider,
-                ServerAuthorizationConfigurationProvider,
-            )
-            self._authz_config_provider = cast(
+            self._authz_config_provider = system.require(
                 ServerAuthorizationConfigurationProvider[Dict[str, Any]],
-                self.require(_cls),
             )
             _config = self._authz_config_provider.get_configuration()
             self._authz_tuples_map: Dict[str, Set[Any]] = {}

@@ -14,7 +14,6 @@ from chromadb.auth import (
     ClientAuthProtocolAdapter,
     SimpleUserIdentity,
 )
-from chromadb.auth.registry import register_provider, resolve_provider
 from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -74,7 +73,6 @@ class HtpasswdServerAuthCredentialsProvider(ServerAuthCredentialsProvider):
         return SimpleUserIdentity(_creds["username"].get_secret_value())
 
 
-@register_provider("htpasswd_file")
 class HtpasswdFileServerAuthCredentialsProvider(HtpasswdServerAuthCredentialsProvider):
     def __init__(self, system: System) -> None:
         super().__init__(system)
@@ -148,14 +146,7 @@ class RequestsClientAuthProtocolAdapter(
     def __init__(self, system: System) -> None:
         super().__init__(system)
         system.settings.require("chroma_client_auth_provider")
-        self._auth_provider = cast(
-            ClientAuthProvider,
-            system.require(
-                resolve_provider(
-                    str(system.settings.chroma_client_auth_provider), ClientAuthProvider
-                ),
-            ),
-        )
+        self._auth_provider = system.require(ClientAuthProvider)
         self._session = self._Session(self)
         self._auth_header = self._auth_provider.authenticate()
 
