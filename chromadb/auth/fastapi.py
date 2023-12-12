@@ -220,7 +220,7 @@ def authz_context(
                     if "tenant" in kwargs:
                         kwargs["tenant"] = request.state.user_identity.get_user_tenant()
                     databases = request.state.user_identity.get_user_databases()
-                    if len(databases) == 1 and "database" in kwargs:
+                    if databases and len(databases) == 1 and "database" in kwargs:
                         kwargs["database"] = databases[0]
             return f(*args, **kwargs)
 
