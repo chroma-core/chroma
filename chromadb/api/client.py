@@ -4,6 +4,8 @@ import uuid
 
 from overrides import override
 import requests
+
+from chromadb import __version__ as local_chroma_version
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.types import (
     CollectionMetadata,
@@ -141,10 +143,9 @@ class Client(SharedSystemClient, ClientAPI):
         self.database = database
         # Create an admin client for verifying that databases and tenants exist
         self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=tenant, database=database)
-
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
+        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Submit event for a client start
         telemetry_client = self._system.instance(ProductTelemetryClient)
@@ -425,7 +426,11 @@ class Client(SharedSystemClient, ClientAPI):
 
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
-            self._admin_client.get_tenant(name=tenant)
+            try:
+                self._admin_client.get_tenant(name=tenant)
+            except Exception as e1:
+                print(type(e1))
+                raise e1
         except requests.exceptions.ConnectionError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
@@ -437,8 +442,9 @@ class Client(SharedSystemClient, ClientAPI):
                 )
             if ex.response.status_code == 404:
                 raise ValueError(
-                    f"It appears your Chroma server is running an older version of Chroma {self.get_version()}. "
-                    "Please upgrade to the latest version."
+                    f"It appears you are using newer version of Chroma client (v{local_chroma_version}) "
+                    f"that is not compatible with  Chroma server (v{self.get_version()}). "
+                    "Please upgrade your server to the latest version."
                 )
             else:
                 raise ValueError(
