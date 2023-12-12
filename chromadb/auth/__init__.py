@@ -53,6 +53,10 @@ class UserIdentity(EnforceOverrides, ABC):
         ...
 
     @abstractmethod
+    def get_user_databases(self) -> Optional[List[str]]:
+        ...
+
+    @abstractmethod
     def get_user_attributes(self) -> Optional[Dict[str, Any]]:
         ...
 
@@ -62,11 +66,13 @@ class SimpleUserIdentity(UserIdentity):
         self,
         user_id: str,
         tenant: Optional[str] = None,
+        databases: Optional[List[str]] = None,
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._user_id = user_id
         self._tenant = tenant
         self._attributes = attributes
+        self._databases = databases
 
     @override
     def get_user_id(self) -> str:
@@ -75,6 +81,10 @@ class SimpleUserIdentity(UserIdentity):
     @override
     def get_user_tenant(self) -> Optional[str]:
         return self._tenant if self._tenant else DEFAULT_TENANT
+
+    @override
+    def get_user_databases(self) -> Optional[List[str]]:
+        return self._databases
 
     @override
     def get_user_attributes(self) -> Optional[Dict[str, Any]]:
