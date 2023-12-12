@@ -1,5 +1,5 @@
 # type: ignore
-from typing import Dict
+from typing import Dict, get_type_hints
 
 import requests
 
@@ -1431,7 +1431,7 @@ def test_invalid_embeddings(api):
 
 
 def get_property_types() -> Dict[str, str]:
-    return {key: value.__name__ for key, value in SystemInfo.__annotations__.items()}
+    return {key: value.__name__ for key, value in get_type_hints(SystemInfo).items()}
 
 
 def test_system_info(api_obs) -> None:

@@ -29,43 +29,37 @@ We also suggest the introduction of two cli commands:
 
 ```python
 import chromadb
+import json
 client = chromadb.PersistentClient(path="testchroma")
-print(client.env())
+print(json.dumps(client.env(), indent=4))
 ```
 
 Producing the following output:
 
-```python
+```json
 {
-    'client': {
-        'chroma_version': '0.4.18',
-        'is_persistent': True,
-        'api': 'chromadb.api.segment.SegmentAPI',
-        'datetime': '2023-12-06T15:56:26.564277',
-        'persist_directory': 'testchroma',
-        'python_version': '3.11.2',
-        'os': 'Darwin',
-        'os_version': '22.6.0',
-        'os_release': 'ProductName: macOS ProductVersion: 13.6.2 BuildVersion: 22G320',
-        'memory_info': {
-            'free_memory': 9616818176,
-            'total_memory': 34359738368,
-            'process_memory': {
-                'rss': 121454592,
-                'vms': 420668538880
-            }
-        },
-        'cpu_info': {
-            'architecture': 'arm64',
-            'number_of_cpus': 12
-        },
-        'disk_info': {
-            'total_space': 994662584320,
-            'used_space': 870198599680,
-            'free_space': 109242904576
-        },
-        'mode': 'persistent'
-    }
+    "client": {
+        "chroma_version": "0.4.18",
+        "python_version": "3.11.2",
+        "is_persistent": true,
+        "api": "chromadb.api.segment.SegmentAPI",
+        "datetime": "2023-12-12T14:51:50.634453",
+        "os": "Darwin",
+        "os_version": "22.6.0",
+        "os_release": "ProductName: macOS ProductVersion: 13.6.2 BuildVersion: 22G320",
+        "memory_free": 6750699520,
+        "memory_total": 34359738368,
+        "process_memory_rss": 124862464,
+        "process_memory_vms": 420594466816,
+        "cpu_architecture": "arm64",
+        "cpu_count": 12,
+        "cpu_usage": 27.3,
+        "persistent_disk_free": 61767798784,
+        "persistent_disk_total": 994662584320,
+        "persistent_disk_used": 861841027072,
+        "mode": "persistent client"
+    },
+    "server": null
 }
 ```
 
@@ -73,64 +67,51 @@ Producing the following output:
 
 ```bash
 chroma env --remote http://localhost:8000
-================================== Remote Sever system info ==================================
+================================== Remote Sever system info ======================================
 {
     "chroma_version": "0.4.18",
+    "python_version": "3.10.13",
     "is_persistent": true,
     "api": "chromadb.api.segment.SegmentAPI",
-    "datetime": "2023-12-06T18:00:18.340669",
-    "persist_directory": "./chroma",
-    "python_version": "3.11.2",
-    "os": "Darwin",
-    "os_version": "22.6.0",
-    "os_release": "ProductName: macOS ProductVersion: 13.6.2 BuildVersion: 22G320",
-    "memory_info": {
-        "free_memory": 9124806656,
-        "total_memory": 34359738368,
-        "process_memory": {
-            "rss": 95485952,
-            "vms": 420263067648
-        }
-    },
-    "cpu_info": {
-        "architecture": "arm64",
-        "number_of_cpus": 12,
-        "cpu_usage": 28.0
-    },
-    "disk_info": {
-        "total_space": 994662584320,
-        "used_space": 871452631040,
-        "free_space": 107988865024
-    }
+    "datetime": "2023-12-12T12:48:03.812470",
+    "os": "Linux",
+    "os_version": "6.5.11-linuxkit",
+    "os_release": "Debian GNU/Linux 12 (bookworm)",
+    "cpu_architecture": "aarch64",
+    "cpu_count": 12,
+    "cpu_usage": 0.4,
+    "memory_free": 10335645696,
+    "memory_total": 12538855424,
+    "process_memory_rss": 129458176,
+    "process_memory_vms": 718258176,
+    "persistent_disk_total": 62671097856,
+    "persistent_disk_used": 33626783744,
+    "persistent_disk_free": 25827598336,
+    "mode": "server single node server"
 }
-================================== End Remote Sever system info ==================================
-================================== Local client system info ==================================
+================================== Local client system info ======================================
 {
     "chroma_version": "0.4.18",
+    "python_version": "3.11.2",
     "is_persistent": false,
     "api": "chromadb.api.fastapi.FastAPI",
-    "datetime": "2023-12-06T18:00:19.368348",
-    "python_version": "3.11.2",
+    "datetime": "2023-12-12T14:48:04.827205",
     "os": "Darwin",
     "os_version": "22.6.0",
     "os_release": "ProductName: macOS ProductVersion: 13.6.2 BuildVersion: 22G320",
-    "memory_info": {
-        "free_memory": 9214787584,
-        "total_memory": 34359738368,
-        "process_memory": {
-            "rss": 90046464,
-            "vms": 420389847040
-        }
-    },
-    "cpu_info": {
-        "architecture": "arm64",
-        "number_of_cpus": 12,
-        "cpu_usage": 29.5
-    },
-    "mode": "http"
+    "memory_free": 5945114624,
+    "memory_total": 34359738368,
+    "process_memory_rss": 92225536,
+    "process_memory_vms": 420391944192,
+    "cpu_architecture": "arm64",
+    "cpu_count": 12,
+    "cpu_usage": 30.1,
+    "persistent_disk_free": null,
+    "persistent_disk_total": null,
+    "persistent_disk_used": null,
+    "mode": "http client"
 }
-================================== End local system info ==================================
-
+==================================================================================================
 ```
 
 #### External Tooling (curl, jq)

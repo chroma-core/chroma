@@ -201,10 +201,17 @@ class IndexMetadata(TypedDict):
 
 
 class OperatingMode(str, Enum):
+    HTTP_CLIENT = "http client"
     PERSISTENT_CLIENT = "persistent client"
     EPHEMERAL_CLIENT = "ephemeral client"
-    SERVER_SINGLE_NODE = "client/server single node"
-    SERVER_DISTRIBUTED = "client/server distributed"
+    SERVER_SINGLE_NODE = "server single node server"
+    SERVER_DISTRIBUTED = "distributed server"
+
+    def __str__(self) -> str:
+        return self.value
+
+    def __repr__(self) -> str:
+        return self.value
 
 
 class SystemInfo(TypedDict):
