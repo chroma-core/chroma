@@ -27,6 +27,8 @@ async-channel = "2.1.1"
 num-bigint = "0.4.4"
 num-traits = "0.2.17"
 parking_lot = "0.12.1"
+aws-sdk-s3 = "1.5.0"
+aws-smithy-types = "1.1.0"
 
 [build-dependencies]
 tonic-build = "0.10"

@@ -103,7 +103,7 @@ fn it_can_add_and_basic_query() {
 fn it_can_persist_and_load() {
     let n = 1000;
     let d: usize = 960;
-    let persist_path = "/Users/hammad/Documents/chroma/rust_test/";
+    let persist_path = "/Users/hammad/Documents/chroma/rust_test/"; // TODO: rust test path creation / teardown
     let space_name = "l2";
     let mut index = Index::new(space_name, n, 16, 100, 0, true, true, persist_path);
     index.init(d);

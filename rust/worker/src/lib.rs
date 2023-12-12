@@ -7,6 +7,7 @@ pub mod memberlist_provider;
 mod messageid;
 pub mod rendezvous_hash;
 mod segment_manager;
+mod storage;
 mod sysdb;
 mod types;
 mod writer;
