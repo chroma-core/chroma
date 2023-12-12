@@ -10,13 +10,13 @@ use thiserror::Error;
 use murmur3::murmur3_x64_128;
 
 /// A trait for hashing a member and a key to a score.
-trait Hasher {
+pub(crate) trait Hasher {
     fn hash(&self, member: &str, key: &str) -> Result<u64, AssignmentError>;
 }
 
 /// Error codes for assignment
 #[derive(Error, Debug)]
-enum AssignmentError {
+pub(crate) enum AssignmentError {
     #[error("Cannot assign empty key")]
     EmptyKey,
     #[error("No members to assign to")]
@@ -49,7 +49,7 @@ impl ChromaError for AssignmentError {
 /// # Notes
 /// This implementation mirrors the rendezvous hash implementation
 /// in the go and python services.
-fn assign<H: Hasher>(
+pub(crate) fn assign<H: Hasher>(
     key: &str,
     members: impl IntoIterator<Item = impl AsRef<str>>,
     hasher: &H,
@@ -97,7 +97,7 @@ fn merge_hashes(x: u64, y: u64) -> u64 {
     acc
 }
 
-struct Murmur3Hasher {}
+pub(crate) struct Murmur3Hasher {}
 
 impl Hasher for Murmur3Hasher {
     fn hash(&self, member: &str, key: &str) -> Result<u64, AssignmentError> {
