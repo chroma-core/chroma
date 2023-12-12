@@ -360,10 +360,10 @@ class FastAPI(chromadb.server.Server):
     )
     def list_collections(
         self,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         return self._api.list_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
