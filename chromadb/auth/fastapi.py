@@ -116,7 +116,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -153,6 +153,15 @@ request_var: ContextVar[Optional[Request]] = ContextVar("request_var", default=N
 authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
+
+# This needs to be module-level config, since it's used in authz_context() where we
+# don't have a system (so don't have easy access to the settings).
+overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+
+def set_overwrite_singleton_tenant_database_access_from_auth(overwrite: bool = False) -> None:
+    global overwrite_singleton_tenant_database_access_from_auth
+    overwrite_singleton_tenant_database_access_from_auth = overwrite
 
 
 def authz_context(
@@ -204,6 +213,15 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
+                # In a multi-tenant environment, we may want to allow users to send
+                # requests without configuring a tenant and DB. If so, they can set
+                # the request tenant and DB however they like and we simply overwrite it.
+                if overwrite_singleton_tenant_database_access_from_auth:
+                    if "tenant" in kwargs:
+                        kwargs["tenant"] = request.state.user_identity.get_user_tenant()
+                    databases = request.state.user_identity.get_user_databases()
+                    if len(databases) == 1 and "database" in kwargs:
+                        kwargs["database"] = databases[0]
             return f(*args, **kwargs)
 
         return wrapped
@@ -267,7 +285,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:
