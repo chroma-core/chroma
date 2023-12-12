@@ -1,11 +1,11 @@
 # type: ignore
-from typing import Dict, get_type_hints
+from typing import Dict
 
 import requests
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult, EmbeddingFunction, Document, SystemInfo
+from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 import chromadb.server.fastapi
 import pytest
@@ -1431,7 +1431,27 @@ def test_invalid_embeddings(api):
 
 
 def get_property_types() -> Dict[str, str]:
-    return {key: value.__name__ for key, value in get_type_hints(SystemInfo).items()}
+    return {
+        "chroma_version": "str",
+        "python_version": "str",
+        "is_persistent": "bool",
+        "api": "str",
+        "datetime": "str",
+        "os": "str",
+        "os_version": "str",
+        "os_release": "Optional",
+        "cpu_architecture": "Optional",
+        "cpu_count": "Optional",
+        "cpu_usage": "Optional",
+        "memory_free": "Optional",
+        "memory_total": "Optional",
+        "process_memory_rss": "Optional",
+        "process_memory_vms": "Optional",
+        "persistent_disk_total": "Optional",
+        "persistent_disk_used": "Optional",
+        "persistent_disk_free": "Optional",
+        "mode": "OperatingMode",
+    }
 
 
 def test_system_info(api_obs) -> None:
