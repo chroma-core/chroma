@@ -5,30 +5,32 @@
 
 use crate::errors::{ChromaError, ErrorCodes};
 use std::io::Cursor;
+use thiserror::Error;
 
 use murmur3::murmur3_x64_128;
 
 /// A trait for hashing a member and a key to a score.
 trait Hasher {
-    fn hash(&self, member: &str, key: &str) -> Result<u64, &'static str>;
+    fn hash(&self, member: &str, key: &str) -> Result<u64, AssignmentError>;
 }
 
-/// Error codes for the rendezvous hash algorithm.
-enum AssignmentErrors {
-    /// The key is empty.
+/// Error codes for assignment
+#[derive(Error, Debug)]
+enum AssignmentError {
+    #[error("Cannot assign empty key")]
     EmptyKey,
-    /// There are no members to assign to.
+    #[error("No members to assign to")]
     NoMembers,
-    /// There was an error hashing a member.
+    #[error("Error hashing member")]
     HashError,
 }
 
-impl ChromaError for AssignmentErrors {
+impl ChromaError for AssignmentError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AssignmentErrors::EmptyKey => ErrorCodes::InvalidArgument,
-            AssignmentErrors::NoMembers => ErrorCodes::InvalidArgument,
-            AssignmentErrors::HashError => ErrorCodes::Internal,
+            AssignmentError::EmptyKey => ErrorCodes::InvalidArgument,
+            AssignmentError::NoMembers => ErrorCodes::InvalidArgument,
+            AssignmentError::HashError => ErrorCodes::Internal,
         }
     }
 }
@@ -51,9 +53,9 @@ fn assign<H: Hasher>(
     key: &str,
     members: impl IntoIterator<Item = impl AsRef<str>>,
     hasher: &H,
-) -> Result<String, &'static str> {
+) -> Result<String, AssignmentError> {
     if key.is_empty() {
-        return Err("Cannot assign empty key");
+        return Err(AssignmentError::EmptyKey);
     }
 
     let mut iterated = false;
@@ -67,7 +69,7 @@ fn assign<H: Hasher>(
         let score = hasher.hash(member.as_ref(), key);
         let score = match score {
             Ok(score) => score,
-            Err(err) => return Err(err),
+            Err(err) => return Err(AssignmentError::HashError),
         };
         if score > max_score {
             max_score = score;
@@ -76,12 +78,12 @@ fn assign<H: Hasher>(
     }
 
     if !iterated {
-        return Err("No members to assign to");
+        return Err(AssignmentError::NoMembers);
     }
 
     match max_member {
         Some(max_member) => return Ok(max_member.as_ref().to_string()),
-        None => return Err("No member to assign to"),
+        None => return Err(AssignmentError::NoMembers),
     }
 }
 
@@ -98,7 +100,7 @@ fn merge_hashes(x: u64, y: u64) -> u64 {
 struct Murmur3Hasher {}
 
 impl Hasher for Murmur3Hasher {
-    fn hash(&self, member: &str, key: &str) -> Result<u64, &'static str> {
+    fn hash(&self, member: &str, key: &str) -> Result<u64, AssignmentError> {
         let member_hash = murmur3_x64_128(&mut Cursor::new(member), 0);
         let key_hash = murmur3_x64_128(&mut Cursor::new(key), 0);
         // The murmur library returns a 128 bit hash, but we only need 64 bits, grab the first 64 bits
@@ -109,7 +111,7 @@ impl Hasher for Murmur3Hasher {
                 let merged = merge_hashes(member_hash_64, key_hash_64);
                 return Ok(merged);
             }
-            _ => return Err("Error in hashing member or key"),
+            _ => return Err(AssignmentError::HashError),
         };
     }
 }
@@ -121,12 +123,12 @@ mod tests {
     struct MockHasher {}
 
     impl Hasher for MockHasher {
-        fn hash(&self, member: &str, _key: &str) -> Result<u64, &'static str> {
+        fn hash(&self, member: &str, _key: &str) -> Result<u64, AssignmentError> {
             match member {
                 "a" => Ok(1),
                 "b" => Ok(2),
                 "c" => Ok(3),
-                _ => Err("No such mock member"),
+                _ => Err(AssignmentError::HashError),
             }
         }
     }
@@ -161,9 +163,9 @@ mod tests {
             counts[index] += 1;
         }
 
+        let expected = num_keys / member_count;
         for i in 0..member_count {
             let count = counts[i];
-            let expected = num_keys / member_count;
             let diff = count - expected as i32;
             assert!(diff.abs() < tolerance);
         }

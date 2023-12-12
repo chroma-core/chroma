@@ -1,3 +1,3 @@
 mod assignment;
 mod config;
-pub(crate) mod errors;
+mod errors;
