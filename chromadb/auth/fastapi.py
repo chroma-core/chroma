@@ -27,6 +27,7 @@ from chromadb.auth import (
     ChromaAuthzMiddleware,
     ServerAuthorizationProvider,
 )
+from chromadb.auth.registry import resolve_provider
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -81,8 +82,10 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
             logger.debug(
                 f"Server Auth Provider: {self._settings.chroma_server_auth_provider}"
             )
-            self._auth_provider = cast(ServerAuthProvider,
-                                       self.require(self._settings.chroma_server_auth_provider))
+            _cls = resolve_provider(
+                self._settings.chroma_server_auth_provider, ServerAuthProvider
+            )
+            self._auth_provider = cast(ServerAuthProvider, self.require(_cls))
 
     @trace_method(
         "FastAPIChromaAuthMiddleware.authenticate", OpenTelemetryGranularity.ALL
@@ -174,50 +177,47 @@ def authz_context(
                 "function_kwargs": kwargs,
             }
             request = request_var.get()
-            if not request:
-                return f(*args, **kwargs)
+            if request:
+                _provider = authz_provider.get()
+                a_list: List[Union[str, AuthzAction]] = []
+                if not isinstance(action, List):
+                    a_list = [action]
+                else:
+                    a_list = cast(List[Union[str, AuthzAction]], action)
+                a_authz_responses = []
+                for a in a_list:
+                    _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
+                    _resource = (
+                        resource
+                        if isinstance(resource, AuthzResource)
+                        else resource.to_authz_resource(**_dynamic_kwargs)
+                    )
+                    _context = AuthorizationContext(
+                        user=AuthzUser(
+                            id=request.state.user_identity.get_user_id()
+                            if hasattr(request.state, "user_identity")
+                            else "Anonymous",
+                            tenant=request.state.user_identity.get_user_tenant()
+                            if hasattr(request.state, "user_identity")
+                            else DEFAULT_TENANT,
+                            attributes=request.state.user_identity.get_user_attributes()
+                            if hasattr(request.state, "user_identity")
+                            else {},
+                        ),
+                        resource=_resource,
+                        action=_action,
+                    )
 
-            _provider = authz_provider.get()
-            a_list: List[Union[str, AuthzAction]] = []
-            if not isinstance(action, List):
-                a_list = [action]
-            else:
-                a_list = cast(List[Union[str, AuthzAction]], action)
-            a_authz_responses = []
-            for a in a_list:
-                _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
-                _resource = (
-                    resource
-                    if isinstance(resource, AuthzResource)
-                    else resource.to_authz_resource(**_dynamic_kwargs)
-                )
-                _context = AuthorizationContext(
-                    user=AuthzUser(
-                        id=request.state.user_identity.get_user_id()
-                        if hasattr(request.state, "user_identity")
-                        else "Anonymous",
-                        tenant=request.state.user_identity.get_user_tenant()
-                        if hasattr(request.state, "user_identity")
-                        else DEFAULT_TENANT,
-                        attributes=request.state.user_identity.get_user_attributes()
-                        if hasattr(request.state, "user_identity")
-                        else {},
-                    ),
-                    resource=_resource,
-                    action=_action,
-                )
-
-                if _provider:
-                    a_authz_responses.append(_provider.authorize(_context))
-            if not any(a_authz_responses):
-                raise AuthorizationError("Unauthorized")
-            if overwrite_singleton_tenant_database_access_from_auth:
-                if "tenant" in kwargs:
-                    kwargs["tenant"] = request.state.user_identity.get_user_tenant()
-                databases = request.state.user_identity.get_user_databases()
-                if len(databases) == 1 and "database" in kwargs:
-                    kwargs["database"] = databases[0]
-
+                    if _provider:
+                        a_authz_responses.append(_provider.authorize(_context))
+                if not any(a_authz_responses):
+                    raise AuthorizationError("Unauthorized")
+                if overwrite_singleton_tenant_database_access_from_auth:
+                    if "tenant" in kwargs:
+                        kwargs["tenant"] = request.state.user_identity.get_user_tenant()
+                    databases = request.state.user_identity.get_user_databases()
+                    if len(databases) == 1 and "database" in kwargs:
+                        kwargs["database"] = databases[0]
             return f(*args, **kwargs)
 
         return wrapped
@@ -253,8 +253,10 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
                 "Server Authorization Provider: "
                 f"{self._settings.chroma_server_authz_provider}"
             )
-            self._authz_provider = cast(ServerAuthorizationProvider,
-                                        self.require(self._settings.chroma_server_authz_provider))
+            _cls = resolve_provider(
+                self._settings.chroma_server_authz_provider, ServerAuthorizationProvider
+            )
+            self._authz_provider = cast(ServerAuthorizationProvider, self.require(_cls))
 
     @override
     def pre_process(self, request: AuthorizationRequestContext[Request]) -> None:

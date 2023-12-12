@@ -34,6 +34,7 @@ from chromadb.auth import (
     ClientAuthProvider,
 )
 from chromadb.auth.providers import RequestsClientAuthProtocolAdapter
+from chromadb.auth.registry import resolve_provider
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -118,10 +119,20 @@ class FastAPI(ServerAPI):
             system.settings.chroma_client_auth_provider
             and system.settings.chroma_client_auth_protocol_adapter
         ):
-            self._auth_provider: ClientAuthProvider = self.require(
-                ClientAuthProvider
+            self._auth_provider = self.require(
+                resolve_provider(
+                    system.settings.chroma_client_auth_provider, ClientAuthProvider
+                )
             )
-            self._adapter = system.require(RequestsClientAuthProtocolAdapter,)
+            self._adapter = cast(
+                RequestsClientAuthProtocolAdapter,
+                system.require(
+                    resolve_provider(
+                        system.settings.chroma_client_auth_protocol_adapter,
+                        RequestsClientAuthProtocolAdapter,
+                    )
+                ),
+            )
             self._session = self._adapter.session
         else:
             self._session = requests.Session()

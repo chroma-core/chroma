@@ -218,10 +218,7 @@ class Settings(BaseSettings):  # type: ignore
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
-    # Instruct the auth system to overwrite requests' tenant and database args. This is
-    # useful for running a multi-tenant system in which users connect with _only_ an
-    # API token to DEFAULT_TENANT and DEFAULT_DATABASE: the auth system can look up
-    # the actual request target and overwrite the tenant and database args to match.
+    # TODO comment
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
     anonymized_telemetry: bool = True
