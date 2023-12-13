@@ -151,7 +151,7 @@ impl_base_convert_error!(VectorConversionError, {
 /// # Notes
 /// This method internally uses unsafe code to convert the bytes to f32s
 fn vec_to_f32(bytes: &[u8]) -> Result<&[f32], VectorConversionError> {
-    // Consumes a vector of bytes and returns a vector of f32s
+    // Transmutes a vector of bytes into vector of f32s
 
     if bytes.len() % 4 != 0 {
         return Err(VectorConversionError::InvalidByteLength);
