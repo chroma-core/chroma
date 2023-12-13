@@ -89,6 +89,29 @@ class CollectionStateMachine(RuleBasedStateMachine):
         for c in colls:
             assert c.name in self.model
 
+    # @rule for list_collections with limit and offset
+    @rule(
+        limit=st.integers(min_value=1, max_value=5),
+        offset=st.integers(min_value=0, max_value=5),
+    )
+    def list_collections_with_limit_offset(self, limit: int, offset: int) -> None:
+        colls = self.api.list_collections(limit=limit, offset=offset)
+        total_collections = self.api.count_collections()
+
+        # get all collections
+        all_colls = self.api.list_collections()
+        # manually slice the collections based on the given limit and offset
+        man_colls = all_colls[offset : offset + limit]
+
+        # given limit and offset, make various assertions regarding the total number of collections
+        if limit + offset > total_collections:
+            assert len(colls) == max(total_collections - offset, 0)
+            # assert that our manually sliced collections are the same as the ones returned by the API
+            assert colls == man_colls
+
+        else:
+            assert len(colls) == limit
+
     @rule(
         target=collections,
         new_metadata=st.one_of(st.none(), strategies.collection_metadata),
