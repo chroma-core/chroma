@@ -35,13 +35,13 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
 
-    # If you have a beefier machine, try "gtr-t5-large".
-    # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
+    # If you have a beefier machine, try "gtr-t5-large". for a full list of options:
+    # https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
     def __init__(
-        self,
-        model_name: str = "all-MiniLM-L6-v2",
-        device: str = "cpu",
-        normalize_embeddings: bool = False,
+            self,
+            model_name: str = "all-MiniLM-L6-v2",
+            device: str = "cpu",
+            normalize_embeddings: bool = False,
     ):
         if model_name not in self.models:
             try:
@@ -55,11 +55,11 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(  # type: ignore
+        return cast(Embeddings, self._model.encode(
             list(input),
             convert_to_numpy=True,
             normalize_embeddings=self._normalize_embeddings,
-        ).tolist()
+        ).tolist())
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -73,20 +73,20 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = SentenceModel(model_name_or_path=model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(list(input), convert_to_numpy=True).tolist()  # type: ignore # noqa E501
+        return cast(Embeddings, self._model.encode(list(input), convert_to_numpy=True).tolist())  # noqa E501
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model_name: str = "text-embedding-ada-002",
-        organization_id: Optional[str] = None,
-        api_base: Optional[str] = None,
-        api_type: Optional[str] = None,
-        api_version: Optional[str] = None,
-        deployment_id: Optional[str] = None,
-        default_headers: Optional[Mapping[str, str]] = None,
+            self,
+            api_key: Optional[str] = None,
+            model_name: str = "text-embedding-ada-002",
+            organization_id: Optional[str] = None,
+            api_base: Optional[str] = None,
+            api_type: Optional[str] = None,
+            api_version: Optional[str] = None,
+            deployment_id: Optional[str] = None,
+            default_headers: Optional[Mapping[str, str]] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
@@ -170,10 +170,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             # Sort resulting embeddings by index
             sorted_embeddings = sorted(
                 embeddings, key=lambda e: e.index
-            )  # type: ignore
+            )
 
             # Return just the embeddings
-            return [result.embedding for result in sorted_embeddings]
+            emb = [result.embedding for result in sorted_embeddings]
+            return cast(Embeddings, emb)
         else:
             if self._api_type == "azure":
                 embeddings = self._client.create(
@@ -187,10 +188,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             # Sort resulting embeddings by index
             sorted_embeddings = sorted(
                 embeddings, key=lambda e: e["index"]
-            )  # type: ignore
+            )
 
             # Return just the embeddings
-            return [result["embedding"] for result in sorted_embeddings]
+            emb1 = [result["embedding"] for result in sorted_embeddings]
+            return cast(Embeddings, emb1)
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -220,7 +222,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     """
 
     def __init__(
-        self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+            self, api_key: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     ):
         """
         Initialize the HuggingFaceEmbeddingFunction.
@@ -249,9 +251,9 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding API for each document
-        return self._session.post(  # type: ignore
+        return cast(Embeddings, self._session.post(
             self._api_url, json={"inputs": input, "options": {"wait_for_model": True}}
-        ).json()
+        ).json())
 
 
 class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -291,7 +293,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = jina_ai_fn(input)
         """
         # Call Jina AI Embedding API
-        resp = self._session.post(  # type: ignore
+        resp = self._session.post(
             self._api_url, json={"input": input, "model": self._model_name}
         ).json()
         if "data" not in resp:
@@ -300,20 +302,21 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         embeddings = resp["data"]
 
         # Sort resulting embeddings by index
-        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
+        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
         # Return just the embeddings
-        return [result["embedding"] for result in sorted_embeddings]
+        embading = [result["embedding"] for result in sorted_embeddings]
+        return cast(Embeddings, embading)
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
     # If you have a GPU with at least 6GB try model_name = "hkunlp/instructor-xl" and device = "cuda"
     # for a full list of options: https://github.com/HKUNLP/instructor-embedding#model-list
     def __init__(
-        self,
-        model_name: str = "hkunlp/instructor-base",
-        device: str = "cpu",
-        instruction: Optional[str] = None,
+            self,
+            model_name: str = "hkunlp/instructor-base",
+            device: str = "cpu",
+            instruction: Optional[str] = None,
     ):
         try:
             from InstructorEmbedding import INSTRUCTOR
@@ -326,11 +329,11 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         if self._instruction is None:
-            return self._model.encode(input).tolist()  # type: ignore
+            return cast(Embeddings, self._model.encode(input).tolist())
 
         texts_with_instructions = [[self._instruction, text] for text in input]
-        # type: ignore
-        return self._model.encode(texts_with_instructions).tolist()
+
+        return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
@@ -356,12 +359,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         # breaks typechecking, thus the ignores.
         # convert the list to set for unique values
         if preferred_providers and not all(
-            [isinstance(i, str) for i in preferred_providers]
+                [isinstance(i, str) for i in preferred_providers]
         ):
             raise ValueError("Preferred providers must be a list of strings")
         # check for duplicate providers
         if preferred_providers and len(preferred_providers) != len(
-            set(preferred_providers)
+                set(preferred_providers)
         ):
             raise ValueError("Preferred providers must be unique")
         self._preferred_providers = preferred_providers
@@ -393,11 +396,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         resp = requests.get(url, stream=True)
         total = int(resp.headers.get("content-length", 0))
         with open(fname, "wb") as file, self.tqdm(
-            desc=str(fname),
-            total=total,
-            unit="iB",
-            unit_scale=True,
-            unit_divisor=1024,
+                desc=str(fname),
+                total=total,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
         ) as bar:
             for data in resp.iter_content(chunk_size=chunk_size):
                 size = file.write(data)
@@ -405,19 +408,19 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
-    def _normalize(self, v: npt.NDArray) -> npt.NDArray:  # type: ignore
+    def _normalize(self, v: npt.NDArray) -> npt.NDArray:
         norm = np.linalg.norm(v, axis=1)
         norm[norm == 0] = 1e-12
-        return v / norm[:, np.newaxis]  # type: ignore
+        return cast(npt.NDArray, v / norm[:, np.newaxis])
 
-    # type: ignore
     def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
-        # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
-        self.tokenizer = cast(self.Tokenizer, self.tokenizer)  # type: ignore
-        self.model = cast(self.ort.InferenceSession, self.model)  # type: ignore
+        # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer
+        # will set the values
+        self.tokenizer = cast(self.Tokenizer, self.tokenizer)
+        self.model = cast(self.ort.InferenceSession, self.model)
         all_embeddings = []
         for i in range(0, len(documents), batch_size):
-            batch = documents[i : i + batch_size]
+            batch = documents[i: i + batch_size]
             encoded = [self.tokenizer.encode(d) for d in batch]
             input_ids = np.array([e.ids for e in encoded])
             attention_mask = np.array([e.attention_mask for e in encoded])
@@ -449,8 +452,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                     self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
                 )
             )
-            # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
-            # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
+            # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a
+            # max length of 128 https://github.com/UKPLab/sentence-transformers/blob
+            # /3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
             self.tokenizer.enable_truncation(max_length=256)
             self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
 
@@ -462,7 +466,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                     )
                 self._preferred_providers = self.ort.get_available_providers()
             elif not set(self._preferred_providers).issubset(
-                set(self.ort.get_available_providers())
+                    set(self.ort.get_available_providers())
             ):
                 raise ValueError(
                     f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
@@ -502,15 +506,15 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         if not onnx_files_exist:
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(
-                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+                    os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
             ):
                 self._download(
                     url=self.MODEL_DOWNLOAD_URL,
                     fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 )
             with tarfile.open(
-                name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                mode="r:gz",
+                    name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    mode="r:gz",
             ) as tar:
                 tar.extractall(path=self.DOWNLOAD_PATH)
 
@@ -558,11 +562,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
     # Information about the text embedding modules in Google Vertex AI
     # https://cloud.google.com/vertex-ai/docs/generative-ai/embeddings/get-text-embeddings
     def __init__(
-        self,
-        api_key: str,
-        model_name: str = "textembedding-gecko",
-        project_id: str = "cloud-large-language-models",
-        region: str = "us-central1",
+            self,
+            api_key: str,
+            model_name: str = "textembedding-gecko",
+            project_id: str = "cloud-large-language-models",
+            region: str = "us-central1",
     ):
         self._api_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/publishers/goole/models/{model_name}:predict"
         self._session = requests.Session()
@@ -583,7 +587,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
 class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
-        self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k"
+            self, model_name: str = "ViT-B-32", checkpoint: str = "laion2b_s34b_b79k"
     ) -> None:
         try:
             import open_clip
@@ -675,9 +679,9 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding Server API for each document
-        return self._session.post(  # type: ignore
+        return cast (Embeddings,self._session.post(
             self._api_url, json={"inputs": input}
-        ).json()
+        ).json())
 
 
 # List of all classes in this module
