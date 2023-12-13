@@ -499,7 +499,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
         data_path = os.path.join(persistent_dir, str(segment["id"]))
-        shutil.rmtree(data_path, ignore_errors=True)
+        shutil.rmtree(data_path)
 
     @staticmethod
     def get_file_handle_count() -> int:
