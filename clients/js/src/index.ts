@@ -36,3 +36,4 @@ export {
     DeleteParams
 } from './types';
 export { HuggingFaceEmbeddingServerFunction } from './embeddings/HuggingFaceEmbeddingServerFunction';
+export { JinaEmbeddingFunction } from './embeddings/JinaEmbeddingFunction';
