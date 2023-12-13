@@ -17,7 +17,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-DHAVE_CXX0X")
         .flag("-fpic")
         .flag("-ftree-vectorize")
-        // .flag("-arch arm64")
         .compile("bindings");
 
     Ok(())
