@@ -15,7 +15,8 @@ import {
     QueryResponse,
     AddResponse,
     CollectionMetadata,
-    ConfigOptions
+    ConfigOptions,
+    GetParams
 } from "./types";
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { ApiApi as DefaultApi } from "./generated";
@@ -313,7 +314,6 @@ export class Collection {
         this.setMetadata(metadata || this.metadata);
 
         return response;
-
     }
 
     /**
@@ -346,14 +346,7 @@ export class Collection {
         offset,
         include,
         whereDocument,
-    }: {
-        ids?: ID | IDs,
-        where?: Where,
-        limit?: PositiveInteger,
-        offset?: PositiveInteger,
-        include?: IncludeEnum[],
-        whereDocument?: WhereDocument
-    } = {}): Promise<GetResponse> {
+    }: GetParams = {}): Promise<GetResponse> {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
 

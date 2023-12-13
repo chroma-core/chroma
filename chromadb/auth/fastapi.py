@@ -6,13 +6,12 @@ from typing import Callable, Optional, Dict, List, Union, cast, Any
 from overrides import override
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import Response, JSONResponse
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
-    AuthorizationError,
     AuthorizationRequestContext,
     AuthzAction,
     AuthzResource,
@@ -28,6 +27,7 @@ from chromadb.auth import (
     ServerAuthorizationProvider,
 )
 from chromadb.auth.registry import resolve_provider
+from chromadb.errors import AuthorizationError
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -143,7 +143,8 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
             FastAPIServerAuthenticationRequest(request)
         )
         if not response or not response.success():
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return AuthorizationError("Unauthorized").fastapi_json_response()
+
         request.state.user_identity = response.get_user_identity()
         return await call_next(request)
 
