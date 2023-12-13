@@ -98,6 +98,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) pulsar_tenant: String,
     pub(crate) pulsar_namespace: String,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
 }
 
 /// # Description
@@ -128,6 +129,9 @@ mod tests {
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
                 "#,
             );
             let config = RootConfig::load();
@@ -153,6 +157,9 @@ mod tests {
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -193,6 +200,9 @@ mod tests {
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
                 "#,
             );
             let config = RootConfig::load();
@@ -215,6 +225,9 @@ mod tests {
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
                 "#,
             );
             let config = RootConfig::load();
