@@ -321,7 +321,3 @@ class LocalHnswSegment(VectorReader):
                     batch.apply(record, label is not None)
 
             self._apply_batch(batch)
-
-    @override
-    def delete(self) -> None:
-        pass  # we do nothing but let underlying HNSW segment do the delete.

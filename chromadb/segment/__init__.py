@@ -112,6 +112,11 @@ class VectorReader(SegmentImplementation):
         """Delete the segment and all its data without instantiating the segment"""
         pass
 
+    @override
+    def delete(self) -> None:
+        """Delete the segment and all its data"""
+        pass
+
 
 class SegmentManager(Component):
     """Interface for a pluggable strategy for creating, retrieving and instantiating
