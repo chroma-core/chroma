@@ -51,12 +51,11 @@ impl<M: Clone> ComponentExecutor<M> {
         loop {
             select! {
                     _ = self.cancellation_token.cancelled() => {
-                        return;
+                        break;
                     }
                     message = self.channel.recv() => {
                         match message {
                             Ok(message) => {
-                                println!("Received message");
                                 self.handler.handle(message).await;
                             }
                             Err(_) => {
@@ -145,9 +144,15 @@ mod tests {
         tx.send(2).unwrap();
         tx.send(3).unwrap();
         // Sleep for a bit to allow the component to process the messages
-        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
         handle.stop();
+        // Yield to allow the component to stop
+        tokio::task::yield_now().await;
         assert_eq!(*handle.state(), ComponentState::Stopped);
         assert_eq!(counter.load(Ordering::SeqCst), 6);
+        let res = tx.send(4);
+        // Expect an error because the component is stopped
+        assert!(res.is_err());
     }
 }
