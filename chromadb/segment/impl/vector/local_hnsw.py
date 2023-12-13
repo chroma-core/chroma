@@ -324,4 +324,4 @@ class LocalHnswSegment(VectorReader):
 
     @override
     def delete(self) -> None:
-        raise NotImplementedError()
+        pass  # we do nothing but let underlying HNSW segment do the delete.
