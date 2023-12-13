@@ -1486,6 +1486,7 @@ dependencies = [
  "num-bigint",
  "num_cpus",
  "prost",
+ "prost-types",
  "rand",
  "rayon",
  "serde",
