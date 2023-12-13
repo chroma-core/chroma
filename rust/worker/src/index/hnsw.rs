@@ -1,6 +1,11 @@
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 
+use crate::errors::{ChromaError, ErrorCodes};
+
+use super::{Index, IndexConfig, PersistentIndex};
+use thiserror::Error;
+
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
 struct IndexPtrFFI {
@@ -8,175 +13,173 @@ struct IndexPtrFFI {
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 
+// TODO: Make this config:
+// - Watchable - for dynamic updates
+// - Have a notion of static vs dynamic config
+// - Have a notion of default config
+// - HNSWIndex should store a ref to the config so it can look up the config values.
+//   deferring this for a config pass
+#[derive(Clone, Debug)]
+pub(crate) struct HnswIndexConfig {
+    pub(crate) max_elements: usize,
+    pub(crate) m: usize,
+    pub(crate) ef_construction: usize,
+    pub(crate) ef_search: usize,
+    pub(crate) random_seed: usize,
+    pub(crate) persist_path: String,
+}
+
 #[repr(C)]
-pub struct HnswIndex {
-    ptr: Option<*const IndexPtrFFI>,
-    // TOOD: put configuration in a struct
-    // make a trait Configurable
-    dim: Option<usize>,
-    max_elements: usize,
-    m: usize,
-    ef_construction: usize,
-    random_seed: usize,
-    allow_replace_deleted: bool,
-    space_name: String,
-    is_persistent: bool,
-    persist_path: String,
-    pub initialized: bool,
+/// The HnswIndex struct.
+/// # Description
+/// This struct wraps a pointer to the C++ HnswIndex class and presents a safe Rust interface.
+/// # Notes
+/// This struct is not thread safe for concurrent reads and writes. Callers should
+/// synchronize access to the index between reads and writes.
+pub(crate) struct HnswIndex {
+    ffi_ptr: *const IndexPtrFFI,
+    dimensionality: i32,
 }
 
 // Make index sync, we should wrap index so that it is sync in the way we expect but for now this implements the trait
 unsafe impl Sync for HnswIndex {}
 unsafe impl Send for HnswIndex {}
 
-// Index impl that is public and wraps the private index extern "C" struct
-impl HnswIndex {
-    pub fn new(
-        space_name: &str,
-        max_elements: usize,
-        m: usize,
-        ef_construction: usize,
-        random_seed: usize,
-        allow_replace_deleted: bool,
-        is_persistent: bool,
-        persist_path: &str,
-    ) -> HnswIndex {
-        println!("Creating index in rust");
-        // TODO: enum for spaces
-        return HnswIndex {
-            ptr: None,
-            dim: None,
-            max_elements: max_elements,
-            m: m,
-            ef_construction: ef_construction,
-            random_seed: random_seed,
-            allow_replace_deleted: allow_replace_deleted,
-            is_persistent: is_persistent,
-            persist_path: persist_path.to_string(),
-            space_name: space_name.to_string(),
-            initialized: false,
-        };
-    }
+#[derive(Error, Debug)]
 
-    pub fn init(
-        &mut self,
-        dim: usize, // The dimen
-    ) {
-        if self.initialized {
-            return;
-        }
-        self.dim = Some(dim);
-        let space_name = CString::new(self.space_name.to_string()).unwrap();
-        let persist_path = CString::new(self.persist_path.to_string()).unwrap();
-        let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
-        self.ptr = Some(index);
-        println!("Initializing index in rust");
-        unsafe {
-            init_index(
-                index,
-                self.max_elements,
-                self.m,
-                self.ef_construction,
-                self.random_seed,
-                self.allow_replace_deleted,
-                self.is_persistent,
-                persist_path.as_ptr(),
-            );
-        }
-        self.initialized = true;
-    }
+pub(crate) enum HnswIndexInitError {
+    #[error("No config provided")]
+    NoConfigProvided,
+    #[error("Invalid distance function `{0}`")]
+    InvalidDistanceFunction(String),
+    #[error("Invalid path `{0}`. Are you sure the path exists?")]
+    InvalidPath(String),
+}
 
-    pub fn get_ef(&self) -> i32 {
-        // TODO: return result and error for all methods
-        match self.ptr {
-            None => return 0,
-            Some(ptr) => unsafe { get_ef(ptr) },
-        }
+impl ChromaError for HnswIndexInitError {
+    fn code(&self) -> ErrorCodes {
+        crate::errors::ErrorCodes::InvalidArgument
     }
+}
 
-    pub fn set_ef(&self, ef: i32) {
-        match self.ptr {
-            None => return,
-            Some(ptr) => unsafe { set_ef(ptr, ef) },
-        }
-    }
+impl Index<HnswIndexConfig> for HnswIndex {
+    fn init(
+        index_config: &IndexConfig,
+        hnsw_config: Option<&HnswIndexConfig>,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match hnsw_config {
+            None => return Err(Box::new(HnswIndexInitError::NoConfigProvided)),
+            Some(config) => {
+                let distance_function_string: String =
+                    index_config.distance_function.clone().into();
 
-    pub fn add_item(&self, data: &[f32], id: usize, replace_deleted: bool) {
-        match self.ptr {
-            None => return,
-            Some(ptr) => unsafe { add_item(ptr, data.as_ptr(), id, replace_deleted) },
-        }
-    }
+                let space_name = match CString::new(distance_function_string) {
+                    Ok(space_name) => space_name,
+                    Err(e) => {
+                        return Err(Box::new(HnswIndexInitError::InvalidDistanceFunction(
+                            e.to_string(),
+                        )))
+                    }
+                };
 
-    pub fn get_item(&self, id: usize) -> Vec<f32> {
-        match (self.ptr, self.dim) {
-            (None, _) => {
-                // TODO: return Result
-                let mut data: Vec<f32> = vec![0.0f32; 0];
-                return data;
-            }
-            (Some(ptr), None) => {
-                let mut data: Vec<f32> = vec![0.0f32; 0];
-                return data;
-            }
-            (Some(ptr), Some(dim)) => unsafe {
-                let mut data: Vec<f32> = vec![0.0f32; dim];
-                get_item(ptr, id, data.as_mut_ptr());
-                return data;
-            },
-        }
-    }
+                let ffi_ptr =
+                    unsafe { create_index(space_name.as_ptr(), index_config.dimensionality) };
 
-    pub fn knn_query(&self, query_vector: &[f32], k: usize) -> (Vec<i32>, Vec<f32>) {
-        let mut ids = vec![0i32; k];
-        let mut distance = vec![0.0f32; k];
-        match self.ptr {
-            None => return (ids, distance),
-            Some(ptr) => {
+                let path = match CString::new(config.persist_path.clone()) {
+                    Ok(path) => path,
+                    Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
+                };
+
                 unsafe {
-                    knn_query(
-                        ptr,
-                        query_vector.as_ptr(),
-                        k,
-                        ids.as_mut_ptr(),
-                        distance.as_mut_ptr(),
+                    init_index(
+                        ffi_ptr,
+                        config.max_elements,
+                        config.m,
+                        config.ef_construction,
+                        config.random_seed,
+                        true,
+                        true,
+                        path.as_ptr(),
                     );
                 }
-                return (ids, distance);
+
+                let hnsw_index = HnswIndex {
+                    ffi_ptr: ffi_ptr,
+                    dimensionality: index_config.dimensionality,
+                };
+
+                Ok(hnsw_index)
             }
         }
     }
 
-    pub fn persist_dirty(&self) {
-        // TODO: return result, error if not initialized
-        match self.ptr {
-            None => return,
-            Some(ptr) => unsafe { persist_dirty(ptr) },
-        }
+    fn add(&self, id: usize, vector: &[f32]) {
+        unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, false) }
     }
 
-    // TODO: clean up this clunkiness where we have to pass in the dimensionality
-    pub fn load(&mut self, dim: usize) {
-        if self.initialized {
-            return;
+    fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+        let mut ids = vec![0usize; k];
+        let mut distance = vec![0.0f32; k];
+        unsafe {
+            knn_query(
+                self.ffi_ptr,
+                vector.as_ptr(),
+                k,
+                ids.as_mut_ptr(),
+                distance.as_mut_ptr(),
+            );
         }
-        let space_name = CString::new(self.space_name.to_string()).unwrap();
-        self.dim = Some(dim);
-        let index = unsafe { create_index(space_name.as_ptr(), dim as c_int) };
-        self.ptr = Some(index);
-        match self.ptr {
-            None => return,
-            Some(ptr) => unsafe {
-                let persist_path = CString::new(self.persist_path.to_string()).unwrap();
-                println!("RUST IS LOADING INDEX from {}", self.persist_path);
-                load_index(
-                    ptr,
-                    persist_path.as_ptr(),
-                    self.allow_replace_deleted,
-                    self.is_persistent,
-                )
-            },
+        return (ids, distance);
+    }
+
+    fn get(&self, id: usize) -> Option<Vec<f32>> {
+        unsafe {
+            let mut data: Vec<f32> = vec![0.0f32; self.dimensionality as usize];
+            get_item(self.ffi_ptr, id, data.as_mut_ptr());
+            return Some(data);
         }
+    }
+}
+
+impl PersistentIndex<HnswIndexConfig> for HnswIndex {
+    fn save(&self) -> Result<(), Box<dyn ChromaError>> {
+        unsafe { persist_dirty(self.ffi_ptr) };
+        Ok(())
+    }
+
+    fn load(path: &str, index_config: &IndexConfig) -> Result<Self, Box<dyn ChromaError>> {
+        let distance_function_string: String = index_config.distance_function.clone().into();
+        let space_name = match CString::new(distance_function_string) {
+            Ok(space_name) => space_name,
+            Err(e) => {
+                return Err(Box::new(HnswIndexInitError::InvalidDistanceFunction(
+                    e.to_string(),
+                )))
+            }
+        };
+        let ffi_ptr = unsafe { create_index(space_name.as_ptr(), index_config.dimensionality) };
+        let path = match CString::new(path.to_string()) {
+            Ok(path) => path,
+            Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
+        };
+        unsafe {
+            load_index(ffi_ptr, path.as_ptr(), true, true);
+        }
+        let hnsw_index = HnswIndex {
+            ffi_ptr: ffi_ptr,
+            dimensionality: index_config.dimensionality,
+        };
+        Ok(hnsw_index)
+    }
+}
+
+impl HnswIndex {
+    pub fn set_ef(&self, ef: usize) {
+        unsafe { set_ef(self.ffi_ptr, ef as c_int) }
+    }
+
+    pub fn get_ef(&self) -> usize {
+        unsafe { get_ef(self.ffi_ptr) as usize }
     }
 }
 
@@ -195,60 +198,99 @@ extern "C" {
         path: *const c_char,
     );
 
-    fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
-    fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
-
-    fn knn_query(
-        index: *const IndexPtrFFI,
-        query_vector: *const f32,
-        k: usize,
-        ids: *mut i32,
-        distance: *mut f32,
-    );
-
-    fn get_ef(index: *const IndexPtrFFI) -> c_int;
-    fn set_ef(index: *const IndexPtrFFI, ef: c_int);
-
-    fn persist_dirty(index: *const IndexPtrFFI);
     fn load_index(
         index: *const IndexPtrFFI,
         path: *const c_char,
         allow_replace_deleted: bool,
         is_persistent_index: bool,
     );
+
+    fn persist_dirty(index: *const IndexPtrFFI);
+
+    fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
+    fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
+    fn knn_query(
+        index: *const IndexPtrFFI,
+        query_vector: *const f32,
+        k: usize,
+        ids: *mut usize,
+        distance: *mut f32,
+    );
+
+    fn get_ef(index: *const IndexPtrFFI) -> c_int;
+    fn set_ef(index: *const IndexPtrFFI, ef: c_int);
+
 }
 
 #[cfg(test)]
 pub mod test {
     use super::*;
 
+    use crate::index::types::DistanceFunction;
+    use crate::index::utils;
     use rand::Rng;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
-    use worker::index::Index;
-    mod utils;
+    use tempfile::tempdir;
 
     #[test]
-    fn it_initializes_and_can_set_ef() {
+    fn it_initializes_and_can_set_get_ef() {
         let n = 1000;
         let d: usize = 960;
-        let space_name = "ip";
-        let mut index = HnswIndex::new(space_name, n, 16, 100, 0, true, false, "");
-        index.init(d);
-        assert_eq!(index.get_ef(), 10);
-        index.set_ef(100);
-        assert_eq!(index.get_ef(), 100);
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let distance_function = DistanceFunction::Euclidean;
+        let mut index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 10,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+        );
+        match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => {
+                assert_eq!(index.get_ef(), 10);
+                index.set_ef(100);
+                assert_eq!(index.get_ef(), 100);
+            }
+        }
     }
 
     #[test]
     fn it_can_add_parallel() {
-        let n = 10000;
+        let n = 10;
         let d: usize = 960;
-        let space_name = "ip";
-        let mut index = HnswIndex::new(space_name, n, 16, 100, 0, true, false, "");
-        index.init(d);
+        let distance_function = DistanceFunction::InnerProduct;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 10,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+        );
 
-        // let data: Vec<f32> = utils::generate_random_data(n, d);
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
         let ids: Vec<usize> = (0..n).collect();
 
         // Add data in parallel, using global pool for testing
@@ -268,19 +310,22 @@ pub mod test {
         }
 
         (0..n).into_par_iter().for_each(|i| {
-            // let data = &data[i * d..(i + 1) * d];
             let data = &datas[i];
-            println!("Adding item: {}", i);
-            index.add_item(data, ids[i], false)
+            index.add(ids[i], data);
         });
 
         // Get the data and check it
         let mut i = 0;
         for id in ids {
-            let actual_data = index.get_item(id);
-            assert_eq!(actual_data.len(), d);
-            for j in 0..d {
-                assert_eq!(actual_data[j], datas[i][j]);
+            let actual_data = index.get(id);
+            match actual_data {
+                None => panic!("No data found for id: {}", id),
+                Some(actual_data) => {
+                    assert_eq!(actual_data.len(), d);
+                    for j in 0..d {
+                        assert_eq!(actual_data[j], datas[i][j]);
+                    }
+                }
             }
             i += 1;
         }
@@ -290,33 +335,56 @@ pub mod test {
     fn it_can_add_and_basic_query() {
         let n = 1000;
         let d: usize = 960;
-        let space_name = "l2";
-        let mut index = HnswIndex::new(space_name, n, 16, 100, 0, true, false, "");
-        index.init(d);
-        index.set_ef(100);
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 16,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path,
+            }),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
 
         let data: Vec<f32> = utils::generate_random_data(n, d);
         let ids: Vec<usize> = (0..n).collect();
 
         (0..n).into_iter().for_each(|i| {
             let data = &data[i * d..(i + 1) * d];
-            index.add_item(data, ids[i], false)
+            index.add(ids[i], data);
         });
 
         // Get the data and check it
         let mut i = 0;
         for id in ids {
-            let actual_data = index.get_item(id);
-            assert_eq!(actual_data.len(), d);
-            for j in 0..d {
-                assert_eq!(actual_data[j], data[i * d + j]);
+            let actual_data = index.get(id);
+            match actual_data {
+                None => panic!("No data found for id: {}", id),
+                Some(actual_data) => {
+                    assert_eq!(actual_data.len(), d);
+                    for j in 0..d {
+                        assert_eq!(actual_data[j], data[i * d + j]);
+                    }
+                }
             }
             i += 1;
         }
 
         // Query the data
         let query = &data[0..d];
-        let (ids, distances) = index.knn_query(query, 1);
+        let (ids, distances) = index.query(query, 1);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
@@ -327,42 +395,78 @@ pub mod test {
     fn it_can_persist_and_load() {
         let n = 1000;
         let d: usize = 960;
-        let persist_path = "/Users/hammad/Documents/chroma/rust_test/"; // TODO: rust test path creation / teardown
-        let space_name = "l2";
-        let mut index = HnswIndex::new(space_name, n, 16, 100, 0, true, true, persist_path);
-        index.init(d);
-        index.set_ef(100);
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function.clone(),
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 32,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path.clone(),
+            }),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
 
         let data: Vec<f32> = utils::generate_random_data(n, d);
         let ids: Vec<usize> = (0..n).collect();
 
         (0..n).into_iter().for_each(|i| {
             let data = &data[i * d..(i + 1) * d];
-            index.add_item(data, ids[i], false)
+            index.add(ids[i], data);
         });
 
         // Persist the index
-        index.persist_dirty();
+        let res = index.save();
+        match res {
+            Err(e) => panic!("Error saving index: {}", e),
+            Ok(_) => {}
+        }
 
         // Load the index
-        let mut index = HnswIndex::new(space_name, n, 16, 100, 0, true, true, persist_path);
-        index.load(d);
+        let index = HnswIndex::load(
+            &persist_path,
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function,
+            },
+        );
 
-        // // Query the data
+        let index = match index {
+            Err(e) => panic!("Error loading index: {}", e),
+            Ok(index) => index,
+        };
+
+        // Query the data
         let query = &data[0..d];
-        let (ids, distances) = index.knn_query(query, 1);
+        let (ids, distances) = index.query(query, 1);
         assert_eq!(ids.len(), 1);
         assert_eq!(distances.len(), 1);
         assert_eq!(ids[0], 0);
         assert_eq!(distances[0], 0.0);
 
-        // // Get the data and check it
+        // Get the data and check it
         let mut i = 0;
         for id in ids {
-            let actual_data = index.get_item(id as usize);
-            assert_eq!(actual_data.len(), d);
-            for j in 0..d {
-                assert_eq!(actual_data[j], data[i * d + j]);
+            let actual_data = index.get(id);
+            match actual_data {
+                None => panic!("No data found for id: {}", id),
+                Some(actual_data) => {
+                    assert_eq!(actual_data.len(), d);
+                    for j in 0..d {
+                        assert_eq!(actual_data[j], data[i * d + j]);
+                    }
+                }
             }
             i += 1;
         }

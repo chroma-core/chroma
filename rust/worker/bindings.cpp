@@ -1,10 +1,6 @@
 // Assumes that chroma-hnswlib is checked out at the same level as chroma
 #include "../../../chroma_hnswlib/hnswlib/hnswlib.h"
 
-// TODO: redo this / clean it up
-// TODO: use const pointers where possible
-// TODO: don't use data_t, use float for now since we don't support templating on the rust side
-
 template <typename dist_t, typename data_t = float>
 class Index
 {
@@ -12,7 +8,6 @@ public:
     std::string space_name;
     int dim;
     size_t seed;
-    size_t ef_search;
 
     bool normalize;
     bool index_inited;
@@ -37,7 +32,6 @@ public:
         }
         appr_alg = NULL;
         index_inited = false;
-        ef_search = 10;
     }
 
     ~Index()
@@ -49,53 +43,51 @@ public:
         }
     }
 
-    void init_new_index(size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, const std::string &persistence_location)
+    void init_index(const size_t max_elements, const size_t M, const size_t ef_construction, const size_t random_seed, const bool allow_replace_deleted, const bool is_persistent_index, const std::string &persistence_location)
     {
-        // if (index_inited) {
-        //     // TODO: ERROR HANDLE!
-        // }
-        std::cout << "init_new_index" << std::endl;
+        if (index_inited)
+        {
+            std::runtime_error("Index already inited");
+        }
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, max_elements, M, ef_construction, random_seed, allow_replace_deleted, normalize, is_persistent_index, persistence_location);
-        appr_alg->ef_ = ef_search;
+        appr_alg->ef_ = 10; // This is a default value for ef_
         index_inited = true;
     }
 
-    void load_index(const std::string &path_to_index, bool allow_replace_deleted, bool is_persistent_index)
+    void load_index(const std::string &path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
     {
-        // check if index is inited and error if it is
-        // check if path is valid
-        // load index
-        // return success
-        // Use 0 for the max_elements since hnswlib will read it from the file and we don't want to override it
+        if (index_inited)
+        {
+            std::runtime_error("Index already inited");
+        }
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted, normalize, is_persistent_index);
         index_inited = true;
     }
 
     void persist_dirty()
     {
-        // check if index is inited
-        // persist dirty
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
         appr_alg->persistDirty();
     }
 
-    void add_item(data_t *data, hnswlib::labeltype id, bool replace_deleted = false)
+    void add_item(const data_t *data, const hnswlib::labeltype id, const bool replace_deleted = false)
     {
-        // if replace_deleted, check if index allows it
-        // check if index is inited
-        // check if there is room for new item
-        // check if id is already in use
-        // check if id is deleted (maybe not necessary)
-        // check if data is the right size
-        // check if data is normalized (if needed) (maybe not necessary)
-        // add item
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
         appr_alg->addPoint(data, id);
     }
 
-    void get_item(hnswlib::labeltype id, data_t *data)
+    void get_item(const hnswlib::labeltype id, data_t *data)
     {
-        // check if index is inited
-        // check if id is in use (hnswlib will throw an error if not, we should catch it and return a more useful error)
-        // get item
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
         std::vector<data_t> ret_data = appr_alg->template getDataByLabel<data_t>(id); // This checks if id is deleted
         for (int i = 0; i < dim; i++)
         {
@@ -103,37 +95,27 @@ public:
         }
     }
 
-    int mark_deleted(hnswlib::labeltype id)
+    int mark_deleted(const hnswlib::labeltype id)
     {
-        // check if index is inited
-        // check if id is in use (hnswlib will throw an error if not, we should catch it and return a more useful error)
-        // check if id is deleted (maybe not necessary)
-        // mark deleted
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
         appr_alg->markDelete(id);
         return 0;
     }
 
-    // I need to look into how JNA handles both cases but this is cleaner for now
-    // For compatbility with java we narrow ids to ints here, we plan to replace this with strings in the future
-    // Note that this means we are bound by the size of an int in Java in the iterim (plenty big enough for our purposes)
-    void knn_query(data_t *query_vector, size_t k, int *ids, data_t *distance)
+    void knn_query(const data_t *query_vector, const size_t k, hnswlib::labeltype *ids, data_t *distance)
     {
-        // check if index is inited
-        // check if query_vector is the right size (should this happen here?)
-        // check if query_vector is normalized (if needed) (maybe not necessary)
-        // check if k is valid
-        // normalize if needed
-        // call knn_query
-        // copy results into return arrays
-        // return results
+        if (!index_inited)
+        {
+            std::runtime_error("Index not inited");
+        }
         std::priority_queue<std::pair<dist_t, hnswlib::labeltype>> res = appr_alg->searchKnn(query_vector, k);
-        // copy results into return arrays
-        // check if we have enough results
         if (res.size() < k)
         {
-            // Handle this case, maybe its ok to just return what we have unlike python. For now return as many as we have
-            // ask yury
-            // we should null signify when we don't have enough results
+            // TODO: This is ok and we should return < K results, but for maintining compatibility with the old API we throw an error for now
+            std::runtime_error("Not enough results");
         }
         int total_results = std::min(res.size(), k);
         for (int i = total_results - 1; i >= 0; i--)
@@ -147,21 +129,20 @@ public:
 
     int get_ef()
     {
-        if (index_inited)
+        if (!index_inited)
         {
-            return appr_alg->ef_;
+            std::runtime_error("Index not inited");
         }
-        // TODO: ERROR IF NOT INITED
+        return appr_alg->ef_;
     }
 
-    void set_ef(int ef)
+    void set_ef(const size_t ef)
     {
-        ef_search = ef;
-        if (index_inited)
+        if (!index_inited)
         {
-            appr_alg->ef_ = ef_search;
+            std::runtime_error("Index not inited");
         }
-        // TODO: ERROR IF NOT INITED
+        appr_alg->ef_ = ef;
     }
 };
 
@@ -169,21 +150,16 @@ extern "C"
 {
     Index<float> *create_index(const char *space_name, const int dim)
     {
-        std::cout << "create_index in c++" << std::endl;
-        std::cout << "c++: space_name: " << space_name << std::endl;
-        std::cout << "c++: dim: " << dim << std::endl;
         return new Index<float>(space_name, dim);
     }
 
-    void init_index(Index<float> *index, size_t max_elements, size_t M, size_t ef_construction, size_t random_seed, bool allow_replace_deleted, bool is_persistent_index, const char *persistence_location)
+    void init_index(Index<float> *index, const size_t max_elements, const size_t M, const size_t ef_construction, const size_t random_seed, const bool allow_replace_deleted, const bool is_persistent_index, const char *persistence_location)
     {
-        std::cout << "c++: Path to inited index: " << persistence_location << std::endl;
-        index->init_new_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
+        index->init_index(max_elements, M, ef_construction, random_seed, allow_replace_deleted, is_persistent_index, persistence_location);
     }
 
-    void load_index(Index<float> *index, const char *path_to_index, bool allow_replace_deleted, bool is_persistent_index)
+    void load_index(Index<float> *index, const char *path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
     {
-        std::cout << "load_index in c++ from: " << path_to_index << std::endl;
         index->load_index(path_to_index, allow_replace_deleted, is_persistent_index);
     }
 
@@ -192,22 +168,22 @@ extern "C"
         index->persist_dirty();
     }
 
-    void add_item(Index<float> *index, float *data, hnswlib::labeltype id, bool replace_deleted)
+    void add_item(Index<float> *index, const float *data, const hnswlib::labeltype id, const bool replace_deleted)
     {
         index->add_item(data, id);
     }
 
-    void get_item(Index<float> *index, hnswlib::labeltype id, float *data)
+    void get_item(Index<float> *index, const hnswlib::labeltype id, float *data)
     {
         index->get_item(id, data);
     }
 
-    // int mark_deleted(Index<float> *index, int id)
-    // {
-    //     return index->mark_deleted(id);
-    // }
+    int mark_deleted(Index<float> *index, const hnswlib::labeltype id)
+    {
+        return index->mark_deleted(id);
+    }
 
-    void knn_query(Index<float> *index, float *query_vector, size_t k, int *ids, float *distance)
+    void knn_query(Index<float> *index, const float *query_vector, const size_t k, hnswlib::labeltype *ids, float *distance)
     {
         index->knn_query(query_vector, k, ids, distance);
     }
@@ -217,7 +193,7 @@ extern "C"
         return index->appr_alg->ef_;
     }
 
-    void set_ef(Index<float> *index, int ef)
+    void set_ef(Index<float> *index, const size_t ef)
     {
         index->set_ef(ef);
     }

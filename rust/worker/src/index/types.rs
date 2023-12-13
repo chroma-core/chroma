@@ -1,32 +1,45 @@
 use crate::errors::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
+#[derive(Clone, Debug)]
+pub(crate) struct IndexConfig {
+    pub(crate) dimensionality: i32,
+    pub(crate) distance_function: DistanceFunction,
+}
+
 /// The index trait.
 /// # Description
 /// This trait defines the interface for a KNN index.
 /// # Methods
-/// - `init` - Initialize the index with a given dimension.
+/// - `init` - Initialize the index with a given dimension and distance function.
 /// - `add` - Add a vector to the index.
 /// - `query` - Query the index for the K nearest neighbors of a given vector.
-/// - `get_distance_function` - Get the distance function used by the index.
-pub(crate) trait Index {
-    fn init(&self, dim: i64);
+pub(crate) trait Index<C> {
+    fn init(
+        index_config: &IndexConfig,
+        custom_config: Option<&C>,
+    ) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
     fn add(&self, id: usize, vector: &[f32]);
-    fn query(&self, vector: &[f32], k: usize) -> Vec<(usize, f32)>;
-    fn get_distance_function(&self) -> DistanceFunction;
+    fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>);
+    fn get(&self, id: usize) -> Option<Vec<f32>>;
 }
 
 /// The persistent index trait.
 /// # Description
 /// This trait defines the interface for a persistent KNN index.
 /// # Methods
-/// - `save` - Save the index to a given path.
+/// - `save` - Save the index to a given path. Configuration of the destination is up to the implementation.
 /// - `load` - Load the index from a given path.
 /// # Notes
 /// This defines a rudimentary interface for saving and loading indices.
-pub(crate) trait PersistentIndex: Index {
-    fn save(&self, path: &str) -> Result<(), Box<dyn ChromaError>>;
-    fn load(&mut self, path: &str) -> Result<(), Box<dyn ChromaError>>;
+/// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
+pub(crate) trait PersistentIndex<C>: Index<C> {
+    fn save(&self) -> Result<(), Box<dyn ChromaError>>;
+    fn load(path: &str, index_config: &IndexConfig) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
 }
 
 /// The distance function enum.
@@ -38,6 +51,7 @@ pub(crate) trait PersistentIndex: Index {
 /// - `InnerProduct` - The inner product. Specifically, 1 - inner product.
 /// # Notes
 /// See https://docs.trychroma.com/usage-guide#changing-the-distance-function
+#[derive(Clone, Debug)]
 pub(crate) enum DistanceFunction {
     Euclidean,
     Cosine,
@@ -69,6 +83,16 @@ impl TryFrom<&str> for DistanceFunction {
             _ => Err(DistanceFunctionError::InvalidDistanceFunction(
                 value.to_string(),
             )),
+        }
+    }
+}
+
+impl Into<String> for DistanceFunction {
+    fn into(self) -> String {
+        match self {
+            DistanceFunction::Euclidean => "l2".to_string(),
+            DistanceFunction::Cosine => "cosine".to_string(),
+            DistanceFunction::InnerProduct => "ip".to_string(),
         }
     }
 }
