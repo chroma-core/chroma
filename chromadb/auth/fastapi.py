@@ -222,8 +222,8 @@ def authz_context(
                 # requests without configuring a tenant and DB. If so, they can set
                 # the request tenant and DB however they like and we simply overwrite it.
                 if overwrite_singleton_tenant_database_access_from_auth:
-                    if "tenant" in kwargs:
-                        desired_tenant = request.state.user_identity.get_user_tenant()
+                    desired_tenant = request.state.user_identity.get_user_tenant()
+                    if desired_tenant and "tenant" in kwargs:
                         if isinstance(kwargs["tenant"], str):
                             kwargs["tenant"] = desired_tenant
                         elif isinstance(kwargs["tenant"], CreateTenant):
