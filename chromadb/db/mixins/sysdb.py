@@ -616,21 +616,18 @@ class SqlSysDB(SqlDB, SysDB):
                 if not result.fetchone():
                     raise NotFoundError(f"Collection {id} not found")
 
-            # TODO: Update to use better semantics where it's possible to update
-            # individual keys without wiping all the existing metadata.
-
-            # For now, follow current legancy semantics where metadata is fully reset
             if metadata != Unspecified():
-                q = (
-                    self.querybuilder()
-                    .from_(metadata_t)
-                    .where(
-                        metadata_t.collection_id == ParameterValue(self.uuid_to_db(id))
-                    )
-                    .delete()
-                )
-                sql, params = get_sql(q, self.parameter_format())
-                cur.execute(sql, params)
+                # Update the metadata for the collection, merging with existing metadata
+                # q = (
+                #     self.querybuilder()
+                #     .from_(metadata_t)
+                #     .where(
+                #         metadata_t.collection_id == ParameterValue(self.uuid_to_db(id))
+                #     )
+                #     .delete()
+                # )
+                # sql, params = get_sql(q, self.parameter_format())
+                # cur.execute(sql, params)
                 if metadata is not None:
                     metadata = cast(UpdateMetadata, metadata)
                     self._insert_metadata(
@@ -639,7 +636,8 @@ class SqlSysDB(SqlDB, SysDB):
                         metadata_t.collection_id,
                         id,
                         metadata,
-                        set(metadata.keys()),
+                        # All keys set to None will be deleted
+                        set([k for k, v in metadata.items() if v is None]),
                     )
 
     @trace_method("SqlSysDB._metadata_from_rows", OpenTelemetryGranularity.ALL)
@@ -674,9 +672,6 @@ class SqlSysDB(SqlDB, SysDB):
         metadata: UpdateMetadata,
         clear_keys: Optional[Set[str]] = None,
     ) -> None:
-        # It would be cleaner to use something like ON CONFLICT UPDATE here But that is
-        # very difficult to do in a portable way (e.g sqlite and postgres have
-        # completely different sytnax)
         add_attributes_to_current_span(
             {
                 "num_keys": len(metadata),

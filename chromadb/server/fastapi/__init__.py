@@ -8,7 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 import chromadb
-from chromadb.api.models.Collection import Collection
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
     AuthzDynamicParams,
@@ -53,7 +53,7 @@ from starlette.requests import Request
 
 import logging
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
-from chromadb.types import Database, Tenant
+from chromadb.types import Database, Tenant, Collection
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -358,7 +358,9 @@ class FastAPI(chromadb.server.Server):
     def list_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> Sequence[Collection]:
-        return self._api.list_collections(tenant=tenant, database=database)
+        api_collections = self._api.list_collections(tenant=tenant, database=database)
+        models = [c.get_model() for c in api_collections]
+        return models
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -377,13 +379,15 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return self._api.create_collection(
+        api_collection = self._api.create_collection(
             name=collection.name,
             metadata=collection.metadata,
+            configuration=CollectionConfiguration.from_json(collection.configuration) if collection.configuration else None,
             get_or_create=collection.get_or_create,
             tenant=tenant,
             database=database,
         )
+        return api_collection.get_model()
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -402,9 +406,10 @@ class FastAPI(chromadb.server.Server):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
-        return self._api.get_collection(
+        api_collection = self._api.get_collection(
             collection_name, tenant=tenant, database=database
         )
+        return api_collection.get_model()
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(
