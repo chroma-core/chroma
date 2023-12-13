@@ -204,8 +204,8 @@ class OperatingMode(str, Enum):
     HTTP_CLIENT = "http client"
     PERSISTENT_CLIENT = "persistent client"
     EPHEMERAL_CLIENT = "ephemeral client"
-    SERVER_SINGLE_NODE = "server single node server"
-    SERVER_DISTRIBUTED = "distributed server"
+    SINGLE_NODE_SERVER = "single node server"
+    DISTRIBUTED_SERVER = "distributed server"
 
     def __str__(self) -> str:
         return self.value

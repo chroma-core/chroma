@@ -82,7 +82,21 @@ def system_info(api: API) -> SystemInfo:
     data["persistent_disk_used"] = disk_info.used if disk_info else None
 
     # local mode either to the server or the client, TBD for distributed - perhaps we can check on api impl
-    if api.get_settings().chroma_api_impl == "chromadb.api.fastapi.FastAPI":
+    if (
+        api.get_settings().chroma_server_backend_impl
+        == "chromadb.server.fastapi.FastAPI"
+        and api.get_settings().chroma_segment_manager_impl
+        == "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    ):
+        data["mode"] = OperatingMode.SINGLE_NODE_SERVER
+    elif (
+        api.get_settings().chroma_server_backend_impl
+        == "chromadb.server.fastapi.FastAPI"
+        and api.get_settings().chroma_segment_manager_impl
+        == "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"
+    ):
+        data["mode"] = OperatingMode.DISTRIBUTED_SERVER
+    elif api.get_settings().chroma_api_impl == "chromadb.api.fastapi.FastAPI":
         data["mode"] = OperatingMode.HTTP_CLIENT
     elif api.get_settings().is_persistent:
         data["mode"] = OperatingMode.PERSISTENT_CLIENT

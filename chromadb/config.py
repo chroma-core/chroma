@@ -122,6 +122,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     chroma_server_grpc_port: Optional[str] = None
+    # eg chromadb.server.fastapi.FastAPI
+    chroma_server_backend_impl: Optional[str] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 

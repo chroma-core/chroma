@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Sequence, Set, Type, cast
 from uuid import UUID
-from chromadb.config import Settings, System, get_class
+from chromadb.config import Settings, System, get_class, get_fqn
 from chromadb.ingest import CollectionAssignmentPolicy, Consumer
 from chromadb.proto.chroma_pb2_grpc import (
     # SegmentServerServicer,
@@ -181,6 +181,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     system = System(Settings())
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    system.settings.chroma_server_backend_impl = get_fqn(type(server))
     segment_server = SegmentServer(system)
     # add_SegmentServerServicer_to_server(segment_server, server)  # type: ignore
     add_VectorReaderServicer_to_server(segment_server, server)  # type: ignore

@@ -87,7 +87,7 @@ chroma env --remote http://localhost:8000
     "persistent_disk_total": 62671097856,
     "persistent_disk_used": 33626783744,
     "persistent_disk_free": 25827598336,
-    "mode": "server single node server"
+    "mode": "single node server"
 }
 ================================== Local client system info ======================================
 {
