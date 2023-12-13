@@ -9,6 +9,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from chromadb.server.fastapi.types import (
+    CreateDatabase,
+    CreateTenant,
+)
+
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
@@ -181,7 +186,7 @@ def authz_context(
             if request:
                 _provider = authz_provider.get()
                 a_list: List[Union[str, AuthzAction]] = []
-                if not isinstance(action, List):
+                if not isinstance(action, list):
                     a_list = [action]
                 else:
                     a_list = cast(List[Union[str, AuthzAction]], action)
@@ -218,10 +223,19 @@ def authz_context(
                 # the request tenant and DB however they like and we simply overwrite it.
                 if overwrite_singleton_tenant_database_access_from_auth:
                     if "tenant" in kwargs:
-                        kwargs["tenant"] = request.state.user_identity.get_user_tenant()
+                        desired_tenant = request.state.user_identity.get_user_tenant()
+                        if isinstance(kwargs["tenant"], str):
+                            kwargs["tenant"] = desired_tenant
+                        elif isinstance(kwargs["tenant"], CreateTenant):
+                            kwargs["tenant"].name = desired_tenant
                     databases = request.state.user_identity.get_user_databases()
                     if databases and len(databases) == 1 and "database" in kwargs:
-                        kwargs["database"] = databases[0]
+                        desired_database = databases[0]
+                        if isinstance(kwargs["database"], str):
+                            kwargs["database"] = desired_database
+                        elif isinstance(kwargs["database"], CreateDatabase):
+                            kwargs["database"].name = desired_database
+
             return f(*args, **kwargs)
 
         return wrapped
