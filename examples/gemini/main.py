@@ -47,7 +47,7 @@ def build_prompt(query: str, context: List[str]) -> str:
 
 def get_gemini_response(query: str, context: List[str]) -> str:
     """
-    Queries the GPT API to get a response to the question.
+    Queries the Gemini API to get a response to the question.
 
     Args:
     query (str): The original query.
@@ -57,13 +57,9 @@ def get_gemini_response(query: str, context: List[str]) -> str:
     A response to the question.
     """
 
-    # response = genai.ChatCompletion.create(
-    #     model="gpt-3.5-turbo",
-    #     messages=build_prompt(query, context),
-    # )
-    response = model.generate_content(build_prompt(query, context))  # type: ignore
+    response = model.generate_content(build_prompt(query, context))
 
-    return response.text  # type: ignore
+    return response.text
 
 
 def main(
@@ -112,7 +108,7 @@ def main(
             ]
         )
 
-        # Get the response from GPT
+        # Get the response from Gemini
         response = get_gemini_response(query, results["documents"][0])  # type: ignore
 
         # Output, with sources
