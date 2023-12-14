@@ -15,7 +15,7 @@ The basic flow is as follows:
 
 ## Running the example
 
-You will need an Google API key to run this demo. 
+You will need an Google API key to run this demo.
 
 Install dependencies and run the example:
 
