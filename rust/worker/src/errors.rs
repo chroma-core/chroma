@@ -41,6 +41,6 @@ pub(crate) enum ErrorCodes {
     DataLoss = 15,
 }
 
-pub(crate) trait ChromaError: Error {
+pub trait ChromaError: Error {
     fn code(&self) -> ErrorCodes;
 }

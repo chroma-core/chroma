@@ -8,7 +8,6 @@ use super::{
     rendezvous_hash::{assign, AssignmentError, Murmur3Hasher},
 };
 use async_trait::async_trait;
-use uuid::Uuid;
 
 /*
 ===========================================
@@ -16,20 +15,22 @@ Interfaces
 ===========================================
 */
 
-/// AssignmentPolicy is a trait that defines how to assign a collection to a topic.
+/// AssignmentPolicy is a trait that defines how to assign a key to a set of members.
 /// # Notes
 /// This trait mirrors the go and python versions of the assignment policy
 /// interface.
 /// # Methods
-/// - assign: Assign a collection to a topic.
-/// - get_topics: Get the topics that can be assigned to.
+/// - assign: Assign a key to a topic.
+/// - get_members: Get the members that can be assigned to.
+/// - set_members: Set the members that can be assigned to.
 /// # Notes
 /// An assignment policy is not responsible for creating the topics it assigns to.
 /// It is the responsibility of the caller to ensure that the topics exist.
 /// An assignment policy must be Send.
 pub(crate) trait AssignmentPolicy: Send {
-    fn assign(&self, collection_id: Uuid) -> Result<String, AssignmentError>;
-    fn get_topics(&self) -> Vec<String>;
+    fn assign(&self, key: &str) -> Result<String, AssignmentError>;
+    fn get_members(&self) -> Vec<String>;
+    fn set_members(&mut self, members: Vec<String>);
 }
 
 /*
@@ -39,13 +40,8 @@ Implementation
 */
 
 pub(crate) struct RendezvousHashingAssignmentPolicy {
-    // The pulsar tenant and namespace being in this implementation of the assignment policy
-    // is purely a temporary measure while the topic propagation is being worked on.
-    // TODO: Remove pulsar_tenant and pulsar_namespace from this struct once topic propagation
-    // is implemented.
-    pulsar_tenant: String,
-    pulsar_namespace: String,
     hasher: Murmur3Hasher,
+    members: Vec<String>,
 }
 
 impl RendezvousHashingAssignmentPolicy {
@@ -55,15 +51,18 @@ impl RendezvousHashingAssignmentPolicy {
     // take ownership of them and put the responsibility on the caller to clone them if they
     // need to. This is the general pattern we should follow in rust - put the burden of cloning
     // on the caller, and if they don't need to clone, they can pass ownership.
-    pub fn new(
+    pub(crate) fn new(
         pulsar_tenant: String,
         pulsar_namespace: String,
     ) -> RendezvousHashingAssignmentPolicy {
         return RendezvousHashingAssignmentPolicy {
-            pulsar_tenant: pulsar_tenant,
-            pulsar_namespace: pulsar_namespace,
             hasher: Murmur3Hasher {},
+            members: vec![],
         };
+    }
+
+    pub(crate) fn set_members(&mut self, members: Vec<String>) {
+        self.members = members;
     }
 }
 
@@ -77,31 +76,26 @@ impl Configurable for RendezvousHashingAssignmentPolicy {
             HasherType::Murmur3 => Murmur3Hasher {},
         };
         return Ok(RendezvousHashingAssignmentPolicy {
-            pulsar_tenant: worker_config.pulsar_tenant.clone(),
-            pulsar_namespace: worker_config.pulsar_namespace.clone(),
             hasher: hasher,
+            members: vec![],
         });
     }
 }
 
 impl AssignmentPolicy for RendezvousHashingAssignmentPolicy {
-    fn assign(&self, collection_id: Uuid) -> Result<String, AssignmentError> {
-        let collection_id = collection_id.to_string();
-        let topics = self.get_topics();
-        let topic = assign(&collection_id, topics, &self.hasher);
+    fn assign(&self, key: &str) -> Result<String, AssignmentError> {
+        let topics = self.get_members();
+        let topic = assign(key, topics, &self.hasher);
         return topic;
     }
 
-    fn get_topics(&self) -> Vec<String> {
-        // This mirrors the current python and go code, which assumes a fixed set of topics
-        let mut topics = Vec::with_capacity(16);
-        for i in 0..16 {
-            let topic = format!(
-                "persistent://{}/{}/chroma_log_{}",
-                self.pulsar_tenant, self.pulsar_namespace, i
-            );
-            topics.push(topic);
-        }
-        return topics;
+    fn get_members(&self) -> Vec<String> {
+        // This is not designed to be used frequently for now, nor is the number of members
+        // expected to be large, so we can just clone the members
+        return self.members.clone();
+    }
+
+    fn set_members(&mut self, members: Vec<String>) {
+        self.members = members;
     }
 }
