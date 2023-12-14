@@ -171,7 +171,6 @@ class ServerSettings(BaseSettings):  # type: ignore
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
 
-
 class ClientSettings(BaseSettings):  # type: ignore
     chroma_client_auth_credentials_provider: Optional[
         str
