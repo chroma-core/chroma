@@ -140,6 +140,7 @@ mod tests {
                     memberlist_provider:
                         CustomResource:
                             memberlist_name: "worker-memberlist"
+                            queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -170,6 +171,8 @@ mod tests {
                     memberlist_provider:
                         CustomResource:
                             memberlist_name: "worker-memberlist"
+                            queue_size: 100
+
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -215,6 +218,8 @@ mod tests {
                     memberlist_provider:
                         CustomResource:
                             memberlist_name: "worker-memberlist"
+                            queue_size: 100
+
                 "#,
             );
             let config = RootConfig::load();
@@ -241,6 +246,7 @@ mod tests {
                     memberlist_provider:
                         CustomResource:
                             memberlist_name: "worker-memberlist"
+                            queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
