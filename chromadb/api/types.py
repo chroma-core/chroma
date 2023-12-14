@@ -141,14 +141,6 @@ OperatorExpression = OperatorExpression
 Where = Where
 WhereDocumentOperator = WhereDocumentOperator
 
-Embeddable = Union[Documents, Images]
-D = TypeVar("D", bound=Embeddable, contravariant=True)
-
-
-class EmbeddingFunction(Protocol[D]):
-    def __call__(self, input: D) -> Embeddings:
-        ...
-
 
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
@@ -215,11 +207,6 @@ def validate_embedding_function(
 
 
 L = TypeVar("L", covariant=True)
-
-
-class DataLoader(Protocol[L]):
-    def __call__(self, uris: URIs) -> L:
-        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
