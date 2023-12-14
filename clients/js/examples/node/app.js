@@ -9,16 +9,12 @@ app.get("/", async (req, res) => {
   const cc = new chroma.ChromaClient({ path: "http://localhost:8000" });
   await cc.reset();
 
-  console.log("entry")
-
   const google = new chroma.GoogleGenerativeAiEmbeddingFunction({ googleApiKey:"<APIKEY>" });
 
   const collection = await cc.createCollection({
     name: "test-from-js",
     embeddingFunction: google,
   });
-
-  console.log("collection", collection)
 
   await collection.add({
     ids: ["doc1", "doc2"],
