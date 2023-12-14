@@ -1,4 +1,4 @@
-use std::{mem, sync::RwLock};
+use std::sync::RwLock;
 
 use super::config::{CustomResourceMemberlistProviderConfig, MemberlistProviderConfig};
 use crate::{
@@ -23,11 +23,12 @@ use tokio_util::sync::CancellationToken;
 
 /* =========== Basic Types ============== */
 
-pub type Memberlist = Vec<String>;
+pub(crate) type Memberlist = Vec<String>;
 
 #[async_trait]
 pub(crate) trait MemberlistProvider: Component + Configurable {
     async fn get_memberlist(&self) -> Memberlist;
+    fn subscribe(&self, sender: Sender<Memberlist>) -> ();
 }
 
 /* =========== CRD ============== */
@@ -59,6 +60,7 @@ pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
+    subscribers: RwLock<Vec<Sender<Memberlist>>>,
 }
 
 #[derive(Error, Debug)]
@@ -103,6 +105,7 @@ impl Configurable for CustomResourceMemberlistProvider {
             memberlist_cr_client: memberlist_cr_client,
             queue_size: my_config.queue_size,
             current_memberlist: RwLock::new(vec![]),
+            subscribers: RwLock::new(vec![]),
         };
         Ok(c)
     }
@@ -124,6 +127,7 @@ impl CustomResourceMemberlistProvider {
             memberlist_cr_client: memberlist_cr_client,
             queue_size: queue_size,
             current_memberlist: RwLock::new(vec![]),
+            subscribers: RwLock::new(vec![]),
         }
     }
 
@@ -141,7 +145,6 @@ impl CustomResourceMemberlistProvider {
             match event {
                 Ok(event) => {
                     let event = event;
-                    println!("Got event: {:?}", event);
                     Some(event)
                 }
                 Err(err) => {
@@ -151,6 +154,28 @@ impl CustomResourceMemberlistProvider {
             }
         });
         self.register_stream(stream, ctx);
+    }
+
+    fn notify_subscribers(&self) -> () {
+        let subscribers = match self.subscribers.read() {
+            Ok(subscribers) => subscribers,
+            Err(err) => {
+                // TODO: Log error and attempt recovery
+                return;
+            }
+        };
+
+        let curr_memberlist = match self.current_memberlist.read() {
+            Ok(curr_memberlist) => curr_memberlist,
+            Err(err) => {
+                // TODO: Log error and attempt recovery
+                return;
+            }
+        };
+
+        for subscriber in subscribers.iter() {
+            let _ = subscriber.send(curr_memberlist.clone());
+        }
     }
 }
 
@@ -195,6 +220,8 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
                         }
                     }
                 }
+                // Inform subscribers
+                self.notify_subscribers();
             }
             None => {
                 // Stream closed or error
@@ -230,6 +257,18 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
             Err(err) => {
                 // TODO: Log an error
                 vec![]
+            }
+        }
+    }
+
+    fn subscribe(&self, sender: Sender<Memberlist>) -> () {
+        let subscribers_handle = self.subscribers.write();
+        match subscribers_handle {
+            Ok(mut subscribers) => {
+                subscribers.push(sender);
+            }
+            Err(err) => {
+                // TODO: log and handle lock poisoning
             }
         }
     }

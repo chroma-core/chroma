@@ -70,19 +70,33 @@ where
 pub(crate) struct ComponentHandle {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: ComponentState,
+    join_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ComponentHandle {
-    pub(super) fn new(cancellation_token: tokio_util::sync::CancellationToken) -> Self {
+    pub(super) fn new(
+        cancellation_token: tokio_util::sync::CancellationToken,
+        join_handle: tokio::task::JoinHandle<()>,
+    ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: ComponentState::Running,
+            join_handle: Some(join_handle),
         }
     }
 
     pub(crate) fn stop(&mut self) {
         self.cancellation_token.cancel();
         self.state = ComponentState::Stopped;
+    }
+
+    pub(crate) async fn join(&mut self) {
+        match self.join_handle.take() {
+            Some(handle) => {
+                handle.await;
+            }
+            None => return,
+        };
     }
 
     pub(crate) fn state(&self) -> &ComponentState {
@@ -95,7 +109,7 @@ pub(crate) struct ComponentContext<M, C>
 where
     C: Component + Send + Sync + 'static,
 {
-    pub(super) system: System,
+    pub(crate) system: System,
     pub(super) sender: tokio::sync::broadcast::Sender<M>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
     pub(super) system_component: Arc<C>, // A reference to the component that is running in the system

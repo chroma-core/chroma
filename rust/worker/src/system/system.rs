@@ -61,8 +61,8 @@ impl System {
             component,
             self.clone(),
         );
-        tokio::spawn(async move { executor.run(rx).await });
-        return (ComponentHandle::new(cancel_token), tx);
+        let join_handle = tokio::spawn(async move { executor.run(rx).await });
+        return (ComponentHandle::new(cancel_token, join_handle), tx);
     }
 
     pub(super) fn register_stream<C, M, S>(&self, stream: S, ctx: &ComponentContext<M, C>)
