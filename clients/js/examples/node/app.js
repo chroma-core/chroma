@@ -3,20 +3,22 @@ var path = require("path");
 
 var express = require("express");
 var chroma = require("chromadb");
-var openai = require("openai");
 
 var app = express();
 app.get("/", async (req, res) => {
   const cc = new chroma.ChromaClient({ path: "http://localhost:8000" });
   await cc.reset();
 
-  const openAIembedder = new chroma.OpenAIEmbeddingFunction("key")
-  const cohereAIEmbedder = new chroma.OpenAIEmbeddingFunction({ openai_api_key: "API_KEY" });
+  console.log("entry")
+
+  const google = new chroma.GoogleGenerativeAiEmbeddingFunction({ google_api_key:"<APIKEY>" });
 
   const collection = await cc.createCollection({
     name: "test-from-js",
-    embeddingFunction: cohereAIEmbedder,
+    embeddingFunction: google,
   });
+
+  console.log("collection", collection)
 
   await collection.add({
     ids: ["doc1", "doc2"],
@@ -28,6 +30,13 @@ app.get("/", async (req, res) => {
 
   let count = await collection.count();
   console.log("count", count);
+
+  const googleQuery = new chroma.GoogleGenerativeAiEmbeddingFunction({ google_api_key:"<APIKEY>", taskType: 'RETRIEVAL_QUERY' });
+
+  const queryCollection = await cc.getCollection({
+    name: "test-from-js",
+    embeddingFunction: googleQuery,
+  });
 
   const query = await collection.query({
     queryTexts: ["doc1"],
