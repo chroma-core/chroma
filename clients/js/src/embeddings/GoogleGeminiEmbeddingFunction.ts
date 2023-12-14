@@ -8,10 +8,10 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
     private googleGenAiApi?: any;
     private taskType: string;
 
-    constructor({ google_api_key, model, taskType }: { google_api_key: string, model?: string, taskType?: string }) {
+    constructor({ googleApiKey, model, taskType }: { googleApiKey: string, model?: string, taskType?: string }) {
         // we used to construct the client here, but we need to async import the types
         // for the openai npm package, and the constructor can not be async
-        this.api_key = google_api_key;
+        this.api_key = googleApiKey;
         this.model = model || "embedding-001";
         this.taskType = taskType || "RETRIEVAL_DOCUMENT";
     }
