@@ -121,6 +121,15 @@ segment_definition = Segment(
     metadata=None,
 )
 
+segment_definition2 = Segment(
+    id=uuid.uuid4(),
+    type="test_type",
+    scope=SegmentScope.METADATA,
+    topic="persistent://test/test/test_topic_2",
+    collection=None,
+    metadata=None,
+)
+
 
 def sync(segment: MetadataReader, seq_id: SeqId) -> None:
     # Try for up to 5 seconds, then throw a TimeoutError
@@ -567,6 +576,50 @@ def _test_update(
     assert results[0]["metadata"] == {"baz": 42}
     results = segment.get_metadata(where_document={"$contains": "biz"})
     assert len(results) == 0
+
+
+def test_limit(
+    system: System,
+    sample_embeddings: Iterator[SubmitEmbeddingRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+
+    topic = str(segment_definition["topic"])
+    max_id = produce_fns(producer, topic, sample_embeddings, 3)[1][-1]
+
+    topic2 = str(segment_definition2["topic"])
+    max_id2 = produce_fns(producer, topic2, sample_embeddings, 3)[1][-1]
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    segment2 = SqliteMetadataSegment(system, segment_definition2)
+    segment2.start()
+
+    sync(segment, max_id)
+    sync(segment2, max_id2)
+
+    assert segment.count() == 3
+
+    for i in range(3):
+        max_id = producer.submit_embedding(topic, next(sample_embeddings))
+
+    sync(segment, max_id)
+
+    assert segment.count() == 6
+
+    res = segment.get_metadata(limit=3)
+    assert len(res) == 3
+
+    # if limit is negative, throw error
+    with pytest.raises(ValueError):
+        segment.get_metadata(limit=-1)
+
+    # if offset is more than number of results, return empty list
+    res = segment.get_metadata(limit=3, offset=10)
+    assert len(res) == 0
 
 
 def test_delete_segment(

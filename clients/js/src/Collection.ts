@@ -1,22 +1,17 @@
 import {
-    IncludeEnum,
-    Metadata,
-    Metadatas,
-    Embedding,
-    Embeddings,
-    Document,
-    Documents,
-    Where,
-    WhereDocument,
-    ID,
-    IDs,
-    PositiveInteger,
     GetResponse,
     QueryResponse,
     AddResponse,
     CollectionMetadata,
     ConfigOptions,
-    GetParams
+    GetParams,
+    AddParams,
+    UpsertParams,
+    ModifyCollectionParams,
+    UpdateParams,
+    QueryParams,
+    PeekParams,
+    DeleteParams
 } from "./types";
 import { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 import { ApiApi as DefaultApi } from "./generated";
@@ -174,12 +169,7 @@ export class Collection {
         embeddings,
         metadatas,
         documents,
-    }: {
-        ids: ID | IDs,
-        embeddings?: Embedding | Embeddings,
-        metadatas?: Metadata | Metadatas,
-        documents?: Document | Documents,
-    }): Promise<AddResponse> {
+    }: AddParams): Promise<AddResponse> {
 
         const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
             true,
@@ -229,12 +219,7 @@ export class Collection {
         embeddings,
         metadatas,
         documents,
-    }: {
-        ids: ID | IDs,
-        embeddings?: Embedding | Embeddings,
-        metadatas?: Metadata | Metadatas,
-        documents?: Document | Documents,
-    }): Promise<boolean> {
+    }: UpsertParams): Promise<boolean> {
         const [idsArray, embeddingsArray, metadatasArray, documentsArray] = await this.validate(
             true,
             ids,
@@ -294,10 +279,7 @@ export class Collection {
     public async modify({
         name,
         metadata
-    }: {
-        name?: string,
-        metadata?: CollectionMetadata
-    } = {}): Promise<void> {
+    }: ModifyCollectionParams = {}): Promise<void> {
         const response = await this.api
             .updateCollection(
                 this.id,
@@ -388,12 +370,7 @@ export class Collection {
         embeddings,
         metadatas,
         documents,
-    }: {
-        ids: ID | IDs,
-        embeddings?: Embedding | Embeddings,
-        metadatas?: Metadata | Metadatas,
-        documents?: Document | Documents,
-    }): Promise<boolean> {
+    }: UpdateParams): Promise<boolean> {
         if (
             embeddings === undefined &&
             documents === undefined &&
@@ -474,14 +451,7 @@ export class Collection {
         queryTexts,
         whereDocument,
         include,
-    }: {
-        queryEmbeddings?: Embedding | Embeddings,
-        nResults?: PositiveInteger,
-        where?: Where,
-        queryTexts?: string | string[],
-        whereDocument?: WhereDocument, // {"$contains":"search_string"}
-        include?: IncludeEnum[] // ["metadata", "document"]
-    }): Promise<QueryResponse> {
+    }: QueryParams): Promise<QueryResponse> {
         if (nResults === undefined) nResults = 10
         if (queryEmbeddings === undefined && queryTexts === undefined) {
             throw new Error(
@@ -529,7 +499,7 @@ export class Collection {
      * });
      * ```
      */
-    public async peek({ limit }: { limit?: PositiveInteger } = {}): Promise<GetResponse> {
+    public async peek({ limit }: PeekParams = {}): Promise<GetResponse> {
         if (limit === undefined) limit = 10;
         const response = await this.api.aGet(this.id, {
             limit: limit,
@@ -559,11 +529,7 @@ export class Collection {
         ids,
         where,
         whereDocument
-    }: {
-        ids?: ID | IDs,
-        where?: Where,
-        whereDocument?: WhereDocument
-    } = {}): Promise<string[]> {
+    }: DeleteParams = {}): Promise<string[]> {
         let idsArray = undefined;
         if (ids !== undefined) idsArray = toArray(ids);
         return await this.api

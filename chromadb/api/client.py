@@ -171,8 +171,18 @@ class Client(SharedSystemClient, ClientAPI):
         return self._server.heartbeat()
 
     @override
-    def list_collections(self) -> Sequence[Collection]:
-        return self._server.list_collections(tenant=self.tenant, database=self.database)
+    def list_collections(
+        self, limit: Optional[int] = None, offset: Optional[int] = None
+    ) -> Sequence[Collection]:
+        return self._server.list_collections(
+            limit, offset, tenant=self.tenant, database=self.database
+        )
+
+    @override
+    def count_collections(self) -> int:
+        return self._server.count_collections(
+            tenant=self.tenant, database=self.database
+        )
 
     @override
     def create_collection(

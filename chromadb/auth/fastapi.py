@@ -9,6 +9,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from chromadb.server.fastapi.types import (
+    CreateDatabase,
+    CreateTenant,
+)
+
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
@@ -116,7 +121,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -154,6 +159,15 @@ authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
     "authz_provider", default=None
 )
 
+# This needs to be module-level config, since it's used in authz_context() where we
+# don't have a system (so don't have easy access to the settings).
+overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+
+def set_overwrite_singleton_tenant_database_access_from_auth(overwrite: bool = False) -> None:
+    global overwrite_singleton_tenant_database_access_from_auth
+    overwrite_singleton_tenant_database_access_from_auth = overwrite
+
 
 def authz_context(
     action: Union[str, AuthzResourceActions, List[str], List[AuthzResourceActions]],
@@ -172,7 +186,7 @@ def authz_context(
             if request:
                 _provider = authz_provider.get()
                 a_list: List[Union[str, AuthzAction]] = []
-                if not isinstance(action, List):
+                if not isinstance(action, list):
                     a_list = [action]
                 else:
                     a_list = cast(List[Union[str, AuthzAction]], action)
@@ -204,6 +218,24 @@ def authz_context(
                         a_authz_responses.append(_provider.authorize(_context))
                 if not any(a_authz_responses):
                     raise AuthorizationError("Unauthorized")
+                # In a multi-tenant environment, we may want to allow users to send
+                # requests without configuring a tenant and DB. If so, they can set
+                # the request tenant and DB however they like and we simply overwrite it.
+                if overwrite_singleton_tenant_database_access_from_auth:
+                    desired_tenant = request.state.user_identity.get_user_tenant()
+                    if desired_tenant and "tenant" in kwargs:
+                        if isinstance(kwargs["tenant"], str):
+                            kwargs["tenant"] = desired_tenant
+                        elif isinstance(kwargs["tenant"], CreateTenant):
+                            kwargs["tenant"].name = desired_tenant
+                    databases = request.state.user_identity.get_user_databases()
+                    if databases and len(databases) == 1 and "database" in kwargs:
+                        desired_database = databases[0]
+                        if isinstance(kwargs["database"], str):
+                            kwargs["database"] = desired_database
+                        elif isinstance(kwargs["database"], CreateDatabase):
+                            kwargs["database"].name = desired_database
+
             return f(*args, **kwargs)
 
         return wrapped
@@ -267,7 +299,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:

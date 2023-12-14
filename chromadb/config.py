@@ -171,6 +171,7 @@ class ServerSettings(BaseSettings):  # type: ignore
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
 
+
 class ClientSettings(BaseSettings):  # type: ignore
     chroma_client_auth_credentials_provider: Optional[
         str
@@ -232,6 +233,9 @@ class SettingsBase(BaseSettings):  # type: ignore
     # you cannot change the hash_algorithm after migrations have already been applied once
     # this is intended to be a first-time setup configuration
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
+
+    # TODO comment
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
 
 class Settings(SettingsBase, ClientSettings, ServerSettings):
