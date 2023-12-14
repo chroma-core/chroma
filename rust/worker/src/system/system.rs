@@ -68,7 +68,7 @@ impl System {
     pub(super) fn register_stream<C, M, S>(&self, stream: S, ctx: &ComponentContext<M, C>)
     where
         C: StreamHandler<M> + Component + Send + Sync + 'static,
-        M: Clone + Send + Sync + 'static,
+        M: Send + Sync + 'static,
         S: Stream + Send + Stream<Item = M> + 'static,
     {
         let mut executor = StreamComponentExecutor::new(
@@ -77,7 +77,6 @@ impl System {
             ctx.system_component.clone(),
             ctx.system.clone(),
         );
-        println!("Registering stream");
         tokio::spawn(async move { executor.run_from_stream(stream).await });
     }
 }

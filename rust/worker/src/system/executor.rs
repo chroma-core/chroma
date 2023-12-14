@@ -1,5 +1,5 @@
-use futures::StreamExt;
-use std::sync::Arc;
+use futures::{Future, FutureExt, StreamExt};
+use std::{future::IntoFuture, sync::Arc};
 
 use futures::Stream;
 use tokio::{pin, select};
@@ -11,7 +11,7 @@ use super::{system::System, Component, Handler, StreamHandler};
 struct Inner<C, M>
 where
     C: Component + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    M: Send + Sync + 'static,
 {
     pub(super) channel_in: tokio::sync::broadcast::Sender<M>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
@@ -56,7 +56,6 @@ where
         loop {
             select! {
                     _ = self.inner.cancellation_token.cancelled() => {
-                        println!("RUN Cancellation token cancelled");
                         break;
                     }
                     message = channel.recv() => {
@@ -85,7 +84,7 @@ where
 pub(super) struct StreamComponentExecutor<H, M>
 where
     H: StreamHandler<M> + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    M: Send + Sync + 'static,
 {
     inner: Arc<Inner<H, M>>,
     handler: Arc<H>,
@@ -94,7 +93,7 @@ where
 impl<H, M> StreamComponentExecutor<H, M>
 where
     H: StreamHandler<M> + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    M: Send + Sync + 'static,
 {
     pub(super) fn new(
         channel_in: tokio::sync::broadcast::Sender<M>,
@@ -117,22 +116,18 @@ where
     where
         S: Stream<Item = M>,
     {
-        println!("Running from stream");
         pin!(stream);
         loop {
             select! {
                 _ = self.inner.cancellation_token.cancelled() => {
-                    println!("STREAM Cancellation token cancelled");
                     break;
                 }
                 message = stream.next() => {
                     match message {
                         Some(message) => {
-                            println!("HI Message");
                             self.handler.handle(message, &ComponentContext{system: self.inner.system.clone(), sender: self.inner.channel_in.clone(), cancellation_token: self.inner.cancellation_token.clone(), system_component: self.inner.system_component.clone()}).await;
                         }
                         None => {
-                            println!("No message");
                             break;
                         }
                     }
