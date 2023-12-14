@@ -7,15 +7,31 @@ use tokio::select;
 use super::{executor::ComponentExecutor, system::System};
 
 #[derive(Debug, PartialEq)]
+/// The state of a component
+/// A component can be running or stopped
+/// A component is stopped when it is cancelled
+/// A component can be run with a system
 pub(crate) enum ComponentState {
     Running,
     Stopped,
 }
 
+/// A component is a processor of work that can be run in a system.
+/// It has a queue of messages that it can process.
+/// Others can send messages to the component.
+/// A component can be stopped using its handle.
+/// It is a data object, and stores some parameterization
+/// for how the system should run it.
+/// # Methods
+/// - queue_size: The size of the queue to use for the component before it starts dropping messages
 pub(crate) trait Component {
     fn queue_size(&self) -> usize;
 }
 
+/// A handler is a component that can process messages of a given type.
+/// # Methods
+/// - handle: Handle a message
+/// - on_start: Called when the component is started
 #[async_trait]
 pub(crate) trait Handler<M>
 where
@@ -26,11 +42,15 @@ where
     fn on_start(&self, ctx: &ComponentContext<M, Self>) -> () {}
 }
 
+/// A stream handler is a component that can process messages of a given type from a stream.
+/// # Methods
+/// - handle: Handle a message from a stream
+/// - register_stream: Register a stream to be processed, this is provided and you do not need to implement it
 #[async_trait]
 pub(crate) trait StreamHandler<M>
 where
     Self: Component + Sized + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    M: Send + Sync + 'static,
 {
     async fn handle(&self, message: M, ctx: &ComponentContext<M, Self>) -> ();
 
@@ -42,6 +62,11 @@ where
     }
 }
 
+/// A component handle is a handle to a component that can be used to stop it.
+/// and introspect its state.
+/// # Fields
+/// - cancellation_token: A cancellation token that can be used to stop the component
+/// - state: The state of the component
 pub(crate) struct ComponentHandle {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: ComponentState,
@@ -65,6 +90,7 @@ impl ComponentHandle {
     }
 }
 
+/// The component context is passed to all Component Handler methods
 pub(crate) struct ComponentContext<M, C>
 where
     C: Component + Send + Sync + 'static,
@@ -79,7 +105,7 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use futures::stream; // Assuming you have the 'futures' crate
+    use futures::stream;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
