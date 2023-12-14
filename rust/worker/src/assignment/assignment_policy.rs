@@ -1,9 +1,13 @@
-use crate::config::{Configurable, WorkerConfig};
+use crate::{
+    config::{Configurable, WorkerConfig},
+    errors::ChromaError,
+};
 
 use super::{
     config::{AssignmentPolicyConfig, HasherType},
     rendezvous_hash::{assign, AssignmentError, Murmur3Hasher},
 };
+use async_trait::async_trait;
 use uuid::Uuid;
 
 /*
@@ -63,19 +67,20 @@ impl RendezvousHashingAssignmentPolicy {
     }
 }
 
+#[async_trait]
 impl Configurable for RendezvousHashingAssignmentPolicy {
-    fn from_config(config: WorkerConfig) -> Self {
-        let assignment_policy_config = match config.assignment_policy {
+    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+        let assignment_policy_config = match &worker_config.assignment_policy {
             AssignmentPolicyConfig::RendezvousHashing(config) => config,
         };
         let hasher = match assignment_policy_config.hasher {
             HasherType::Murmur3 => Murmur3Hasher {},
         };
-        return RendezvousHashingAssignmentPolicy {
-            pulsar_tenant: config.pulsar_tenant,
-            pulsar_namespace: config.pulsar_namespace,
+        return Ok(RendezvousHashingAssignmentPolicy {
+            pulsar_tenant: worker_config.pulsar_tenant.clone(),
+            pulsar_namespace: worker_config.pulsar_namespace.clone(),
             hasher: hasher,
-        };
+        });
     }
 }
 
