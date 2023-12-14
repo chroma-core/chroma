@@ -22,7 +22,7 @@ def build_prompt(query: str, context: List[str]) -> str:
     context (List[str]): The context of the query, returned by embedding search.
 
     Returns:
-    A prompt for the LLM (List[Dict[str, str]]).
+    A prompt for the LLM (str).
     """
 
     base_prompt = {
@@ -39,8 +39,6 @@ def build_prompt(query: str, context: List[str]) -> str:
 
     # combine the prompts to output a single prompt string
     system = f"{base_prompt['content']} {user_prompt['content']}"
-
-    print(system)
 
     return system
 
@@ -80,7 +78,7 @@ def main(
     client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerative(api_key=google_api_key)
+    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(api_key=google_api_key, task_type="RETRIEVAL_QUERY")
 
     # Get the collection.
     collection = client.get_collection(

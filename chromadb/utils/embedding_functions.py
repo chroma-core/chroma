@@ -552,10 +552,11 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         ]
 
 
-class GoogleGenerative(EmbeddingFunction[Documents]):
+class GoogleGenerativeAIEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a Google API key."""
+    """Use RETRIEVAL_DOCUMENT for the task_type for embedding, and RETRIEVAL_QUERY for the task_type for retrieval."""
 
-    def __init__(self, api_key: str, model_name: str = "models/embedding-001"):
+    def __init__(self, api_key: str, model_name: str = "models/embedding-001", task_type: str = "RETRIEVAL_DOCUMENT"):
         if not api_key:
             raise ValueError("Please provide a Google API key.")
 
@@ -572,14 +573,18 @@ class GoogleGenerative(EmbeddingFunction[Documents]):
         genai.configure(api_key=api_key)
         self._genai = genai
         self._model_name = model_name
+        self._task_type = task_type
+        self._task_title = None
+        if self._task_type is "RETRIEVAL_DOCUMENT":
+            self._task_title = "Embedding of single string"
 
     def __call__(self, input: Documents) -> Embeddings:
         return [
             self._genai.embed_content(
                 model=self._model_name,
                 content=text,
-                task_type="retrieval_document",
-                title="Embedding of single string",
+                task_type=self._task_type,
+                title=self._task_title,
             )["embedding"]
             for text in input
         ]
