@@ -16,6 +16,7 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+from tenacity import wait_exponential_jitter
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -194,6 +195,44 @@ D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
 class EmbeddingFunction(Protocol[D]):
+    def __init__(
+        self,
+        initial: float = 1,
+        max: float = 10,
+        exp_base: float = 1,
+        jitter: float = 1,
+    ):
+        self.initial = initial
+        self.max = max
+        self.exp_base = exp_base
+        self.jitter = jitter
+        self.wait = wait_exponential_jitter(
+            initial=initial, max=max, exp_base=exp_base, jitter=jitter
+        )
+
+    def change_wait_params(
+        self,
+        initial: float = 1,
+        max: float = 10,
+        exp_base: float = 1,
+        jitter=1,
+        wait: Optional["WaitBaseT"] = None,
+    ):
+        if wait:
+            self.wait = wait
+            self.initial = None
+            self.max = None
+            self.exp_base = None
+            self.jitter = None
+        else:
+            self.initial = initial
+            self.max = max
+            self.exp_base = exp_base
+            self.jitter = jitter
+            self.wait = wait_exponential_jitter(
+                initial=initial, max=max, exp_base=exp_base, jitter=jitter
+            )
+
     def __call__(self, input: D) -> Embeddings:
         ...
 

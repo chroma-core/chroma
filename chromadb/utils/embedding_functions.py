@@ -21,7 +21,9 @@ import numpy.typing as npt
 import importlib
 import inspect
 import sys
+from tenacity import retry
 from typing import Optional
+
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -53,13 +55,18 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             self.models[model_name] = SentenceTransformer(model_name, device=device)
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
+        super().__init__()
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(  # type: ignore
-            list(input),
-            convert_to_numpy=True,
-            normalize_embeddings=self._normalize_embeddings,
-        ).tolist()
+        @retry(wait=self.wait)
+        def wrapped_call(input):
+            return self._model.encode(  # type: ignore
+                list(input),
+                convert_to_numpy=True,
+                normalize_embeddings=self._normalize_embeddings,
+            ).tolist()
+
+        return wrapped_call(input)
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -144,13 +151,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key,
                     api_version=api_version,
                     azure_endpoint=api_base,
-                    default_headers=default_headers
+                    default_headers=default_headers,
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key,
-                    base_url=api_base,
-                    default_headers=default_headers
+                    api_key=api_key, base_url=api_base, default_headers=default_headers
                 ).embeddings
         else:
             self._client = openai.Embedding
@@ -209,7 +214,9 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call Cohere Embedding API for each document.
         return [
             embeddings
-            for embeddings in self._client.embed(texts=input, model=self._model_name, input_type="search_document")
+            for embeddings in self._client.embed(
+                texts=input, model=self._model_name, input_type="search_document"
+            )
         ]
 
 
@@ -260,9 +267,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
     """
 
-    def __init__(
-            self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"
-    ):
+    def __init__(self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"):
         """
         Initialize the JinaEmbeddingFunction.
 
@@ -271,9 +276,11 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "jina-embeddings-v2-base-en".
         """
         self._model_name = model_name
-        self._api_url = 'https://api.jina.ai/v1/embeddings'
+        self._api_url = "https://api.jina.ai/v1/embeddings"
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"})
+        self._session.headers.update(
+            {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
