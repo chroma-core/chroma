@@ -450,23 +450,14 @@ class Client(SharedSystemClient, ClientAPI):
                 code=-1, message=f"Chroma server seems inaccessible: {str(e)}"
             )
         except requests.exceptions.HTTPError as ex:
-            if ex.response and ex.response.status_code in [504, 502, 503]:
+            if ex.response.status_code in [504, 502, 503]:  # type: ignore
                 # proxy errors, Gateway timeout = 504, Bad Gateway = 502, Service Unavailable = 503
                 raise errors.GenericError(
-                    code=ex.response.status_code,
+                    code=ex.response.status_code,  # type: ignore
                     message=f"Your proxy reports Chroma server might not be accessible: {str(ex)}",
                 )
-            if (
-                ex.response and ex.response.status_code == 429
-            ):  # do we need to handle this?
-                raise errors.GenericError(
-                    code=ex.response.status_code,
-                    message=f"Chroma server is rate limiting your requests: {str(ex)}",
-                )
             else:
-                raise errors.GenericError(
-                    code=ex.response.status_code if ex.response else -1, message=str(ex)
-                )
+                raise errors.GenericError(code=ex.response.status_code, message=str(ex))  # type: ignore
 
     def _validate(self) -> "Client":
         if self._validated:
@@ -507,11 +498,11 @@ class Client(SharedSystemClient, ClientAPI):
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
         except requests.exceptions.HTTPError as ex:
-            if ex.response and ex.response.status_code in [401, 403]:
+            if ex.response.status_code in [401, 403]:  # type: ignore
                 raise ValueError(
                     "Authentication error. Have you configured your client to use authentication?"
                 )
-            if ex.response and ex.response.status_code == 404:
+            if ex.response.status_code == 404:  # type: ignore
                 from chromadb import __version__ as local_chroma_version
 
                 raise ValueError(

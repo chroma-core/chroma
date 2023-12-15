@@ -93,4 +93,5 @@ def test_client_server_with_proxy_error(
 
         with pytest.raises(GenericError) as e:
             client.list_collections()
+        print(str(e.value))
         assert "Your proxy reports Chroma server might not be" in str(e.value)
