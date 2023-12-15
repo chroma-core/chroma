@@ -50,6 +50,7 @@ export class ChromaClient {
         const apiConfig: Configuration = new Configuration({
             basePath: path,
         });
+
         if (auth !== undefined) {
             this.apiAdapter = new IsomorphicFetchClientAuthProtocolAdapter(new DefaultApi(apiConfig), auth);
             this.api = this.apiAdapter.getApi();
