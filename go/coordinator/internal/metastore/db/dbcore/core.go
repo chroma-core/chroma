@@ -32,8 +32,8 @@ type DBConfig struct {
 }
 
 func Connect(cfg DBConfig) (*gorm.DB, error) {
-	dsn := url.QueryEscape(fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port))
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d",
+		cfg.Address, url.QueryEscape(cfg.Username), url.QueryEscape(cfg.Password), cfg.DBName, cfg.Port)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
