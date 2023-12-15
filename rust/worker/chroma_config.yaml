@@ -4,7 +4,7 @@
 # for now we nest it in the worker directory
 
 worker:
-  my_ip: "10.244.0.85"
+  my_ip: "10.244.0.90"
   num_indexing_threads: 4
   pulsar_url: "pulsar://127.0.0.1:6650"
   pulsar_tenant: "public"
