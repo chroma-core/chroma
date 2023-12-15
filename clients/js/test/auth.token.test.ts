@@ -56,7 +56,6 @@ if (!process.env.XTOKEN_TEST) {
         expect(collections.length).toBe(1)
     })
 
-    // test CloudClient here
     test('it should list collections with explicit x-token token config in CloudClient', async () => {
         await cloudClient.reset()
         let collections = await cloudClient.listCollections()

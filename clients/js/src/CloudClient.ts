@@ -9,11 +9,9 @@ interface CloudClientParams {
     database?: string;
     cloudHost?: string;
     cloudPort?: string;
-    // enableSsl?: boolean;
 }
 
 class CloudClient extends ChromaClient{
-    // private enableSsl: boolean;
 
     constructor({apiKey, database, cloudHost, cloudPort}: CloudClientParams)  {
         // If no API key is provided, try to load it from the environment variable
@@ -24,7 +22,7 @@ class CloudClient extends ChromaClient{
             throw new Error("No API key provided");
         }
 
-        cloudHost = cloudHost || "http://localhost";
+        cloudHost = cloudHost || "https://api.trychroma.com";
         cloudPort = cloudPort || "8000";
 
         const path = `${cloudHost}:${cloudPort}`;

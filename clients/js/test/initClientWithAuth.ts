@@ -13,4 +13,4 @@ export const chromaTokenXToken = new ChromaClient({
     path: URL,
     auth: {provider: "token", credentials: "test-token", providerOptions: {headerType: "X_CHROMA_TOKEN"}}
 });
-export const cloudClient = new CloudClient({apiKey: "test-token", cloudPort: PORT})
+export const cloudClient = new CloudClient({apiKey: "test-token", cloudPort: PORT, cloudHost: "http://localhost"})
