@@ -4,18 +4,22 @@
 # for now we nest it in the worker directory
 
 worker:
-  my_ip: "10.244.0.90"
-  num_indexing_threads: 4
-  pulsar_url: "pulsar://127.0.0.1:6650"
-  pulsar_tenant: "public"
-  pulsar_namespace: "default"
-  kube_namespace: "chroma"
-  assignment_policy:
-      RendezvousHashing:
-          hasher: Murmur3
-  memberlist_provider:
-      CustomResource:
-          memberlist_name: "worker-memberlist"
-          queue_size: 100
-  ingest:
-      queue_size: 100
+    my_ip: "10.244.0.90"
+    num_indexing_threads: 4
+    pulsar_url: "pulsar://127.0.0.1:6650"
+    pulsar_tenant: "public"
+    pulsar_namespace: "default"
+    kube_namespace: "chroma"
+    assignment_policy:
+        RendezvousHashing:
+            hasher: Murmur3
+    memberlist_provider:
+        CustomResource:
+            memberlist_name: "worker-memberlist"
+            queue_size: 100
+    ingest:
+        queue_size: 100
+    sysdb:
+        Grpc:
+            host: "localhost"
+            port: 50051

@@ -4,7 +4,7 @@ use futures::{StreamExt, TryStreamExt};
 use prost::Message;
 use std::{
     collections::{HashMap, HashSet},
-    sync::RwLock,
+    sync::{Arc, RwLock},
 };
 
 use crate::{
@@ -17,12 +17,15 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
     memberlist::{CustomResourceMemberlistProvider, Memberlist},
     system::{Component, ComponentContext, ComponentHandle, Handler, StreamHandler},
+    types::{EmbeddingRecord, EmbeddingRecordConversionError, SeqId},
 };
 
 use pulsar::{
     consumer::topic, Consumer, DeserializeMessage, Payload, Pulsar, SubType, TokioExecutor,
 };
 use thiserror::Error;
+
+use super::message_id::PulsarMessageIdWrapper;
 
 /// An ingest component is responsible for ingesting data into the system from the log
 /// stream.
@@ -151,12 +154,12 @@ impl Handler<Memberlist> for Ingest {
                     // Compute the diff between the current assignments and the new assignments
                     for topic in assigned_topics.iter() {
                         if !new_assignments.contains(topic) {
-                            to_remove.push(topic.clone());
+                            to_remove.push(topic.to_string());
                         }
                     }
                     for topic in new_assignments.iter() {
                         if !assigned_topics.contains(*topic) {
-                            to_add.push(topic.clone());
+                            to_add.push(topic.to_string());
                         }
                     }
                 }
@@ -252,19 +255,16 @@ impl Component for PulsarIngestTopic {
 }
 
 #[async_trait]
-impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic {
+impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
     async fn handle(
         &self,
-        _message: Option<chroma_proto::SubmitEmbeddingRecord>,
-        _ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, PulsarIngestTopic>,
+        _message: Option<Arc<EmbeddingRecord>>,
+        _ctx: &ComponentContext<Option<Arc<EmbeddingRecord>>, PulsarIngestTopic>,
     ) -> () {
         // No-op
     }
 
-    fn on_start(
-        &self,
-        ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, Self>,
-    ) -> () {
+    fn on_start(&self, ctx: &ComponentContext<Option<Arc<EmbeddingRecord>>, Self>) -> () {
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),
             Err(err) => None,
@@ -278,8 +278,21 @@ impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic 
         let stream = stream.then(|result| async {
             match result {
                 Ok(msg) => {
-                    let msg = msg.deserialize();
-                    return Some(msg);
+                    // Convert the Pulsar Message to an EmbeddingRecord
+                    let proto_embedding_record = msg.deserialize();
+                    let id = msg.message_id;
+                    let seq_id: SeqId = PulsarMessageIdWrapper(id).into();
+                    let embedding_record: Result<EmbeddingRecord, EmbeddingRecordConversionError> =
+                        (proto_embedding_record, seq_id).try_into();
+                    match embedding_record {
+                        Ok(embedding_record) => {
+                            return Some(Arc::new(embedding_record));
+                        }
+                        Err(err) => {
+                            // TODO: Handle and log
+                        }
+                    }
+                    None
                 }
                 Err(err) => {
                     // TODO: Log an error
@@ -294,13 +307,11 @@ impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic 
 }
 
 #[async_trait]
-impl StreamHandler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic {
+impl StreamHandler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
     async fn handle(
         &self,
-        message: Option<chroma_proto::SubmitEmbeddingRecord>,
-        _ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, PulsarIngestTopic>,
+        message: Option<Arc<EmbeddingRecord>>,
+        _ctx: &ComponentContext<Option<Arc<EmbeddingRecord>>, PulsarIngestTopic>,
     ) -> () {
-        println!("Received stream message: {:?}", message);
-        // This will be where we filter the message and add it to the corresponding tenant queue
     }
 }

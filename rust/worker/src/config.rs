@@ -105,6 +105,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) ingest: crate::ingest::config::IngestConfig,
+    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
 }
 
 /// # Description
@@ -146,6 +147,11 @@ mod tests {
                             queue_size: 100
                     ingest:
                         queue_size: 100
+                    sysdb:
+                        GrpcSysDb:
+                            host: "localhost"
+                            port: 50051
+
                 "#,
             );
             let config = RootConfig::load();
@@ -180,6 +186,10 @@ mod tests {
                             queue_size: 100
                     ingest:
                         queue_size: 100
+                    sysdb:
+                        GrpcSysDb:
+                            host: "localhost"
+                            port: 50051
 
                 "#,
             );
@@ -230,6 +240,10 @@ mod tests {
                             queue_size: 100
                     ingest:
                         queue_size: 100
+                    sysdb:
+                        GrpcSysDb:
+                            host: "localhost"
+                            port: 50051
 
                 "#,
             );
@@ -261,6 +275,10 @@ mod tests {
                             queue_size: 100
                     ingest:
                         queue_size: 100
+                    sysdb:
+                        GrpcSysDb:
+                            host: "localhost"
+                            port: 50051
                 "#,
             );
             let config = RootConfig::load();
