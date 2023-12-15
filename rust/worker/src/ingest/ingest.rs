@@ -207,7 +207,7 @@ impl Handler<Memberlist> for Ingest {
             // Bookkeep the handle so we can shut the stream down later
             match self.topic_to_handle.write() {
                 Ok(mut topic_to_handle) => {
-                    topic_to_handle.insert("test".to_string(), handle);
+                    topic_to_handle.insert(topic.to_string(), handle);
                 }
                 Err(err) => {
                     // TODO: log error and handle lock poisoning
