@@ -76,7 +76,7 @@ results = collection.query(
 For example, the `"Chat your data"` use case:
 1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
-3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis.
+3. Compose documents into the context window of an LLM like `GPT-3.5-Turbo` for additional summarization or analysis.
 
 ## Embeddings?
 
