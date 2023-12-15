@@ -33,6 +33,19 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _retry_call(call):
+    def call_wrapper_factory(
+        *args,
+    ):  # this level is used to access the class attributes
+        @retry(wait=args[0].wait)  # wait parameters are taken from self
+        def wrapped_call():  # this is the retried call
+            return call(*args)
+
+        return wrapped_call
+
+    return call_wrapper_factory
+
+
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
@@ -57,16 +70,13 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
         super().__init__()
 
+    @_retry_call
     def __call__(self, input: Documents) -> Embeddings:
-        @retry(wait=self.wait)
-        def wrapped_call(input):
-            return self._model.encode(  # type: ignore
-                list(input),
-                convert_to_numpy=True,
-                normalize_embeddings=self._normalize_embeddings,
-            ).tolist()
-
-        return wrapped_call(input)
+        return self._model.encode(  # type: ignore[
+            list(input),
+            convert_to_numpy=True,
+            normalize_embeddings=self._normalize_embeddings,
+        ).tolist()
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):

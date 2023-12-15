@@ -1,4 +1,15 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Sequence,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Callable,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -16,7 +27,7 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
-from tenacity import wait_exponential_jitter
+from tenacity import retry, wait_exponential_jitter
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -195,43 +206,8 @@ D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
 class EmbeddingFunction(Protocol[D]):
-    def __init__(
-        self,
-        initial: float = 1,
-        max: float = 10,
-        exp_base: float = 1,
-        jitter: float = 1,
-    ):
-        self.initial = initial
-        self.max = max
-        self.exp_base = exp_base
-        self.jitter = jitter
-        self.wait = wait_exponential_jitter(
-            initial=initial, max=max, exp_base=exp_base, jitter=jitter
-        )
-
-    def change_wait_params(
-        self,
-        initial: float = 1,
-        max: float = 10,
-        exp_base: float = 1,
-        jitter=1,
-        wait: Optional["WaitBaseT"] = None,
-    ):
-        if wait:
-            self.wait = wait
-            self.initial = None
-            self.max = None
-            self.exp_base = None
-            self.jitter = None
-        else:
-            self.initial = initial
-            self.max = max
-            self.exp_base = exp_base
-            self.jitter = jitter
-            self.wait = wait_exponential_jitter(
-                initial=initial, max=max, exp_base=exp_base, jitter=jitter
-            )
+    def __init__(self):
+        self.wait = wait_exponential_jitter()
 
     def __call__(self, input: D) -> Embeddings:
         ...
