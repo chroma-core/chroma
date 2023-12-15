@@ -4,6 +4,7 @@ export { Collection } from './Collection';
 export { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 export { OpenAIEmbeddingFunction } from './embeddings/OpenAIEmbeddingFunction';
 export { CohereEmbeddingFunction } from './embeddings/CohereEmbeddingFunction';
+export { GoogleGenerativeAiEmbeddingFunction } from './embeddings/GoogleGeminiEmbeddingFunction';
 export {
     IncludeEnum,
     GetParams,
