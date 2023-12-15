@@ -44,8 +44,16 @@ class BaseAPI(ABC):
     #
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Collection]:
         """List all collections.
+        Args:
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+
         Returns:
             Sequence[Collection]: A list of collections
 
@@ -53,6 +61,21 @@ class BaseAPI(ABC):
             ```python
             client.list_collections()
             # [collection(name="my_collection", metadata={})]
+            ```
+        """
+        pass
+
+    @abstractmethod
+    def count_collections(self) -> int:
+        """Count the number of collections.
+
+        Returns:
+            int: The number of collections.
+
+        Examples:
+            ```python
+            client.count_collections()
+            # 1
             ```
         """
         pass
@@ -501,8 +524,19 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     @override
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
+        pass
+
+    @abstractmethod
+    @override
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int:
         pass
 
     @abstractmethod

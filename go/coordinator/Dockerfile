@@ -10,7 +10,7 @@ RUN cd /src/chroma-coordinator \
 
 FROM alpine:3.17.3
 
-RUN apk add --no-cache bash bash-completion
+RUN apk add --no-cache bash bash-completion jq findutils
 
 # As of 6 Dec 2023, the atlas package isn't in Alpine's main package manager, only
 # testing. So we have to add the testing repository to get it.
