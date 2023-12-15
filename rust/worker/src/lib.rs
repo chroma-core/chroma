@@ -4,6 +4,7 @@ mod errors;
 mod index;
 mod ingest;
 mod memberlist;
+mod sysdb;
 mod system;
 mod types;
 
