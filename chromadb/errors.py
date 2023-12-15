@@ -82,6 +82,31 @@ class AuthorizationError(ChromaError):
         return "AuthorizationError"
 
 
+class GenericError(ChromaError):
+    def __init__(self, code: int, message: str) -> None:
+        self._code = code
+        self._message = message
+
+    @overrides
+    def code(self) -> int:
+        return self._code
+
+    @overrides
+    def message(self) -> str:
+        return self._message
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "ServerError"
+
+    def __str__(self) -> str:
+        return f"{self.name()}(code={self._code}, message={self._message})"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,

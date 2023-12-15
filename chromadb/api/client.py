@@ -1,3 +1,4 @@
+import logging
 from typing import ClassVar, Dict, Optional, Sequence
 from uuid import UUID
 import uuid
@@ -5,8 +6,9 @@ import uuid
 from overrides import override
 import requests
 
-from chromadb import __version__ as local_chroma_version
+from chromadb import errors
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import (
     CollectionMetadata,
     DataLoader,
@@ -30,6 +32,9 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
+from chromadb.utils.client_utils import compare_versions
+
+logger = logging.getLogger(__name__)
 
 
 class SharedSystemClient:
@@ -139,13 +144,13 @@ class Client(SharedSystemClient, ClientAPI):
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
+        self._validated = False
         self.tenant = tenant
         self.database = database
         # Create an admin client for verifying that databases and tenants exist
         self._admin_client = AdminClient.from_system(self._system)
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
-        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Submit event for a client start
         telemetry_client = self._system.instance(ProductTelemetryClient)
@@ -169,19 +174,19 @@ class Client(SharedSystemClient, ClientAPI):
     # Note - we could do this in less verbose ways, but they break type checking
     @override
     def heartbeat(self) -> int:
-        return self._server.heartbeat()
+        return self._validate()._server.heartbeat()
 
     @override
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[Collection]:
-        return self._server.list_collections(
+        return self._validate()._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
 
     @override
     def count_collections(self) -> int:
-        return self._server.count_collections(
+        return self._validate()._server.count_collections(
             tenant=self.tenant, database=self.database
         )
 
@@ -196,7 +201,7 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        return self._server.create_collection(
+        return self._validate()._server.create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
@@ -216,7 +221,7 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_collection(
+        return self._validate()._server.get_collection(
             id=id,
             name=name,
             embedding_function=embedding_function,
@@ -235,7 +240,7 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_or_create_collection(
+        return self._validate()._server.get_or_create_collection(
             name=name,
             metadata=metadata,
             embedding_function=embedding_function,
@@ -251,7 +256,7 @@ class Client(SharedSystemClient, ClientAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
-        return self._server._modify(
+        return self._validate()._server._modify(
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
@@ -262,7 +267,7 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         name: str,
     ) -> None:
-        return self._server.delete_collection(
+        return self._validate()._server.delete_collection(
             name=name,
             tenant=self.tenant,
             database=self.database,
@@ -282,7 +287,7 @@ class Client(SharedSystemClient, ClientAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        return self._server._add(
+        return self._validate()._server._add(
             ids=ids,
             collection_id=collection_id,
             embeddings=embeddings,
@@ -301,7 +306,7 @@ class Client(SharedSystemClient, ClientAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        return self._server._update(
+        return self._validate()._server._update(
             collection_id=collection_id,
             ids=ids,
             embeddings=embeddings,
@@ -320,7 +325,7 @@ class Client(SharedSystemClient, ClientAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        return self._server._upsert(
+        return self._validate()._server._upsert(
             collection_id=collection_id,
             ids=ids,
             embeddings=embeddings,
@@ -331,13 +336,13 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def _count(self, collection_id: UUID) -> int:
-        return self._server._count(
+        return self._validate()._server._count(
             collection_id=collection_id,
         )
 
     @override
     def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
-        return self._server._peek(
+        return self._validate()._server._peek(
             collection_id=collection_id,
             n=n,
         )
@@ -356,7 +361,7 @@ class Client(SharedSystemClient, ClientAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],
     ) -> GetResult:
-        return self._server._get(
+        return self._validate()._server._get(
             collection_id=collection_id,
             ids=ids,
             where=where,
@@ -376,7 +381,7 @@ class Client(SharedSystemClient, ClientAPI):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
     ) -> IDs:
-        return self._server._delete(
+        return self._validate()._server._delete(
             collection_id=collection_id,
             ids=ids,
             where=where,
@@ -393,7 +398,7 @@ class Client(SharedSystemClient, ClientAPI):
         where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],
     ) -> QueryResult:
-        return self._server._query(
+        return self._validate()._server._query(
             collection_id=collection_id,
             query_embeddings=query_embeddings,
             n_results=n_results,
@@ -434,23 +439,81 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
+    def _validate_connectivity(self) -> None:
+        """Validates connectivity to the server. Returns True if successful, False otherwise."""
+        if not isinstance(self._server, FastAPI):
+            return
+        try:
+            self._server.heartbeat()
+        except requests.exceptions.ConnectionError as e:
+            raise errors.GenericError(
+                code=-1, message=f"Chroma server seems inaccessible: {str(e)}"
+            )
+        except requests.exceptions.HTTPError as ex:
+            if ex.response and ex.response.status_code in [504, 502, 503]:
+                # proxy errors, Gateway timeout = 504, Bad Gateway = 502, Service Unavailable = 503
+                raise errors.GenericError(
+                    code=ex.response.status_code,
+                    message=f"Your proxy reports Chroma server might not be accessible: {str(ex)}",
+                )
+            if (
+                ex.response and ex.response.status_code == 429
+            ):  # do we need to handle this?
+                raise errors.GenericError(
+                    code=ex.response.status_code,
+                    message=f"Chroma server is rate limiting your requests: {str(ex)}",
+                )
+            else:
+                raise errors.GenericError(
+                    code=ex.response.status_code if ex.response else -1, message=str(ex)
+                )
+
+    def _validate(self) -> "Client":
+        if self._validated:
+            return self
+        self._validate_connectivity()
+        self._version_compatibility_check()
+        self._validate_tenant_database(tenant=self.tenant, database=self.database)
+        self._validated = True
+        return self
+
+    @staticmethod
+    def _min_server_compatible_version() -> str:
+        # TODO - this should be automatically generated upon release
+        return "0.4.15"
+
+    def _version_compatibility_check(self) -> None:
+        """Checks if the client and server versions are compatible. Raises an error if not."""
+        if isinstance(self._server, FastAPI):
+            server_version = self.get_version()
+            if (
+                compare_versions(server_version, self._min_server_compatible_version())
+                < 0
+            ):
+                from chromadb import __version__ as local_chroma_version
+
+                raise ValueError(
+                    f"It appears you are using newer version of Chroma client (v{local_chroma_version}) "
+                    f"that is not compatible with  Chroma server (v{server_version}). "
+                    f"Please upgrade your server to a compatible version "
+                    f"(min: v{self._min_server_compatible_version()})."
+                )
+
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
-            try:
-                self._admin_client.get_tenant(name=tenant)
-            except Exception as e1:
-                print(type(e1))
-                raise e1
+            self._admin_client.get_tenant(name=tenant)
         except requests.exceptions.ConnectionError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
         except requests.exceptions.HTTPError as ex:
-            if ex.response.status_code in [401, 403]:
+            if ex.response and ex.response.status_code in [401, 403]:
                 raise ValueError(
                     "Authentication error. Have you configured your client to use authentication?"
                 )
-            if ex.response.status_code == 404:
+            if ex.response and ex.response.status_code == 404:
+                from chromadb import __version__ as local_chroma_version
+
                 raise ValueError(
                     f"It appears you are using newer version of Chroma client (v{local_chroma_version}) "
                     f"that is not compatible with  Chroma server (v{self.get_version()}). "

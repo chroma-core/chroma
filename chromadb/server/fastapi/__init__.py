@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from fastapi import HTTPException, status
+from fastapi import status
 from uuid import UUID
 
 import chromadb
@@ -36,7 +36,6 @@ from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
-    InvalidDimensionException,
     InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
@@ -85,7 +84,9 @@ async def catch_exceptions_middleware(
         return e.fastapi_json_response()
     except Exception as e:
         logger.exception(e)
-        return JSONResponse(content={"error": repr(e)}, status_code=500)
+        return JSONResponse(
+            content={"error": str(type(e)), "message": f"e{str(e)}"}, status_code=500
+        )
 
 
 async def check_http_version_middleware(
@@ -486,17 +487,14 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def add(self, collection_id: str, add: AddEmbedding) -> None:
-        try:
-            result = self._api._add(
-                collection_id=_uuid(collection_id),
-                embeddings=add.embeddings,  # type: ignore
-                metadatas=add.metadatas,  # type: ignore
-                documents=add.documents,  # type: ignore
-                uris=add.uris,  # type: ignore
-                ids=add.ids,
-            )
-        except InvalidDimensionException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        result = self._api._add(
+            collection_id=_uuid(collection_id),
+            embeddings=add.embeddings,  # type: ignore
+            metadatas=add.metadatas,  # type: ignore
+            documents=add.documents,  # type: ignore
+            uris=add.uris,  # type: ignore
+            ids=add.ids,
+        )
         return result  # type: ignore
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
