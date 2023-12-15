@@ -1,2 +1,2 @@
 pub(crate) mod config;
-mod sysdb;
+pub(crate) mod sysdb;

@@ -1,58 +1,57 @@
-use futures::{Future, FutureExt, StreamExt};
-use std::{future::IntoFuture, sync::Arc};
+use std::sync::Arc;
 
-use futures::Stream;
-use tokio::{pin, select};
+use tokio::select;
 
 use crate::system::ComponentContext;
 
-use super::{system::System, Component, Handler, StreamHandler};
+use super::{
+    sender::{Sender, Wrapper},
+    system::System,
+    Component,
+};
 
-struct Inner<C, M>
+struct Inner<C>
 where
-    C: Component + Send + Sync + 'static,
-    M: Send + Sync + 'static,
+    C: Component,
 {
-    pub(super) channel_in: tokio::sync::broadcast::Sender<M>,
+    pub(super) sender: Sender<C>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
-    pub(super) system_component: Arc<C>,
     pub(super) system: System,
 }
 
 #[derive(Clone)]
-pub(super) struct ComponentExecutor<H, M>
+/// # Description
+/// The executor holds the context for a components execution and is responsible for
+/// running the components handler methods
+pub(super) struct ComponentExecutor<C>
 where
-    H: Handler<M> + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    C: Component,
 {
-    inner: Arc<Inner<H, M>>,
-    handler: Arc<H>,
+    inner: Arc<Inner<C>>,
+    handler: C,
 }
 
-impl<H, M> ComponentExecutor<H, M>
+impl<C> ComponentExecutor<C>
 where
-    H: Handler<M> + Send + Sync + 'static,
-    M: Clone + Send + Sync + 'static,
+    C: Component + Send + 'static,
 {
     pub(super) fn new(
-        channel_in: tokio::sync::broadcast::Sender<M>,
+        sender: Sender<C>,
         cancellation_token: tokio_util::sync::CancellationToken,
-        system_component: Arc<H>,
-        handler: Arc<H>,
+        handler: C,
         system: System,
     ) -> Self {
         ComponentExecutor {
             inner: Arc::new(Inner {
-                channel_in,
+                sender,
                 cancellation_token,
-                system_component,
                 system,
             }),
             handler,
         }
     }
 
-    pub(super) async fn run(&mut self, mut channel: tokio::sync::broadcast::Receiver<M>) {
+    pub(super) async fn run(&mut self, mut channel: tokio::sync::mpsc::Receiver<Wrapper<C>>) {
         loop {
             select! {
                     _ = self.inner.cancellation_token.cancelled() => {
@@ -60,77 +59,20 @@ where
                     }
                     message = channel.recv() => {
                         match message {
-                            Ok(message) => {
-                                self.handler.handle(message,
+                            Some(mut message) => {
+                                message.handle(&mut self.handler,
                                     &ComponentContext{
                                         system: self.inner.system.clone(),
-                                        sender: self.inner.channel_in.clone(),
+                                        sender: self.inner.sender.clone(),
                                         cancellation_token: self.inner.cancellation_token.clone(),
-                                        system_component: self.inner.system_component.clone(),
+                                        // executor: self,
                                     }
                                 ).await;
                             }
-                            Err(_) => {
+                            None => {
                                 // TODO: Log error
                             }
                         }
-                }
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct StreamComponentExecutor<H, M>
-where
-    H: StreamHandler<M> + Send + Sync + 'static,
-    M: Send + Sync + 'static,
-{
-    inner: Arc<Inner<H, M>>,
-    handler: Arc<H>,
-}
-
-impl<H, M> StreamComponentExecutor<H, M>
-where
-    H: StreamHandler<M> + Send + Sync + 'static,
-    M: Send + Sync + 'static,
-{
-    pub(super) fn new(
-        channel_in: tokio::sync::broadcast::Sender<M>,
-        cancellation_token: tokio_util::sync::CancellationToken,
-        handler: Arc<H>,
-        system: System,
-    ) -> Self {
-        StreamComponentExecutor {
-            inner: Arc::new(Inner {
-                channel_in,
-                cancellation_token,
-                system_component: handler.clone(),
-                system,
-            }),
-            handler,
-        }
-    }
-
-    pub(super) async fn run_from_stream<S>(&mut self, stream: S)
-    where
-        S: Stream<Item = M>,
-    {
-        pin!(stream);
-        loop {
-            select! {
-                _ = self.inner.cancellation_token.cancelled() => {
-                    break;
-                }
-                message = stream.next() => {
-                    match message {
-                        Some(message) => {
-                            self.handler.handle(message, &ComponentContext{system: self.inner.system.clone(), sender: self.inner.channel_in.clone(), cancellation_token: self.inner.cancellation_token.clone(), system_component: self.inner.system_component.clone()}).await;
-                        }
-                        None => {
-                            break;
-                        }
-                    }
                 }
             }
         }
