@@ -1,14 +1,17 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::chroma_proto;
+use crate::config::{Configurable, WorkerConfig};
 use crate::types::{CollectionConversionError, SegmentConversionError};
+use crate::{chroma_proto, worker_entrypoint};
 use crate::{
     chroma_proto::sys_db_client,
     errors::{ChromaError, ErrorCodes},
     types::{Collection, Segment, SegmentScope},
 };
 use thiserror::Error;
+
+use super::config::SysDbConfig;
 
 const DEFAULT_DATBASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -63,16 +66,37 @@ pub(crate) struct GrpcSysDb {
     client: sys_db_client::SysDbClient<tonic::transport::Channel>,
 }
 
-impl GrpcSysDb {
-    pub(crate) async fn new() -> Self {
-        let client = sys_db_client::SysDbClient::connect("http://[::1]:50051").await;
-        match client {
-            Ok(client) => {
-                return GrpcSysDb { client: client };
-            }
-            Err(e) => {
-                // TODO: config error
-                panic!("Failed to connect to sysdb: {}", e);
+#[derive(Error, Debug)]
+pub(crate) enum GrpcSysDbError {
+    #[error("Failed to connect to sysdb")]
+    FailedToConnect(#[from] tonic::transport::Error),
+}
+
+impl ChromaError for GrpcSysDbError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcSysDbError::FailedToConnect(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[async_trait]
+impl Configurable for GrpcSysDb {
+    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &worker_config.sysdb {
+            SysDbConfig::Grpc(my_config) => {
+                let host = &my_config.host;
+                let port = &my_config.port;
+                let connection_string = format!("http://{}:{}", host, port);
+                let client = sys_db_client::SysDbClient::connect(connection_string).await;
+                match client {
+                    Ok(client) => {
+                        return Ok(GrpcSysDb { client: client });
+                    }
+                    Err(e) => {
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
+                    }
+                }
             }
         }
     }
@@ -173,7 +197,6 @@ impl SysDb for GrpcSysDb {
                 },
             })
             .await;
-        println!("get_segments: {:?}", res);
         match res {
             Ok(res) => {
                 let segments = res.into_inner().segments;
@@ -184,11 +207,9 @@ impl SysDb for GrpcSysDb {
 
                 match converted_segments {
                     Ok(segments) => {
-                        println!("returning segments");
                         return Ok(segments);
                     }
                     Err(e) => {
-                        println!("failed to convert segments: {}", e);
                         return Err(GetSegmentsError::ConversionError(e));
                     }
                 }
