@@ -14,6 +14,8 @@ uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 serde = { version = "1.0.193", features = ["derive"] }
 num_cpus = "1.16.0"
+murmur3 = "0.5.2"
+thiserror = "1.0.50"
 
 [build-dependencies]
 tonic-build = "0.10"

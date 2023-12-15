@@ -144,13 +144,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_key=api_key,
                     api_version=api_version,
                     azure_endpoint=api_base,
-                    default_headers=default_headers
+                    default_headers=default_headers,
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key,
-                    base_url=api_base,
-                    default_headers=default_headers
+                    api_key=api_key, base_url=api_base, default_headers=default_headers
                 ).embeddings
         else:
             self._client = openai.Embedding
@@ -211,7 +209,9 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         # Call Cohere Embedding API for each document.
         return [
             embeddings
-            for embeddings in self._client.embed(texts=input, model=self._model_name, input_type="search_document")
+            for embeddings in self._client.embed(
+                texts=input, model=self._model_name, input_type="search_document"
+            )
         ]
 
 
@@ -262,9 +262,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
     """
 
-    def __init__(
-            self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"
-    ):
+    def __init__(self, api_key: str, model_name: str = "jina-embeddings-v2-base-en"):
         """
         Initialize the JinaEmbeddingFunction.
 
@@ -273,9 +271,11 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings. Defaults to "jina-embeddings-v2-base-en".
         """
         self._model_name = model_name
-        self._api_url = 'https://api.jina.ai/v1/embeddings'
+        self._api_url = "https://api.jina.ai/v1/embeddings"
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"})
+        self._session.headers.update(
+            {"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"}
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -552,6 +552,50 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
             self._palm.generate_embeddings(model=self._model_name, text=text)[
                 "embedding"
             ]
+            for text in input
+        ]
+
+
+class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
+    """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a Google API key."""
+
+    """Use RETRIEVAL_DOCUMENT for the task_type for embedding, and RETRIEVAL_QUERY for the task_type for retrieval."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "models/embedding-001",
+        task_type: str = "RETRIEVAL_DOCUMENT",
+    ):
+        if not api_key:
+            raise ValueError("Please provide a Google API key.")
+
+        if not model_name:
+            raise ValueError("Please provide the model name.")
+
+        try:
+            import google.generativeai as genai
+        except ImportError:
+            raise ValueError(
+                "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
+            )
+
+        genai.configure(api_key=api_key)
+        self._genai = genai
+        self._model_name = model_name
+        self._task_type = task_type
+        self._task_title = None
+        if self._task_type is "RETRIEVAL_DOCUMENT":
+            self._task_title = "Embedding of single string"
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [
+            self._genai.embed_content(
+                model=self._model_name,
+                content=text,
+                task_type=self._task_type,
+                title=self._task_title,
+            )["embedding"]
             for text in input
         ]
 

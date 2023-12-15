@@ -263,11 +263,15 @@ class SegmentAPI(ServerAPI):
     @override
     def list_collections(
         self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections(tenant=tenant, database=database)
+        db_collections = self._sysdb.get_collections(
+            limit=limit, offset=offset, tenant=tenant, database=database
+        )
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -280,6 +284,19 @@ class SegmentAPI(ServerAPI):
                 )
             )
         return collections
+
+    @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        collection_count = len(
+            self._sysdb.get_collections(tenant=tenant, database=database)
+        )
+
+        return collection_count
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
