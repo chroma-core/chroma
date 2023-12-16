@@ -148,7 +148,7 @@ mod tests {
                     ingest:
                         queue_size: 100
                     sysdb:
-                        GrpcSysDb:
+                        Grpc:
                             host: "localhost"
                             port: 50051
 
@@ -187,7 +187,7 @@ mod tests {
                     ingest:
                         queue_size: 100
                     sysdb:
-                        GrpcSysDb:
+                        Grpc:
                             host: "localhost"
                             port: 50051
 
@@ -241,7 +241,7 @@ mod tests {
                     ingest:
                         queue_size: 100
                     sysdb:
-                        GrpcSysDb:
+                        Grpc:
                             host: "localhost"
                             port: 50051
 
@@ -276,7 +276,7 @@ mod tests {
                     ingest:
                         queue_size: 100
                     sysdb:
-                        GrpcSysDb:
+                        Grpc:
                             host: "localhost"
                             port: 50051
                 "#,
