@@ -6,7 +6,7 @@ from chromadb.api.types import (
     Embeddings,
 )
 
-from typing import Generic, Type, Union, Callable, Any
+from typing import Type, Union, Callable, Any
 from tenacity import retry, stop_never, wait_exponential_jitter
 
 EmbeddingFuncType = Type[EmbeddingFunction[Any]]
@@ -18,7 +18,7 @@ EmbeddingFunctionCall = Callable[
 # 1st level used to access the class attributes
 # wait parameters are taken from self
 # 2nd level is the retried call
-def retry_call(call: EmbeddingFunctionCall) -> EmbeddingFunctionCall:
+def retry_decorator(call: EmbeddingFunctionCall) -> EmbeddingFunctionCall:
     def decorator(
         cls: EmbeddingFuncType, input: Union[Documents, Images]
     ) -> EmbeddingFunctionCall:
