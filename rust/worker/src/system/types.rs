@@ -111,7 +111,6 @@ impl<C: Component> ComponentHandle<C> {
         M: Send + Debug + 'static,
     {
         let sender = self.sender.sender.clone();
-        println!("Creating sender for component handle");
         Box::new(ReceiverImpl::new(sender))
     }
 }

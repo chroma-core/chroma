@@ -161,19 +161,6 @@ impl CustomResourceMemberlistProvider {
     }
 
     async fn notify_subscribers(&self) -> () {
-        // let subscribers = match self.subscribers.read() {
-        //     Ok(subscribers) => subscribers,
-        //     Err(err) => {
-        //         // TODO: Log error and attempt recovery
-        //         return;
-        //     }
-        // };
-
-        println!(
-            "Notifying subscribers, there are {} subscribers",
-            self.subscribers.len()
-        );
-
         let curr_memberlist = match self.current_memberlist.read() {
             Ok(curr_memberlist) => curr_memberlist.clone(),
             Err(err) => {
@@ -183,7 +170,6 @@ impl CustomResourceMemberlistProvider {
         };
 
         for subscriber in self.subscribers.iter() {
-            println!("Sending memberlist to subscriber");
             let _ = subscriber.send(curr_memberlist.clone()).await;
         }
     }
@@ -249,16 +235,6 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
 #[async_trait]
 impl MemberlistProvider for CustomResourceMemberlistProvider {
     fn subscribe(&mut self, sender: Box<dyn Receiver<Memberlist> + Send>) -> () {
-        // let subscribers_handle = self.subscribers.write();
-        // match subscribers_handle {
-        //     Ok(mut subscribers) => {
-        //         println!("Adding subscriber");
-        //         subscribers.push(sender);
-        //     }
-        //     Err(err) => {
-        //         // TODO: log and handle lock poisoning
-        //     }
-        // }
         self.subscribers.push(sender);
     }
 }
