@@ -42,7 +42,7 @@ pub(crate) struct Ingest {
     pulsar_tenant: String,
     pulsar_namespace: String,
     pulsar: Pulsar<TokioExecutor>,
-    sysdb: Arc<dyn SysDb>,
+    sysdb: Box<dyn SysDb>,
 }
 
 impl Component for Ingest {
@@ -111,7 +111,7 @@ impl Configurable for Ingest {
             pulsar: pulsar,
             pulsar_tenant: worker_config.pulsar_tenant.clone(),
             pulsar_namespace: worker_config.pulsar_namespace.clone(),
-            sysdb: Arc::new(sysdb),
+            sysdb: Box::new(sysdb),
         };
         Ok(ingest)
     }
@@ -260,7 +260,7 @@ impl DeserializeMessage for chroma_proto::SubmitEmbeddingRecord {
 
 struct PulsarIngestTopic {
     consumer: RwLock<Option<Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>>>,
-    sysdb: Arc<dyn SysDb>,
+    sysdb: Box<dyn SysDb>,
 }
 
 impl Debug for PulsarIngestTopic {
@@ -272,7 +272,7 @@ impl Debug for PulsarIngestTopic {
 impl PulsarIngestTopic {
     fn new(
         consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>,
-        sysdb: Arc<dyn SysDb>,
+        sysdb: Box<dyn SysDb>,
     ) -> Self {
         PulsarIngestTopic {
             consumer: RwLock::new(Some(consumer)),
@@ -342,10 +342,10 @@ impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
                 return;
             }
         };
-        // let coll = self
-        //     .sysdb
-        //     .get_collections(Some(embedding_record.collection_id), None, None, None, None)
-        //     .await;
+        let coll = self
+            .sysdb
+            .get_collections(Some(embedding_record.collection_id), None, None, None, None)
+            .await;
     }
 }
 
