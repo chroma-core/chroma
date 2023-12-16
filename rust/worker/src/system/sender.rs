@@ -122,8 +122,6 @@ where
 {
     async fn send(&self, message: M) -> Result<(), ChannelError> {
         let res = self.sender.send(wrap(message)).await;
-        println!("Sending message form receiver wrapper");
-        println!("Result: {:?}", res);
         match res {
             Ok(_) => Ok(()),
             Err(_) => Err(ChannelError::SendError),
