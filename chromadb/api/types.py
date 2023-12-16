@@ -1,15 +1,4 @@
-from typing import (
-    Optional,
-    Sequence,
-    Union,
-    TypeVar,
-    List,
-    Dict,
-    Any,
-    Tuple,
-    cast,
-    Callable,
-)
+from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -27,7 +16,6 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
-from tenacity import retry, wait_exponential_jitter
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -206,9 +194,6 @@ D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
 class EmbeddingFunction(Protocol[D]):
-    def __init__(self):
-        self.wait = wait_exponential_jitter()
-
     def __call__(self, input: D) -> Embeddings:
         ...
 

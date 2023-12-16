@@ -11,18 +11,18 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
+from chromadb.utils.retry_decorator import retry_call
+
 from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import Any, Dict, List, Mapping, Union, cast
+from typing import Any, Dict, List, Mapping, Union, cast, Optional
 import numpy as np
 import numpy.typing as npt
 import importlib
 import inspect
 import sys
-from tenacity import retry
-from typing import Optional
 
 
 try:
@@ -31,19 +31,6 @@ except ImportError:
     is_thin_client = False
 
 logger = logging.getLogger(__name__)
-
-
-def _retry_call(call):
-    def call_wrapper_factory(
-        *args,
-    ):  # this level is used to access the class attributes
-        @retry(wait=args[0].wait)  # wait parameters are taken from self
-        def wrapped_call():  # this is the retried call
-            return call(*args)
-
-        return wrapped_call
-
-    return call_wrapper_factory
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -70,7 +57,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
         super().__init__()
 
-    @_retry_call
+    @retry_call
     def __call__(self, input: Documents) -> Embeddings:
         return self._model.encode(  # type: ignore[
             list(input),
