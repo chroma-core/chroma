@@ -2,9 +2,11 @@ use std::fmt::Debug;
 
 use super::{Component, ComponentContext, Handler};
 use async_trait::async_trait;
+use thiserror::Error;
 
+// Message Wrapper
 #[derive(Debug)]
-pub(super) struct Wrapper<C>
+pub(crate) struct Wrapper<C>
 where
     C: Component,
 {
@@ -48,6 +50,8 @@ where
     }
 }
 
+// Sender
+
 pub(crate) struct Sender<C>
 where
     C: Component + Send + 'static,
@@ -63,15 +67,16 @@ where
         Sender { sender }
     }
 
-    pub(super) async fn send<M>(
-        &self,
-        message: M,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<Wrapper<C>>>
+    pub(crate) async fn send<M>(&self, message: M) -> Result<(), ChannelError>
     where
         C: Component + Handler<M>,
         M: Debug + Send + 'static,
     {
-        return self.sender.send(wrap(message)).await;
+        let res = self.sender.send(wrap(message)).await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(ChannelError::SendError),
+        }
     }
 }
 
@@ -84,4 +89,51 @@ where
             sender: self.sender.clone(),
         }
     }
+}
+
+// Reciever
+
+#[async_trait]
+pub(crate) trait Receiver<M>: Send + Sync {
+    async fn send(&self, message: M) -> Result<(), ChannelError>;
+}
+
+pub(super) struct ReceiverImpl<C>
+where
+    C: Component,
+{
+    pub(super) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+}
+
+impl<C> ReceiverImpl<C>
+where
+    C: Component,
+{
+    pub(super) fn new(sender: tokio::sync::mpsc::Sender<Wrapper<C>>) -> Self {
+        ReceiverImpl { sender }
+    }
+}
+
+#[async_trait]
+impl<C, M> Receiver<M> for ReceiverImpl<C>
+where
+    C: Component + Handler<M>,
+    M: Send + Debug + 'static,
+{
+    async fn send(&self, message: M) -> Result<(), ChannelError> {
+        let res = self.sender.send(wrap(message)).await;
+        println!("Sending message form receiver wrapper");
+        println!("Result: {:?}", res);
+        match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(ChannelError::SendError),
+        }
+    }
+}
+
+// Errors
+#[derive(Error, Debug)]
+pub enum ChannelError {
+    #[error("Failed to send message")]
+    SendError,
 }

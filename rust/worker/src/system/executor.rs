@@ -65,7 +65,6 @@ where
                                         system: self.inner.system.clone(),
                                         sender: self.inner.sender.clone(),
                                         cancellation_token: self.inner.cancellation_token.clone(),
-                                        // executor: self,
                                     }
                                 ).await;
                             }
