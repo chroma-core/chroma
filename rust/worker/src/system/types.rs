@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use futures::Stream;
 use tokio::select;
 
-use super::{executor::ComponentExecutor, sender::Sender, system::System};
+use super::{
+    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
+};
 
 #[derive(Debug, PartialEq)]
 /// The state of a component
@@ -36,7 +38,7 @@ pub(crate) trait Component: Send + Sized + Debug + 'static {
 #[async_trait]
 pub(crate) trait Handler<M>
 where
-    Self: Component + Sync + Sized + 'static,
+    Self: Component + Sized + 'static,
 {
     async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ();
 }
@@ -45,10 +47,9 @@ where
 /// # Methods
 /// - handle: Handle a message from a stream
 /// - register_stream: Register a stream to be processed, this is provided and you do not need to implement it
-#[async_trait]
 pub(crate) trait StreamHandler<M>
 where
-    Self: Component + Sized + Send + Sync + 'static + Handler<M>,
+    Self: Component + 'static + Handler<M>,
     M: Send + Debug + 'static,
 {
     fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>) -> ()
@@ -65,21 +66,24 @@ where
 /// - cancellation_token: A cancellation token that can be used to stop the component
 /// - state: The state of the component
 /// - join_handle: The join handle for the component, used to join on the component
-pub(crate) struct ComponentHandle {
+pub(crate) struct ComponentHandle<C: Component> {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: ComponentState,
     join_handle: Option<tokio::task::JoinHandle<()>>,
+    sender: Sender<C>,
 }
 
-impl ComponentHandle {
+impl<C: Component> ComponentHandle<C> {
     pub(super) fn new(
         cancellation_token: tokio_util::sync::CancellationToken,
         join_handle: tokio::task::JoinHandle<()>,
+        sender: Sender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: ComponentState::Running,
             join_handle: Some(join_handle),
+            sender: sender,
         }
     }
 
@@ -100,12 +104,22 @@ impl ComponentHandle {
     pub(crate) fn state(&self) -> &ComponentState {
         return &self.state;
     }
+
+    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
+    where
+        C: Handler<M>,
+        M: Send + Debug + 'static,
+    {
+        let sender = self.sender.sender.clone();
+        println!("Creating sender for component handle");
+        Box::new(ReceiverImpl::new(sender))
+    }
 }
 
 /// The component context is passed to all Component Handler methods
 pub(crate) struct ComponentContext<C>
 where
-    C: Component + Send + 'static,
+    C: Component + 'static,
 {
     pub(crate) system: System,
     pub(super) sender: Sender<C>,
@@ -160,10 +174,10 @@ mod tests {
         let mut system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
-        let (mut handle, tx) = system.start_component(component);
-        tx.send(1).await.unwrap();
-        tx.send(2).await.unwrap();
-        tx.send(3).await.unwrap();
+        let mut handle = system.start_component(component);
+        handle.sender.send(1).await.unwrap();
+        handle.sender.send(2).await.unwrap();
+        handle.sender.send(3).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         handle.stop();
@@ -172,7 +186,7 @@ mod tests {
         assert_eq!(*handle.state(), ComponentState::Stopped);
         // With the streaming data and the messages we should have 12
         assert_eq!(counter.load(Ordering::SeqCst), 12);
-        let res = tx.send(4).await;
+        let res = handle.sender.send(4).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
     }
