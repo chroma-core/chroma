@@ -1,4 +1,16 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
+import logging
+from typing import (
+    Optional,
+    Sequence,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Callable,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -16,6 +28,8 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+
+logger = logging.getLogger(__name__)
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -196,6 +210,33 @@ D = TypeVar("D", bound=Embeddable, contravariant=True)
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
+
+    def max_token_input_length(self) -> int:
+        return -1
+
+    def _check_large_inputs(
+        self,
+        inputs: Documents,
+        token_count_function: Callable[..., Any] = None,
+    ) -> None:
+        if token_count_function is None:
+            return
+        # Check if all inputs are strings
+        if not all(is_document(i) for i in inputs):
+            return
+
+        for i, t in enumerate(inputs):
+            tokens = token_count_function(t)
+            _too_long = (
+                len(tokens) > self.max_token_input_length()
+                if self.max_token_input_length() > 0
+                else False
+            )
+            if _too_long:
+                logger.warning(
+                    "WARNING: The following document exceed the maximum input size of "
+                    f"{self.max_token_input_length()}: {t[:50]}..."
+                )
 
 
 def validate_embedding_function(
