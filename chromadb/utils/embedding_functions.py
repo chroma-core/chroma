@@ -55,7 +55,6 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             self.models[model_name] = SentenceTransformer(model_name, device=device)
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
-        super().__init__()
 
     @retry_call
     def __call__(self, input: Documents) -> Embeddings:
