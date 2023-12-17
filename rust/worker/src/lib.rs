@@ -4,6 +4,7 @@ mod errors;
 mod index;
 mod ingest;
 mod memberlist;
+mod segment;
 mod sysdb;
 mod system;
 mod types;
@@ -22,6 +23,7 @@ pub async fn worker_entrypoint() {
     // for now we expose the config to pub and inject it into the components
 
     // The two root components are ingest, and the gRPC server
+    let mut system: system::System = system::System::new();
 
     let mut ingest = match ingest::Ingest::try_from_config(&config.worker).await {
         Ok(ingest) => ingest,
@@ -40,11 +42,24 @@ pub async fn worker_entrypoint() {
             }
         };
 
-    let scheduler = ingest::RoundRobinScheduler::new();
+    let mut scheduler = ingest::RoundRobinScheduler::new();
+
+    let mut segment_ingestor_receivers =
+        Vec::with_capacity(config.worker.num_indexing_threads as usize);
+    for _ in 0..config.worker.num_indexing_threads {
+        let segment_ingestor = segment::SegmentIngestor::new();
+        let segment_ingestor_handle = system.start_component(segment_ingestor);
+        let recv = segment_ingestor_handle.receiver();
+        segment_ingestor_receivers.push(recv);
+    }
 
     // Boot the system
-    // memberlist -> ingest -> scheduler
-    let mut system = system::System::new();
+    // memberlist -> ingest -> scheduler -> NUM_THREADS x segment_ingestor
+
+    for recv in segment_ingestor_receivers {
+        scheduler.subscribe(recv);
+    }
+
     let mut scheduler_handler = system.start_component(scheduler);
     ingest.subscribe(scheduler_handler.receiver());
 

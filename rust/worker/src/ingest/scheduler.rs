@@ -6,12 +6,13 @@ use crate::{
     types::EmbeddingRecord,
 };
 use async_trait::async_trait;
+use rand::prelude::SliceRandom;
+use rand::Rng;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{btree_map::Range, HashMap},
     fmt::{Debug, Formatter, Result},
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
 };
-use tokio::{io::Empty, select};
 
 pub(crate) struct RoundRobinScheduler {
     // The segment manager to schedule to, a segment manager is a component
@@ -19,6 +20,7 @@ pub(crate) struct RoundRobinScheduler {
     curr_wake_up: Option<tokio::sync::oneshot::Sender<WakeMessage>>,
     tenant_to_queue: HashMap<String, tokio::sync::mpsc::Sender<Arc<EmbeddingRecord>>>,
     new_tenant_channel: Option<tokio::sync::mpsc::Sender<NewTenantMessage>>,
+    subscribers: Option<Vec<Box<dyn Receiver<Arc<EmbeddingRecord>>>>>,
 }
 
 impl Debug for RoundRobinScheduler {
@@ -33,6 +35,16 @@ impl RoundRobinScheduler {
             curr_wake_up: None,
             tenant_to_queue: HashMap::new(),
             new_tenant_channel: None,
+            subscribers: Some(Vec::new()),
+        }
+    }
+
+    pub(crate) fn subscribe(&mut self, subscriber: Box<dyn Receiver<Arc<EmbeddingRecord>>>) {
+        match self.subscribers {
+            Some(ref mut subscribers) => {
+                subscribers.push(subscriber);
+            }
+            None => {}
         }
     }
 }
@@ -43,11 +55,18 @@ impl Component for RoundRobinScheduler {
     }
 
     fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        println!("Starting scheduler");
         let sleep_sender = ctx.sender.clone();
         let (new_tenant_tx, mut new_tenant_rx) = tokio::sync::mpsc::channel(1000);
         self.new_tenant_channel = Some(new_tenant_tx);
         let cancellation_token = ctx.cancellation_token.clone();
+        let subscribers = self.subscribers.take();
+        let mut subscribers = match subscribers {
+            Some(subscribers) => subscribers,
+            None => {
+                // TODO: log + error
+                return;
+            }
+        };
         tokio::spawn(async move {
             let mut tenant_queues: HashMap<
                 String,
@@ -59,8 +78,21 @@ impl Component for RoundRobinScheduler {
                 for tenant_queue in tenant_queues.values_mut() {
                     match tenant_queue.try_recv() {
                         Ok(message) => {
-                            // TODO: Send the message to the segment manager in a spawned task
-                            // so we can continue polling
+                            // Randomly pick a subscriber to send the message to
+                            // This serves as a crude load balancing between available threads
+                            // Future improvements here could be
+                            // -
+                            let mut subscriber = None;
+                            {
+                                let mut rng = rand::thread_rng();
+                                subscriber = subscribers.choose_mut(&mut rng);
+                            }
+                            match subscriber {
+                                Some(subscriber) => {
+                                    let res = subscriber.send(message).await;
+                                }
+                                None => {}
+                            }
                             did_work = true;
                         }
                         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
@@ -93,7 +125,6 @@ impl Component for RoundRobinScheduler {
                     let (wake_tx, wake_rx) = tokio::sync::oneshot::channel();
                     let sleep_res = sleep_sender.send(SleepMessage { sender: wake_tx }).await;
                     let wake_res = wake_rx.await;
-                    println!("Scheduler awake");
                 }
             }
         });
@@ -143,6 +174,7 @@ impl Handler<(String, Arc<EmbeddingRecord>)> for RoundRobinScheduler {
         // TODO: handle this res
 
         // Check if the scheduler is sleeping, if so wake it up
+        // TODO: we need to init with a wakeup otherwise we are off by one
         if self.curr_wake_up.is_some() {
             // Send a wake up message to the scheduler loop
             let res = self.curr_wake_up.take().unwrap().send(WakeMessage {});

@@ -22,9 +22,7 @@ use crate::{
     types::{EmbeddingRecord, EmbeddingRecordConversionError, SeqId},
 };
 
-use pulsar::{
-    consumer::topic, Consumer, DeserializeMessage, Payload, Pulsar, SubType, TokioExecutor,
-};
+use pulsar::{Consumer, DeserializeMessage, Payload, Pulsar, SubType, TokioExecutor};
 use thiserror::Error;
 
 use super::message_id::PulsarMessageIdWrapper;

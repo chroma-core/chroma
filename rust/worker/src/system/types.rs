@@ -18,6 +18,12 @@ pub(crate) enum ComponentState {
     Stopped,
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum ComponentRuntime {
+    Global,
+    Dedicated,
+}
+
 /// A component is a processor of work that can be run in a system.
 /// It has a queue of messages that it can process.
 /// Others can send messages to the component.
@@ -29,6 +35,9 @@ pub(crate) enum ComponentState {
 /// - on_start: Called when the component is started
 pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
+    fn runtime() -> ComponentRuntime {
+        ComponentRuntime::Global
+    }
     fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
 }
 
@@ -76,13 +85,16 @@ pub(crate) struct ComponentHandle<C: Component> {
 impl<C: Component> ComponentHandle<C> {
     pub(super) fn new(
         cancellation_token: tokio_util::sync::CancellationToken,
-        join_handle: tokio::task::JoinHandle<()>,
+        // Components with a dedicated runtime do not have a join handle
+        // and instead use a one shot channel to signal completion
+        // TODO: implement this
+        join_handle: Option<tokio::task::JoinHandle<()>>,
         sender: Sender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: ComponentState::Running,
-            join_handle: Some(join_handle),
+            join_handle: join_handle,
             sender: sender,
         }
     }
@@ -105,7 +117,7 @@ impl<C: Component> ComponentHandle<C> {
         return &self.state;
     }
 
-    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M>>
+    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,
