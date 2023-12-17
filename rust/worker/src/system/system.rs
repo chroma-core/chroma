@@ -25,13 +25,14 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&mut self, mut component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
         let sender = Sender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
+        println!("Starting component: {:?}", component);
         let _ = component.on_start(&ComponentContext {
             system: self.clone(),
             sender: sender.clone(),

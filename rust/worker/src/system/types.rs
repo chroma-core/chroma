@@ -29,7 +29,7 @@ pub(crate) enum ComponentState {
 /// - on_start: Called when the component is started
 pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
-    fn on_start(&self, ctx: &ComponentContext<Self>) -> () {}
+    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -105,7 +105,7 @@ impl<C: Component> ComponentHandle<C> {
         return &self.state;
     }
 
-    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
+    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M>>
     where
         C: Handler<M>,
         M: Send + Debug + 'static,
@@ -121,8 +121,8 @@ where
     C: Component + 'static,
 {
     pub(crate) system: System,
-    pub(super) sender: Sender<C>,
-    pub(super) cancellation_token: tokio_util::sync::CancellationToken,
+    pub(crate) sender: Sender<C>,
+    pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 #[cfg(test)]
@@ -162,7 +162,7 @@ mod tests {
             return self.queue_size;
         }
 
-        fn on_start(&self, ctx: &ComponentContext<TestComponent>) -> () {
+        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

@@ -18,7 +18,7 @@ use crate::{
     errors::{ChromaError, ErrorCodes},
     memberlist::{CustomResourceMemberlistProvider, Memberlist},
     sysdb::sysdb::{GrpcSysDb, SysDb},
-    system::{Component, ComponentContext, ComponentHandle, Handler, StreamHandler},
+    system::{Component, ComponentContext, ComponentHandle, Handler, Receiver, StreamHandler},
     types::{EmbeddingRecord, EmbeddingRecordConversionError, SeqId},
 };
 
@@ -43,6 +43,7 @@ pub(crate) struct Ingest {
     pulsar_namespace: String,
     pulsar: Pulsar<TokioExecutor>,
     sysdb: Box<dyn SysDb>,
+    scheduler: Option<Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>>,
 }
 
 impl Component for Ingest {
@@ -112,6 +113,7 @@ impl Configurable for Ingest {
             pulsar_tenant: worker_config.pulsar_tenant.clone(),
             pulsar_namespace: worker_config.pulsar_namespace.clone(),
             sysdb: Box::new(sysdb),
+            scheduler: None,
         };
         Ok(ingest)
     }
@@ -129,6 +131,13 @@ impl Ingest {
             topics.push(topic);
         }
         return topics;
+    }
+
+    pub(crate) fn subscribe(
+        &mut self,
+        scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
+    ) {
+        self.scheduler = Some(scheduler);
     }
 }
 
@@ -214,7 +223,7 @@ impl Handler<Memberlist> for Ingest {
 
         // Subscribe to new topics
         for topic in to_add.iter() {
-            println!("Adding topic: {}", topic);
+            println!("HERE Adding topic: {}", topic);
             // Do the subscription and register the stream to this ingest component
             let consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor> = self
                 .pulsar
@@ -225,7 +234,16 @@ impl Handler<Memberlist> for Ingest {
                 .await
                 .unwrap();
 
-            let ingest_topic_component = PulsarIngestTopic::new(consumer, self.sysdb.clone());
+            let scheduler = match &self.scheduler {
+                Some(scheduler) => scheduler.clone(),
+                None => {
+                    // TODO: log error
+                    return;
+                }
+            };
+
+            let ingest_topic_component =
+                PulsarIngestTopic::new(consumer, self.sysdb.clone(), scheduler);
 
             let handle = ctx.system.clone().start_component(ingest_topic_component);
 
@@ -261,6 +279,7 @@ impl DeserializeMessage for chroma_proto::SubmitEmbeddingRecord {
 struct PulsarIngestTopic {
     consumer: RwLock<Option<Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>>>,
     sysdb: Box<dyn SysDb>,
+    scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
 }
 
 impl Debug for PulsarIngestTopic {
@@ -273,10 +292,12 @@ impl PulsarIngestTopic {
     fn new(
         consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>,
         sysdb: Box<dyn SysDb>,
+        scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
     ) -> Self {
         PulsarIngestTopic {
             consumer: RwLock::new(Some(consumer)),
             sysdb: sysdb,
+            scheduler: scheduler,
         }
     }
 }
@@ -286,7 +307,7 @@ impl Component for PulsarIngestTopic {
         1000
     }
 
-    fn on_start(&self, ctx: &ComponentContext<Self>) -> () {
+    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),
             Err(err) => None,
@@ -342,10 +363,37 @@ impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
                 return;
             }
         };
+
+        // TODO: Cache this
         let coll = self
             .sysdb
             .get_collections(Some(embedding_record.collection_id), None, None, None, None)
             .await;
+
+        let coll = match coll {
+            Ok(coll) => coll,
+            Err(err) => {
+                // TODO: Log error and handle. How do we want to deal with this?
+                return;
+            }
+        };
+
+        let coll = match coll.first() {
+            Some(coll) => coll,
+            None => {
+                // TODO: Log error, as we found no collection with this id
+                return;
+            }
+        };
+
+        let tenant_id = &coll.tenant;
+
+        let _ = self
+            .scheduler
+            .send((tenant_id.clone(), embedding_record))
+            .await;
+
+        // TODO: Handle res
     }
 }
 
