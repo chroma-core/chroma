@@ -18,9 +18,9 @@ pub(crate) struct RoundRobinScheduler {
     // The segment manager to schedule to, a segment manager is a component
     // segment_manager: SegmentManager
     curr_wake_up: Option<tokio::sync::oneshot::Sender<WakeMessage>>,
-    tenant_to_queue: HashMap<String, tokio::sync::mpsc::Sender<Arc<EmbeddingRecord>>>,
+    tenant_to_queue: HashMap<String, tokio::sync::mpsc::Sender<Box<EmbeddingRecord>>>,
     new_tenant_channel: Option<tokio::sync::mpsc::Sender<NewTenantMessage>>,
-    subscribers: Option<Vec<Box<dyn Receiver<Arc<EmbeddingRecord>>>>>,
+    subscribers: Option<Vec<Box<dyn Receiver<Box<EmbeddingRecord>>>>>,
 }
 
 impl Debug for RoundRobinScheduler {
@@ -39,7 +39,7 @@ impl RoundRobinScheduler {
         }
     }
 
-    pub(crate) fn subscribe(&mut self, subscriber: Box<dyn Receiver<Arc<EmbeddingRecord>>>) {
+    pub(crate) fn subscribe(&mut self, subscriber: Box<dyn Receiver<Box<EmbeddingRecord>>>) {
         match self.subscribers {
             Some(ref mut subscribers) => {
                 subscribers.push(subscriber);
@@ -70,7 +70,7 @@ impl Component for RoundRobinScheduler {
         tokio::spawn(async move {
             let mut tenant_queues: HashMap<
                 String,
-                tokio::sync::mpsc::Receiver<Arc<EmbeddingRecord>>,
+                tokio::sync::mpsc::Receiver<Box<EmbeddingRecord>>,
             > = HashMap::new();
             loop {
                 // TODO: handle cancellation
@@ -136,10 +136,10 @@ impl Component for RoundRobinScheduler {
 }
 
 #[async_trait]
-impl Handler<(String, Arc<EmbeddingRecord>)> for RoundRobinScheduler {
+impl Handler<(String, Box<EmbeddingRecord>)> for RoundRobinScheduler {
     async fn handle(
         &mut self,
-        message: (String, Arc<EmbeddingRecord>),
+        message: (String, Box<EmbeddingRecord>),
         _ctx: &ComponentContext<Self>,
     ) {
         let (tenant, embedding_record) = message;
@@ -208,5 +208,5 @@ struct SleepMessage {
 
 struct NewTenantMessage {
     tenant: String,
-    channel: tokio::sync::mpsc::Receiver<Arc<EmbeddingRecord>>,
+    channel: tokio::sync::mpsc::Receiver<Box<EmbeddingRecord>>,
 }

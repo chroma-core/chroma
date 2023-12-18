@@ -41,7 +41,7 @@ pub(crate) struct Ingest {
     pulsar_namespace: String,
     pulsar: Pulsar<TokioExecutor>,
     sysdb: Box<dyn SysDb>,
-    scheduler: Option<Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>>,
+    scheduler: Option<Box<dyn Receiver<(String, Box<EmbeddingRecord>)>>>,
 }
 
 impl Component for Ingest {
@@ -133,7 +133,7 @@ impl Ingest {
 
     pub(crate) fn subscribe(
         &mut self,
-        scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
+        scheduler: Box<dyn Receiver<(String, Box<EmbeddingRecord>)>>,
     ) {
         self.scheduler = Some(scheduler);
     }
@@ -277,7 +277,7 @@ impl DeserializeMessage for chroma_proto::SubmitEmbeddingRecord {
 struct PulsarIngestTopic {
     consumer: RwLock<Option<Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>>>,
     sysdb: Box<dyn SysDb>,
-    scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
+    scheduler: Box<dyn Receiver<(String, Box<EmbeddingRecord>)>>,
 }
 
 impl Debug for PulsarIngestTopic {
@@ -290,7 +290,7 @@ impl PulsarIngestTopic {
     fn new(
         consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>,
         sysdb: Box<dyn SysDb>,
-        scheduler: Box<dyn Receiver<(String, Arc<EmbeddingRecord>)>>,
+        scheduler: Box<dyn Receiver<(String, Box<EmbeddingRecord>)>>,
     ) -> Self {
         PulsarIngestTopic {
             consumer: RwLock::new(Some(consumer)),
@@ -327,7 +327,7 @@ impl Component for PulsarIngestTopic {
                         (proto_embedding_record, seq_id).try_into();
                     match embedding_record {
                         Ok(embedding_record) => {
-                            return Some(Arc::new(embedding_record));
+                            return Some(Box::new(embedding_record));
                         }
                         Err(err) => {
                             // TODO: Handle and log
@@ -348,10 +348,10 @@ impl Component for PulsarIngestTopic {
 }
 
 #[async_trait]
-impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
+impl Handler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {
     async fn handle(
         &mut self,
-        message: Option<Arc<EmbeddingRecord>>,
+        message: Option<Box<EmbeddingRecord>>,
         _ctx: &ComponentContext<PulsarIngestTopic>,
     ) -> () {
         // Use the sysdb to tenant id for the embedding record
@@ -396,4 +396,4 @@ impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
 }
 
 #[async_trait]
-impl StreamHandler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {}
+impl StreamHandler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {}

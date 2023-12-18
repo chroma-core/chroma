@@ -4,6 +4,7 @@ use crate::{
     sysdb::sysdb::{GrpcSysDb, SysDb},
 };
 use async_trait::async_trait;
+use k8s_openapi::api::node;
 use parking_lot::{
     MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard, RwLockWriteGuard,
 };
@@ -20,87 +21,92 @@ pub(crate) struct SegmentManager {
     sysdb: Box<dyn SysDb>,
 }
 
+///
 struct Inner {
     vector_segments: RwLock<HashMap<Uuid, Box<DistributedHNSWSegment>>>,
-    collection_to_segment_cache: RwLock<HashMap<Uuid, Vec<Segment>>>,
+    collection_to_segment_cache: RwLock<HashMap<Uuid, Vec<Arc<Segment>>>>,
+    storage_path: Box<std::path::PathBuf>,
 }
 
 impl SegmentManager {
-    pub(crate) fn new(sysdb: Box<dyn SysDb>) -> Self {
+    pub(crate) fn new(sysdb: Box<dyn SysDb>, storage_path: &std::path::Path) -> Self {
         SegmentManager {
             inner: Arc::new(Inner {
                 vector_segments: RwLock::new(HashMap::new()),
                 collection_to_segment_cache: RwLock::new(HashMap::new()),
+                storage_path: Box::new(storage_path.to_owned()),
             }),
             sysdb: sysdb,
         }
     }
 
-    pub(crate) async fn write_record(&mut self, record: Arc<EmbeddingRecord>) {
-        println!(
-            "Manager is writing record for collection: {}",
-            record.collection_id
-        );
+    pub(crate) async fn write_record(&mut self, record: Box<EmbeddingRecord>) {
         let collection_id = record.collection_id;
-        let mut target_segment_id = None;
-
+        let mut target_segment = None;
         // TODO: don't assume 1:1 mapping between collection and segment
         {
             let segments = self.get_segments(&collection_id).await;
-            // For now we assume segment is 1:1 with collection
-            target_segment_id = match segments {
-                Ok(segments) => {
-                    if segments.len() == 0 {
+            target_segment = match segments {
+                Ok(found_segments) => {
+                    if found_segments.len() == 0 {
                         return; // TODO: handle no segment found
                     }
-                    Some(segments[0].id)
+                    Some(found_segments[0].clone())
                 }
-                Err(_) => None,
+                Err(_) => {
+                    // TODO: throw an error and log no segment found
+                    return;
+                }
             };
         }
 
-        if target_segment_id.is_none() {
-            return; // TODO: handle no segment found
-        }
-        // let target_segment_id = target_segment_id.unwrap();
-        println!("Writing record to segment: {}", target_segment_id.unwrap());
+        let target_segment = match target_segment {
+            Some(segment) => segment,
+            None => {
+                // TODO: throw an error and log no segment found
+                return;
+            }
+        };
 
-        // let segment_cache = self.inner.vector_segments.upgradable_read();
-        // match segment_cache.get(&target_segment_id) {
-        //     Some(segment) => {
-        //         segment.write_records(vec![record]);
-        //     }
-        //     None => {
-        //         let mut segment_cache = RwLockUpgradableReadGuard::upgrade(segment_cache);
-        //         // Parse metadata from the segment and hydrate the params for the segment
-        //         let new_segment = Box::new(DistributedHNSWSegment::new(
-        //             "ip".to_string(),
-        //             100000,
-        //             "./test/".to_string(),
-        //             100,
-        //             10000,
-        //         ));
-        //         segment_cache.insert(target_segment_id.clone(), new_segment);
-        //         let segment_cache = RwLockWriteGuard::downgrade(segment_cache);
-        //         let segment = RwLockReadGuard::map(segment_cache, |cache| {
-        //             return cache.get(&target_segment_id).unwrap();
-        //         });
-        //         segment.write_records(vec![record]);
-        //     }
-        // }
+        let segment_cache = self.inner.vector_segments.upgradable_read();
+        match segment_cache.get(&target_segment.id) {
+            Some(segment) => {
+                segment.write_records(vec![record]);
+            }
+            None => {
+                let mut segment_cache = RwLockUpgradableReadGuard::upgrade(segment_cache);
+
+                let new_segment = DistributedHNSWSegment::from_segment(
+                    &target_segment,
+                    &self.inner.storage_path,
+                    // TODO: Don't unwrap - throw an error
+                    record.embedding.as_ref().unwrap().len(),
+                );
+
+                match new_segment {
+                    Ok(new_segment) => {
+                        new_segment.write_records(vec![record]);
+                        segment_cache.insert(target_segment.id, new_segment);
+                    }
+                    Err(e) => {
+                        println!("Failed to create segment error {}", e);
+                        // TODO: fail and log an error - failed to create/init segment
+                    }
+                }
+            }
+        }
     }
 
     async fn get_segments(
         &mut self,
         collection_uuid: &Uuid,
-    ) -> Result<MappedRwLockReadGuard<Vec<Segment>>, &'static str> {
+    ) -> Result<MappedRwLockReadGuard<Vec<Arc<Segment>>>, &'static str> {
         let cache_guard = self.inner.collection_to_segment_cache.read();
         // This lets us return a reference to the segments with the lock. The caller is responsible
         // dropping the lock.
-        let segments =
-            RwLockReadGuard::try_map(cache_guard, |cache: &HashMap<Uuid, Vec<Segment>>| {
-                return cache.get(&collection_uuid);
-            });
+        let segments = RwLockReadGuard::try_map(cache_guard, |cache| {
+            return cache.get(&collection_uuid);
+        });
         match segments {
             Ok(segments) => {
                 return Ok(segments);
@@ -125,7 +131,11 @@ impl SegmentManager {
                 match segments {
                     Ok(segments) => {
                         let mut cache_guard = self.inner.collection_to_segment_cache.write();
-                        cache_guard.insert(collection_uuid.clone(), segments);
+                        let mut arc_segments = Vec::new();
+                        for segment in segments {
+                            arc_segments.push(Arc::new(segment));
+                        }
+                        cache_guard.insert(collection_uuid.clone(), arc_segments);
                         let cache_guard = RwLockWriteGuard::downgrade(cache_guard);
                         let segments = RwLockReadGuard::map(cache_guard, |cache| {
                             // This unwrap is safe because we just inserted the segments into the cache and currently,
@@ -154,6 +164,7 @@ impl Configurable for SegmentManager {
                 return Err(err);
             }
         };
-        Ok(SegmentManager::new(Box::new(sysdb)))
+        let path = std::path::Path::new(&worker_config.segment_manager.storage_path);
+        Ok(SegmentManager::new(Box::new(sysdb), path))
     }
 }

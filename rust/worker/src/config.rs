@@ -106,6 +106,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) ingest: crate::ingest::config::IngestConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
+    pub(crate) segment_manager: crate::segment::config::SegmentManagerConfig,
 }
 
 /// # Description
@@ -151,6 +152,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                    segment_manager:
+                        storage_path: "/tmp"
 
                 "#,
             );
@@ -190,6 +193,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                    segment_manager:
+                        storage_path: "/tmp"
 
                 "#,
             );
@@ -244,6 +249,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                    segment_manager:
+                        storage_path: "/tmp"
 
                 "#,
             );
@@ -279,6 +286,8 @@ mod tests {
                         Grpc:
                             host: "localhost"
                             port: 50051
+                    segment_manager:
+                        storage_path: "/tmp"
                 "#,
             );
             let config = RootConfig::load();

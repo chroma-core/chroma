@@ -31,6 +31,7 @@ schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
 bytes = "1.5.0"
+parking_lot = "0.12.1"
 
 [build-dependencies]
 tonic-build = "0.10"

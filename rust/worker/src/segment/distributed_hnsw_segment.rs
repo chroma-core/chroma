@@ -1,14 +1,16 @@
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use crate::errors::ChromaError;
 use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::types::{EmbeddingRecord, Operation};
+use crate::types::{EmbeddingRecord, Operation, Segment};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
     id: AtomicUsize,
+    user_id_to_id: Arc<RwLock<HashMap<String, usize>>>,
     index_config: IndexConfig,
     hnsw_config: HnswIndexConfig,
 }
@@ -30,22 +32,39 @@ impl DistributedHNSWSegment {
         return Ok(DistributedHNSWSegment {
             index: index,
             id: AtomicUsize::new(0),
+            user_id_to_id: Arc::new(RwLock::new(HashMap::new())),
             index_config: index_config,
             hnsw_config,
         });
     }
 
-    pub(crate) fn write_records(&mut self, records: Vec<Box<EmbeddingRecord>>) {
+    pub(crate) fn from_segment(
+        segment: &Segment,
+        persist_path: &std::path::Path,
+        dimensionality: usize,
+    ) -> Result<Box<DistributedHNSWSegment>, Box<dyn ChromaError>> {
+        let index_config = IndexConfig::from_segment(&segment, dimensionality as i32)?;
+        let hnsw_config = HnswIndexConfig::from_segment(segment, persist_path)?;
+        Ok(Box::new(DistributedHNSWSegment::new(
+            index_config,
+            hnsw_config,
+        )?))
+    }
+
+    pub(crate) fn write_records(&self, records: Vec<Box<EmbeddingRecord>>) {
         for record in records {
             let op = Operation::try_from(record.operation);
             match op {
                 Ok(Operation::Add) => {
                     // TODO: make lock xor lock
-                    match record.embedding {
+                    match &record.embedding {
                         Some(vector) => {
                             let next_id = self.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            println!("Adding item: {}", next_id);
-                            self.index.write().add(next_id, &vector);
+                            self.user_id_to_id
+                                .write()
+                                .insert(record.id.clone(), next_id);
+                            println!("DIS SEGMENT Adding item: {}", next_id);
+                            self.index.read().add(next_id, &vector);
                         }
                         None => {
                             // TODO: log an error

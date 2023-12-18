@@ -40,8 +40,8 @@ impl SegmentIngestor {
 }
 
 #[async_trait]
-impl Handler<Arc<EmbeddingRecord>> for SegmentIngestor {
-    async fn handle(&mut self, message: Arc<EmbeddingRecord>, ctx: &ComponentContext<Self>) {
+impl Handler<Box<EmbeddingRecord>> for SegmentIngestor {
+    async fn handle(&mut self, message: Box<EmbeddingRecord>, ctx: &ComponentContext<Self>) {
         println!("INGEST: ID of embedding is {}", message.id);
         self.segment_manager.write_record(message).await;
     }
