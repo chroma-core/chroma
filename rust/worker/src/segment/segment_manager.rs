@@ -2,9 +2,11 @@ use crate::{
     config::{Configurable, WorkerConfig},
     errors::ChromaError,
     sysdb::sysdb::{GrpcSysDb, SysDb},
+    types::VectorQueryResult,
 };
 use async_trait::async_trait;
 use k8s_openapi::api::node;
+use num_bigint::BigInt;
 use parking_lot::{
     MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard, RwLockWriteGuard,
 };
@@ -13,7 +15,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::distributed_hnsw_segment::DistributedHNSWSegment;
-use crate::types::{EmbeddingRecord, MetadataValue, Segment, SegmentScope};
+use crate::types::{EmbeddingRecord, MetadataValue, Segment, SegmentScope, VectorEmbeddingRecord};
 
 #[derive(Clone)]
 pub(crate) struct SegmentManager {
@@ -93,6 +95,85 @@ impl SegmentManager {
                         // TODO: fail and log an error - failed to create/init segment
                     }
                 }
+            }
+        }
+    }
+
+    pub(crate) async fn get_records(
+        &self,
+        segment_id: &Uuid,
+        ids: Vec<String>,
+    ) -> Result<Vec<Box<VectorEmbeddingRecord>>, &'static str> {
+        // TODO: Load segment if not in cache
+        let segment_cache = self.inner.vector_segments.read();
+        match segment_cache.get(segment_id) {
+            Some(segment) => {
+                return Ok(segment.get_records(ids));
+            }
+            None => {
+                return Err("No segment found");
+            }
+        }
+    }
+
+    pub(crate) async fn query_vector(
+        &self,
+        segment_id: &Uuid,
+        vectors: &[f32],
+        k: usize,
+        include_vector: bool,
+    ) -> Result<Vec<Box<VectorQueryResult>>, &'static str> {
+        let segment_cache = self.inner.vector_segments.read();
+        match segment_cache.get(segment_id) {
+            Some(segment) => {
+                let mut results = Vec::new();
+                let (ids, distances) = segment.query(vectors, k);
+                for (id, distance) in ids.iter().zip(distances.iter()) {
+                    let id: String = id.to_string();
+                    let fetched_vector = match include_vector {
+                        true => Some(segment.get_records(vec![id.clone()])),
+                        false => None,
+                    };
+
+                    let mut target_record = None;
+                    if include_vector {
+                        target_record = match fetched_vector {
+                            Some(fetched_vectors) => {
+                                if fetched_vectors.len() == 0 {
+                                    return Err("No vector found");
+                                }
+                                let mut target_vec = None;
+                                for vec in fetched_vectors.into_iter() {
+                                    if vec.id == id {
+                                        target_vec = Some(vec);
+                                        break;
+                                    }
+                                }
+                                target_vec
+                            }
+                            None => {
+                                return Err("No vector found");
+                            }
+                        };
+                    }
+
+                    let ret_vec = match target_record {
+                        Some(target_record) => Some(target_record.vector),
+                        None => None,
+                    };
+
+                    let result = Box::new(VectorQueryResult {
+                        id,
+                        seq_id: BigInt::from(0),
+                        distance: *distance,
+                        vector: ret_vec,
+                    });
+                    results.push(result);
+                }
+                return Ok(results);
+            }
+            None => {
+                return Err("No segment found");
             }
         }
     }

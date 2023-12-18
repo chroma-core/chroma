@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::errors::ChromaError;
 
-const DEFAULT_CONFIG_PATH: &str = "chroma_config.yaml";
+const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 const ENV_PREFIX: &str = "CHROMA_";
 
 #[derive(Deserialize)]

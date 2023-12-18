@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -5,7 +6,7 @@ use std::sync::Arc;
 
 use crate::errors::ChromaError;
 use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::types::{EmbeddingRecord, Operation, Segment};
+use crate::types::{EmbeddingRecord, Operation, Segment, VectorEmbeddingRecord};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
@@ -80,5 +81,41 @@ impl DistributedHNSWSegment {
                 }
             }
         }
+    }
+
+    pub(crate) fn get_records(&self, ids: Vec<String>) -> Vec<Box<VectorEmbeddingRecord>> {
+        let mut records = Vec::new();
+        let user_id_to_id = self.user_id_to_id.read();
+        let index = self.index.read();
+        for id in ids {
+            let id = match user_id_to_id.get(&id) {
+                Some(id) => id,
+                None => {
+                    // TODO: Error
+                    return records;
+                }
+            };
+            let vector = index.get(*id);
+            match vector {
+                Some(vector) => {
+                    let record = VectorEmbeddingRecord {
+                        id: id.to_string(),
+                        seq_id: BigInt::from(0),
+                        vector,
+                    };
+                    records.push(Box::new(record));
+                }
+                None => {
+                    // TODO: error
+                }
+            }
+        }
+        return records;
+    }
+
+    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+        let index = self.index.read();
+        let (ids, distances) = index.query(vector, k);
+        return (ids, distances);
     }
 }

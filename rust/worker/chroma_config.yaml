@@ -5,7 +5,7 @@
 
 worker:
     my_ip: "10.244.0.90"
-    my_port: 50051
+    my_port: 50052
     num_indexing_threads: 4
     pulsar_url: "pulsar://127.0.0.1:6650"
     pulsar_tenant: "public"
