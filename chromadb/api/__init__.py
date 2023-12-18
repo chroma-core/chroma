@@ -98,6 +98,7 @@ class BaseAPI(ABC):
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
             get_or_create: If True, return the existing collection if it exists.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The newly created collection.
@@ -129,9 +130,11 @@ class BaseAPI(ABC):
     ) -> Collection:
         """Get a collection with the given name.
         Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The collection
@@ -165,6 +168,7 @@ class BaseAPI(ABC):
             provided and not None. If the collection does not exist, the
             new collection will be created with the provided metadata.
             embedding_function: Optional function to use to embed documents
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             The collection

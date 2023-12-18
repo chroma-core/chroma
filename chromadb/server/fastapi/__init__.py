@@ -7,8 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
-
-import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
@@ -30,7 +28,6 @@ from chromadb.auth.fastapi_utils import (
     attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.server
 import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
