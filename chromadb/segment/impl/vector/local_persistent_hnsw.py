@@ -7,7 +7,7 @@ from overrides import override
 import pickle
 from typing import Dict, List, Optional, Sequence, Set, cast
 
-from tenacity import RetryCallState, retry, stop_after_attempt
+from tenacity import retry, stop_after_attempt, wait_random
 from chromadb.config import System
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
@@ -41,45 +41,7 @@ from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 logger = logging.getLogger(__name__)
 
 
-def move_to_recycle_bin(retry_state: RetryCallState) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    class SHFILEOPSTRUCT(ctypes.Structure):
-        _fields_ = [
-            ("hwnd", wintypes.HWND),
-            ("wFunc", ctypes.c_uint),
-            ("pFrom", ctypes.c_wchar_p),
-            ("pTo", ctypes.c_wchar_p),
-            ("fFlags", wintypes.UINT),
-            ("fAnyOperationsAborted", ctypes.c_bool),
-            ("hNameMappings", ctypes.c_void_p),
-            ("lpszProgressTitle", ctypes.c_wchar_p),
-        ]
-
-    FO_DELETE = 0x0003
-    FOF_ALLOWUNDO = 0x0040
-    FOF_NOCONFIRMATION = 0x0010
-    FOF_SILENT = 0x0004
-
-    def move_to_bin(file_path: str) -> None:
-        file_op = SHFILEOPSTRUCT(
-            hwnd=None,
-            wFunc=FO_DELETE,
-            pFrom=file_path + "\0",  # Double-null terminated for multiple files
-            pTo=None,
-            fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT,
-            fAnyOperationsAborted=False,
-            hNameMappings=None,
-            lpszProgressTitle=None,
-        )
-
-        ctypes.windll.shell32.SHFileOperationW(ctypes.byref(file_op))
-
-    move_to_bin(retry_state.args[0])
-
-
-@retry(stop=stop_after_attempt(7), retry_error_callback=move_to_recycle_bin)
+@retry(stop=stop_after_attempt(3), reraise=True, wait=wait_random(min=2, max=5))
 def remove_index_dir_win(data_path: str) -> None:
     shutil.rmtree(data_path, ignore_errors=False)
 
@@ -174,6 +136,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+    @trace_method("PersistentLocalHnswSegment.stop", OpenTelemetryGranularity.ALL)
+    @override
+    def stop(self) -> None:
+        super().stop()
+        # TODO do we need to flush brute force index here too?
+        self.close_persistent_index()
 
     @staticmethod
     @override
@@ -499,7 +468,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def offline_delete(cls, segment: Segment, persistent_dir: str) -> None:
         data_path = os.path.join(persistent_dir, str(segment["id"]))
-        shutil.rmtree(data_path)
+        if platform.system() == "Windows":
+            remove_index_dir_win(data_path)
+        else:
+            shutil.rmtree(data_path, ignore_errors=True)
 
     @staticmethod
     def get_file_handle_count() -> int:
