@@ -44,10 +44,18 @@ pub async fn worker_entrypoint() {
 
     let mut scheduler = ingest::RoundRobinScheduler::new();
 
+    let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
+        Ok(segment_manager) => segment_manager,
+        Err(err) => {
+            println!("Failed to create segment manager component: {:?}", err);
+            return;
+        }
+    };
+
     let mut segment_ingestor_receivers =
         Vec::with_capacity(config.worker.num_indexing_threads as usize);
     for _ in 0..config.worker.num_indexing_threads {
-        let segment_ingestor = segment::SegmentIngestor::new();
+        let segment_ingestor = segment::SegmentIngestor::new(segment_manager.clone());
         let segment_ingestor_handle = system.start_component(segment_ingestor);
         let recv = segment_ingestor_handle.receiver();
         segment_ingestor_receivers.push(recv);

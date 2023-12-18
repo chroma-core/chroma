@@ -1,3 +1,6 @@
+mod distributed_hnsw_segment;
 mod segment_ingestor;
+mod segment_manager;
 
-pub use segment_ingestor::*;
+pub(crate) use segment_ingestor::*;
+pub(crate) use segment_manager::*;

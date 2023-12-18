@@ -81,7 +81,11 @@ impl Component for RoundRobinScheduler {
                             // Randomly pick a subscriber to send the message to
                             // This serves as a crude load balancing between available threads
                             // Future improvements here could be
-                            // -
+                            // - Use a work stealing scheduler
+                            // - Use rayon
+                            // - We need to enforce partial order over writes to a given key
+                            //   so we need a mechanism to ensure that all writes to a given key
+                            //   occur in order
                             let mut subscriber = None;
                             {
                                 let mut rng = rand::thread_rng();

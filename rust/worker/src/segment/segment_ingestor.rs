@@ -10,7 +10,11 @@ use crate::{
     types::EmbeddingRecord,
 };
 
-pub(crate) struct SegmentIngestor {}
+use super::segment_manager::{self, SegmentManager};
+
+pub(crate) struct SegmentIngestor {
+    segment_manager: SegmentManager,
+}
 
 impl Component for SegmentIngestor {
     fn queue_size(&self) -> usize {
@@ -28,8 +32,10 @@ impl Debug for SegmentIngestor {
 }
 
 impl SegmentIngestor {
-    pub(crate) fn new() -> Self {
-        SegmentIngestor {}
+    pub(crate) fn new(segment_manager: SegmentManager) -> Self {
+        SegmentIngestor {
+            segment_manager: segment_manager,
+        }
     }
 }
 
@@ -37,8 +43,6 @@ impl SegmentIngestor {
 impl Handler<Arc<EmbeddingRecord>> for SegmentIngestor {
     async fn handle(&mut self, message: Arc<EmbeddingRecord>, ctx: &ComponentContext<Self>) {
         println!("INGEST: ID of embedding is {}", message.id);
-        // let segment_manager = ctx.system.get_segment_manager();
-        // let segment = segment_manager.get_segment(&tenant);
-        // segment.ingest(embedding);
+        self.segment_manager.write_record(message).await;
     }
 }
