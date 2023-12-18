@@ -3,6 +3,7 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"reflect"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -10,7 +11,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -24,18 +25,19 @@ type DBConfig struct {
 	Username     string
 	Password     string
 	Address      string
+	Port         int
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
 }
 
 func Connect(cfg DBConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&tls=true&interpolateParams=true",
-		cfg.Username, cfg.Password, cfg.Address, cfg.DBName)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d",
+		cfg.Address, url.QueryEscape(cfg.Username), url.QueryEscape(cfg.Password), cfg.DBName, cfg.Port)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:          ormLogger,
 		CreateBatchSize: 100,
 	})

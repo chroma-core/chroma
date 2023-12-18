@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	ariga.io/atlas-provider-gorm v0.1.1
+	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
 	github.com/google/uuid v1.3.1
 	github.com/pingcap/log v1.1.0
 	github.com/rs/zerolog v1.31.0
@@ -13,12 +14,41 @@ require (
 	go.uber.org/zap v1.26.0
 	google.golang.org/grpc v1.58.3
 	google.golang.org/protobuf v1.31.0
-	gorm.io/driver/mysql v1.5.2
 	gorm.io/driver/sqlite v1.5.4
 	gorm.io/gorm v1.25.5
 	k8s.io/apimachinery v0.28.3
 	k8s.io/client-go v0.28.3
 	pgregory.net/rapid v1.1.0
+)
+
+require (
+	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
+	github.com/99designs/keyring v1.2.1 // indirect
+	github.com/AthenZ/athenz v1.10.39 // indirect
+	github.com/DataDog/zstd v1.5.0 // indirect
+	github.com/ardielle/ardielle-go v1.5.2 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bits-and-blooms/bitset v1.4.0 // indirect
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/danieljoos/wincred v1.1.2 // indirect
+	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
+	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
+	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
+	github.com/golang/snappy v0.0.1 // indirect
+	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/klauspost/compress v1.14.4 // indirect
+	github.com/linkedin/goavro/v2 v2.9.8 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/mtibben/percent v0.2.1 // indirect
+	github.com/pierrec/lz4 v2.0.5+incompatible // indirect
+	github.com/prometheus/client_golang v1.11.1 // indirect
+	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/common v0.26.0 // indirect
+	github.com/prometheus/procfs v0.6.0 // indirect
+	github.com/sirupsen/logrus v1.8.1 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
+	golang.org/x/mod v0.11.0 // indirect
+	gorm.io/driver/mysql v1.5.2 // indirect
 )
 
 require (
@@ -71,7 +101,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/postgres v1.5.2 // indirect
+	gorm.io/driver/postgres v1.5.2
 	k8s.io/api v0.28.3
 	k8s.io/klog/v2 v2.100.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20230717233707-2695361300d9 // indirect

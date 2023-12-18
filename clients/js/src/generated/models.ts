@@ -20,6 +20,7 @@ export namespace Api {
 		embeddings?: Api.AddEmbedding.Embedding[];
 		metadatas?: Api.AddEmbedding.Metadata[];
 		documents?: string[];
+		uris?: string[];
 		ids: string[];
 	}
 
@@ -30,10 +31,10 @@ export namespace Api {
 	export namespace AddEmbedding {
 		export interface Embedding {
 		}
-
+	
 		export interface Metadata {
 		}
-
+	
 	}
 
 	export interface ADelete200Response {
@@ -45,12 +46,15 @@ export namespace Api {
 	export interface Count200Response {
 	}
 
+	export interface CountCollections200Response {
+	}
+
 	export interface CreateCollection {
 		name: string;
 		metadata?: Api.CreateCollection.Metadata;
 		'get_or_create'?: boolean;
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace CreateCollection
@@ -58,10 +62,24 @@ export namespace Api {
 	export namespace CreateCollection {
 		export interface Metadata {
 		}
-
+	
 	}
 
 	export interface CreateCollection200Response {
+	}
+
+	export interface CreateDatabase {
+		name: string;
+	}
+
+	export interface CreateDatabase200Response {
+	}
+
+	export interface CreateTenant {
+		name: string;
+	}
+
+	export interface CreateTenant200Response {
 	}
 
 	export interface DeleteCollection200Response {
@@ -72,7 +90,7 @@ export namespace Api {
 		where?: Api.DeleteEmbedding.Where;
 		'where_document'?: Api.DeleteEmbedding.WhereDocument;
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace DeleteEmbedding
@@ -80,13 +98,16 @@ export namespace Api {
 	export namespace DeleteEmbedding {
 		export interface Where {
 		}
-
+	
 		export interface WhereDocument {
 		}
-
+	
 	}
 
 	export interface GetCollection200Response {
+	}
+
+	export interface GetDatabase200Response {
 	}
 
 	export interface GetEmbedding {
@@ -104,9 +125,9 @@ export namespace Api {
 		 * @memberof GetEmbedding
 		 */
 		offset?: number;
-		include?: (Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4)[];
+		include?: (Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4 | Api.GetEmbedding.Include.EnumValueEnum5 | Api.GetEmbedding.Include.EnumValueEnum6)[];
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace GetEmbedding
@@ -114,12 +135,12 @@ export namespace Api {
 	export namespace GetEmbedding {
 		export interface Where {
 		}
-
+	
 		export interface WhereDocument {
 		}
-
-		export type Include = Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4;
-
+	
+		export type Include = Api.GetEmbedding.Include.EnumValueEnum | Api.GetEmbedding.Include.EnumValueEnum2 | Api.GetEmbedding.Include.EnumValueEnum3 | Api.GetEmbedding.Include.EnumValueEnum4 | Api.GetEmbedding.Include.EnumValueEnum5 | Api.GetEmbedding.Include.EnumValueEnum6;
+		
 		/**
 		 * @export
 		 * @namespace Include
@@ -128,24 +149,35 @@ export namespace Api {
 			export enum EnumValueEnum {
 				Documents = 'documents'
 			}
-
+		
 			export enum EnumValueEnum2 {
 				Embeddings = 'embeddings'
 			}
-
+		
 			export enum EnumValueEnum3 {
 				Metadatas = 'metadatas'
 			}
-
+		
 			export enum EnumValueEnum4 {
 				Distances = 'distances'
 			}
-
+		
+			export enum EnumValueEnum5 {
+				Uris = 'uris'
+			}
+		
+			export enum EnumValueEnum6 {
+				Data = 'data'
+			}
+		
 		}
-
+	
 	}
 
 	export interface GetNearestNeighbors200Response {
+	}
+
+	export interface GetTenant200Response {
 	}
 
 	export interface HTTPValidationError {
@@ -153,6 +185,9 @@ export namespace Api {
 	}
 
 	export interface ListCollections200Response {
+	}
+
+	export interface PreFlightChecks200Response {
 	}
 
 	export interface QueryEmbedding {
@@ -164,9 +199,9 @@ export namespace Api {
 		 * @memberof QueryEmbedding
 		 */
 		'n_results'?: number;
-		include?: (Api.QueryEmbedding.Include.EnumValueEnum | Api.QueryEmbedding.Include.EnumValueEnum2 | Api.QueryEmbedding.Include.EnumValueEnum3 | Api.QueryEmbedding.Include.EnumValueEnum4)[];
+		include?: (Api.QueryEmbedding.Include.EnumValueEnum | Api.QueryEmbedding.Include.EnumValueEnum2 | Api.QueryEmbedding.Include.EnumValueEnum3 | Api.QueryEmbedding.Include.EnumValueEnum4 | Api.QueryEmbedding.Include.EnumValueEnum5 | Api.QueryEmbedding.Include.EnumValueEnum6)[];
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace QueryEmbedding
@@ -174,15 +209,15 @@ export namespace Api {
 	export namespace QueryEmbedding {
 		export interface Where {
 		}
-
+	
 		export interface WhereDocument {
 		}
-
+	
 		export interface QueryEmbedding2 {
 		}
-
-		export type Include = Api.QueryEmbedding.Include.EnumValueEnum | Api.QueryEmbedding.Include.EnumValueEnum2 | Api.QueryEmbedding.Include.EnumValueEnum3 | Api.QueryEmbedding.Include.EnumValueEnum4;
-
+	
+		export type Include = Api.QueryEmbedding.Include.EnumValueEnum | Api.QueryEmbedding.Include.EnumValueEnum2 | Api.QueryEmbedding.Include.EnumValueEnum3 | Api.QueryEmbedding.Include.EnumValueEnum4 | Api.QueryEmbedding.Include.EnumValueEnum5 | Api.QueryEmbedding.Include.EnumValueEnum6;
+		
 		/**
 		 * @export
 		 * @namespace Include
@@ -191,21 +226,29 @@ export namespace Api {
 			export enum EnumValueEnum {
 				Documents = 'documents'
 			}
-
+		
 			export enum EnumValueEnum2 {
 				Embeddings = 'embeddings'
 			}
-
+		
 			export enum EnumValueEnum3 {
 				Metadatas = 'metadatas'
 			}
-
+		
 			export enum EnumValueEnum4 {
 				Distances = 'distances'
 			}
-
+		
+			export enum EnumValueEnum5 {
+				Uris = 'uris'
+			}
+		
+			export enum EnumValueEnum6 {
+				Data = 'data'
+			}
+		
 		}
-
+	
 	}
 
 	export interface Update200Response {
@@ -215,7 +258,7 @@ export namespace Api {
 		'new_name'?: string;
 		'new_metadata'?: Api.UpdateCollection.NewMetadata;
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace UpdateCollection
@@ -223,7 +266,7 @@ export namespace Api {
 	export namespace UpdateCollection {
 		export interface NewMetadata {
 		}
-
+	
 	}
 
 	export interface UpdateCollection200Response {
@@ -233,9 +276,10 @@ export namespace Api {
 		embeddings?: Api.UpdateEmbedding.Embedding[];
 		metadatas?: Api.UpdateEmbedding.Metadata[];
 		documents?: string[];
+		uris?: string[];
 		ids: string[];
 	}
-
+	
 	/**
 	 * @export
 	 * @namespace UpdateEmbedding
@@ -243,10 +287,10 @@ export namespace Api {
 	export namespace UpdateEmbedding {
 		export interface Embedding {
 		}
-
+	
 		export interface Metadata {
 		}
-
+	
 	}
 
 	export interface Upsert200Response {

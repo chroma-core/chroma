@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from typing import Dict, Type
 from overrides import overrides, EnforceOverrides
+from fastapi.responses import JSONResponse
 
 
 class ChromaError(Exception, EnforceOverrides):
@@ -13,9 +14,15 @@ class ChromaError(Exception, EnforceOverrides):
 
     @classmethod
     @abstractmethod
-    def name(self) -> str:
+    def name(cls) -> str:
         """Return the error name"""
         pass
+
+    def fastapi_json_response(self) -> JSONResponse:
+        return JSONResponse(
+            content={"error": self.name(), "message": self.message()},
+            status_code=self.code(),
+        )
 
 
 class InvalidDimensionException(ChromaError):
@@ -64,6 +71,17 @@ class InvalidHTTPVersion(ChromaError):
         return "InvalidHTTPVersion"
 
 
+class AuthorizationError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 401
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "AuthorizationError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
@@ -71,4 +89,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "DuplicateID": DuplicateIDError,
     "InvalidUUID": InvalidUUIDError,
     "InvalidHTTPVersion": InvalidHTTPVersion,
+    "AuthorizationError": AuthorizationError,
 }

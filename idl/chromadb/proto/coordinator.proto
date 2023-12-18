@@ -120,6 +120,13 @@ message UpdateCollectionRequest {
   }
 }
 
+message Notification {
+  int64 id = 1;
+  string collection_id = 2;
+  string type = 3;
+  string status = 4;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (ChromaResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}

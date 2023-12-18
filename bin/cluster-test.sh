@@ -34,7 +34,7 @@ kubectl apply -f k8s/cr
 kubectl apply -f k8s/test
 
 # Wait for the pods in the chroma namespace to be ready
-kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=300s
+kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=400s
 
 # Run mini kube tunnel in the background to expose the service
 minikube tunnel -c true -p chroma-test &
