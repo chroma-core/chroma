@@ -41,7 +41,7 @@ Generate SSH key to use with your chroma instance (so you can login to the EC2):
 > Note: This is optional. You can use your own existing SSH key if you prefer.
 
 ```bash
-ssh-keygen -t RSA -b 4096 -C "Chroma AWS Key" -N "" -f ./chroma-aws && chmod 400 ./chroma-aws
+ssh-keygen -t RSA -b 4096 -C "Chroma SSH Keypair" -N "" -f ./chroma_id_rsa && chmod 400 ./chroma_id_rsa
 ```
 
 Set up your Terraform variables and deploy your instance:
@@ -52,9 +52,9 @@ export TF_VAR_AWS_ACCESS_KEY=<AWS_ACCESS_KEY>
 #AWS secret access key
 export TF_VAR_AWS_SECRET_ACCESS_KEY=<AWS_SECRET_ACCESS_KEY>
 #path to the public key you generated above (or can be different if you want to use your own key)
-export TF_ssh_public_key="./chroma-aws.pub"
+export TF_ssh_public_key="./chroma_id_rsa.pub"
 #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
-export TF_ssh_private_key="./chroma-aws"
+export TF_ssh_private_key="./chroma_id_rsa"
 #set the chroma release to deploy
 export TF_VAR_chroma_release=0.4.12
 # AWS region to deploy the chroma instance to
@@ -148,7 +148,7 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 To SSH to your instance:
 
 ```bash
-ssh -i ./chroma-aws ubuntu@$instance_public_ip
+ssh -i ./chroma_id_rsa ubuntu@$instance_public_ip
 ```
 
 ### 5. Destroy your Chroma instance

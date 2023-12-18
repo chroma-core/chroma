@@ -5,7 +5,7 @@ variable "project_id" {
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.9"
+  default     = "0.4.20"
 }
 
 variable "zone" {
