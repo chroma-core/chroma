@@ -19,6 +19,7 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    CollectionInfo,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -331,6 +332,12 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def _count(self, collection_id: UUID) -> int:
         return self._server._count(
+            collection_id=collection_id,
+        )
+
+    @override
+    def _describe(self, collection_id: UUID) -> CollectionInfo:
+        return self._server._describe(
             collection_id=collection_id,
         )
 

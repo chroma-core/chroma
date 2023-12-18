@@ -10,7 +10,7 @@ from uuid import UUID
 
 import chromadb
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import GetResult, QueryResult, CollectionInfo
 from chromadb.auth import (
     AuthzDynamicParams,
     AuthzResourceActions,
@@ -256,6 +256,12 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/count",
             self.count,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
+            "/api/v1/collections/{collection_id}/describe",
+            self.describe,
             methods=["GET"],
             response_model=None,
         )
@@ -586,6 +592,18 @@ class FastAPI(chromadb.server.Server):
     )
     def count(self, collection_id: str) -> int:
         return self._api._count(_uuid(collection_id))
+
+    @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.DESCRIBE,
+        resource=DynamicAuthzResource(
+            id=AuthzDynamicParams.from_function_kwargs(arg_name="collection_id"),
+            type=AuthzResourceTypes.COLLECTION,
+            attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
+        ),
+    )
+    def describe(self, collection_id: str) -> CollectionInfo:
+        return self._api._describe(_uuid(collection_id))
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.OPERATION)
     @authz_context(

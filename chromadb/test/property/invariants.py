@@ -65,6 +65,19 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     assert count == len(normalized_record_set["ids"])
 
 
+def dimensions(collection: Collection, record_set: RecordSet) -> None:
+    """The given collection dimensions is equal to the number of dimensions"""
+    dimensions = collection.dimensions()
+    normalized_record_set = wrap_all(record_set)
+    if (
+        normalized_record_set["embeddings"]
+        and len(normalized_record_set["embeddings"]) > 0
+    ):
+        assert dimensions == len(normalized_record_set["embeddings"][0])
+    else:
+        assert dimensions == -1
+
+
 def _field_matches(
     collection: Collection,
     normalized_record_set: NormalizedRecordSet,

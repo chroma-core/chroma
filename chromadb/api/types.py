@@ -78,6 +78,11 @@ def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
 CollectionMetadata = Dict[str, Any]
 UpdateCollectionMetadata = UpdateMetadata
 
+
+class CollectionInfo(TypedDict):
+    dimensionality: int
+
+
 # Documents
 Document = str
 Documents = List[Document]

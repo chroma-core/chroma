@@ -21,6 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    CollectionInfo,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -300,6 +301,19 @@ class BaseAPI(ABC):
 
         Returns:
             int: The number of embeddings in the collection
+
+        """
+        pass
+
+    @abstractmethod
+    def _describe(self, collection_id: UUID) -> CollectionInfo:
+        """Returns collection information specified by UUID.
+
+        Args:
+            collection_id: The UUID of the collection
+
+        Returns:
+            CollectionInfo: The collection detailed information
 
         """
         pass
