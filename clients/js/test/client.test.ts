@@ -191,6 +191,5 @@ test('wrong code returns an error', async () => {
     // @ts-ignore - supposed to fail
     const results = await collection.get({ where: { "test": { "$contains": "hello" } } });
     expect(results.error).toBeDefined()
-    console.log(results)
     expect(results.error).toContain("ValueError")
 })
