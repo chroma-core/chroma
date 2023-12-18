@@ -14,7 +14,7 @@ from chromadb.types import Tenant, Database
 
 @pytest.fixture(autouse=True)
 def reset_client_settings() -> None:
-    SharedSystemClient.clear_system_cache()
+    SharedSystemClient._identifer_to_system = {}
 
 
 def test_incompatible_server_version(caplog: pytest.LogCaptureFixture) -> None:
