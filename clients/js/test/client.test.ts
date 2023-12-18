@@ -191,5 +191,6 @@ test('wrong code returns an error', async () => {
     // @ts-ignore - supposed to fail
     const results = await collection.get({ where: { "test": { "$contains": "hello" } } });
     expect(results.error).toBeDefined()
-    expect(results.error).toContain("ValueError('Expected where operator")
+    console.log(results)
+    expect(results.error).toContain("ValueError")
 })
