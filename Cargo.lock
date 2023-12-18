@@ -3771,6 +3771,7 @@ dependencies = [
  "murmur3",
  "num-bigint",
  "num_cpus",
+ "parking_lot",
  "prost 0.12.3",
  "prost-types 0.12.3",
  "pulsar",
