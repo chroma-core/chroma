@@ -70,6 +70,8 @@ impl SegmentManager {
             }
         };
 
+        println!("Writing to segment id {}", target_segment.id);
+
         let segment_cache = self.inner.vector_segments.upgradable_read();
         match segment_cache.get(&target_segment.id) {
             Some(segment) => {

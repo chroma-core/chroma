@@ -32,31 +32,17 @@ spec:
     spec:
       containers:
         - name: segment-server
-          image: server
+          image: worker
           imagePullPolicy: IfNotPresent
-          command: ["python", "-m", "chromadb.segment.impl.distributed.server"]
+          command: ["cargo", "run"]
           ports:
             - containerPort: 50051
           volumeMounts:
             - name: chroma
               mountPath: /index_data
           env:
-            - name: IS_PERSISTENT
-              value: "TRUE"
-            - name: CHROMA_PRODUCER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarProducer"
-            - name: CHROMA_CONSUMER_IMPL
-              value: "chromadb.ingest.impl.pulsar.PulsarConsumer"
-            - name: PULSAR_BROKER_URL
-              value: "pulsar.chroma"
-            - name: PULSAR_BROKER_PORT
-              value: "6650"
-            - name: PULSAR_ADMIN_PORT
-              value: "8080"
-            - name: CHROMA_SERVER_GRPC_PORT
-              value: "50051"
-            - name: CHROMA_COLLECTION_ASSIGNMENT_POLICY_IMPL
-              value: "chromadb.ingest.impl.simple_policy.RendezvousHashingAssignmentPolicy"
+            - name: pulsar_url
+              value: "pulsar.chroma:6650"
             - name: MY_POD_IP
               valueFrom:
                 fieldRef:
