@@ -6,6 +6,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore"
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -17,6 +18,7 @@ type MemoryCatalog struct {
 	segments                  map[types.UniqueID]*model.Segment
 	tenantDatabaseCollections map[string]map[string]map[types.UniqueID]*model.Collection
 	tenantDatabases           map[string]map[string]*model.Database
+	store                     notification.NotificationStore
 }
 
 var _ metastore.Catalog = (*MemoryCatalog)(nil)
@@ -37,6 +39,12 @@ func NewMemoryCatalog() *MemoryCatalog {
 	memoryCatalog.tenantDatabaseCollections[common.DefaultTenant] = make(map[string]map[types.UniqueID]*model.Collection)
 	memoryCatalog.tenantDatabaseCollections[common.DefaultTenant][common.DefaultDatabase] = make(map[types.UniqueID]*model.Collection)
 	return &memoryCatalog
+}
+
+func NewMemoryCatalogWithNotification(store notification.NotificationStore) *MemoryCatalog {
+	memoryCatalog := NewMemoryCatalog()
+	memoryCatalog.store = store
+	return memoryCatalog
 }
 
 func (mc *MemoryCatalog) ResetState(ctx context.Context) error {
@@ -223,6 +231,11 @@ func (mc *MemoryCatalog) DeleteCollection(ctx context.Context, deleteCollection 
 	}
 	delete(collections, collectionID)
 	log.Info("collection deleted", zap.String("collection", collectionID.String()))
+	mc.store.AddNotification(ctx, model.Notification{
+		CollectionID: collectionID.String(),
+		Type:         model.NotificationTypeDeleteCollection,
+		Status:       model.NotificationStatusPending,
+	})
 	return nil
 }
 

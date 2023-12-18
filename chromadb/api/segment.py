@@ -253,8 +253,8 @@ class SegmentAPI(ServerAPI):
                 metadata=existing[0]["metadata"],  # type: ignore
                 embedding_function=embedding_function,
                 data_loader=data_loader,
-                tenant=tenant,
-                database=database,
+                tenant=existing[0]["tenant"],
+                database=existing[0]["database"],
             )
         else:
             raise ValueError(f"Collection {name} does not exist.")
@@ -263,11 +263,15 @@ class SegmentAPI(ServerAPI):
     @override
     def list_collections(
         self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         collections = []
-        db_collections = self._sysdb.get_collections(tenant=tenant, database=database)
+        db_collections = self._sysdb.get_collections(
+            limit=limit, offset=offset, tenant=tenant, database=database
+        )
         for db_collection in db_collections:
             collections.append(
                 Collection(
@@ -280,6 +284,19 @@ class SegmentAPI(ServerAPI):
                 )
             )
         return collections
+
+    @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        collection_count = len(
+            self._sysdb.get_collections(tenant=tenant, database=database)
+        )
+
+        return collection_count
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
@@ -349,6 +366,7 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.ADD,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -390,6 +408,7 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPDATE,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -433,6 +452,7 @@ class SegmentAPI(ServerAPI):
         for r in _records(
             t.Operation.UPSERT,
             ids=ids,
+            collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -601,7 +621,9 @@ class SegmentAPI(ServerAPI):
             return []
 
         records_to_submit = []
-        for r in _records(t.Operation.DELETE, ids_to_delete):
+        for r in _records(
+            operation=t.Operation.DELETE, ids=ids_to_delete, collection_id=collection_id
+        ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
         self._producer.submit_embeddings(coll["topic"], records_to_submit)
@@ -811,6 +833,7 @@ class SegmentAPI(ServerAPI):
 def _records(
     operation: t.Operation,
     ids: IDs,
+    collection_id: UUID,
     embeddings: Optional[Embeddings] = None,
     metadatas: Optional[Metadatas] = None,
     documents: Optional[Documents] = None,
@@ -848,6 +871,7 @@ def _records(
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,
+            collection_id=collection_id,
         )
         yield record
 

@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/generative-ai": "^0.1.1",
     "chromadb": "file:../..",
     "cohere-ai": "^5.0.2",
     "express": "^4.18.2",

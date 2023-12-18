@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -145,18 +145,8 @@ Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
-class EmbeddingFunction(Protocol[D]):
-    def __call__(self, input: D) -> Embeddings:
-        ...
-
-
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
-
-
-class DataLoader(Protocol[L]):
-    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
-        ...
 
 
 class GetResult(TypedDict):
@@ -189,10 +179,6 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
-Embeddable = Union[Documents, Images]
-D = TypeVar("D", bound=Embeddable, contravariant=True)
-
-
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
@@ -213,7 +199,6 @@ def validate_embedding_function(
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
 
-L = TypeVar("L", covariant=True)
 
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
@@ -404,7 +389,7 @@ def validate_where_document(where_document: WhereDocument) -> WhereDocument:
             f"Expected where document to have exactly one operator, got {where_document}"
         )
     for operator, operand in where_document.items():
-        if operator not in ["$contains", "$and", "$or"]:
+        if operator not in ["$contains", "$not_contains", "$and", "$or"]:
             raise ValueError(
                 f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
             )
@@ -477,7 +462,12 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
     for embedding in embeddings:
-        if not all([isinstance(value, (int, float)) for value in embedding]):
+        if not all(
+            [
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in embedding
+            ]
+        ):
             raise ValueError(
                 f"Expected each value in the embedding to be a int or float, got {embeddings}"
             )
