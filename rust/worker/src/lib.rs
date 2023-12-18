@@ -5,6 +5,7 @@ mod index;
 mod ingest;
 mod memberlist;
 mod segment;
+mod server;
 mod sysdb;
 mod system;
 mod types;
@@ -61,8 +62,18 @@ pub async fn worker_entrypoint() {
         segment_ingestor_receivers.push(recv);
     }
 
+    let mut worker_server = match server::WorkerServer::try_from_config(&config.worker).await {
+        Ok(worker_server) => worker_server,
+        Err(err) => {
+            println!("Failed to create worker server component: {:?}", err);
+            return;
+        }
+    };
+    worker_server.set_segment_manager(segment_manager.clone());
+
     // Boot the system
-    // memberlist -> ingest -> scheduler -> NUM_THREADS x segment_ingestor
+    // memberlist -> ingest -> scheduler -> NUM_THREADS x segment_ingestor -> segment_manager
+    // server <- segment_manager
 
     for recv in segment_ingestor_receivers {
         scheduler.subscribe(recv);
@@ -76,10 +87,14 @@ pub async fn worker_entrypoint() {
     memberlist.subscribe(recv);
     let mut memberlist_handle = system.start_component(memberlist);
 
+    let server_join_handle = tokio::spawn(async move {
+        crate::server::WorkerServer::run(worker_server).await;
+    });
+
     // Join on all handles
     let _ = tokio::join!(
         ingest_handle.join(),
         memberlist_handle.join(),
-        scheduler_handler.join()
+        scheduler_handler.join(),
     );
 }

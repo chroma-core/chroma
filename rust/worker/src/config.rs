@@ -97,6 +97,7 @@ impl RootConfig {
 /// have its own field in this struct for its Config struct.
 pub(crate) struct WorkerConfig {
     pub(crate) my_ip: String,
+    pub(crate) my_port: u16,
     pub(crate) num_indexing_threads: u32,
     pub(crate) pulsar_tenant: String,
     pub(crate) pulsar_namespace: String,
@@ -134,6 +135,7 @@ mod tests {
                 r#"
                 worker:
                     my_ip: "192.0.0.1"
+                    my_port: 50051
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
@@ -175,6 +177,7 @@ mod tests {
                 r#"
                 worker:
                     my_ip: "192.0.0.1"
+                    my_port: 50051
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
@@ -232,6 +235,7 @@ mod tests {
                 r#"
                 worker:
                     my_ip: "192.0.0.1"
+                    my_port: 50051
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
                     kube_namespace: "chroma"
@@ -265,6 +269,7 @@ mod tests {
     fn test_config_with_env_override() {
         Jail::expect_with(|jail| {
             let _ = jail.set_env("CHROMA_WORKER__MY_IP", "192.0.0.1");
+            let _ = jail.set_env("CHROMA_WORKER__MY_PORT", 50051);
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_TENANT", "A");
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_NAMESPACE", "B");
             let _ = jail.set_env("CHROMA_WORKER__KUBE_NAMESPACE", "C");
@@ -292,6 +297,7 @@ mod tests {
             );
             let config = RootConfig::load();
             assert_eq!(config.worker.my_ip, "192.0.0.1");
+            assert_eq!(config.worker.my_port, 50051);
             assert_eq!(config.worker.num_indexing_threads, num_cpus::get() as u32);
             assert_eq!(config.worker.pulsar_tenant, "A");
             assert_eq!(config.worker.pulsar_namespace, "B");
