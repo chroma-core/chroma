@@ -7,8 +7,14 @@ from hypothesis import given, strategies as st
 from pytest_httpserver import HTTPServer
 
 import chromadb
+from chromadb.api.client import SharedSystemClient
 from chromadb.errors import GenericError
 from chromadb.types import Tenant, Database
+
+
+@pytest.fixture(autouse=True)
+def reset_client_settings() -> None:
+    SharedSystemClient.clear_system_cache()
 
 
 def test_incompatible_server_version(caplog: pytest.LogCaptureFixture) -> None:
