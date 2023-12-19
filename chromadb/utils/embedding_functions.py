@@ -641,7 +641,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 
 class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
-        self, api_key: str, api_url = "https://infer.roboflow.com"
+        self, api_key: str = "", api_url = "https://infer.roboflow.com"
     ) -> None:
         """
         Create a RoboflowEmbeddingFunction.
@@ -650,8 +650,11 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
             api_key (str): Your API key for the Roboflow API.
             api_url (str, optional): The URL of the Roboflow API. Defaults to "https://infer.roboflow.com".
         """
+        if not api_key:
+            api_key = os.environ.get("ROBOFLOW_API_KEY")
+
         self._api_url = api_url
-        self._api_key = api_key
+        self._api_key = api_key 
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
