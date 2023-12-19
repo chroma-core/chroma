@@ -584,14 +584,16 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        session: 'boto3.Session', # Quote for forward reference
+        session: "boto3.Session",  # Quote for forward reference
         model_name: str = "amazon.titan-embed-text-v1",
+        **kwargs: Any,
     ):
         """Initialize AmazonBedrockEmbeddingFunction.
 
         Args:
             session (boto3.Session): The boto3 session to use.
             model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
+            **kwargs: Additional arguments to pass to the boto3 client.
 
         Example:
             >>> import boto3
@@ -603,22 +605,9 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._model_name = model_name
 
-        try:
-            from botocore.config import Config
-        except ImportError:
-            raise ValueError(
-                "The boto3 python package is not installed. Please install it with `pip install boto3`"
-            )
-
-        retry_config = Config(
-            retries={
-                "max_attempts": 10,
-                "mode": "standard",
-            },
-        )
-
         self._client = session.client(
-            service_name="bedrock-runtime", config=retry_config,
+            service_name="bedrock-runtime",
+            **kwargs,
         )
 
     def __call__(self, input: Documents) -> Embeddings:
