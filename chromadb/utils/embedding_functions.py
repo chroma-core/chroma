@@ -529,6 +529,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(
                 os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+            ) or not _verify_sha256(
+                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                self._MODEL_SHA256,
             ):
                 self._download(
                     url=self.MODEL_DOWNLOAD_URL,
