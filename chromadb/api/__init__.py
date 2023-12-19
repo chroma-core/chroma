@@ -45,8 +45,16 @@ class BaseAPI(ABC):
     #
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Collection]:
         """List all collections.
+        Args:
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+
         Returns:
             Sequence[Collection]: A list of collections
 
@@ -54,6 +62,21 @@ class BaseAPI(ABC):
             ```python
             client.list_collections()
             # [collection(name="my_collection", metadata={})]
+            ```
+        """
+        pass
+
+    @abstractmethod
+    def count_collections(self) -> int:
+        """Count the number of collections.
+
+        Returns:
+            int: The number of collections.
+
+        Examples:
+            ```python
+            client.count_collections()
+            # 1
             ```
         """
         pass
@@ -76,6 +99,7 @@ class BaseAPI(ABC):
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
             get_or_create: If True, return the existing collection if it exists.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The newly created collection.
@@ -107,9 +131,11 @@ class BaseAPI(ABC):
     ) -> Collection:
         """Get a collection with the given name.
         Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The collection
@@ -143,6 +169,7 @@ class BaseAPI(ABC):
             provided and not None. If the collection does not exist, the
             new collection will be created with the provided metadata.
             embedding_function: Optional function to use to embed documents
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             The collection
@@ -508,8 +535,19 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     @override
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
+        pass
+
+    @abstractmethod
+    @override
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int:
         pass
 
     @abstractmethod

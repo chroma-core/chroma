@@ -22,8 +22,9 @@ var (
 )
 
 func init() {
+
 	// GRPC
-	flag.GRPCAddr(Cmd, &conf.BindAddress)
+	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")

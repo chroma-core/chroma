@@ -1,15 +1,5 @@
 from enum import Enum
-from typing import (
-    Optional,
-    Sequence,
-    Union,
-    TypeVar,
-    List,
-    Dict,
-    Any,
-    Tuple,
-    cast,
-)
+from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import Literal, TypedDict, Protocol
@@ -156,18 +146,8 @@ Embeddable = Union[Documents, Images]
 D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
-class EmbeddingFunction(Protocol[D]):
-    def __call__(self, input: D) -> Embeddings:
-        ...
-
-
 Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
-
-
-class DataLoader(Protocol[L]):
-    def __call__(self, uris: Sequence[Optional[URI]]) -> L:
-        ...
 
 
 class GetResult(TypedDict):
@@ -264,9 +244,6 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/migration#migration-to-0416---november-7-2023 \n"
         )
-
-
-L = TypeVar("L", covariant=True)
 
 
 class DataLoader(Protocol[L]):

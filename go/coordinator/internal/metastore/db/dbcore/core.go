@@ -3,7 +3,6 @@ package dbcore
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"reflect"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -32,8 +31,8 @@ type DBConfig struct {
 }
 
 func Connect(cfg DBConfig) (*gorm.DB, error) {
-	dsn := url.QueryEscape(fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port))
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
+		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)

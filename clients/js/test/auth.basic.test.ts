@@ -1,7 +1,7 @@
 import {expect, test} from "@jest/globals";
-import {ChromaClient} from "../src/ChromaClient";
 import {chromaBasic} from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
+import { ChromaClient } from "../src/ChromaClient";
 
 test("it should get the version without auth needed", async () => {
     const version = await chromaNoAuth.version();
