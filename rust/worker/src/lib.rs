@@ -13,6 +13,8 @@ mod types;
 use config::Configurable;
 use memberlist::MemberlistProvider;
 
+use crate::sysdb::sysdb::SysDb;
+
 mod chroma_proto {
     tonic::include_proto!("chroma");
 }

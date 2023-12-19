@@ -82,6 +82,7 @@ impl Configurable for Ingest {
             worker_config.pulsar_namespace.clone(),
         );
 
+        println!("Pulsar connection url: {}", worker_config.pulsar_url);
         let pulsar = match Pulsar::builder(worker_config.pulsar_url.clone(), TokioExecutor)
             .build()
             .await

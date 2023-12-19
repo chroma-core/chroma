@@ -19,10 +19,10 @@ worker:
             memberlist_name: "worker-memberlist"
             queue_size: 100
     ingest:
-        queue_size: 100
+        queue_size: 10000
     sysdb:
         Grpc:
-            host: "chroma.coordinator"
+            host: "coordinator.chroma"
             port: 50051
     segment_manager:
         storage_path: "./tmp/segment_manager/"
