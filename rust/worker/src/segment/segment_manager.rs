@@ -131,7 +131,6 @@ impl SegmentManager {
                 let mut results = Vec::new();
                 let (ids, distances) = segment.query(vectors, k);
                 for (id, distance) in ids.iter().zip(distances.iter()) {
-                    let id: String = id.to_string();
                     let fetched_vector = match include_vector {
                         true => Some(segment.get_records(vec![id.clone()])),
                         false => None,
@@ -146,7 +145,7 @@ impl SegmentManager {
                                 }
                                 let mut target_vec = None;
                                 for vec in fetched_vectors.into_iter() {
-                                    if vec.id == id {
+                                    if vec.id == *id {
                                         target_vec = Some(vec);
                                         break;
                                     }
@@ -165,7 +164,7 @@ impl SegmentManager {
                     };
 
                     let result = Box::new(VectorQueryResult {
-                        id,
+                        id: id.to_string(),
                         seq_id: BigInt::from(0),
                         distance: *distance,
                         vector: ret_vec,

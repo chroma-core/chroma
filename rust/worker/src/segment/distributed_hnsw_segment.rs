@@ -12,6 +12,7 @@ pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
     id: AtomicUsize,
     user_id_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    id_to_user_id: Arc<RwLock<HashMap<usize, String>>>,
     index_config: IndexConfig,
     hnsw_config: HnswIndexConfig,
 }
@@ -34,6 +35,7 @@ impl DistributedHNSWSegment {
             index: index,
             id: AtomicUsize::new(0),
             user_id_to_id: Arc::new(RwLock::new(HashMap::new())),
+            id_to_user_id: Arc::new(RwLock::new(HashMap::new())),
             index_config: index_config,
             hnsw_config,
         });
@@ -64,7 +66,10 @@ impl DistributedHNSWSegment {
                             self.user_id_to_id
                                 .write()
                                 .insert(record.id.clone(), next_id);
-                            println!("DIS SEGMENT Adding item: {}", next_id);
+                            self.id_to_user_id
+                                .write()
+                                .insert(next_id, record.id.clone());
+                            println!("Segment adding item: {}", next_id);
                             self.index.read().add(next_id, &vector);
                         }
                         None => {
@@ -88,18 +93,18 @@ impl DistributedHNSWSegment {
         let user_id_to_id = self.user_id_to_id.read();
         let index = self.index.read();
         for id in ids {
-            let id = match user_id_to_id.get(&id) {
-                Some(id) => id,
+            let internal_id = match user_id_to_id.get(&id) {
+                Some(internal_id) => internal_id,
                 None => {
                     // TODO: Error
                     return records;
                 }
             };
-            let vector = index.get(*id);
+            let vector = index.get(*internal_id);
             match vector {
                 Some(vector) => {
                     let record = VectorEmbeddingRecord {
-                        id: id.to_string(),
+                        id: id,
                         seq_id: BigInt::from(0),
                         vector,
                     };
@@ -113,9 +118,19 @@ impl DistributedHNSWSegment {
         return records;
     }
 
-    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<String>, Vec<f32>) {
         let index = self.index.read();
+        let mut return_user_ids = Vec::new();
         let (ids, distances) = index.query(vector, k);
-        return (ids, distances);
+        let user_ids = self.id_to_user_id.read();
+        for id in ids {
+            match user_ids.get(&id) {
+                Some(user_id) => return_user_ids.push(user_id.clone()),
+                None => {
+                    // TODO: error
+                }
+            };
+        }
+        return (return_user_ids, distances);
     }
 }

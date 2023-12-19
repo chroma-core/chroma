@@ -30,7 +30,7 @@ impl Configurable for WorkerServer {
 
 impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("[::1]:{}", worker.port).parse().unwrap();
+        let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
         let server = Server::builder()
             .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(

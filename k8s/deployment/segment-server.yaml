@@ -43,7 +43,7 @@ spec:
           env:
             - name: CHROMA_WORKER__PULSAR_URL
               value: pulsar://pulsar.chroma:6650
-            - name: CHROMA_WORKER_MY_POD_IP
+            - name: CHROMA_WORKER__MY_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
