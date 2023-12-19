@@ -14,7 +14,7 @@ from chromadb.types import Tenant, Database
 
 @pytest.fixture(autouse=True)
 def reset_client_settings() -> None:
-    SharedSystemClient._identifer_to_system = {}
+    SharedSystemClient.clear_system_cache()
 
 
 def test_incompatible_server_version(caplog: pytest.LogCaptureFixture) -> None:
@@ -33,7 +33,11 @@ def test_incompatible_server_version(caplog: pytest.LogCaptureFixture) -> None:
         httpserver.expect_request("/api/v1/version").respond_with_data(
             json.dumps("0.4.1")
         )
-        client = chromadb.HttpClient(host="localhost", port="8001")
+        client = chromadb.HttpClient(
+            host="localhost",
+            port="8001",
+            settings=chromadb.Settings(chroma_server_http_port=8001),
+        )
 
         with pytest.raises(ValueError) as e:
             client.list_collections()
@@ -71,14 +75,22 @@ def test_compatible_server_version(caplog: pytest.LogCaptureFixture) -> None:
             )
         )
 
-        client = chromadb.HttpClient(host="localhost", port="8001")
+        client = chromadb.HttpClient(
+            host="localhost",
+            port="8001",
+            settings=chromadb.Settings(chroma_server_http_port=8001),
+        )
 
         client.list_collections()
 
 
 def test_client_server_not_available(caplog: pytest.LogCaptureFixture) -> None:
     with HTTPServer(port=8002) as _:
-        client = chromadb.HttpClient(host="localhost", port="8001")
+        client = chromadb.HttpClient(
+            host="localhost",
+            port="8001",
+            settings=chromadb.Settings(chroma_server_http_port=8001),
+        )
 
         with pytest.raises(GenericError) as e:
             client.list_collections()
@@ -95,7 +107,11 @@ def test_client_server_with_proxy_error(
         )
 
         httpserver.expect_request("/api/v1").respond_with_data("Oh no!", status=status)
-        client = chromadb.HttpClient(host="localhost", port="8001")
+        client = chromadb.HttpClient(
+            host="localhost",
+            port="8001",
+            settings=chromadb.Settings(chroma_server_http_port=8001),
+        )
 
         with pytest.raises(GenericError) as e:
             client.list_collections()

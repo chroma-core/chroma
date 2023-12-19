@@ -38,6 +38,7 @@ __all__ = [
     "QueryResult",
     "GetResult",
     "__version__",
+    "Settings",
 ]
 
 logger = logging.getLogger(__name__)
