@@ -584,19 +584,19 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        profile_name: Optional[str] = None,
-        region: Optional[str] = None,
+        session: 'boto3.Session', # Quote for forward reference
         model_name: str = "amazon.titan-embed-text-v1",
     ):
-        """Initialize AmazonBedrockEmbeddingFucntion.
+        """Initialize AmazonBedrockEmbeddingFunction.
 
         Args:
-            profile_name (str, optional): The name of a profile to use. If not given, then the default profile is used, defaults to None
-            region (str, optional): Default region when creating new connections, defaults to None
+            session (boto3.Session): The boto3 session to use.
             model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
 
         Example:
-            >>> bedrock = AmazonBedrockEmbeddingFunction(profile_name="profile")
+            >>> import boto3
+            >>> session = boto3.Session(profile_name="profile", region_name="us-east-1")
+            >>> bedrock = AmazonBedrockEmbeddingFunction(session=session)
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = bedrock(texts)
         """
@@ -604,42 +604,21 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
 
         try:
-            import boto3
             from botocore.config import Config
         except ImportError:
             raise ValueError(
                 "The boto3 python package is not installed. Please install it with `pip install boto3`"
             )
 
-        if not region:
-            target_region = os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION")
-            )
-        else:
-            target_region = region
-
-        session_kwargs = {"region_name": target_region}
-        client_kwargs = {**session_kwargs}
-
-        if profile_name:
-            target_profile = profile_name
-        else:
-            target_profile = os.environ.get("AWS_PROFILE")
-
-        if target_profile:
-            session_kwargs["profile_name"] = target_profile
-
         retry_config = Config(
-            region_name=target_region,
             retries={
                 "max_attempts": 10,
                 "mode": "standard",
             },
         )
 
-        session = boto3.Session(**session_kwargs)
         self._client = session.client(
-            service_name="bedrock-runtime", config=retry_config, **client_kwargs
+            service_name="bedrock-runtime", config=retry_config,
         )
 
     def __call__(self, input: Documents) -> Embeddings:
