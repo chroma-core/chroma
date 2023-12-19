@@ -643,6 +643,13 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
     def __init__(
         self, api_key: str, api_url = "https://infer.roboflow.com"
     ) -> None:
+        """
+        Create a RoboflowEmbeddingFunction.
+
+        Args:
+            api_key (str): Your API key for the Roboflow API.
+            api_url (str, optional): The URL of the Roboflow API. Defaults to "https://infer.roboflow.com".
+        """
         self._api_url = api_url
         self._api_key = api_key
 
