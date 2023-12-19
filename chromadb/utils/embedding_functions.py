@@ -594,6 +594,11 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
             profile_name (str, optional): The name of a profile to use. If not given, then the default profile is used, defaults to None
             region (str, optional): Default region when creating new connections, defaults to None
             model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
+
+        Example:
+            >>> bedrock = AmazonBedrockEmbeddingFunction(profile_name="profile")
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = bedrock(texts)
         """
 
         self._model_name = model_name
@@ -638,35 +643,14 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         )
 
     def __call__(self, input: Documents) -> Embeddings:
-        """Get the embeddings for a list of texts.
-
-        Args:
-            input (Documents): A list of texts to get embeddings for.
-
-        Returns:
-            Embeddings: The embeddings for the texts.
-
-        Example:
-            >>> bedrock = AmazonBedrockEmbeddingFunction(profile_name="profile")
-            >>> texts = ["Hello, world!", "How are you?"]
-            >>> embeddings = bedrock(texts)
-        """
-        embeddings = []
-        for text in input:
-            embeddings.append(self._invoke(text))
-        return embeddings
-
-    def _invoke(
-        self,
-        text: str,
-    ) -> Embedding:
         import json
 
-        input_body = {"inputText": text}
-        body = json.dumps(input_body)
         accept = "application/json"
         content_type = "application/json"
-        try:
+        embeddings = []
+        for text in input:
+            input_body = {"inputText": text}
+            body = json.dumps(input_body)
             response = self._client.invoke_model(
                 body=body,
                 modelId=self._model_name,
@@ -674,10 +658,8 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 contentType=content_type,
             )
             embedding = json.load(response.get("body")).get("embedding")
-        except Exception as e:
-            raise ValueError(f"Error raised by bedrock service: {e}")
-
-        return embedding
+            embeddings.append(embedding)
+        return embeddings
 
 
 # List of all classes in this module
