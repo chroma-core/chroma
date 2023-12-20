@@ -360,6 +360,13 @@ def test_modify_error_on_existing_name(api):
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
+def test_modify_warn_on_DF_change(api, caplog):
+    api.reset()
+    
+    collection = api.create_collection("testspace")
+
+    with pytest.raises(Exception, match="not supported") as e:
+        collection.modify(metadata={"hnsw:space": "cosine"})
 
 def test_metadata_cru(api):
     api.reset()
