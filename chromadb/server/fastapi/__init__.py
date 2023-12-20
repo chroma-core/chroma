@@ -25,7 +25,6 @@ from chromadb.auth.fastapi import (
 )
 from chromadb.auth.fastapi_utils import (
     attr_from_collection_lookup,
-    attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 import chromadb.api
@@ -38,8 +37,6 @@ from chromadb.errors import (
 )
 from chromadb.server.fastapi.types import (
     AddEmbedding,
-    CreateDatabase,
-    CreateTenant,
     DeleteEmbedding,
     GetEmbedding,
     QueryEmbedding,
@@ -180,7 +177,7 @@ class FastAPI(chromadb.server.Server):
         )
 
         self.router.add_api_route(
-            "/api/v1/databases/{database}",
+            "/api/v1/databases",
             self.get_database,
             methods=["GET"],
             response_model=None,
@@ -194,7 +191,7 @@ class FastAPI(chromadb.server.Server):
         )
 
         self.router.add_api_route(
-            "/api/v1/tenants/{tenant}",
+            "/api/v1/tenants",
             self.get_tenant,
             methods=["GET"],
             response_model=None,
@@ -303,15 +300,15 @@ class FastAPI(chromadb.server.Server):
         action=AuthzResourceActions.CREATE_DATABASE,
         resource=DynamicAuthzResource(
             type=AuthzResourceTypes.DB,
-            attributes=attr_from_resource_object(
-                type=AuthzResourceTypes.DB, additional_attrs=["tenant"]
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
             ),
         ),
     )
     def create_database(
-        self, database: CreateDatabase, tenant: str = DEFAULT_TENANT
+        self, database: str = DEFAULT_DATABASE, tenant: str = DEFAULT_TENANT
     ) -> None:
-        return self._api.create_database(database.name, tenant)
+        return self._api.create_database(database, tenant)
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -324,7 +321,7 @@ class FastAPI(chromadb.server.Server):
             ),
         ),
     )
-    def get_database(self, database: str, tenant: str = DEFAULT_TENANT) -> Database:
+    def get_database(self, database: str = DEFAULT_DATABASE, tenant: str = DEFAULT_TENANT) -> Database:
         return self._api.get_database(database, tenant)
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
@@ -334,8 +331,8 @@ class FastAPI(chromadb.server.Server):
             type=AuthzResourceTypes.TENANT,
         ),
     )
-    def create_tenant(self, tenant: CreateTenant) -> None:
-        return self._api.create_tenant(tenant.name)
+    def create_tenant(self, tenant: str = DEFAULT_TENANT) -> None:
+        return self._api.create_tenant(tenant)
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @authz_context(
@@ -343,9 +340,12 @@ class FastAPI(chromadb.server.Server):
         resource=DynamicAuthzResource(
             id="*",
             type=AuthzResourceTypes.TENANT,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant"]
+            ),
         ),
     )
-    def get_tenant(self, tenant: str) -> Tenant:
+    def get_tenant(self, tenant: str = DEFAULT_TENANT) -> Tenant:
         return self._api.get_tenant(tenant)
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
