@@ -1,6 +1,10 @@
 package dbmodel
 
-import "context"
+import (
+	"context"
+
+	_ "ariga.io/atlas-provider-gorm/gormschema"
+)
 
 //go:generate mockery --name=IMetaDomain
 type IMetaDomain interface {
@@ -10,6 +14,7 @@ type IMetaDomain interface {
 	CollectionMetadataDb(ctx context.Context) ICollectionMetadataDb
 	SegmentDb(ctx context.Context) ISegmentDb
 	SegmentMetadataDb(ctx context.Context) ISegmentMetadataDb
+	NotificationDb(ctx context.Context) INotificationDb
 }
 
 //go:generate mockery --name=ITransaction

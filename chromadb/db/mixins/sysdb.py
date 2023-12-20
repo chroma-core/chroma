@@ -367,6 +367,8 @@ class SqlSysDB(SqlDB, SysDB):
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
 
@@ -414,7 +416,9 @@ class SqlSysDB(SqlDB, SysDB):
         if name:
             q = q.where(collections_t.name == ParameterValue(name))
 
-        if tenant and database:
+        # Only if we have a name, tenant and database do we need to filter databases
+        # Given an id, we can uniquely identify the collection so we don't need to filter databases
+        if id is None and tenant and database:
             databases_t = Table("databases")
             q = q.where(
                 collections_t.database_id
@@ -424,6 +428,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .where(databases_t.name == ParameterValue(database))
                 .where(databases_t.tenant_id == ParameterValue(tenant))
             )
+        # cant set limit and offset here because this is metadata and we havent reduced yet
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
@@ -448,6 +453,12 @@ class SqlSysDB(SqlDB, SysDB):
                         database=str(rows[0][4]),
                     )
                 )
+
+            # apply limit and offset
+            if limit is not None:
+                collections = collections[offset:offset+limit]
+            else:
+                collections = collections[offset:]
 
             return collections
 

@@ -247,7 +247,10 @@ class GrpcSysDB(SysDB):
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
+        # TODO: implement limit and offset in the gRPC service
         request = GetCollectionsRequest(
             id=id.hex if id else None,
             topic=topic,

@@ -3,6 +3,9 @@ package dao
 import (
 	"testing"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/types"
@@ -15,17 +18,30 @@ func TestCollectionDb_GetCollections(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	err = db.AutoMigrate(&dbmodel.Collection{}, &dbmodel.CollectionMetadata{})
+	err = db.AutoMigrate(&dbmodel.Tenant{}, &dbmodel.Database{}, &dbmodel.Collection{}, &dbmodel.CollectionMetadata{})
+	db.Model(&dbmodel.Tenant{}).Create(&dbmodel.Tenant{
+		ID: common.DefaultTenant,
+	})
+
+	databaseID := types.NilUniqueID().String()
+	db.Model(&dbmodel.Database{}).Create(&dbmodel.Database{
+		ID:       databaseID,
+		Name:     common.DefaultDatabase,
+		TenantID: common.DefaultTenant,
+	})
+
 	assert.NoError(t, err)
 	name := "test_name"
 	topic := "test_topic"
 	collection := &dbmodel.Collection{
-		ID:    types.NewUniqueID().String(),
-		Name:  &name,
-		Topic: &topic,
+		ID:         types.NewUniqueID().String(),
+		Name:       &name,
+		Topic:      &topic,
+		DatabaseID: databaseID,
 	}
 	err = db.Create(collection).Error
 	assert.NoError(t, err)
+
 	testKey := "test"
 	testValue := "test"
 	metadata := &dbmodel.CollectionMetadata{
@@ -40,7 +56,15 @@ func TestCollectionDb_GetCollections(t *testing.T) {
 		db: db,
 	}
 
-	// Test when all parameters are nil
+	query := db.Table("collections").Select("collections.id")
+	rows, err := query.Rows()
+	assert.NoError(t, err)
+	for rows.Next() {
+		var collectionID string
+		err = rows.Scan(&collectionID)
+		assert.NoError(t, err)
+		log.Info("collectionID", zap.String("collectionID", collectionID))
+	}
 	collections, err := collectionDb.GetCollections(nil, nil, nil, common.DefaultTenant, common.DefaultDatabase)
 	assert.NoError(t, err)
 	assert.Len(t, collections, 1)
