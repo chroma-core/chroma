@@ -9,7 +9,7 @@ import chromadb
 
 def test_new_release_available(caplog: pytest.LogCaptureFixture) -> None:
     with patch(
-        "chromadb.api.client.Client._upgrade_check_url",
+        "chromadb.utils.client_utils._upgrade_check_url",
         new="http://localhost:8008/pypi/chromadb/json",
     ):
         with HTTPServer(port=8008) as httpserver:
@@ -39,7 +39,7 @@ def test_on_latest_release(caplog: pytest.LogCaptureFixture) -> None:
 
 def test_local_version_newer_than_latest(caplog: pytest.LogCaptureFixture) -> None:
     with patch(
-        "chromadb.api.client.Client._upgrade_check_url",
+        "chromadb.utils.client_utils._upgrade_check_url",
         new="http://localhost:8008/pypi/chromadb/json",
     ):
         with HTTPServer(port=8008) as httpserver:
@@ -56,7 +56,7 @@ def test_local_version_newer_than_latest(caplog: pytest.LogCaptureFixture) -> No
 
 def test_pypi_unavailable(caplog: pytest.LogCaptureFixture) -> None:
     with patch(
-        "chromadb.api.client.Client._upgrade_check_url",
+        "chromadb.utils.client_utils._upgrade_check_url",
         new="http://localhost:8008/pypi/chromadb/json",
     ):
         with HTTPServer(port=8009) as httpserver:

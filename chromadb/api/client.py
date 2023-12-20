@@ -1,7 +1,4 @@
-import json
-import logging
 from typing import ClassVar, Dict, Optional, Sequence
-from urllib import request
 from uuid import UUID
 import uuid
 
@@ -31,9 +28,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
-from chromadb.utils.client_utils import compare_versions
-
-logger = logging.getLogger(__name__)
+from chromadb.utils.client_utils import _upgrade_check
 
 
 class SharedSystemClient:
@@ -134,7 +129,6 @@ class Client(SharedSystemClient, ClientAPI):
     _server: ServerAPI
     # An internal admin client for verifying that databases and tenants exist
     _admin_client: AdminAPI
-    _upgrade_check_url: str = "https://pypi.org/pypi/chromadb/json"
 
     # region Initialization
     def __init__(
@@ -144,7 +138,7 @@ class Client(SharedSystemClient, ClientAPI):
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
-        self._upgrade_check()
+        _upgrade_check()
         self.tenant = tenant
         self.database = database
         # Create an admin client for verifying that databases and tenants exist
@@ -171,25 +165,6 @@ class Client(SharedSystemClient, ClientAPI):
         return instance
 
     # endregion
-
-    def _upgrade_check(self) -> None:
-        """Check pypi index for new version if possible."""
-        try:
-            data = json.load(
-                request.urlopen(request.Request(self._upgrade_check_url), timeout=5)
-            )
-            from chromadb import __version__ as local_chroma_version
-
-            latest_version = data["info"]["version"]
-            if compare_versions(latest_version, local_chroma_version) > 0:
-                logger.info(
-                    f"\033[38;5;069m[notice]\033[0m A new release of chromadb is available: "
-                    f"\033[38;5;196m{local_chroma_version}!\033[0m -> "
-                    f"\033[38;5;082m{latest_version}\033[0m\n"
-                    "\033[38;5;069m[notice]\033[0m To upgrade, run `pip install --upgrade chromadb`."
-                )
-        except Exception:
-            pass
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
