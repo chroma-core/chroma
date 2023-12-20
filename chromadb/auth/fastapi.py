@@ -9,11 +9,6 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from chromadb.server.fastapi.types import (
-    CreateDatabase,
-    CreateTenant,
-)
-
 from chromadb.config import DEFAULT_TENANT, System
 from chromadb.auth import (
     AuthorizationContext,
@@ -226,14 +221,14 @@ def authz_context(
                     if desired_tenant and "tenant" in kwargs:
                         if isinstance(kwargs["tenant"], str):
                             kwargs["tenant"] = desired_tenant
-                        elif isinstance(kwargs["tenant"], CreateTenant):
+                        elif isinstance(kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant):
                             kwargs["tenant"].name = desired_tenant
                     databases = request.state.user_identity.get_user_databases()
                     if databases and len(databases) == 1 and "database" in kwargs:
                         desired_database = databases[0]
                         if isinstance(kwargs["database"], str):
                             kwargs["database"] = desired_database
-                        elif isinstance(kwargs["database"], CreateDatabase):
+                        elif isinstance(kwargs["database"], chromadb.server.fastapi.types.CreateDatabase):
                             kwargs["database"].name = desired_database
 
             return f(*args, **kwargs)
