@@ -1,4 +1,7 @@
+import hashlib
 import logging
+
+from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
 
 from chromadb.api.types import (
     Document,
@@ -29,6 +32,16 @@ except ImportError:
     is_thin_client = False
 
 logger = logging.getLogger(__name__)
+
+
+def _verify_sha256(fname: str, expected_sha256: str) -> bool:
+    sha256_hash = hashlib.sha256()
+    with open(fname, "rb") as f:
+        # Read and update hash in chunks to avoid using too much memory
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest() == expected_sha256
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -346,6 +359,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_DOWNLOAD_URL = (
         "https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz"
     )
+    _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
     tokenizer = None
     model = None
 
@@ -389,6 +403,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_random(min=1, max=3),
+        retry=retry_if_exception(lambda e: "does not match expected SHA256" in str(e)),
+    )
     def _download(self, url: str, fname: str, chunk_size: int = 1024) -> None:
         resp = requests.get(url, stream=True)
         total = int(resp.headers.get("content-length", 0))
@@ -402,6 +422,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             for data in resp.iter_content(chunk_size=chunk_size):
                 size = file.write(data)
                 bar.update(size)
+        if not _verify_sha256(fname, self._MODEL_SHA256):
+            # if the integrity of the file is not verified, remove it
+            os.remove(fname)
+            raise ValueError(
+                f"Downloaded file {fname} does not match expected SHA256 hash. Corrupted download or malicious file."
+            )
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
@@ -503,6 +529,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(
                 os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+            ) or not _verify_sha256(
+                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                self._MODEL_SHA256,
             ):
                 self._download(
                     url=self.MODEL_DOWNLOAD_URL,

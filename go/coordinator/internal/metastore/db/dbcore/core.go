@@ -150,5 +150,9 @@ func ConfigDatabaseForTesting() *gorm.DB {
 	db.Migrator().DropTable(&dbmodel.SegmentMetadata{})
 	db.Migrator().CreateTable(&dbmodel.Segment{})
 	db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
+
+	// Setup notification related tables
+	db.Migrator().DropTable(&dbmodel.Notification{})
+	db.Migrator().CreateTable(&dbmodel.Notification{})
 	return db
 }

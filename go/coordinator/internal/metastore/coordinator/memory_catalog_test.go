@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/types"
 )
 
@@ -15,7 +16,8 @@ const (
 
 func TestMemoryCatalog(t *testing.T) {
 	ctx := context.Background()
-	mc := NewMemoryCatalog()
+	store := notification.NewMemoryNotificationStore()
+	mc := NewMemoryCatalogWithNotification(store)
 
 	// Test CreateCollection
 	coll := &model.CreateCollection{
@@ -27,6 +29,8 @@ func TestMemoryCatalog(t *testing.T) {
 				"test-metadata-key": &model.CollectionMetadataValueStringType{Value: "test-metadata-value"},
 			},
 		},
+		TenantID:     defaultTenant,
+		DatabaseName: defaultDatabase,
 	}
 	collection, err := mc.CreateCollection(ctx, coll, types.Timestamp(0))
 	if err != nil {
@@ -102,6 +106,8 @@ func TestMemoryCatalog(t *testing.T) {
 				"test-metadata-key": &model.CollectionMetadataValueStringType{Value: "test-metadata-value"},
 			},
 		},
+		TenantID:     defaultTenant,
+		DatabaseName: defaultDatabase,
 	}
 	collection, err = mc.CreateCollection(ctx, coll, types.Timestamp(0))
 	if err != nil {
