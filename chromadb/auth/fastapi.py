@@ -219,11 +219,15 @@ def authz_context(
                 # the request tenant and DB however they like and we simply overwrite it.
                 if overwrite_singleton_tenant_database_access_from_auth:
                     desired_tenant = request.state.user_identity.get_user_tenant()
-                    if desired_tenant and "tenant" not in kwargs:
+                    # Only overwrite if the user didn't specify a tenant but the
+                    # method requires one.
+                    if desired_tenant and "tenant" in kwargs and not kwargs["tenant"]:
                         if isinstance(kwargs["tenant"], str):
                             kwargs["tenant"] = desired_tenant
                     databases = request.state.user_identity.get_user_databases()
-                    if databases and len(databases) == 1 and "database" not in kwargs:
+                    # Only overwrite if the user didn't specify a database but the
+                    # method requires one.
+                    if databases and len(databases) == 1 and "database" in kwargs and not kwargs["database"]:
                         desired_database = databases[0]
                         if isinstance(kwargs["database"], str):
                             kwargs["database"] = desired_database
