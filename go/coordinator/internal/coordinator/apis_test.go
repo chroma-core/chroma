@@ -788,7 +788,14 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 	testTypeB := "test_type_b"
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), &testTypeB, nil, nil, types.NilUniqueID())
 	assert.NoError(t, err)
-	assert.Equal(t, sampleSegments[1:], result)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID.String() < result[j].ID.String()
+	})
+	sort.Slice(sampleSegments, func(i, j int) bool {
+		return sampleSegments[i].ID.String() < sampleSegments[j].ID.String()
+	})
+	assert.Equal(t, result[0], sampleSegments[1])
+	assert.Equal(t, result[1], sampleSegments[2])
 
 	// Find by collection ID
 	result, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, nil, sampleCollections[0].ID)
@@ -814,7 +821,14 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotContains(t, results, s1)
 	assert.Len(t, results, len(sampleSegments)-1)
-	assert.Equal(t, sampleSegments[1:], results)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID.String() < result[j].ID.String()
+	})
+	sort.Slice(sampleSegments, func(i, j int) bool {
+		return sampleSegments[i].ID.String() < sampleSegments[j].ID.String()
+	})
+	assert.Equal(t, results[0], sampleSegments[1])
+	assert.Equal(t, results[1], sampleSegments[2])
 
 	// Duplicate delete throws an exception
 	err = c.DeleteSegment(ctx, s1.ID)
