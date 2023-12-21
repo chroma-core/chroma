@@ -23,6 +23,7 @@ import numpy as np
 import numpy.typing as npt
 import importlib
 import inspect
+import json
 import sys
 from typing import Optional
 
@@ -740,8 +741,6 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         )
 
     def __call__(self, input: Documents) -> Embeddings:
-        import json
-
         accept = "application/json"
         content_type = "application/json"
         embeddings = []
