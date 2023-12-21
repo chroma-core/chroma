@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
@@ -42,6 +43,9 @@ func TestConvertCollectionMetadataToDB(t *testing.T) {
 		},
 	}
 	dbCollectionMetadataList = convertCollectionMetadataToDB("collectionID", metadata)
+	sort.Slice(dbCollectionMetadataList, func(i, j int) bool {
+		return *dbCollectionMetadataList[i].Key < *dbCollectionMetadataList[j].Key
+	})
 	assert.NotNil(t, dbCollectionMetadataList)
 	assert.Len(t, dbCollectionMetadataList, 3)
 	assert.Equal(t, "collectionID", dbCollectionMetadataList[0].CollectionID)
