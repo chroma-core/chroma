@@ -177,11 +177,8 @@ def authz_context(
                 "function_args": args,
                 "function_kwargs": kwargs,
             }
-            logger.debug(_dynamic_kwargs)
-
             request = request_var.get()
             if not request:
-                logger.debug("No request found, skipping authz")
                 return f(*args, **kwargs)
 
             _provider = authz_provider.get()
@@ -190,7 +187,6 @@ def authz_context(
                 a_list = [action]
             else:
                 a_list = cast(List[Union[str, AuthzAction]], action)
-            logger.debug(a_list)
             a_authz_responses = []
             for a in a_list:
                 _action = a if isinstance(a, AuthzAction) else AuthzAction(id=a)
@@ -199,7 +195,6 @@ def authz_context(
                     if isinstance(resource, AuthzResource)
                     else resource.to_authz_resource(**_dynamic_kwargs)
                 )
-                logger.debug(resource.__dict__)
                 _context = AuthorizationContext(
                     user=AuthzUser(
                         id=request.state.user_identity.get_user_id()
@@ -221,23 +216,24 @@ def authz_context(
             if not any(a_authz_responses):
                 raise AuthorizationError("Unauthorized")
 
-            # # In a multi-tenant environment, we may want to allow users to send
-            # # requests without configuring a tenant and DB. If so, they can set
-            # # the request tenant and DB however they like and we simply overwrite it.
-            # if overwrite_singleton_tenant_database_access_from_auth:
-            #     desired_tenant = request.state.user_identity.get_user_tenant()
-            #     # Only overwrite if the user didn't specify a tenant but the
-            #     # method requires one.
-            #     if desired_tenant and "tenant" in kwargs and not kwargs["tenant"]:
-            #         if isinstance(kwargs["tenant"], str):
-            #             kwargs["tenant"] = desired_tenant
-            #     databases = request.state.user_identity.get_user_databases()
-            #     # Only overwrite if the user didn't specify a database but the
-            #     # method requires one.
-            #     if databases and len(databases) == 1 and "database" in kwargs and not kwargs["database"]:
-            #         desired_database = databases[0]
-            #         if isinstance(kwargs["database"], str):
-            #             kwargs["database"] = desired_database
+            # In a multi-tenant environment, we may want to allow users to send
+            # requests without configuring a tenant and DB. If so, they can set
+            # the request tenant and DB however they like and we simply overwrite it.
+            if overwrite_singleton_tenant_database_access_from_auth:
+                desired_tenant = request.state.user_identity.get_user_tenant()
+                # Only overwrite if the user didn't specify a tenant but the
+                # method requires one.
+                if desired_tenant and "tenant" in kwargs and not kwargs["tenant"]:
+                    if isinstance(kwargs["tenant"], str):
+                        kwargs["tenant"] = desired_tenant
+                databases = request.state.user_identity.get_user_databases()
+                # Only overwrite if the user didn't specify a database but the
+                # method requires one.
+                if databases and len(databases) == 1 and "database" in kwargs and not kwargs["database"]:
+                    desired_database = databases[0]
+                    if isinstance(kwargs["database"], str):
+                        kwargs["database"] = desired_database
+
             return f(*args, **kwargs)
 
         return wrapped
