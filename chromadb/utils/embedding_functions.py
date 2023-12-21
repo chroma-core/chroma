@@ -36,7 +36,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     models: Dict[str, Any] = {}
 
     # If you have a beefier machine, try "gtr-t5-large".
-    #  for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
+    # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
@@ -305,8 +305,8 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
         # Return just the embeddings
-        embading = [result["embedding"] for result in sorted_embeddings]
-        return cast(Embeddings, embading)
+        embedding = [result["embedding"] for result in sorted_embeddings]
+        return cast(Embeddings, embedding)
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
