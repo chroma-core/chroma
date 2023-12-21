@@ -4,14 +4,16 @@ import (
 	"io"
 	"time"
 
-	"github.com/chroma/chroma-coordinator/cmd/flag"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
+	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var (
-	conf = grpccoordinator.Config{}
+	conf = grpccoordinator.Config{
+		GrpcConfig: &grpcutils.GrpcConfig{},
+	}
 
 	Cmd = &cobra.Command{
 		Use:   "coordinator",
@@ -24,7 +26,7 @@ var (
 func init() {
 
 	// GRPC
-	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
+	Cmd.Flags().StringVar(&conf.GrpcConfig.BindAddress, "grpc-bind-address", "", "GRPC bind address")
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")
