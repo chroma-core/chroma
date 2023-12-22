@@ -610,7 +610,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
         self._task_type = task_type
         self._task_title = None
-        if self._task_type is "RETRIEVAL_DOCUMENT":
+        if self._task_type == "RETRIEVAL_DOCUMENT":
             self._task_title = "Embedding of single string"
 
     def __call__(self, input: Documents) -> Embeddings:
