@@ -107,7 +107,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     ffi_ptr: ffi_ptr,
                     dimensionality: index_config.dimensionality,
                 };
-
+                hnsw_index.set_ef(config.ef_search);
                 Ok(hnsw_index)
             }
         }
@@ -280,7 +280,7 @@ pub mod test {
                 max_elements: n,
                 m: 16,
                 ef_construction: 100,
-                ef_search: 10,
+                ef_search: 100,
                 random_seed: 0,
                 persist_path: persist_path,
             }),
@@ -358,6 +358,7 @@ pub mod test {
             Err(e) => panic!("Error initializing index: {}", e),
             Ok(index) => index,
         };
+        assert_eq!(index.get_ef(), 100);
 
         let data: Vec<f32> = utils::generate_random_data(n, d);
         let ids: Vec<usize> = (0..n).collect();
@@ -448,6 +449,8 @@ pub mod test {
             Err(e) => panic!("Error loading index: {}", e),
             Ok(index) => index,
         };
+        // TODO: This should be set by the load
+        index.set_ef(100);
 
         // Query the data
         let query = &data[0..d];
