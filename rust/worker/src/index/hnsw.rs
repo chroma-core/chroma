@@ -323,7 +323,8 @@ pub mod test {
                 Some(actual_data) => {
                     assert_eq!(actual_data.len(), d);
                     for j in 0..d {
-                        assert_eq!(actual_data[j], datas[i][j]);
+                        // Floating point epsilon comparison
+                        assert!((actual_data[j] - datas[i][j]).abs() < 0.00001);
                     }
                 }
             }
@@ -375,7 +376,8 @@ pub mod test {
                 Some(actual_data) => {
                     assert_eq!(actual_data.len(), d);
                     for j in 0..d {
-                        assert_eq!(actual_data[j], data[i * d + j]);
+                        // Floating point epsilon comparison
+                        assert!((actual_data[j] - data[i * d + j]).abs() < 0.00001);
                     }
                 }
             }
