@@ -5,4 +5,3 @@ opentelemetry-instrumentation-fastapi>=0.41b0
 pypika==0.48.9
 pytest
 uvicorn[standard]==0.18.3
-build
