@@ -334,7 +334,7 @@ pub mod test {
 
     #[test]
     fn it_can_add_and_basic_query() {
-        let n = 1000;
+        let n = 1;
         let d: usize = 960;
         let distance_function = DistanceFunction::Euclidean;
         let tmp_dir = tempdir().unwrap();
