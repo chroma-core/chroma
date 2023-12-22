@@ -17,6 +17,10 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
+    - name: Checkout chroma-hnswlib
+      uses: actions/checkout@v3
+      with:
+        repository: chroma-colors/hnswlib
     - name: Checkout
       uses: actions/checkout@v3
     - name: Install Protoc
