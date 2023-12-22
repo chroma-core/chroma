@@ -20,7 +20,7 @@ jobs:
     - name: Checkout chroma-hnswlib
       uses: actions/checkout@v3
       with:
-        repository: chroma-colors/hnswlib
+        repository: chroma-core/hnswlib
     - name: Checkout
       uses: actions/checkout@v3
     - name: Install Protoc
