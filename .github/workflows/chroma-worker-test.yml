@@ -21,8 +21,10 @@ jobs:
       uses: actions/checkout@v3
       with:
         repository: chroma-core/hnswlib
+        path: hnswlib
     - name: Checkout
       uses: actions/checkout@v3
+      path: chroma
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
     - name: Build
