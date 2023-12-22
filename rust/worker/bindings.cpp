@@ -1,5 +1,5 @@
 // Assumes that chroma-hnswlib is checked out at the same level as chroma
-#include "../../../chroma_hnswlib/hnswlib/hnswlib.h"
+#include "../../../hnswlib/hnswlib/hnswlib.h"
 
 template <typename dist_t, typename data_t = float>
 class Index
