@@ -30,5 +30,7 @@ jobs:
       uses: arduino/setup-protoc@v2
     - name: Build
       run: cargo build --verbose
+      working-directory: chroma
     - name: Test
       run: cargo test --verbose
+      working-directory: chroma
