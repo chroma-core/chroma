@@ -177,7 +177,7 @@ def HttpClient(
     host = str(host)
     port = int(port)
     ssl = bool(ssl)
-    _stringify_headers(headers)
+    headers = _stringify_headers(headers)
     tenant = str(tenant)
     database = str(database)
 
@@ -284,7 +284,8 @@ def AdminClient(settings: Settings = Settings()) -> AdminAPI:
     return AdminClientCreator(settings=settings)
 
 
-def _stringify_headers(headers: Optional[Dict[str, str]]) -> None:
+# Despite type hints, users may pass in non-string values for headers.
+def _stringify_headers(headers: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
     if headers is not None:
-        for key, value in headers.items():
-            headers[key] = str(value)
+        return {key: str(value) for key, value in headers.items()}
+    return None
