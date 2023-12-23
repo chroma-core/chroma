@@ -112,6 +112,10 @@ def EphemeralClient(
         settings = Settings()
     settings.is_persistent = False
 
+    # https://github.com/chroma-core/chroma/issues/1573
+    tenant = str(tenant)
+    database = str(database)
+
     return ClientCreator(settings=settings, tenant=tenant, database=database)
 
 
@@ -134,6 +138,10 @@ def PersistentClient(
         settings = Settings()
     settings.persist_directory = path
     settings.is_persistent = True
+
+    # https://github.com/chroma-core/chroma/issues/1573
+    tenant = str(tenant)
+    database = str(database)
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
@@ -164,6 +172,14 @@ def HttpClient(
 
     if settings is None:
         settings = Settings()
+
+    # https://github.com/chroma-core/chroma/issues/1573
+    host = str(host)
+    port = str(port)
+    ssl = bool(ssl)
+    _stringify_headers(headers)
+    tenant = str(tenant)
+    database = str(database)
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
@@ -217,6 +233,14 @@ def CloudClient(
     if settings is None:
         settings = Settings()
 
+    # https://github.com/chroma-core/chroma/issues/1573
+    tenant = str(tenant)
+    database = str(database)
+    api_key = str(api_key)
+    cloud_host = str(cloud_host)
+    cloud_port = str(cloud_port)
+    enable_ssl = bool(enable_ssl)
+
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = cloud_host
     settings.chroma_server_http_port = cloud_port
@@ -242,8 +266,11 @@ def Client(
 
     tenant: The tenant to use for this client. Defaults to the default tenant.
     database: The database to use for this client. Defaults to the default database.
-
     """
+
+    # https://github.com/chroma-core/chroma/issues/1573
+    tenant = str(tenant)
+    database = str(database)
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
@@ -255,3 +282,9 @@ def AdminClient(settings: Settings = Settings()) -> AdminAPI:
 
     """
     return AdminClientCreator(settings=settings)
+
+
+def _stringify_headers(headers: Optional[Dict[str, str]]) -> None:
+    if headers is not None:
+        for key, value in headers.items():
+            headers[key] = str(value)
