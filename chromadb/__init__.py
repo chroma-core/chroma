@@ -148,7 +148,7 @@ def PersistentClient(
 
 def HttpClient(
     host: str = "localhost",
-    port: str = "8000",
+    port: int = 8000,
     ssl: bool = False,
     headers: Optional[Dict[str, str]] = None,
     settings: Optional[Settings] = None,
@@ -175,7 +175,7 @@ def HttpClient(
 
     # https://github.com/chroma-core/chroma/issues/1573
     host = str(host)
-    port = str(port)
+    port = int(port)
     ssl = bool(ssl)
     _stringify_headers(headers)
     tenant = str(tenant)
@@ -205,7 +205,7 @@ def CloudClient(
     settings: Optional[Settings] = None,
     *,  # Following arguments are keyword-only, intended for testing only.
     cloud_host: str = "api.trychroma.com",
-    cloud_port: str = "8000",
+    cloud_port: int = 8000,
     enable_ssl: bool = True,
 ) -> ClientAPI:
     """
@@ -238,7 +238,7 @@ def CloudClient(
     database = str(database)
     api_key = str(api_key)
     cloud_host = str(cloud_host)
-    cloud_port = str(cloud_port)
+    cloud_port = int(cloud_port)
     enable_ssl = bool(enable_ssl)
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"

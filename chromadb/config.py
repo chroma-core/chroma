@@ -118,10 +118,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
-    chroma_server_http_port: Optional[str] = None
+    chroma_server_http_port: Optional[int] = None
     chroma_server_ssl_enabled: Optional[bool] = False
     chroma_server_api_default_path: Optional[str] = "/api/v1"
-    chroma_server_grpc_port: Optional[str] = None
+    chroma_server_grpc_port: Optional[int] = None
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
@@ -134,8 +134,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_nofile: Optional[int] = None
 
     pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[str] = "8080"
-    pulsar_broker_port: Optional[str] = "6650"
+    pulsar_admin_port: Optional[int] = 8080
+    pulsar_broker_port: Optional[int] = 6650
 
     chroma_server_auth_provider: Optional[str] = None
 

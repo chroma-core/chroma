@@ -109,7 +109,7 @@ class FastAPI(ServerAPI):
 
         self._api_url = FastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
-            chroma_server_http_port=int(str(system.settings.chroma_server_http_port)),
+            chroma_server_http_port=system.settings.chroma_server_http_port,
             chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
             default_api_path=system.settings.chroma_server_api_default_path,
         )
