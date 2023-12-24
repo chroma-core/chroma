@@ -83,8 +83,7 @@ def _field_matches(
     actual_field = result[field_name]
 
     if len(normalized_record_set["ids"]) == 0:
-        assert isinstance(actual_field, list)
-        assert len(actual_field) == 0
+        assert actual_field == []
         return
 
     # This assert should never happen, if we include metadatas/documents it will be
