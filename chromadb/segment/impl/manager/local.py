@@ -3,15 +3,20 @@ from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
     MetadataReader,
+    SegmentType,
     VectorReader,
     S,
 )
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
-from enum import Enum
 from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
+)
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
 )
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
@@ -27,12 +32,6 @@ elif platform.system() == "Windows":
     import ctypes
 
 
-class SegmentType(Enum):
-    SQLITE = "urn:chroma:segment/metadata/sqlite"
-    HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
-    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
-
-
 SEGMENT_TYPE_IMPLS = {
     SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
@@ -43,6 +42,7 @@ SEGMENT_TYPE_IMPLS = {
 class LocalSegmentManager(SegmentManager):
     _sysdb: SysDB
     _system: System
+    _opentelemetry_client: OpenTelemetryClient
     _instances: Dict[UUID, SegmentImplementation]
     _vector_instances_file_handle_cache: LRUCache[
         UUID, PersistentLocalHnswSegment
@@ -58,10 +58,13 @@ class LocalSegmentManager(SegmentManager):
         super().__init__(system)
         self._sysdb = self.require(SysDB)
         self._system = system
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
         self._segment_cache = defaultdict(dict)
         self._lock = Lock()
 
+        # TODO: prototyping with distributed segment for now, but this should be a configurable option
+        # we need to think about how to handle this configuration
         if self._system.settings.require("is_persistent"):
             self._vector_segment_type = SegmentType.HNSW_LOCAL_PERSISTED
             if platform.system() != "Windows":
@@ -97,6 +100,10 @@ class LocalSegmentManager(SegmentManager):
         self._segment_cache = defaultdict(dict)
         super().reset_state()
 
+    @trace_method(
+        "LocalSegmentManager.create_segments",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def create_segments(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
@@ -107,6 +114,10 @@ class LocalSegmentManager(SegmentManager):
         )
         return [vector_segment, metadata_segment]
 
+    @trace_method(
+        "LocalSegmentManager.delete_segments",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
@@ -115,6 +126,9 @@ class LocalSegmentManager(SegmentManager):
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
                     instance = self.get_segment(collection_id, VectorReader)
                     instance.delete()
+                elif segment["type"] == SegmentType.SQLITE.value:
+                    instance = self.get_segment(collection_id, MetadataReader)
+                    instance.delete()
                 del self._instances[segment["id"]]
             if collection_id in self._segment_cache:
                 if segment["scope"] in self._segment_cache[collection_id]:
@@ -122,6 +136,10 @@ class LocalSegmentManager(SegmentManager):
                 del self._segment_cache[collection_id]
         return [s["id"] for s in segments]
 
+    @trace_method(
+        "LocalSegmentManager.get_segment",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
@@ -144,6 +162,10 @@ class LocalSegmentManager(SegmentManager):
             instance = self._instance(self._segment_cache[collection_id][scope])
         return cast(S, instance)
 
+    @trace_method(
+        "LocalSegmentManager.hint_use_collection",
+        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
+    )
     @override
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
         # The local segment manager responds to hints by pre-loading both the metadata and vector

@@ -15,6 +15,14 @@ from chromadb.types import (
 )
 from chromadb.config import Component, System
 from uuid import UUID
+from enum import Enum
+
+
+class SegmentType(Enum):
+    SQLITE = "urn:chroma:segment/metadata/sqlite"
+    HNSW_LOCAL_MEMORY = "urn:chroma:segment/vector/hnsw-local-memory"
+    HNSW_LOCAL_PERSISTED = "urn:chroma:segment/vector/hnsw-local-persisted"
+    HNSW_DISTRIBUTED = "urn:chroma:segment/vector/hnsw-distributed"
 
 
 class SegmentImplementation(Component):

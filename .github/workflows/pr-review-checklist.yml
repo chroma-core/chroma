@@ -33,5 +33,5 @@ jobs:
             - [ ] Are there any potential impacts on other parts of the system or backward compatibility?
             - [ ] Does this change intersect with any items on our roadmap, and if so, is there a plan for fitting them together?
             ## Quality
-            - [ ] Is this code of a unexpectedly high quality (Readbility, Modularity, Intuitiveness)`
+            - [ ] Is this code of a unexpectedly high quality (Readability, Modularity, Intuitiveness)`
           })
