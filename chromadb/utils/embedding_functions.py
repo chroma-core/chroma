@@ -11,7 +11,6 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
-from chromadb.utils.retry_decorator import retry_decorator
 
 from pathlib import Path
 import os
@@ -56,7 +55,6 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
-    @retry_decorator
     def __call__(self, input: Documents) -> Embeddings:
         return self._model.encode(  # type: ignore
             list(input),
