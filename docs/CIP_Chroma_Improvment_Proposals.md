@@ -1,4 +1,4 @@
-# CIP Chroma Improvment Proposals
+# CIP Chroma Improvement Proposals
 
 ## Purpose
 
@@ -10,7 +10,7 @@ with it going forward.
 This means when making this kind of change we need to think through what we are doing as
 best we can prior to release. And as we go forward we need to stick to our decisions as
 much as possible. All technical decisions have pros and cons so it is important we
-capture the thought process that lead to a decision or design to avoid flip-flopping
+capture the thought process that leads to a decision or design to avoid flip-flopping
 needlessly.
 
 Hopefully we can make these proportional in effort to their magnitude — small changes

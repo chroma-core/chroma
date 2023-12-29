@@ -1,7 +1,7 @@
 import {expect, test} from "@jest/globals";
-import {ChromaClient} from "../src/ChromaClient";
-import chroma from "./initClientWithAuth";
+import {chromaBasic} from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
+import { ChromaClient } from "../src/ChromaClient";
 
 test("it should get the version without auth needed", async () => {
     const version = await chromaNoAuth.version();
@@ -22,12 +22,12 @@ test("it should raise error when non authenticated", async () => {
 });
 
 test('it should list collections', async () => {
-    await chroma.reset()
-    let collections = await chroma.listCollections()
+    await chromaBasic.reset()
+    let collections = await chromaBasic.listCollections()
     expect(collections).toBeDefined()
     expect(collections).toBeInstanceOf(Array)
     expect(collections.length).toBe(0)
-    const collection = await chroma.createCollection({name: "test"});
-    collections = await chroma.listCollections()
+    await chromaBasic.createCollection({name: "test"});
+    collections = await chromaBasic.listCollections()
     expect(collections.length).toBe(1)
 })

@@ -7,7 +7,7 @@ Current Status: `Accepted`
 ## **Motivation**
 
 Currently, Chroma does not provide any authentication mechanism. This CIP proposes to
-to add authentication abstractions and basic authentication mechanisms to Chroma.
+add authentication abstractions and basic authentication mechanisms to Chroma.
 
 There are intrinsic and extrinsic motivations for this CIP. The intrinsic motivation
 is to provide a secure way to access Chroma as adoption grows and the team is gearing up to release a cloud offering.
@@ -39,7 +39,7 @@ Request Sequence:
 
 ### Constraints
 
-This section provides teh architectural constraints for the authentication framework. The constraints are set of
+This section provides the architectural constraints for the authentication framework. The constraints are set of
 restrictions we impose to make the design simpler and more robust.
 
 - There must be at most one active client-side auth provider
@@ -168,7 +168,7 @@ Further work:
 
 ## **Compatibility, Deprecation, and Migration Plan**
 
-This change, introducing a pluggable auth framework is no impacting compatibility of existing deployments and users can
+This change, introducing a pluggable auth framework is not impacting compatibility of existing deployments and users can
 upgrade and use the new framework without the need for migration.
 
 No deprecations.

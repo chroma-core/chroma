@@ -1,7 +1,24 @@
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.8"
+  default     = "0.4.12"
+}
+
+#TODO this should be updated to point to https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/common/startup.sh in the repo
+data "http" "startup_script_remote" {
+  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/aws-terraform/startup.sh"
+}
+
+data "template_file" "user_data" {
+  template = data.http.startup_script_remote.response_body
+
+  vars = {
+    chroma_release         = var.chroma_release
+    enable_auth            = var.enable_auth
+    auth_type              = var.auth_type
+    basic_auth_credentials = "${local.basic_auth_credentials.username}:${local.basic_auth_credentials.password}"
+    token_auth_credentials = random_password.chroma_token.result
+  }
 }
 
 variable "region" {
@@ -62,6 +79,10 @@ locals {
   token_auth_credentials = {
     token = random_password.chroma_token.result
   }
+  tags = [
+    "chroma",
+    "release-${replace(var.chroma_release, ".", "")}",
+  ]
 }
 
 variable "ssh_public_key" {
@@ -87,8 +108,32 @@ variable "chroma_data_volume_size" {
   default     = 20
 }
 
-variable "prevent_chroma_data_volume_delete" {
-    description = "Prevent the chroma data volume from being deleted when the instance is terminated"
+variable "chroma_data_volume_snapshot_before_destroy" {
+    description = "Take a snapshot of the chroma data volume before destroying it"
     type        = bool
     default     = false
+}
+
+variable "chroma_data_restore_from_snapshot_id" {
+    description = "Restore the chroma data volume from a snapshot"
+    type        = string
+    default     = null
+}
+
+variable "chroma_port" {
+  default     = "8000"
+  description = "The port that chroma listens on"
+  type        = string
+}
+
+variable "source_ranges" {
+  default     = ["0.0.0.0/0", "::/0"]
+  type        = list(string)
+  description = "List of CIDR ranges to allow through the firewall"
+}
+
+variable "mgmt_source_ranges" {
+  default     = ["0.0.0.0/0", "::/0"]
+  type        = list(string)
+  description = "List of CIDR ranges to allow for management of the Chroma instance. This is used for SSH incoming traffic filtering"
 }

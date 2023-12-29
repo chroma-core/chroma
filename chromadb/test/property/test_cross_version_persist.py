@@ -5,14 +5,14 @@ import shutil
 import subprocess
 import tempfile
 from types import ModuleType
-from typing import Generator, List, Tuple, Dict, Any, Callable
+from typing import Generator, List, Tuple, Dict, Any, Callable, Type
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -23,6 +23,9 @@ from chromadb.config import Settings
 
 MINIMUM_VERSION = "0.4.1"
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+# Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
+VERSIONED_MODULES = ["pydantic"]
 
 
 def versions() -> List[str]:
@@ -43,13 +46,15 @@ def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _patch_boolean_metadata(
-    collection: strategies.Collection, embeddings: strategies.RecordSet
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
 ) -> None:
     # Since the old version does not support boolean value metadata, we will convert
     # boolean value metadata to int
     collection_metadata = collection.metadata
     if collection_metadata is not None:
-        _bool_to_int(collection_metadata)
+        _bool_to_int(collection_metadata)  # type: ignore
 
     if embeddings["metadatas"] is not None:
         if isinstance(embeddings["metadatas"], list):
@@ -61,15 +66,29 @@ def _patch_boolean_metadata(
             _bool_to_int(metadata)
 
 
+def _patch_telemetry_client(
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
+) -> None:
+    # chroma 0.4.14 added OpenTelemetry, distinct from ProductTelemetry. Before 0.4.14
+    # ProductTelemetry was simply called Telemetry.
+    settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
+
+
 version_patches: List[
-    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet], None]]
+    Tuple[str, Callable[[strategies.Collection, strategies.RecordSet, Settings], None]]
 ] = [
     ("0.4.3", _patch_boolean_metadata),
+    ("0.4.14", _patch_telemetry_client),
 ]
 
 
 def patch_for_version(
-    version: str, collection: strategies.Collection, embeddings: strategies.RecordSet
+    version: str,
+    collection: strategies.Collection,
+    embeddings: strategies.RecordSet,
+    settings: Settings,
 ) -> None:
     """Override aspects of the collection and embeddings, before testing, to account for
     breaking changes in old versions."""
@@ -78,7 +97,13 @@ def patch_for_version(
         if packaging_version.Version(version) <= packaging_version.Version(
             patch_version
         ):
-            patch(collection, embeddings)
+            patch(collection, embeddings, settings)
+
+
+def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
+    if packaging_version.Version(version) <= packaging_version.Version("0.4.14"):
+        return module.api.API  # type: ignore
+    return module.api.ServerAPI  # type: ignore
 
 
 def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
@@ -162,7 +187,10 @@ def switch_to_version(version: str) -> ModuleType:
     old_modules = {
         n: m
         for n, m in sys.modules.items()
-        if n == module_name or (n.startswith(module_name + "."))
+        if n == module_name
+        or (n.startswith(module_name + "."))
+        or n in VERSIONED_MODULES
+        or (any(n.startswith(m + ".") for m in VERSIONED_MODULES))
     }
     for n in old_modules:
         del sys.modules[n]
@@ -176,8 +204,8 @@ def switch_to_version(version: str) -> ModuleType:
     return chromadb
 
 
-class not_implemented_ef(EmbeddingFunction):
-    def __call__(self, texts: Documents) -> Embeddings:
+class not_implemented_ef(EmbeddingFunction[Documents]):
+    def __call__(self, input: Documents) -> Embeddings:
         assert False, "Embedding function should not be called"
 
 
@@ -191,7 +219,7 @@ def persist_generated_data_with_old_version(
     try:
         old_module = switch_to_version(version)
         system = old_module.config.System(settings)
-        api: API = system.instance(API)
+        api = system.instance(api_import_for_version(old_module, version))
         system.start()
 
         api.reset()
@@ -255,7 +283,7 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
-    patch_for_version(version, collection_strategy, embeddings_strategy)
+    patch_for_version(version, collection_strategy, embeddings_strategy, settings)
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -282,11 +310,11 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     system.start()
     coll = api.get_collection(
         name=collection_strategy.name,
-        embedding_function=not_implemented_ef(),
+        embedding_function=not_implemented_ef(),  # type: ignore
     )
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)

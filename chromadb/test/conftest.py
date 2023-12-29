@@ -6,6 +6,8 @@ import socket
 import tempfile
 import time
 from typing import (
+    Any,
+    Dict,
     Generator,
     Iterator,
     List,
@@ -22,11 +24,12 @@ from requests.exceptions import ConnectionError
 from typing_extensions import Protocol
 
 import chromadb.server.fastapi
-from chromadb.api import API
+from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, SubmitEmbeddingRecord
+from chromadb.api.client import Client as ClientCreator
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)  # This will only run when testing
@@ -45,6 +48,16 @@ hypothesis.settings.register_profile(
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
+NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+
+
+def skip_if_not_cluster() -> pytest.MarkDecorator:
+    return pytest.mark.skipif(
+        NOT_CLUSTER_ONLY,
+        reason="Requires Kubernetes to be running with a valid config",
+    )
+
+
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -61,6 +74,9 @@ def _run_server(
     chroma_server_auth_credentials_file: Optional[str] = None,
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
@@ -78,6 +94,9 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
+            chroma_server_authz_config=chroma_server_authz_config,
         )
     else:
         settings = Settings(
@@ -93,12 +112,21 @@ def _run_server(
             chroma_server_auth_credentials_file=chroma_server_auth_credentials_file,
             chroma_server_auth_credentials=chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header=chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider=chroma_server_authz_provider,
+            chroma_server_authz_config_file=chroma_server_authz_config_file,
+            chroma_server_authz_config=chroma_server_authz_config,
         )
     server = chromadb.server.fastapi.FastAPI(settings)
-    uvicorn.run(server.app(), host="0.0.0.0", port=port, log_level="error")
+    uvicorn.run(
+        server.app(),
+        host="0.0.0.0",
+        port=port,
+        log_level="error",
+        timeout_keep_alive=30,
+    )
 
 
-def _await_server(api: API, attempts: int = 0) -> None:
+def _await_server(api: ServerAPI, attempts: int = 0) -> None:
     try:
         api.heartbeat()
     except ConnectionError as e:
@@ -121,6 +149,9 @@ def _fastapi_fixture(
     chroma_server_auth_credentials: Optional[str] = None,
     chroma_client_auth_token_transport_header: Optional[str] = None,
     chroma_server_auth_token_transport_header: Optional[str] = None,
+    chroma_server_authz_provider: Optional[str] = None,
+    chroma_server_authz_config_file: Optional[str] = None,
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None,
 ) -> Generator[System, None, None]:
     """Fixture generator that launches a server in a separate process, and yields a
     fastapi client connect to it"""
@@ -137,6 +168,9 @@ def _fastapi_fixture(
         Optional[str],
         Optional[str],
         Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[Dict[str, Any]],
     ] = (
         port,
         False,
@@ -146,6 +180,9 @@ def _fastapi_fixture(
         chroma_server_auth_credentials_file,
         chroma_server_auth_credentials,
         chroma_server_auth_token_transport_header,
+        chroma_server_authz_provider,
+        chroma_server_authz_config_file,
+        chroma_server_authz_config,
     )
     persist_directory = None
     if is_persistent:
@@ -159,6 +196,9 @@ def _fastapi_fixture(
             chroma_server_auth_credentials_file,
             chroma_server_auth_credentials,
             chroma_server_auth_token_transport_header,
+            chroma_server_authz_provider,
+            chroma_server_authz_config_file,
+            chroma_server_authz_config,
         )
     proc = ctx.Process(target=_run_server, args=args, daemon=True)
     proc.start()
@@ -172,7 +212,7 @@ def _fastapi_fixture(
         chroma_client_auth_token_transport_header=chroma_client_auth_token_transport_header,
     )
     system = System(settings)
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     system.start()
     _await_server(api)
     yield system
@@ -189,6 +229,20 @@ def fastapi() -> Generator[System, None, None]:
 
 def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
+
+
+def basic_http_client() -> Generator[System, None, None]:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_http_port="8000",
+        allow_reset=True,
+    )
+    system = System(settings)
+    api = system.instance(ServerAPI)
+    _await_server(api)
+    system.start()
+    yield system
+    system.stop()
 
 
 def fastapi_server_basic_auth() -> Generator[System, None, None]:
@@ -327,6 +381,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         fixtures = [integration]
+    if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
+        fixtures = [basic_http_client]
     return fixtures
 
 
@@ -345,41 +401,51 @@ def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, No
 
 
 @pytest.fixture(scope="module", params=system_fixtures_wrong_auth())
-def system_wrong_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system_wrong_auth(
+    request: pytest.FixtureRequest,
+) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="module", params=system_fixtures())
-def system(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
-def system_auth(request: pytest.FixtureRequest) -> Generator[API, None, None]:
+def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
 
 
 @pytest.fixture(scope="function")
-def api(system: System) -> Generator[API, None, None]:
+def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
-    api = system.instance(API)
+    api = system.instance(ServerAPI)
     yield api
+
+
+@pytest.fixture(scope="function")
+def client(system: System) -> Generator[ClientAPI, None, None]:
+    system.reset_state()
+    client = ClientCreator.from_system(system)
+    yield client
+    client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")
 def api_wrong_cred(
     system_wrong_auth: System,
-) -> Generator[API, None, None]:
+) -> Generator[ServerAPI, None, None]:
     system_wrong_auth.reset_state()
-    api = system_wrong_auth.instance(API)
+    api = system_wrong_auth.instance(ServerAPI)
     yield api
 
 
 @pytest.fixture(scope="function")
-def api_with_server_auth(system_auth: System) -> Generator[API, None, None]:
+def api_with_server_auth(system_auth: System) -> Generator[ServerAPI, None, None]:
     _sys = system_auth
     _sys.reset_state()
-    api = _sys.instance(API)
+    api = _sys.instance(ServerAPI)
     yield api
 
 
@@ -439,5 +505,5 @@ def produce_fns(
     yield request.param
 
 
-def pytest_configure(config):
+def pytest_configure(config):  # type: ignore
     embeddings_queue._called_from_test = True
