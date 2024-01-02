@@ -11,7 +11,13 @@ configure SSL contexts to trust custom CA certificates or self-signed certificat
 the current setup. This capability is crucial for organizations that operate their own CA or for developers who need to
 test their applications in environments where certificates from a recognized CA are not available or practical.
 
->**IMPORTANT:** It should be noted that we do not recommend or encourage the use of self-signed certificates in production environments.
+The suggested change entails a server-side certificate be available, but this CIP does not prescribe how such
+certificate should be configured or obtained. In our testing, we used a self-signed certificate generated with
+`openssl` and configured the client to trust the certificate. We also experiment with a SSL-terminated proxy server.
+Both of approaches yielded the same results.
+
+> **IMPORTANT:** It should be noted that we do not recommend or encourage the use of self-signed certificates in
+> production environments.
 
 ## Public Interfaces
 
