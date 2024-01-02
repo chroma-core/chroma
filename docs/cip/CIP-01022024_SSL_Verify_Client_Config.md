@@ -1,4 +1,4 @@
-# CIP-01022024 Allow Filtering for Collections
+# CIP-01022024 SSL Verify Client Config
 
 ## Status
 
@@ -10,6 +10,8 @@ The motivation for this change is to enhance security and flexibility in Chroma'
 configure SSL contexts to trust custom CA certificates or self-signed certificates, which is not straightforward with
 the current setup. This capability is crucial for organizations that operate their own CA or for developers who need to
 test their applications in environments where certificates from a recognized CA are not available or practical.
+
+>**IMPORTANT:** It should be noted that we do not recommend or encourage the use of self-signed certificates in production environments.
 
 ## Public Interfaces
 
