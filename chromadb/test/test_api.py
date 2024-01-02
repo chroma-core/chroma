@@ -1,5 +1,7 @@
 # type: ignore
+import traceback
 import requests
+from urllib3.connectionpool import InsecureRequestWarning
 
 import chromadb
 from chromadb.api.fastapi import FastAPI
@@ -360,13 +362,15 @@ def test_modify_error_on_existing_name(api):
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
+
 def test_modify_warn_on_DF_change(api, caplog):
     api.reset()
-    
+
     collection = api.create_collection("testspace")
 
     with pytest.raises(Exception, match="not supported") as e:
         collection.modify(metadata={"hnsw:space": "cosine"})
+
 
 def test_metadata_cru(api):
     api.reset()
@@ -1437,6 +1441,7 @@ def test_invalid_embeddings(api):
 
 # test to make sure update shows exception for bad dimensionality
 
+
 def test_dimensionality_exception_update(api):
     api.reset()
     collection = api.create_collection("test_dimensionality_update_exception")
@@ -1446,7 +1451,9 @@ def test_dimensionality_exception_update(api):
         collection.update(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
 
+
 # test to make sure upsert shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_upsert(api):
     api.reset()
@@ -1456,3 +1463,75 @@ def test_dimensionality_exception_upsert(api):
     with pytest.raises(Exception) as e:
         collection.upsert(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
+
+
+#
+# # Generate a self-signed certificate fixture
+# @pytest.fixture(scope="session")
+# def generate_self_signed_certificate() -> str:
+#     subprocess.run(
+#         ["openssl", "req", "-x509", "-newkey", "rsa:4096", "-keyout", "serverkey.pem", "-out", "servercert.pem", "-days", "365",
+#          "-nodes", "-subj", "/CN=localhost"])
+#     return "./cert.pem"
+#
+#
+# def run_ssl_server():
+#     uvicorn.run(app, host="127.0.0.1", port=8000, ssl_keyfile="key.pem", ssl_certfile="cert.pem")
+#
+#
+# def _await_ssl_server(attempts: int = 0) -> None:
+#     try:
+#         requests.get("https://localhost:8000/api/v1", verify=False)
+#     except ConnectionError as e:
+#         print(e)
+#         if attempts > 15:
+#             raise e
+#         else:
+#             print("Waiting for server to start...")
+#             time.sleep(4)
+#             _await_ssl_server(attempts + 1)
+#     except Exception as e:
+#         print(type(e))
+#         raise e
+#
+#
+# # Start a uvicorn process with given settings including the SSL self-signed certificate
+# @pytest.fixture(scope="session")
+# def start_uvicorn_process():
+#     ctx = multiprocessing.get_context("spawn")
+#     proc = ctx.Process(target=run_ssl_server, daemon=True)
+#     proc.start()
+#     _await_ssl_server()
+#     yield proc
+#     proc.kill()
+
+
+# Send a request to the server with given SSL context
+def test_ssl_self_signed(client_ssl):
+    client_ssl.heartbeat()
+
+
+def test_ssl_self_signed_without_ssl_verify(client_ssl):
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.raises(ValueError) as e:
+        chromadb.HttpClient(ssl=True, port=_port)
+    stack_trace = traceback.format_exception(
+        type(e.value), e.value, e.value.__traceback__
+    )
+    client_ssl.clear_system_cache()
+    assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
+
+
+def test_ssl_self_signed_with_verify_false(client_ssl):
+    client_ssl.heartbeat()
+    _port = client_ssl._server._settings.chroma_server_http_port
+    with pytest.warns(InsecureRequestWarning) as record:
+        client = chromadb.HttpClient(
+            ssl=True,
+            port=_port,
+            settings=chromadb.Settings(chroma_server_ssl_verify=False),
+        )
+        client.heartbeat()
+    client_ssl.clear_system_cache()
+    assert "Unverified HTTPS request" in str(record[0].message)

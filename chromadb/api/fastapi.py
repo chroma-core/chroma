@@ -138,6 +138,8 @@ class FastAPI(ServerAPI):
             self._session = requests.Session()
         if self._header is not None:
             self._session.headers.update(self._header)
+        if self._settings.chroma_server_ssl_verify is not None:
+            self._session.verify = self._settings.chroma_server_ssl_verify
 
     @trace_method("FastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
