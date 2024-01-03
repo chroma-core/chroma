@@ -112,7 +112,7 @@ def EphemeralClient(
         settings = Settings()
     settings.is_persistent = False
 
-    # https://github.com/chroma-core/chroma/issues/1573
+    # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -139,7 +139,7 @@ def PersistentClient(
     settings.persist_directory = path
     settings.is_persistent = True
 
-    # https://github.com/chroma-core/chroma/issues/1573
+    # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -173,11 +173,10 @@ def HttpClient(
     if settings is None:
         settings = Settings()
 
-    # https://github.com/chroma-core/chroma/issues/1573
+    # Make sure paramaters are the correct types -- users can pass anything.
     host = str(host)
     port = int(port)
     ssl = bool(ssl)
-    headers = _stringify_headers(headers)
     tenant = str(tenant)
     database = str(database)
 
@@ -233,7 +232,7 @@ def CloudClient(
     if settings is None:
         settings = Settings()
 
-    # https://github.com/chroma-core/chroma/issues/1573
+    # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
     api_key = str(api_key)
@@ -268,7 +267,7 @@ def Client(
     database: The database to use for this client. Defaults to the default database.
     """
 
-    # https://github.com/chroma-core/chroma/issues/1573
+    # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)
     database = str(database)
 
@@ -282,10 +281,3 @@ def AdminClient(settings: Settings = Settings()) -> AdminAPI:
 
     """
     return AdminClientCreator(settings=settings)
-
-
-# Despite type hints, users may pass in non-string values for headers.
-def _stringify_headers(headers: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
-    if headers is not None:
-        return {key: str(value) for key, value in headers.items()}
-    return None
