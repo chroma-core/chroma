@@ -668,7 +668,7 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     assert result == sample_segments[:1]
 
     result = sysdb.get_segments(type="test_type_b")
-    assert sorted(result, key=lambda c: c["type"]) == sample_segments[1:]
+    assert result == sample_segments[1:]
 
     # Find by collection ID
     result = sysdb.get_segments(collection=sample_collections[0]["id"])
