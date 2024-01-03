@@ -29,15 +29,16 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
 # TODO: Placing this here, since data loaders are a common use case for this function.
 #   But it should probably be moved to a more general-purpose module.
 #   See: https://github.com/chroma-core/chroma/issues/1606
-def vectorize(func, iterable=None):
+from functools import partial
+from concurrent.futures import ThreadPoolExecutor
+
+def vectorize(func, iterable=None, *, max_workers : int = 1):
     """Like builtin map, but returns a list, 
     and if iterable is None, returns a partial function that can directly be applied 
     to an iterable.
-
     This is useful, for instance, for making a data loader from any single-uri loader.
     
     Example:
-
     >>> vectorize(lambda x: x**2, [1,2,3])
     [1, 4, 9]
     >>> vectorized_square = vectorize(lambda x: x**2)
@@ -45,10 +46,13 @@ def vectorize(func, iterable=None):
     [1, 4, 9]
     """
     if iterable is None:
-        from functools import partial
-        return partial(vectorize, func)
-    return list(map(func, iterable))
-
+        return partial(vectorize, func, max_workers=max_workers)
+    if max_workers == 1:
+        return list(map(func, iterable))
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return list(executor.map(func, iterable))
+        
 # --------------------------- Examples of loaders ---------------------------
 
 FileContents = Union[str, bytes]  # a type for the contents of a file
@@ -87,7 +91,7 @@ class FileLoader(DataLoader[List[Optional[FileContents]]]):
     By default, it loads text files from local files, given URIs that are full file paths.
     You can specify a prefix thought (usually used to specify a root directory),
     or a suffix (usually used to specify a file extension).
-    
+
     Further, you can specify a different `loader`, e.g. to load files from a remote URL, 
     or to load binary files, or to load text from pdf files, or from S3, or a database, etc.
 
@@ -132,8 +136,7 @@ class FileLoader(DataLoader[List[Optional[FileContents]]]):
         if isinstance(uris, str):
             # To avoid a common mistake, we cast a string to a list of containing it
             uris = [uris]
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            return list(executor.map(self._load_file, uris))
+        return vectorize(self._load_file, uris, max_workers=self._max_workers)
         
 # add a few loaders as attributes, for convenience
 FileLoader.load_text = load_text
