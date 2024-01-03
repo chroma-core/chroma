@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.6.1",
+  "version": "1.7.3",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -43,7 +43,7 @@
   "scripts": {
     "test": "run-s db:clean db:cleanauth db:run test:runfull db:clean test:runfull-authonly db:cleanauth",
     "testnoauth": "run-s db:clean db:run test:runfull db:clean",
-    "testauth": "run-s db:cleanauth db:run-auth test:runfull-authonly db:cleanauth",
+    "testauth": "run-s db:cleanauth test:runfull-authonly db:cleanauth",
     "test:set-port": "cross-env URL=localhost:8001",
     "test:run": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
     "test:run-auth-basic": "jest --runInBand --testPathPattern=test/auth.basic.test.ts",
@@ -76,10 +76,14 @@
     "cliui": "^8.0.1"
   },
   "peerDependencies": {
-    "cohere-ai": "^5.0.0 || ^6.0.0",
+    "@google/generative-ai": "^0.1.1",
+    "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@google/generative-ai": {
+      "optional": true
+    },
     "cohere-ai": {
       "optional": true
     },

@@ -1,4 +1,5 @@
 import {ChromaClient} from "../src/ChromaClient";
+import { CloudClient } from "../src/CloudClient";
 
 const PORT = process.env.PORT || "8000";
 const URL = "http://localhost:" + PORT;
@@ -12,3 +13,4 @@ export const chromaTokenXToken = new ChromaClient({
     path: URL,
     auth: {provider: "token", credentials: "test-token", providerOptions: {headerType: "X_CHROMA_TOKEN"}}
 });
+export const cloudClient = new CloudClient({apiKey: "test-token", cloudPort: PORT, cloudHost: "http://localhost"})

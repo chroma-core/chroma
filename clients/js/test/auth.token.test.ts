@@ -1,6 +1,6 @@
 import {expect, test} from "@jest/globals";
 import {ChromaClient} from "../src/ChromaClient";
-import {chromaTokenDefault, chromaTokenBearer, chromaTokenXToken} from "./initClientWithAuth";
+import {chromaTokenDefault, chromaTokenBearer, chromaTokenXToken, cloudClient} from "./initClientWithAuth";
 import chromaNoAuth from "./initClient";
 
 test("it should get the version without auth needed", async () => {
@@ -53,6 +53,17 @@ if (!process.env.XTOKEN_TEST) {
         expect(collections.length).toBe(0)
         const collection = await chromaTokenXToken.createCollection({name: "test"});
         collections = await chromaTokenXToken.listCollections()
+        expect(collections.length).toBe(1)
+    })
+
+    test('it should list collections with explicit x-token token config in CloudClient', async () => {
+        await cloudClient.reset()
+        let collections = await cloudClient.listCollections()
+        expect(collections).toBeDefined()
+        expect(collections).toBeInstanceOf(Array)
+        expect(collections.length).toBe(0)
+        const collection = await cloudClient.createCollection({name: "test"});
+        collections = await cloudClient.listCollections()
         expect(collections.length).toBe(1)
     })
 

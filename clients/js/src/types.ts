@@ -1,3 +1,6 @@
+import { AuthOptions } from "./auth";
+import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+
 export enum IncludeEnum {
   Documents = 'documents',
   Embeddings = 'embeddings',
@@ -80,3 +83,75 @@ export type CollectionMetadata = Record<string, unknown>;
 export type ConfigOptions = {
   options?: RequestInit;
 };
+
+export type GetParams = {
+  ids?: ID | IDs,
+  where?: Where,
+  limit?: PositiveInteger,
+  offset?: PositiveInteger,
+  include?: IncludeEnum[],
+  whereDocument?: WhereDocument
+}
+
+export type ListCollectionsParams = {
+  limit?: PositiveInteger,
+  offset?: PositiveInteger,
+}
+
+export type ChromaClientParams = {
+  path?: string,
+  fetchOptions?: RequestInit,
+  auth?: AuthOptions,
+  tenant?: string,
+  database?: string,
+}
+
+export type CreateCollectionParams = {
+  name: string,
+  metadata?: CollectionMetadata,
+  embeddingFunction?: IEmbeddingFunction
+}
+
+export type GetOrCreateCollectionParams = CreateCollectionParams
+
+export type GetCollectionParams = {
+  name: string;
+  embeddingFunction?: IEmbeddingFunction
+}
+
+export type DeleteCollectionParams = {
+  name: string
+}
+
+export type AddParams = {
+  ids: ID | IDs,
+  embeddings?: Embedding | Embeddings,
+  metadatas?: Metadata | Metadatas,
+  documents?: Document | Documents,
+}
+
+export type UpsertParams = AddParams;
+export type UpdateParams = AddParams;
+
+export type ModifyCollectionParams = {
+  name?: string,
+  metadata?: CollectionMetadata
+}
+
+export type QueryParams = {
+    queryEmbeddings?: Embedding | Embeddings,
+    nResults?: PositiveInteger,
+    where?: Where,
+    queryTexts?: string | string[],
+    whereDocument?: WhereDocument, // {"$contains":"search_string"}
+    include?: IncludeEnum[] // ["metadata", "document"]
+}
+
+export type PeekParams = { limit?: PositiveInteger }
+
+export type DeleteParams = {
+    ids?: ID | IDs,
+    where?: Where,
+    whereDocument?: WhereDocument
+}
+

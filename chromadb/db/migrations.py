@@ -52,10 +52,15 @@ class InconsistentVersionError(Exception):
 class InconsistentHashError(Exception):
     def __init__(self, path: str, db_hash: str, source_hash: str):
         super().__init__(
-            f"Inconsistent MD5 hashes in {path}:"
+            f"Inconsistent hashes in {path}:"
             + f"db hash was {db_hash}, source has was {source_hash}."
             + " Was the migration file modified after being applied to the DB?"
         )
+
+
+class InvalidHashError(Exception):
+    def __init__(self, alg: str):
+        super().__init__(f"Invalid hash algorithm specified: {alg}")
 
 
 class InvalidMigrationFilename(Exception):
@@ -141,7 +146,11 @@ class MigratableDB(SqlDB):
             raise UninitializedMigrationsError()
         for dir in self.migration_dirs():
             db_migrations = self.db_migrations(dir)
-            source_migrations = find_migrations(dir, self.migration_scope())
+            source_migrations = find_migrations(
+                dir,
+                self.migration_scope(),
+                self._settings.require("migrations_hash_algorithm"),
+            )
             unapplied_migrations = verify_migration_sequence(
                 db_migrations, source_migrations
             )
@@ -155,7 +164,11 @@ class MigratableDB(SqlDB):
         self.setup_migrations()
         for dir in self.migration_dirs():
             db_migrations = self.db_migrations(dir)
-            source_migrations = find_migrations(dir, self.migration_scope())
+            source_migrations = find_migrations(
+                dir,
+                self.migration_scope(),
+                self._settings.require("migrations_hash_algorithm"),
+            )
             unapplied_migrations = verify_migration_sequence(
                 db_migrations, source_migrations
             )
@@ -218,7 +231,7 @@ def verify_migration_sequence(
     return source_migrations[len(db_migrations) :]
 
 
-def find_migrations(dir: Traversable, scope: str) -> Sequence[Migration]:
+def find_migrations(dir: Traversable, scope: str, hash_alg: str = "md5") -> Sequence[Migration]:
     """Return a list of all migration present in the given directory, in ascending
     order. Filter by scope."""
     files = [
@@ -228,17 +241,24 @@ def find_migrations(dir: Traversable, scope: str) -> Sequence[Migration]:
     ]
     files = list(filter(lambda f: f["scope"] == scope, files))
     files = sorted(files, key=lambda f: f["version"])
-    return [_read_migration_file(f) for f in files]
+    return [_read_migration_file(f, hash_alg) for f in files]
 
 
-def _read_migration_file(file: MigrationFile) -> Migration:
+def _read_migration_file(file: MigrationFile, hash_alg: str) -> Migration:
     """Read a migration file"""
     if "path" not in file or not file["path"].is_file():
         raise FileNotFoundError(
             f"No migration file found for dir {file['dir']} with filename {file['filename']} and scope {file['scope']} at version {file['version']}"
         )
     sql = file["path"].read_text()
-    hash = hashlib.md5(sql.encode("utf-8")).hexdigest()
+
+    if hash_alg == "md5":
+        hash = hashlib.md5(sql.encode("utf-8")).hexdigest()
+    elif hash_alg == "sha256":
+        hash = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+    else:
+        raise InvalidHashError(alg=hash_alg)
+
     return {
         "hash": hash,
         "sql": sql,

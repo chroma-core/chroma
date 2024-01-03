@@ -7,6 +7,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/metastore"
 	"github.com/chroma/chroma-coordinator/internal/metastore/db/dbmodel"
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -16,6 +17,7 @@ import (
 type Catalog struct {
 	metaDomain dbmodel.IMetaDomain
 	txImpl     dbmodel.ITransaction
+	store      notification.NotificationStore
 }
 
 func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain) *Catalog {
@@ -23,6 +25,12 @@ func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain
 		txImpl:     txImpl,
 		metaDomain: metaDomain,
 	}
+}
+
+func NewTableCatalogWithNotification(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain, store notification.NotificationStore) *Catalog {
+	catalog := NewTableCatalog(txImpl, metaDomain)
+	catalog.store = store
+	return catalog
 }
 
 var _ metastore.Catalog = (*Catalog)(nil)
@@ -273,6 +281,16 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 		result = convertCollectionToModel(collectionList)[0]
 		result.Created = true
+
+		notificationRecord := &dbmodel.Notification{
+			CollectionID: result.ID.String(),
+			Type:         dbmodel.NotificationTypeCreateCollection,
+			Status:       dbmodel.NotificationStatusPending,
+		}
+		err = tc.metaDomain.NotificationDb(txCtx).Insert(notificationRecord)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -300,6 +318,15 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 			return err
 		}
 		err = tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if err != nil {
+			return err
+		}
+		notificationRecord := &dbmodel.Notification{
+			CollectionID: collectionID.String(),
+			Type:         dbmodel.NotificationTypeDeleteCollection,
+			Status:       dbmodel.NotificationStatusPending,
+		}
+		err = tc.metaDomain.NotificationDb(txCtx).Insert(notificationRecord)
 		if err != nil {
 			return err
 		}

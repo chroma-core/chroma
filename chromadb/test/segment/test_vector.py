@@ -91,6 +91,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             encoding=ScalarEncoding.FLOAT32,
             metadata=None,
             operation=Operation.ADD,
+            collection_id=uuid.UUID(int=0),
         )
         return record
 
@@ -301,6 +302,7 @@ def test_delete(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
     )
     assert isinstance(seq_ids, List)
     seq_ids.append(
@@ -380,6 +382,7 @@ def _test_update(
                 encoding=ScalarEncoding.FLOAT32,
                 metadata=None,
                 operation=operation,
+                collection_id=uuid.UUID(int=0),
             ),
         )
     )
@@ -437,6 +440,7 @@ def test_update(
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPDATE,
+        collection_id=uuid.UUID(int=0),
     )
     seq_id = produce_fns(
         producer=producer,
@@ -474,6 +478,7 @@ def test_upsert(
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPSERT,
+        collection_id=uuid.UUID(int=0),
     )
     seq_id = produce_fns(
         producer=producer,
@@ -510,6 +515,7 @@ def test_delete_without_add(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
     )
 
     try:
@@ -545,6 +551,7 @@ def test_delete_with_local_segment_storage(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
     )
     assert isinstance(seq_ids, List)
     seq_ids.append(
@@ -620,6 +627,7 @@ def test_reset_state_ignored_for_allow_reset_false(
         encoding=None,
         metadata=None,
         operation=Operation.DELETE,
+        collection_id=uuid.UUID(int=0),
     )
     assert isinstance(seq_ids, List)
     seq_ids.append(
