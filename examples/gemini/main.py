@@ -2,11 +2,14 @@ import argparse
 import os
 from typing import List, Dict
 
-import openai
+import google.generativeai as genai
 import chromadb
+from chromadb.utils import embedding_functions
+
+model = genai.GenerativeModel("gemini-pro")
 
 
-def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
+def build_prompt(query: str, context: List[str]) -> str:
     """
     Builds a prompt for the LLM. #
 
@@ -14,36 +17,35 @@ def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
     and the returned context, and asks the model to answer the question based only
     on what's in the context, not what's in its weights.
 
-    More information: https://platform.openai.com/docs/guides/chat/introduction
-
     Args:
     query (str): The original query.
     context (List[str]): The context of the query, returned by embedding search.
 
     Returns:
-    A prompt for the LLM (List[Dict[str, str]]).
+    A prompt for the LLM (str).
     """
 
-    system = {
-        "role": "system",
+    base_prompt = {
         "content": "I am going to ask you a question, which I would like you to answer"
-        "based only on the provided context, and not any other information."
-        "If there is not enough information in the context to answer the question,"
-        'say "I am not sure", then try to make a guess.'
-        "Break your answer up into nicely readable paragraphs.",
+        " based only on the provided context, and not any other information."
+        " If there is not enough information in the context to answer the question,"
+        ' say "I am not sure", then try to make a guess.'
+        " Break your answer up into nicely readable paragraphs.",
     }
-    user = {
-        "role": "user",
-        "content": f"The question is {query}. Here is all the context you have:"
+    user_prompt = {
+        "content": f" The question is '{query}'. Here is all the context you have:"
         f'{(" ").join(context)}',
     }
 
-    return [system, user]
+    # combine the prompts to output a single prompt string
+    system = f"{base_prompt['content']} {user_prompt['content']}"
+
+    return system
 
 
-def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str:
+def get_gemini_response(query: str, context: List[str]) -> str:
     """
-    Queries the GPT API to get a response to the question.
+    Queries the Gemini API to get a response to the question.
 
     Args:
     query (str): The original query.
@@ -52,37 +54,36 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
     Returns:
     A response to the question.
     """
-    response = openai.ChatCompletion.create(
-        model=model_name,
-        messages=build_prompt(query, context),
-    )
 
-    return response.choices[0].message.content  # type: ignore
+    response = model.generate_content(build_prompt(query, context))
+
+    return response.text
 
 
 def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
-    
-    # Check if the OPENAI_API_KEY environment variable is set. Prompt the user to set it if not.
-    if "OPENAI_API_KEY" not in os.environ:
-        openai.api_key = input(
-            "Please enter your OpenAI API Key. You can get it from https://platform.openai.com/account/api-keys\n"
-        )
-
-    # Ask what model to use
-    model_name = "gpt-3.5-turbo"
-    answer = input(f"Do you want to use GPT-4? (y/n) (default is {model_name}): ")
-    if answer == "y":
-        model_name = "gpt-4"
+    # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
+    google_api_key = None
+    if "GOOGLE_API_KEY" not in os.environ:
+        gapikey = input("Please enter your Google API Key: ")
+        genai.configure(api_key=gapikey)
+        google_api_key = gapikey
+    else:
+        google_api_key = os.environ["GOOGLE_API_KEY"]
 
     # Instantiate a persistent chroma client in the persist_directory.
     # This will automatically load any previously saved collections.
     # Learn more at docs.trychroma.com
     client = chromadb.PersistentClient(path=persist_directory)
 
+    # create embedding function
+    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(api_key=google_api_key, task_type="RETRIEVAL_QUERY")
+
     # Get the collection.
-    collection = client.get_collection(name=collection_name)
+    collection = client.get_collection(
+        name=collection_name, embedding_function=embedding_function
+    )
 
     # We use a simple input loop.
     while True:
@@ -91,7 +92,7 @@ def main(
         if len(query) == 0:
             print("Please enter a question. Ctrl+C to Quit.\n")
             continue
-        print(f"\nThinking using {model_name}...\n")
+        print("\nThinking...\n")
 
         # Query the collection to get the 5 most relevant results
         results = collection.query(
@@ -105,8 +106,8 @@ def main(
             ]
         )
 
-        # Get the response from GPT
-        response = get_chatGPT_response(query, results["documents"][0], model_name)  # type: ignore
+        # Get the response from Gemini
+        response = get_gemini_response(query, results["documents"][0])  # type: ignore
 
         # Output, with sources
         print(response)
