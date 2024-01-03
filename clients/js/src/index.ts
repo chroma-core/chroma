@@ -4,4 +4,5 @@ export { IEmbeddingFunction } from './embeddings/IEmbeddingFunction';
 export { OpenAIEmbeddingFunction } from './embeddings/OpenAIEmbeddingFunction';
 export { CohereEmbeddingFunction } from './embeddings/CohereEmbeddingFunction';
 export { TransformersEmbeddingFunction } from './embeddings/TransformersEmbeddingFunction';
+export { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction';
 export { IncludeEnum } from './types';

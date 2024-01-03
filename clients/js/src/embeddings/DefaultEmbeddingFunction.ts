@@ -3,7 +3,7 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 // Dynamically import module
 let TransformersApi: Promise<any>;
 
-export class TransformersEmbeddingFunction implements IEmbeddingFunction {
+export class DefaultEmbeddingFunction implements IEmbeddingFunction {
   private pipelinePromise?: Promise<any> | null;
   private transformersApi: any;
   private model: string;
@@ -12,7 +12,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   private progress_callback: Function | null;
 
   /**
-   * TransformersEmbeddingFunction constructor.
+   * DefaultEmbeddingFunction constructor.
    * @param options The configuration options.
    * @param options.model The model to use to calculate embeddings. Defaults to 'Xenova/all-MiniLM-L6-v2', which is an ONNX port of `sentence-transformers/all-MiniLM-L6-v2`.
    * @param options.revision The specific model version to use (can be a branch, tag name, or commit id). Defaults to 'main'.
@@ -69,12 +69,12 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
       if(this.transformersApi) return;
       try {
           // eslint-disable-next-line global-require,import/no-extraneous-dependencies
-          let { pipeline } = await TransformersEmbeddingFunction.import();
+          let { pipeline } = await DefaultEmbeddingFunction.import();
           TransformersApi = pipeline;
       } catch (_a) {
           // @ts-ignore
           if (_a.code === 'MODULE_NOT_FOUND') {
-              throw new Error("Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`");
+              throw new Error("Please install the chromadb-default-embed package to use the DefaultEmbeddingFunction, `npm install -S chromadb-default-embed`");
           }
           throw _a; // Re-throw other errors
       }
@@ -84,15 +84,15 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   /** @ignore */
   static async import(): Promise<{
       // @ts-ignore
-      pipeline: typeof import("@xenova/transformers");
+      pipeline: typeof import("chromadb-default-embed");
   }> {
       try {
           // @ts-ignore
-          const { pipeline } = await import("@xenova/transformers");
+          const { pipeline } = await import("chromadb-default-embed");
           return { pipeline };
       } catch (e) {
           throw new Error(
-              "Please install @xenova/transformers as a dependency with, e.g. `yarn add @xenova/transformers`"
+              "Please install chromadb-default-embed as a dependency with, e.g. `yarn add chromadb-default-embed`"
           );
       }
   }

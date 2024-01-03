@@ -8,7 +8,7 @@ import {
     ClientAuthProtocolAdapter,
     IsomorphicFetchClientAuthProtocolAdapter
 } from "./auth";
-import { TransformersEmbeddingFunction } from './embeddings/TransformersEmbeddingFunction';
+import { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction';
 
 
 export class ChromaClient {
@@ -130,7 +130,7 @@ export class ChromaClient {
 }): Promise<Collection> {
 
         if (embeddingFunction === undefined) {
-            embeddingFunction = new TransformersEmbeddingFunction();
+            embeddingFunction = new DefaultEmbeddingFunction();
         }
 
         const newCollection = await this.api
@@ -180,7 +180,7 @@ export class ChromaClient {
     }): Promise<Collection> {
 
         if (embeddingFunction === undefined) {
-            embeddingFunction = new TransformersEmbeddingFunction();
+            embeddingFunction = new DefaultEmbeddingFunction();
         }
 
         const newCollection = await this.api
