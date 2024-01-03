@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install Python Dependencies
-        run: pip install -r requirements.txt && pip install -r requirements-dev.txt
+        run: pip install -r requirements.txt && pip install -r requirements_dev.txt
       - name: Run Server
         run: Python -m chromadb.cli.cli run &
       - name: Setup Node
