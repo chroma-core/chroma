@@ -31,7 +31,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Install Dependencies
         run: yarn
-        working-directory: ./client/js
+        working-directory: ./clients/js
       - name: Generate
         run: yarn genapi
-        working-directory: ./client/js
+        working-directory: ./clients/js
