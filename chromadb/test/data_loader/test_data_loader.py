@@ -117,3 +117,33 @@ def test_data_loader(
         assert data is not None
         assert query_result["uris"] is not None
         assert data == encode_data(query_result["uris"][0][i])
+
+
+def test_file_loader():
+    from chromadb.utils.data_loaders import FileLoader
+    # Here, we'll use the dfault loader, which loads text from local files
+    # We'll use the rootdir of the chromadb package as our root directory
+    import chromadb
+    rootdir = chromadb.__path__[0] + '/'
+    file_loader_1 = FileLoader(prefix=rootdir)
+
+    file_contents_1 = file_loader_1(['__init__.py', 'types.py'])
+    assert len(file_contents_1) == 2
+
+    # Note: The following two asserts seem faily robust, but still, they assume something 
+    # about the contents of __init__.py, and types.py, which could change in the future. 
+    assert 'Embeddings' in file_contents_1[0]
+    assert 'from typing import' in file_contents_1[1]
+
+    # See that we could also decide that keys should assume the `.py` extension implicitly:
+    file_loader_2 = FileLoader(prefix=rootdir, suffix='.py')
+
+    file_contents_2 = file_loader_2(['__init__', 'types'])
+    assert sorted(file_contents_1) == sorted(file_contents_2)
+
+    # Now lets use a different loader: One that returns contents from a remote URL
+    file_loader_3 = FileLoader(loader=FileLoader.url_to_contents)
+    url = 'https://github.com/chroma-core/chroma/issues/1606'
+    contents = file_loader_3(url)[0]
+    'vectorizer' in contents  # this issue mentions the term "vectorizer"
+

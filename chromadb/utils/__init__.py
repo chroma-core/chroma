@@ -10,3 +10,4 @@ def get_class(fqn: str, type: Type[C]) -> Type[C]:
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
     return cast(Type[C], cls)
+
