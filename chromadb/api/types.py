@@ -251,7 +251,7 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
-            raise ValueError(
+            raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key)}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
