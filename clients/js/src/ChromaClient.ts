@@ -19,8 +19,8 @@ export class ChromaClient {
      */
     private api: DefaultApi & ConfigOptions;
     private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
-    private tenant: string = DEFAULT_TENANT;
-    private database: string = DEFAULT_DATABASE;
+    private tenant: string | undefined;
+    private database: string | undefined;
     private _adminClient?: AdminClient
 
     /**
