@@ -25,7 +25,7 @@ repos:
     hooks:
       - id: flake8
         args:
-          - "--extend-ignore=E203,E501,E503,F401"
+          - "--extend-ignore=E203,E501,E503"
           - "--max-line-length=88"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
