@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # curl -s http://localhost:8000/openapi.json | jq > openapi.json
 curl -s http://localhost:8000/openapi.json | python -c "import sys, json; print(json.dumps(json.load(sys.stdin), indent=2))" > openapi.json
