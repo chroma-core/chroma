@@ -18,8 +18,8 @@ fi
 openapi-generator-plus -c config.yml
 
 if [ $? -ne 0 ]; then 
-  echo "Generation failed with exit status $?" 
-  exit $?
+  echo "Generation failed"
+  exit 1
 fi
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
