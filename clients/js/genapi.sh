@@ -17,6 +17,10 @@ fi
 
 openapi-generator-plus -c config.yml
 
+if [ $? -ne 0 ]; then 
+  echo "Generation failed with exit status $?" 
+  exit $?
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
   sed -i '' -e '/import "whatwg-fetch";/d' -e 's/window.fetch/fetch/g' src/generated/runtime.ts
 else
