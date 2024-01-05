@@ -19,9 +19,9 @@ export class ChromaClient {
      * @ignore
      */
     private api: DefaultApi & ConfigOptions;
-    private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
-    private tenant: string = DEFAULT_TENANT;
-    private database: string = DEFAULT_DATABASE;
+    private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
+    private tenant: string | undefined;
+    private database: string | undefined;
     private _adminClient?: AdminClient
 
     /**
@@ -239,10 +239,10 @@ export class ChromaClient {
         offset,
     }: ListCollectionsParams = {}): Promise<CollectionType[]> {
         const response = await this.api.listCollections(
-            this.tenant,
-            this.database,
             limit,
             offset,
+            this.tenant,
+            this.database,
             this.api.options);
         return handleSuccess(response);
     }

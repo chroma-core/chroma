@@ -6,14 +6,15 @@ import { ChromaClient } from "./ChromaClient";
 
 interface CloudClientParams {
     apiKey?: string;
-    database?: string;
+    database?: string | undefined;
+    tenant?: string | undefined;
     cloudHost?: string;
     cloudPort?: string;
 }
 
-class CloudClient extends ChromaClient{
+class CloudClient extends ChromaClient {
 
-    constructor({apiKey, database, cloudHost, cloudPort}: CloudClientParams)  {
+    constructor({ apiKey, database, tenant, cloudHost, cloudPort }: CloudClientParams) {
         // If no API key is provided, try to load it from the environment variable
         if (!apiKey) {
             apiKey = process.env.CHROMA_API_KEY;
@@ -27,16 +28,17 @@ class CloudClient extends ChromaClient{
 
         const path = `${cloudHost}:${cloudPort}`;
 
-        const auth =  {
-                provider: "token",
-                credentials: apiKey,
-                providerOptions: { headerType: "X_CHROMA_TOKEN" },
-            }
+        const auth = {
+            provider: "token",
+            credentials: apiKey,
+            providerOptions: { headerType: "X_CHROMA_TOKEN" },
+        }
 
         return new ChromaClient({
             path: path,
             auth: auth,
             database: database,
+            tenant: tenant,
         })
 
         super()

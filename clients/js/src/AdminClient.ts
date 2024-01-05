@@ -25,7 +25,7 @@ export class AdminClient {
      * @ignore
      */
     private api: DefaultApi & ConfigOptions;
-    private apiAdapter: ClientAuthProtocolAdapter<any>|undefined;
+    private apiAdapter: ClientAuthProtocolAdapter<any> | undefined;
     public tenant: string = DEFAULT_TENANT;
     public database: string = DEFAULT_DATABASE;
 
@@ -146,10 +146,10 @@ export class AdminClient {
     public async createTenant({
         name,
     }: {
-        name: string,
+        name: string | undefined,
     }): Promise<Tenant> {
         const newTenant = await this.api
-            .createTenant({name}, this.api.options)
+            .createTenant(name, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -158,7 +158,7 @@ export class AdminClient {
             throw new Error(newTenant.error);
         }
 
-        return {name: name} as Tenant
+        return { name: name } as Tenant
     }
 
     /**
@@ -180,7 +180,7 @@ export class AdminClient {
     public async getTenant({
         name,
     }: {
-        name: string,
+        name: string | undefined,
     }): Promise<Tenant> {
         const getTenant = await this.api
             .getTenant(name, this.api.options)
@@ -191,7 +191,7 @@ export class AdminClient {
             throw new Error(getTenant.error);
         }
 
-        return {name: getTenant.name} as Tenant
+        return { name: getTenant.name } as Tenant
     }
 
     /**
@@ -216,11 +216,11 @@ export class AdminClient {
         name,
         tenantName
     }: {
-        name: string,
-        tenantName: string,
+        name: string | undefined,
+        tenantName: string | undefined,
     }): Promise<Database> {
         const newDatabase = await this.api
-            .createDatabase(tenantName, {name}, this.api.options)
+            .createDatabase(name, tenantName, this.api.options)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -229,7 +229,7 @@ export class AdminClient {
             throw new Error(newDatabase.error);
         }
 
-        return {name: name} as Database
+        return { name: name } as Database
     }
 
     /**
@@ -254,8 +254,8 @@ export class AdminClient {
         name,
         tenantName
     }: {
-        name: string,
-        tenantName: string,
+        name: string | undefined,
+        tenantName: string | undefined,
     }): Promise<Database> {
         const getDatabase = await this.api
             .getDatabase(name, tenantName, this.api.options)
@@ -266,7 +266,7 @@ export class AdminClient {
             throw new Error(getDatabase.error);
         }
 
-        return {name: getDatabase.name} as Database
+        return { name: getDatabase.name } as Database
     }
 
 }

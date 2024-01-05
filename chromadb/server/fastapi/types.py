@@ -61,11 +61,3 @@ class CreateCollection(BaseModel):
 class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
-
-
-class CreateDatabase(BaseModel):
-    name: str
-
-
-class CreateTenant(BaseModel):
-    name: str

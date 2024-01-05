@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # curl -s http://localhost:8000/openapi.json | jq > openapi.json
 curl -s http://localhost:8000/openapi.json | python -c "import sys, json; print(json.dumps(json.load(sys.stdin), indent=2))" > openapi.json
@@ -16,6 +16,11 @@ else
 fi
 
 openapi-generator-plus -c config.yml
+
+if [ $? -ne 0 ]; then 
+  echo "Generation failed"
+  exit 1
+fi
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   sed -i '' -e '/import "whatwg-fetch";/d' -e 's/window.fetch/fetch/g' src/generated/runtime.ts

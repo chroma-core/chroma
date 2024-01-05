@@ -1,0 +1,36 @@
+name: Chroma Test JS Client Generation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install Python Dependencies
+        run: pip install -r requirements.txt && pip install -r requirements_dev.txt
+      - name: Run Server
+        run: python -m chromadb.cli.cli run &
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install Dependencies
+        run: yarn
+        working-directory: ./clients/js
+      - name: Generate
+        run: yarn genapi
+        working-directory: ./clients/js

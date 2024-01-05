@@ -171,8 +171,8 @@ class FastAPI(ServerAPI):
     ) -> Database:
         """Returns a database"""
         resp = self._session.get(
-            self._api_url + "/databases/" + name,
-            params={"tenant": tenant},
+            self._api_url + "/databases",
+            params={"tenant": tenant, "database": name},
         )
         raise_chroma_error(resp)
         resp_json = resp.json()
@@ -193,7 +193,8 @@ class FastAPI(ServerAPI):
     @override
     def get_tenant(self, name: str) -> Tenant:
         resp = self._session.get(
-            self._api_url + "/tenants/" + name,
+            self._api_url + "/tenants",
+            params={"tenant": name},
         )
         raise_chroma_error(resp)
         resp_json = resp.json()

@@ -270,16 +270,12 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Create Database
+		 * @param {string} [database]
 		 * @param {string} [tenant]
-		 * @param {Api.CreateDatabase} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		createDatabase(tenant: string | undefined, request: Api.CreateDatabase, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'request' is not null or undefined
-			if (request === null || request === undefined) {
-				throw new RequiredError('request', 'Required parameter request was null or undefined when calling createDatabase.');
-			}
+		createDatabase(database: string | undefined, tenant: string | undefined, options: RequestInit = {}): FetchArgs {
 			let localVarPath = `/api/v1/databases`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
@@ -289,17 +285,15 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
 			}
 
+			if (database !== undefined) {
+				localVarQueryParameter.append('database', String(database));
+			}
+
 			if (tenant !== undefined) {
 				localVarQueryParameter.append('tenant', String(tenant));
 			}
 
-			localVarHeaderParameter.set('Content-Type', 'application/json');
-
 			localVarRequestOptions.headers = localVarHeaderParameter;
-	
-			if (request !== undefined) {
-				localVarRequestOptions.body = JSON.stringify(request || {});
-			}
 
 			const localVarQueryParameterString = localVarQueryParameter.toString();
 			if (localVarQueryParameterString) {
@@ -312,15 +306,11 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Create Tenant
-		 * @param {Api.CreateTenant} request
+		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		createTenant(request: Api.CreateTenant, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'request' is not null or undefined
-			if (request === null || request === undefined) {
-				throw new RequiredError('request', 'Required parameter request was null or undefined when calling createTenant.');
-			}
+		createTenant(tenant: string | undefined, options: RequestInit = {}): FetchArgs {
 			let localVarPath = `/api/v1/tenants`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
@@ -330,13 +320,11 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
 			}
 
-			localVarHeaderParameter.set('Content-Type', 'application/json');
+			if (tenant !== undefined) {
+				localVarQueryParameter.append('tenant', String(tenant));
+			}
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
-	
-			if (request !== undefined) {
-				localVarRequestOptions.body = JSON.stringify(request || {});
-			}
 
 			const localVarQueryParameterString = localVarQueryParameter.toString();
 			if (localVarQueryParameterString) {
@@ -433,24 +421,23 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Get Database
-		 * @param {string} database
+		 * @param {string} [database]
 		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getDatabase(database: string, tenant: string | undefined, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'database' is not null or undefined
-			if (database === null || database === undefined) {
-				throw new RequiredError('database', 'Required parameter database was null or undefined when calling getDatabase.');
-			}
-			let localVarPath = `/api/v1/databases/{database}`
-				.replace('{database}', encodeURIComponent(String(database)));
+		getDatabase(database: string | undefined, tenant: string | undefined, options: RequestInit = {}): FetchArgs {
+			let localVarPath = `/api/v1/databases`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
 			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
 			if (localVarPathQueryStart !== -1) {
 				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			if (database !== undefined) {
+				localVarQueryParameter.append('database', String(database));
 			}
 
 			if (tenant !== undefined) {
@@ -513,23 +500,22 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary Get Tenant
-		 * @param {string} tenant
+		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getTenant(tenant: string, options: RequestInit = {}): FetchArgs {
-			// verify required parameter 'tenant' is not null or undefined
-			if (tenant === null || tenant === undefined) {
-				throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getTenant.');
-			}
-			let localVarPath = `/api/v1/tenants/{tenant}`
-				.replace('{tenant}', encodeURIComponent(String(tenant)));
+		getTenant(tenant: string | undefined, options: RequestInit = {}): FetchArgs {
+			let localVarPath = `/api/v1/tenants`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
 			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
 			if (localVarPathQueryStart !== -1) {
 				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			if (tenant !== undefined) {
+				localVarQueryParameter.append('tenant', String(tenant));
 			}
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
@@ -571,14 +557,14 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 		},
 		/**
 		 * @summary List Collections
-		 * @param {string} [tenant]
-		 * @param {string} [database]
 		 * @param {number} [limit]
 		 * @param {number} [offset]
+		 * @param {string} [tenant]
+		 * @param {string} [database]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options: RequestInit = {}): FetchArgs {
+		listCollections(limit: number | undefined, offset: number | undefined, tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
 			let localVarPath = `/api/v1/collections`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
@@ -588,20 +574,20 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
 			}
 
-			if (tenant !== undefined) {
-				localVarQueryParameter.append('tenant', String(tenant));
-			}
-
-			if (database !== undefined) {
-				localVarQueryParameter.append('database', String(database));
-			}
-
 			if (limit !== undefined) {
 				localVarQueryParameter.append('limit', String(limit));
 			}
 
 			if (offset !== undefined) {
 				localVarQueryParameter.append('offset', String(offset));
+			}
+
+			if (tenant !== undefined) {
+				localVarQueryParameter.append('tenant', String(tenant));
+			}
+
+			if (database !== undefined) {
+				localVarQueryParameter.append('database', String(database));
 			}
 
 			localVarRequestOptions.headers = localVarHeaderParameter;
@@ -1039,13 +1025,13 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Create Database
+		 * @param {string} [database]
 		 * @param {string} [tenant]
-		 * @param {Api.CreateDatabase} request
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		createDatabase(tenant: string | undefined, request: Api.CreateDatabase, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.CreateDatabase200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createDatabase(tenant, request, options);
+		createDatabase(database: string | undefined, tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.CreateDatabase200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createDatabase(database, tenant, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1069,12 +1055,12 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Create Tenant
-		 * @param {Api.CreateTenant} request
+		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		createTenant(request: Api.CreateTenant, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.CreateTenant200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createTenant(request, options);
+		createTenant(tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.CreateTenant200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createTenant(tenant, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1160,12 +1146,12 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Get Database
-		 * @param {string} database
+		 * @param {string} [database]
 		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getDatabase(database: string, tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetDatabase200Response> {
+		getDatabase(database: string | undefined, tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetDatabase200Response> {
 			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getDatabase(database, tenant, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
@@ -1220,11 +1206,11 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary Get Tenant
-		 * @param {string} tenant
+		 * @param {string} [tenant]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		getTenant(tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetTenant200Response> {
+		getTenant(tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetTenant200Response> {
 			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getTenant(tenant, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
@@ -1271,15 +1257,15 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		},
 		/**
 		 * @summary List Collections
-		 * @param {string} [tenant]
-		 * @param {string} [database]
 		 * @param {number} [limit]
 		 * @param {number} [offset]
+		 * @param {string} [tenant]
+		 * @param {string} [database]
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
 		 */
-		listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ListCollections200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollections(tenant, database, limit, offset, options);
+		listCollections(limit: number | undefined, offset: number | undefined, tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ListCollections200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollections(limit, offset, tenant, database, options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -1565,23 +1551,23 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary Create Database
+	 * @param {string} [database]
 	 * @param {string} [tenant]
-	 * @param {Api.CreateDatabase} request
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public createDatabase(tenant: string | undefined, request: Api.CreateDatabase, options?: RequestInit) {
-		return ApiApiFp(this.configuration).createDatabase(tenant, request, options)(this.fetch, this.basePath);
+	public createDatabase(database: string | undefined, tenant: string | undefined, options?: RequestInit) {
+		return ApiApiFp(this.configuration).createDatabase(database, tenant, options)(this.fetch, this.basePath);
 	}
 
 	/**
 	 * @summary Create Tenant
-	 * @param {Api.CreateTenant} request
+	 * @param {string} [tenant]
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public createTenant(request: Api.CreateTenant, options?: RequestInit) {
-		return ApiApiFp(this.configuration).createTenant(request, options)(this.fetch, this.basePath);
+	public createTenant(tenant: string | undefined, options?: RequestInit) {
+		return ApiApiFp(this.configuration).createTenant(tenant, options)(this.fetch, this.basePath);
 	}
 
 	/**
@@ -1610,12 +1596,12 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary Get Database
-	 * @param {string} database
+	 * @param {string} [database]
 	 * @param {string} [tenant]
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public getDatabase(database: string, tenant: string | undefined, options?: RequestInit) {
+	public getDatabase(database: string | undefined, tenant: string | undefined, options?: RequestInit) {
 		return ApiApiFp(this.configuration).getDatabase(database, tenant, options)(this.fetch, this.basePath);
 	}
 
@@ -1632,11 +1618,11 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary Get Tenant
-	 * @param {string} tenant
+	 * @param {string} [tenant]
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public getTenant(tenant: string, options?: RequestInit) {
+	public getTenant(tenant: string | undefined, options?: RequestInit) {
 		return ApiApiFp(this.configuration).getTenant(tenant, options)(this.fetch, this.basePath);
 	}
 
@@ -1651,15 +1637,15 @@ export class ApiApi extends BaseAPI {
 
 	/**
 	 * @summary List Collections
-	 * @param {string} [tenant]
-	 * @param {string} [database]
 	 * @param {number} [limit]
 	 * @param {number} [offset]
+	 * @param {string} [tenant]
+	 * @param {string} [database]
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
 	 */
-	public listCollections(tenant: string | undefined, database: string | undefined, limit: number | undefined, offset: number | undefined, options?: RequestInit) {
-		return ApiApiFp(this.configuration).listCollections(tenant, database, limit, offset, options)(this.fetch, this.basePath);
+	public listCollections(limit: number | undefined, offset: number | undefined, tenant: string | undefined, database: string | undefined, options?: RequestInit) {
+		return ApiApiFp(this.configuration).listCollections(limit, offset, tenant, database, options)(this.fetch, this.basePath);
 	}
 
 	/**
