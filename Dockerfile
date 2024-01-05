@@ -1,25 +1,22 @@
-FROM python:3.10-slim-bookworm as builder
-
+FROM python:3.11-slim-bookworm AS builder
+ARG REBUILD_HNSWLIB
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
     gcc \
-    g++ && \
-    rm -rf /var/lib/apt/lists/*
+    g++ \
+    cmake \
+    autoconf && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir /install
 
-RUN mkdir /install
 WORKDIR /install
 
 COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
+RUN if [ "$REBUILD_HNSWLIB" = "true" ] ;pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
 
-FROM python:3.10-slim-bookworm as final
-
-RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
-    build-essential \
-    gcc \
-    g++ && \
-    rm -rf /var/lib/apt/lists/*
+FROM python:3.11-slim-bookworm AS final
 
 RUN mkdir /chroma
 WORKDIR /chroma
