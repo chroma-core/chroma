@@ -14,7 +14,7 @@ WORKDIR /install
 COPY ./requirements.txt requirements.txt
 
 RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
-RUN if [ "$REBUILD_HNSWLIB" = "true" ] ;pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
+RUN if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
 
 FROM python:3.11-slim-bookworm AS final
 
