@@ -39,33 +39,35 @@ class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
         adapters_path: str = "",
         device: str = "cpu",
         normalize_embeddings: bool = True,
+        model_name = "jinaai/jina-embeddings-v2-base-en"
     ):
                 
-        try:
-            from AutoModelForSentenceEmbedding import (
-                AutoModelForSentenceEmbedding,
-            )
-        except ModuleNotFoundError:
-            print("sentence-transformers module is not installed. You can install it by running 'pip install sentence-transformers' in your application runtime terminal.")
-        model_name = "jinaai/jina-embeddings-v2-base-en"
+        try:  
+            from AutoModelForSentenceEmbedding import (  
+                AutoModelForSentenceEmbedding,  
+            )  
+        except ModuleNotFoundError:  
+            raise ValueError("The sentence-transformers python package is not installed. Please install it with `pip install sentence-transformers`")
+        
+        
         if model_name not in self.models:
             try:
                 from transformers import AutoTokenizer
             except ModuleNotFoundError:
-                print("transformers module is not installed. You can install it by running 'pip install transformers' in your application runtime terminal.")
+                raise ValueError("The transformers python package is not installed. Please install it with `pip install transformers`")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
             )    
             
             model = AutoModelForSentenceEmbedding(model_name, tokenizer)
+            
             if len(adapters_path) > 0:
                 self._peft = True
-                print("BASE", model)
                 
                 try:
                     from peft import PeftModel
                 except ModuleNotFoundError:
-                    print("peft module is not installed. You can install it by running 'pip install peft' in your application runtime terminal.")
+                    raise ValueError("The peft python package is not installed. Please install it with `pip install peft`")
                 
                 model = PeftModel.from_pretrained(model, adapters_path)
                 model.to(device)
@@ -82,17 +84,22 @@ class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
     def __call__(self, input: Documents) -> Embeddings:
         device = self._device
+        
         if len(input) <= 0:
             return []
+        
         if self._peft:
             embeddings = []
+            
             try:
                 from torch import inference_mode
             except ModuleNotFoundError:
-                print("peft module is not installed. You can install it by running 'pip install peft' in your application runtime terminal.")
+                    raise ValueError("The torch python package is not installed. Please install it with `pip install torch`")
+                
             with inference_mode():
                 for query in input:
                     inputs = self._tokenizer(query, padding="max_length", max_length=8192, truncation=True, return_tensors="pt")    
+                    
                     if device == "cpu": 
                         query_embs = self._model(**{k:v for k, v in inputs.items()})
                     else:
@@ -116,6 +123,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         device: str = "cpu",
         normalize_embeddings: bool = False,
     ):
+        
         if model_name not in self.models:
             try:
                 from sentence_transformers import SentenceTransformer
