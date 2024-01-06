@@ -5,10 +5,12 @@ import torch
 class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, normalize=True):
         super(AutoModelForSentenceEmbedding, self).__init__()
+        
         try:
             from transformers import AutoModel
         except ModuleNotFoundError:
-            print("transformers module is not installed. You can install it by running 'pip install transformers' in your application runtime terminal.")
+            raise ValueError("The transformers python package is not installed. Please install it with `pip install transformers`")
+            
         self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)  # , load_in_8bit=True, device_map={"":0})
         self.normalize = normalize
         self.tokenizer = tokenizer
@@ -16,6 +18,7 @@ class AutoModelForSentenceEmbedding(nn.Module):
     def forward(self, **kwargs):
         model_output = self.model(**kwargs)
         embeddings = self.mean_pooling(model_output, kwargs["attention_mask"])
+        
         if self.normalize:
             embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
