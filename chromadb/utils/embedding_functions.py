@@ -30,13 +30,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-if os.getenv('GENERAL_SENTENCES') == "True":
-    from AutoModelForSentenceEmbedding import (
-        AutoModelForSentenceEmbedding,
-    )
-else:
-    print("Environment variable is not set, skipping import.")
-
 class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
@@ -47,6 +40,13 @@ class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
         device: str = "cpu",
         normalize_embeddings: bool = True,
     ):
+                
+        try:
+            from AutoModelForSentenceEmbedding import (
+                AutoModelForSentenceEmbedding,
+            )
+        except ModuleNotFoundError:
+            print("sentence-transformers module is not installed. You can install it by running 'pip install sentence-transformers' in your application runtime terminal.")
         model_name = "jinaai/jina-embeddings-v2-base-en"
         if model_name not in self.models:
             try:
@@ -56,6 +56,7 @@ class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
             )    
+            
             model = AutoModelForSentenceEmbedding(model_name, tokenizer)
             if len(adapters_path) > 0:
                 self._peft = True
@@ -108,9 +109,7 @@ class JinaWithPeftEmbeddingsFunction(EmbeddingFunction[Documents]):
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
-
-    # If you have a beefier machine, try "gtr-t5-large".
-    # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
+    
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
