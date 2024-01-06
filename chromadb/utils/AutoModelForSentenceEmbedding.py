@@ -1,5 +1,7 @@
 from torch import nn
 import torch
+
+
 class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, normalize=True):
         super(AutoModelForSentenceEmbedding, self).__init__()
