@@ -1,6 +1,7 @@
 from typing import Optional
 from urllib.parse import urlparse
 
+import pytest
 from hypothesis import given, strategies as st
 
 from chromadb.api.fastapi import FastAPI
@@ -28,7 +29,7 @@ def domain_strategy() -> st.SearchStrategy[str]:
     return st.tuples(label, tld).map(".".join)
 
 
-port_strategy = st.integers(min_value=1, max_value=65535)
+port_strategy = st.one_of(st.integers(min_value=1, max_value=65535), st.none())
 
 ssl_enabled_strategy = st.booleans()
 
@@ -56,8 +57,21 @@ def is_valid_url(url: str) -> bool:
 
 def generate_valid_domain_url() -> st.SearchStrategy[str]:
     return st.builds(
-        lambda url_scheme, hostname, url_path: f"{url_scheme}://{hostname}{url_path}",
-        url_scheme=st.sampled_from(["http", "https"]),
+        lambda url_scheme, hostname, url_path: f"{url_scheme}{hostname}{url_path}",
+        url_scheme=st.sampled_from(["http://", "https://"]),
+        hostname=domain_strategy(),
+        url_path=url_path_strategy(),
+    )
+
+
+def generate_invalid_domain_url() -> st.SearchStrategy[str]:
+    return st.builds(
+        lambda url_scheme, hostname, url_path: f"{url_scheme}{hostname}{url_path}",
+        url_scheme=st.builds(
+            lambda scheme, suffix: f"{scheme}{suffix}",
+            scheme=st.text(max_size=10),
+            suffix=st.sampled_from(["://", ":///", ":////", ""]),
+        ),
         hostname=domain_strategy(),
         url_path=url_path_strategy(),
     )
@@ -76,7 +90,7 @@ host_or_domain_strategy = st.one_of(
 )
 def test_url_resolve(
     hostname: str,
-    port: int,
+    port: Optional[int],
     ssl_enabled: bool,
     default_api_path: Optional[str],
 ) -> None:
@@ -90,5 +104,31 @@ def test_url_resolve(
     assert (
         _url.startswith("https") if ssl_enabled else _url.startswith("http")
     ), f"Invalid URL: {_url} - SSL Enabled: {ssl_enabled}"
+    if hostname.startswith("http"):
+        assert ":" + str(port) not in _url, f"Port in URL not expected: {_url}"
+    else:
+        assert ":" + str(port) in _url, f"Port in URL expected: {_url}"
     if default_api_path:
         assert _url.endswith(default_api_path), f"Invalid URL: {_url}"
+
+
+@given(
+    hostname=generate_invalid_domain_url(),
+    port=port_strategy,
+    ssl_enabled=ssl_enabled_strategy,
+    default_api_path=st.sampled_from(["/api/v1", "/api/v2", None]),
+)
+def test_resolve_invalid(
+    hostname: str,
+    port: Optional[int],
+    ssl_enabled: bool,
+    default_api_path: Optional[str],
+) -> None:
+    with pytest.raises(ValueError) as e:
+        FastAPI.resolve_url(
+            chroma_server_host=hostname,
+            chroma_server_http_port=port,
+            chroma_server_ssl_enabled=ssl_enabled,
+            default_api_path=default_api_path,
+        )
+    assert "Invalid URL" in str(e.value)

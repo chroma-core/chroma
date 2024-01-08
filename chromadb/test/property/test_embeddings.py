@@ -1,11 +1,12 @@
 import pytest
 import logging
 import hypothesis.strategies as st
-from typing import Dict, Set, cast, Union, DefaultDict
+from hypothesis import given
+from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import ID, Include, IDs
+from chromadb.api.types import ID, Include, IDs, validate_embeddings
 import chromadb.errors as errors
-from chromadb.api import API
+from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -64,7 +65,7 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
     collection: Collection
     embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
-    def __init__(self, api: API):
+    def __init__(self, api: ServerAPI):
         super().__init__()
         self.api = api
         self._rules_strategy = strategies.DeterministicRuleStrategy(self)  # type: ignore
@@ -294,13 +295,13 @@ class EmbeddingStateMachine(RuleBasedStateMachine):
         pass
 
 
-def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: API) -> None:
+def test_embeddings_state(caplog: pytest.LogCaptureFixture, api: ServerAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: EmbeddingStateMachine(api))  # type: ignore
     print_traces()
 
 
-def test_multi_add(api: API) -> None:
+def test_multi_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])
@@ -319,7 +320,7 @@ def test_multi_add(api: API) -> None:
     assert coll.count() == 0
 
 
-def test_dup_add(api: API) -> None:
+def test_dup_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
@@ -328,7 +329,7 @@ def test_dup_add(api: API) -> None:
         coll.upsert(ids=["a", "a"], embeddings=[[0.0], [1.1]])
 
 
-def test_query_without_add(api: API) -> None:
+def test_query_without_add(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]
@@ -343,7 +344,7 @@ def test_query_without_add(api: API) -> None:
         assert all([len(result) == 0 for result in field_results])
 
 
-def test_get_non_existent(api: API) -> None:
+def test_get_non_existent(api: ServerAPI) -> None:
     api.reset()
     coll = api.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])
@@ -355,7 +356,7 @@ def test_get_non_existent(api: API) -> None:
 
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
-def test_escape_chars_in_ids(api: API) -> None:
+def test_escape_chars_in_ids(api: ServerAPI) -> None:
     api.reset()
     id = "\x1f"
     coll = api.create_collection(name="foo")
@@ -365,39 +366,92 @@ def test_escape_chars_in_ids(api: API) -> None:
     assert coll.count() == 0
 
 
-def test_delete_empty_fails(api: API):
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"ids": []},
+        {"where": {}},
+        {"where_document": {}},
+        {"where_document": {}, "where": {}},
+    ],
+)
+def test_delete_empty_fails(api: ServerAPI, kwargs: dict):
     api.reset()
     coll = api.create_collection(name="foo")
+    with pytest.raises(Exception) as e:
+        coll.delete(**kwargs)
+    assert "You must provide either ids, where, or where_document to delete." in str(e)
 
-    error_valid = (
-        lambda e: "You must provide either ids, where, or where_document to delete."
-        in e
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"ids": ["foo"]},
+        {"where": {"foo": "bar"}},
+        {"where_document": {"$contains": "bar"}},
+        {"ids": ["foo"], "where": {"foo": "bar"}},
+        {"ids": ["foo"], "where_document": {"$contains": "bar"}},
+        {
+            "ids": ["foo"],
+            "where": {"foo": "bar"},
+            "where_document": {"$contains": "bar"},
+        },
+    ],
+)
+def test_delete_success(api: ServerAPI, kwargs: dict):
+    api.reset()
+    coll = api.create_collection(name="foo")
+    # Should not raise
+    coll.delete(**kwargs)
+
+
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
+def test_autocasting_validate_embeddings_for_compatible_types(
+    supported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings(10, 10, supported_types)
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+    assert all(
+        [
+            isinstance(value, list)
+            and all(
+                [
+                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
+                    for vec in value
+                ]
+            )
+            for value in validated_embeddings
+        ]
     )
 
-    with pytest.raises(Exception) as e:
-        coll.delete()
-    assert error_valid(str(e))
 
-    with pytest.raises(Exception):
-        coll.delete(ids=[])
-    assert error_valid(str(e))
+@given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))
+def test_autocasting_validate_embeddings_with_ndarray(
+    supported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings_ndarray(10, 10, supported_types)
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+    assert all(
+        [
+            isinstance(value, list)
+            and all(
+                [
+                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
+                    for vec in value
+                ]
+            )
+            for value in validated_embeddings
+        ]
+    )
 
-    with pytest.raises(Exception):
-        coll.delete(where={})
-    assert error_valid(str(e))
 
-    with pytest.raises(Exception):
-        coll.delete(where_document={})
-    assert error_valid(str(e))
+@given(unsupported_types=st.sampled_from([str, bool]))
+def test_autocasting_validate_embeddings_incompatible_types(
+    unsupported_types: List[Any],
+) -> None:
+    embds = strategies.create_embeddings(10, 10, unsupported_types)
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(Collection._normalize_embeddings(embds))
 
-    with pytest.raises(Exception):
-        coll.delete(where_document={}, where={})
-    assert error_valid(str(e))
-
-    # Should not raise
-    coll.delete(where_document={"$contains": "bar"})
-    coll.delete(where={"foo": "bar"})
-    coll.delete(ids=["foo"])
-    coll.delete(ids=["foo"], where={"foo": "bar"})
-    coll.delete(ids=["foo"], where_document={"$contains": "bar"})
-    coll.delete(ids=["foo"], where_document={"$contains": "bar"}, where={"foo": "bar"})
+    assert "Expected each value in the embedding to be a int or float" in str(e)

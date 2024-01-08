@@ -10,6 +10,11 @@ from chromadb.db.base import (
     ParameterValue,
     get_sql,
 )
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     Where,
     WhereDocument,
@@ -26,7 +31,7 @@ from pypika import Table, Tables
 from pypika.queries import QueryBuilder
 import pypika.functions as fn
 from pypika.terms import Criterion
-from itertools import islice, groupby
+from itertools import groupby
 from functools import reduce
 import sqlite3
 
@@ -39,6 +44,7 @@ class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
+    _opentelemetry_client: OpenTelemetryClient
     _topic: Optional[str]
     _subscription: Optional[UUID]
 
@@ -46,8 +52,10 @@ class SqliteMetadataSegment(MetadataReader):
         self._db = system.instance(SqliteDB)
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
+        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._topic = segment["topic"]
 
+    @trace_method("SqliteMetadataSegment.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
         if self._topic:
@@ -56,11 +64,13 @@ class SqliteMetadataSegment(MetadataReader):
                 self._topic, self._write_metadata, start=seq_id
             )
 
+    @trace_method("SqliteMetadataSegment.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:
         if self._subscription:
             self._consumer.unsubscribe(self._subscription)
 
+    @trace_method("SqliteMetadataSegment.max_seqid", OpenTelemetryGranularity.ALL)
     @override
     def max_seqid(self) -> SeqId:
         t = Table("max_seq_id")
@@ -79,6 +89,7 @@ class SqliteMetadataSegment(MetadataReader):
             else:
                 return _decode_seq_id(result[0])
 
+    @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
     def count(self) -> int:
         embeddings_t = Table("embeddings")
@@ -95,6 +106,7 @@ class SqliteMetadataSegment(MetadataReader):
             result = cur.execute(sql, params).fetchone()[0]
             return cast(int, result)
 
+    @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
     @override
     def get_metadata(
         self,
@@ -105,10 +117,15 @@ class SqliteMetadataSegment(MetadataReader):
         offset: Optional[int] = None,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
-
         embeddings_t, metadata_t, fulltext_t = Tables(
             "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
+
+        limit = limit or 2**63 - 1
+        offset = offset or 0
+
+        if limit < 0:
+            raise ValueError("Limit cannot be negative")
 
         q = (
             (
@@ -127,27 +144,74 @@ class SqliteMetadataSegment(MetadataReader):
                 metadata_t.float_value,
                 metadata_t.bool_value,
             )
-            .where(
-                embeddings_t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-            )
-            .orderby(embeddings_t.id)
+            .orderby(embeddings_t.embedding_id)
         )
 
-        if where:
-            q = q.where(self._where_map_criterion(q, where, embeddings_t, metadata_t))
-
-        if where_document:
-            q = q.where(
-                self._where_doc_criterion(q, where_document, embeddings_t, fulltext_t)
+        # If there is a query that touches the metadata table, it uses
+        # where and where_document filters, we treat this case seperately
+        if where is not None or where_document is not None:
+            metadata_q = (
+                self._db.querybuilder()
+                .from_(metadata_t)
+                .select(metadata_t.id)
+                .join(embeddings_t)
+                .on(embeddings_t.id == metadata_t.id)
+                .orderby(embeddings_t.embedding_id)
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
+                .distinct()  # These are embedding ids
             )
 
-        if ids:
-            q = q.where(embeddings_t.embedding_id.isin(ParameterValue(ids)))
+            if where:
+                metadata_q = metadata_q.where(
+                    self._where_map_criterion(
+                        metadata_q, where, metadata_t, embeddings_t
+                    )
+                )
+            if where_document:
+                metadata_q = metadata_q.where(
+                    self._where_doc_criterion(
+                        metadata_q, where_document, metadata_t, fulltext_t, embeddings_t
+                    )
+                )
+            if ids is not None:
+                metadata_q = metadata_q.where(
+                    embeddings_t.embedding_id.isin(ParameterValue(ids))
+                )
 
-        limit = limit or 2**63 - 1
-        offset = offset or 0
+            metadata_q = metadata_q.limit(limit)
+            metadata_q = metadata_q.offset(offset)
+
+            q = q.where(embeddings_t.id.isin(metadata_q))
+        else:
+            # In the case where we don't use the metadata table
+            # We have to apply limit/offset to embeddings and then join
+            # with metadata
+            embeddings_q = (
+                self._db.querybuilder()
+                .from_(embeddings_t)
+                .select(embeddings_t.id)
+                .where(
+                    embeddings_t.segment_id
+                    == ParameterValue(self._db.uuid_to_db(self._id))
+                )
+                .orderby(embeddings_t.embedding_id)
+                .limit(limit)
+                .offset(offset)
+            )
+
+            if ids is not None:
+                embeddings_q = embeddings_q.where(
+                    embeddings_t.embedding_id.isin(ParameterValue(ids))
+                )
+
+            q = q.where(embeddings_t.id.isin(embeddings_q))
+
         with self._db.tx() as cur:
-            return list(islice(self._records(cur, q), offset, offset + limit))
+            # Execute the query with the limit and offset already applied
+            return list(self._records(cur, q))
 
     def _records(
         self, cur: Cursor, q: QueryBuilder
@@ -164,6 +228,7 @@ class SqliteMetadataSegment(MetadataReader):
         for _, group in group_iterator:
             yield self._record(list(group))
 
+    @trace_method("SqliteMetadataSegment._record", OpenTelemetryGranularity.ALL)
     def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
@@ -189,6 +254,7 @@ class SqliteMetadataSegment(MetadataReader):
             metadata=metadata or None,
         )
 
+    @trace_method("SqliteMetadataSegment._insert_record", OpenTelemetryGranularity.ALL)
     def _insert_record(
         self, cur: Cursor, record: EmbeddingRecord, upsert: bool
     ) -> None:
@@ -223,6 +289,9 @@ class SqliteMetadataSegment(MetadataReader):
         if record["metadata"]:
             self._update_metadata(cur, id, record["metadata"])
 
+    @trace_method(
+        "SqliteMetadataSegment._update_metadata", OpenTelemetryGranularity.ALL
+    )
     def _update_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Update the metadata for a single EmbeddingRecord"""
         t = Table("embedding_metadata")
@@ -240,6 +309,9 @@ class SqliteMetadataSegment(MetadataReader):
 
         self._insert_metadata(cur, id, metadata)
 
+    @trace_method(
+        "SqliteMetadataSegment._insert_metadata", OpenTelemetryGranularity.ALL
+    )
     def _insert_metadata(self, cur: Cursor, id: int, metadata: UpdateMetadata) -> None:
         """Insert or update each metadata row for a single embedding record"""
         t = Table("embedding_metadata")
@@ -247,7 +319,12 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .into(t)
             .columns(
-                t.id, t.key, t.string_value, t.int_value, t.float_value, t.bool_value
+                t.id,
+                t.key,
+                t.string_value,
+                t.int_value,
+                t.float_value,
+                t.bool_value,
             )
         )
         for key, value in metadata.items():
@@ -323,6 +400,7 @@ class SqliteMetadataSegment(MetadataReader):
                 cur.execute(sql, params)
                 insert_into_fulltext_search()
 
+    @trace_method("SqliteMetadataSegment._delete_record", OpenTelemetryGranularity.ALL)
     def _delete_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Delete a single EmbeddingRecord from the DB"""
         t = Table("embeddings")
@@ -353,6 +431,7 @@ class SqliteMetadataSegment(MetadataReader):
             sql, params = get_sql(q)
             cur.execute(sql, params)
 
+    @trace_method("SqliteMetadataSegment._update_record", OpenTelemetryGranularity.ALL)
     def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
         """Update a single EmbeddingRecord in the DB"""
         t = Table("embeddings")
@@ -373,6 +452,7 @@ class SqliteMetadataSegment(MetadataReader):
             if record["metadata"]:
                 self._update_metadata(cur, id, record["metadata"])
 
+    @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""
@@ -400,49 +480,28 @@ class SqliteMetadataSegment(MetadataReader):
                 elif record["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
 
+    @trace_method(
+        "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
+    )
     def _where_map_criterion(
-        self, q: QueryBuilder, where: Where, embeddings_t: Table, metadata_t: Table
+        self, q: QueryBuilder, where: Where, metadata_t: Table, embeddings_t: Table
     ) -> Criterion:
-        clause: list[Criterion] = []
+        clause: List[Criterion] = []
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t, embeddings_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x & y, criteria))
             elif k == "$or":
                 criteria = [
-                    self._where_map_criterion(q, w, embeddings_t, metadata_t)
+                    self._where_map_criterion(q, w, metadata_t, embeddings_t)
                     for w in cast(Sequence[Where], v)
                 ]
                 clause.append(reduce(lambda x, y: x | y, criteria))
-            elif k == "$in":
-                expr = cast(
-                    Dict[InclusionExclusionOperator, List[LiteralValue]], {k: v}
-                )
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key.isin(ParameterValue(k)))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(embeddings_t.id.isin(sq))
-            elif k == "$nin":
-                expr = cast(
-                    Dict[InclusionExclusionOperator, List[LiteralValue]], {k: v}
-                )
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key.notin(ParameterValue(k)))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(embeddings_t.id.notin(sq))
             else:
-                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)  # type: ignore
+                expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
                 sq = (
                     self._db.querybuilder()
                     .from_(metadata_t)
@@ -450,26 +509,34 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(metadata_t.key == ParameterValue(k))
                     .where(_where_clause(expr, metadata_t))
                 )
-                clause.append(embeddings_t.id.isin(sq))
+                clause.append(metadata_t.id.isin(sq))
         return reduce(lambda x, y: x & y, clause)
 
+    @trace_method(
+        "SqliteMetadataSegment._where_doc_criterion", OpenTelemetryGranularity.ALL
+    )
     def _where_doc_criterion(
         self,
         q: QueryBuilder,
         where: WhereDocument,
-        embeddings_t: Table,
+        metadata_t: Table,
         fulltext_t: Table,
+        embeddings_t: Table,
     ) -> Criterion:
         for k, v in where.items():
             if k == "$and":
                 criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    self._where_doc_criterion(
+                        q, w, metadata_t, fulltext_t, embeddings_t
+                    )
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x & y, criteria)
             elif k == "$or":
                 criteria = [
-                    self._where_doc_criterion(q, w, embeddings_t, fulltext_t)
+                    self._where_doc_criterion(
+                        q, w, metadata_t, fulltext_t, embeddings_t
+                    )
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
@@ -483,21 +550,69 @@ class SqliteMetadataSegment(MetadataReader):
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
+                return metadata_t.id.isin(sq)
+            elif k == "$not_contains":
+                v = cast(str, v)
+                search_term = f"%{v}%"
+
+                sq = (
+                    self._db.querybuilder()
+                    .from_(fulltext_t)
+                    .select(fulltext_t.rowid)
+                    .where(
+                        fulltext_t.string_value.not_like(ParameterValue(search_term))
+                    )
+                )
                 return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
 
+    @trace_method("SqliteMetadataSegment.delete", OpenTelemetryGranularity.ALL)
     @override
     def delete(self) -> None:
-        raise NotImplementedError()
+        t = Table("embeddings")
+        t1 = Table("embedding_metadata")
+        q0 = (
+            self._db.querybuilder()
+            .from_(t1)
+            .delete()
+            .where(
+                t1.id.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
+        q = (
+            self._db.querybuilder()
+            .from_(t)
+            .delete()
+            .where(
+                t.id.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
+        with self._db.tx() as cur:
+            cur.execute(*get_sql(q0))
+            cur.execute(*get_sql(q))
 
 
 def _encode_seq_id(seq_id: SeqId) -> bytes:
     """Encode a SeqID into a byte array"""
-    if seq_id.bit_length() < 64:
+    if seq_id.bit_length() <= 64:
         return int.to_bytes(seq_id, 8, "big")
-    elif seq_id.bit_length() < 192:
+    elif seq_id.bit_length() <= 192:
         return int.to_bytes(seq_id, 24, "big")
     else:
         raise ValueError(f"Unsupported SeqID: {seq_id}")
@@ -554,30 +669,36 @@ def _value_criterion(
             raise ValueError(f"Empty list for {op} operator")
         if isinstance(value[0], str):
             col_exprs = [
-                table.string_value.isin(_v)
+                table.string_value.isin(ParameterValue(_v))
                 if op == "$in"
-                else table.str_value.notin(_v)
+                else table.string_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], bool):
             col_exprs = [
-                table.bool_value.isin(_v) if op == "$in" else table.bool_value.notin(_v)
+                table.bool_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.bool_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], int):
             col_exprs = [
-                table.int_value.isin(_v) if op == "$in" else table.int_value.notin(_v)
+                table.int_value.isin(ParameterValue(_v))
+                if op == "$in"
+                else table.int_value.notin(ParameterValue(_v))
             ]
         elif isinstance(value[0], float):
             col_exprs = [
-                table.float_value.isin(_v)
+                table.float_value.isin(ParameterValue(_v))
                 if op == "$in"
-                else table.float_value.notin(_v)
+                else table.float_value.notin(ParameterValue(_v))
             ]
     elif isinstance(value, list) and op in ("$in", "$nin"):
         col_exprs = [
-            table.int_value.isin(value),
-            table.float_value.isin(value)
+            table.int_value.isin(ParameterValue(value))
             if op == "$in"
-            else table.float_value.notin(value),
+            else table.int_value.notin(ParameterValue(value)),
+            table.float_value.isin(ParameterValue(value))
+            if op == "$in"
+            else table.float_value.notin(ParameterValue(value)),
         ]
     else:
         cols = [table.int_value, table.float_value]

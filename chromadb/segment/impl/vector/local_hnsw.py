@@ -6,6 +6,11 @@ from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import HnswParams
+from chromadb.telemetry.opentelemetry import (
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -46,6 +51,8 @@ class LocalHnswSegment(VectorReader):
     _label_to_id: Dict[int, str]
     _id_to_seq_id: Dict[str, SeqId]
 
+    _opentelemtry_client: OpenTelemetryClient
+
     def __init__(self, system: System, segment: Segment):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
@@ -63,6 +70,7 @@ class LocalHnswSegment(VectorReader):
         self._label_to_id = {}
 
         self._lock = ReadWriteLock()
+        self._opentelemtry_client = system.require(OpenTelemetryClient)
         super().__init__(system, segment)
 
     @staticmethod
@@ -72,6 +80,7 @@ class LocalHnswSegment(VectorReader):
         segment_metadata = HnswParams.extract(metadata)
         return segment_metadata
 
+    @trace_method("LocalHnswSegment.start", OpenTelemetryGranularity.ALL)
     @override
     def start(self) -> None:
         super().start()
@@ -81,12 +90,14 @@ class LocalHnswSegment(VectorReader):
                 self._topic, self._write_records, start=seq_id
             )
 
+    @trace_method("LocalHnswSegment.stop", OpenTelemetryGranularity.ALL)
     @override
     def stop(self) -> None:
         super().stop()
         if self._subscription:
             self._consumer.unsubscribe(self._subscription)
 
+    @trace_method("LocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
         self, ids: Optional[Sequence[str]] = None
@@ -112,6 +123,7 @@ class LocalHnswSegment(VectorReader):
 
         return results
 
+    @trace_method("LocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL)
     @override
     def query_vectors(
         self, query: VectorQuery
@@ -181,6 +193,7 @@ class LocalHnswSegment(VectorReader):
     def count(self) -> int:
         return len(self._id_to_label)
 
+    @trace_method("LocalHnswSegment._init_index", OpenTelemetryGranularity.ALL)
     def _init_index(self, dimensionality: int) -> None:
         # more comments available at the source: https://github.com/nmslib/hnswlib
 
@@ -198,6 +211,7 @@ class LocalHnswSegment(VectorReader):
         self._index = index
         self._dimensionality = dimensionality
 
+    @trace_method("LocalHnswSegment._ensure_index", OpenTelemetryGranularity.ALL)
     def _ensure_index(self, n: int, dim: int) -> None:
         """Create or resize the index as necessary to accomodate N new records"""
         if not self._index:
@@ -218,6 +232,7 @@ class LocalHnswSegment(VectorReader):
             )
             index.resize_index(max(new_size, DEFAULT_CAPACITY))
 
+    @trace_method("LocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL)
     def _apply_batch(self, batch: Batch) -> None:
         """Apply a batch of changes, as atomically as possible."""
         deleted_ids = batch.get_deleted_ids()
@@ -267,6 +282,7 @@ class LocalHnswSegment(VectorReader):
             # If that succeeds, finally the seq ID
             self._max_seq_id = batch.max_seq_id
 
+    @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
     def _write_records(self, records: Sequence[EmbeddingRecord]) -> None:
         """Add a batch of embeddings to the index"""
         if not self._running:

@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package chroma;
+option go_package = "github.com/chroma/chroma-coordinator/internal/proto/coordinatorpb";
+
+import "chromadb/proto/chroma.proto";
+import "google/protobuf/empty.proto";
+
+message CreateDatabaseRequest {
+  string id = 1;
+  string name = 2;
+  string tenant = 3;
+}
+
+message GetDatabaseRequest {
+  string name = 1;
+  string tenant = 2;
+}
+
+message GetDatabaseResponse {
+  Database database = 1;
+  Status status = 2;
+}
+
+message CreateTenantRequest {
+  string name = 2; // Names are globally unique
+}
+
+message GetTenantRequest {
+  string name = 1;
+}
+
+message GetTenantResponse {
+  Tenant tenant = 1;
+  Status status = 2;
+}
+
+
+message CreateSegmentRequest {
+  Segment segment = 1;
+}
+
+message DeleteSegmentRequest {
+  string id = 1;
+}
+
+message GetSegmentsRequest {
+  optional string id = 1;
+  optional string type = 2;
+  optional SegmentScope scope = 3;
+  optional string topic = 4;
+  optional string collection = 5; // Collection ID
+}
+
+message GetSegmentsResponse {
+  repeated Segment segments = 1;
+  Status status = 2;
+}
+
+
+message UpdateSegmentRequest {
+  string id = 1;
+  oneof topic_update {
+    string topic = 2;
+    bool reset_topic = 3;
+  }
+  oneof collection_update {
+    string collection = 4;
+    bool reset_collection = 5;
+  }
+  oneof metadata_update {
+    UpdateMetadata metadata = 6;
+    bool reset_metadata = 7;
+  }
+}
+
+message CreateCollectionRequest {
+  string id = 1;
+  string name = 2;
+  optional UpdateMetadata metadata = 3;
+  optional int32 dimension = 4;
+  optional bool get_or_create = 5;
+  string tenant = 6;
+  string database = 7;
+}
+
+message CreateCollectionResponse {
+  Collection collection = 1;
+  bool created = 2;
+  Status status = 3;
+}
+
+message DeleteCollectionRequest {
+  string id = 1;
+  string tenant = 2;
+  string database = 3;
+}
+
+message GetCollectionsRequest {
+  optional string id = 1;
+  optional string name = 2;
+  optional string topic = 3;
+  string tenant = 4;
+  string database = 5;
+}
+
+message GetCollectionsResponse {
+  repeated Collection collections = 1;
+  Status status = 2;
+}
+
+message UpdateCollectionRequest {
+  string id = 1;
+  optional string topic = 2;
+  optional string name = 3;
+  optional int32 dimension = 4;
+  oneof metadata_update {
+    UpdateMetadata metadata = 5;
+    bool reset_metadata = 6;
+  }
+}
+
+message Notification {
+  int64 id = 1;
+  string collection_id = 2;
+  string type = 3;
+  string status = 4;
+}
+
+service SysDB {
+  rpc CreateDatabase(CreateDatabaseRequest) returns (ChromaResponse) {}
+  rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
+  rpc CreateTenant(CreateTenantRequest) returns (ChromaResponse) {}
+  rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
+  rpc CreateSegment(CreateSegmentRequest) returns (ChromaResponse) {}
+  rpc DeleteSegment(DeleteSegmentRequest) returns (ChromaResponse) {}
+  rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
+  rpc UpdateSegment(UpdateSegmentRequest) returns (ChromaResponse) {}
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
+  rpc DeleteCollection(DeleteCollectionRequest) returns (ChromaResponse) {}
+  rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc UpdateCollection(UpdateCollectionRequest) returns (ChromaResponse) {}
+  rpc ResetState(google.protobuf.Empty) returns (ChromaResponse) {}
+}

@@ -1,0 +1,34 @@
+# ignore mac created DS_Store files
+**/.DS_Store
+
+**/__pycache__
+
+go/coordinator/bin/
+go/coordinator/**/testdata/
+
+*.log
+
+**/data__nogit
+
+**/.ipynb_checkpoints
+
+index_data
+
+# Default configuration for persist_directory in chromadb/config.py
+# Currently it's located in "./chroma/"
+chroma/
+chroma_test_data/
+server.htpasswd
+
+.venv
+venv
+.env
+.chroma
+*.egg-info
+dist
+
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+.hypothesis/
+.idea
