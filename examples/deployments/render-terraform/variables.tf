@@ -7,7 +7,7 @@ variable "chroma_image_reg_url" {
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.20"
+  default     = "0.4.22"
 }
 
 variable "region" {

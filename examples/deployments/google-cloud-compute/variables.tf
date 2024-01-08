@@ -5,12 +5,28 @@ variable "project_id" {
 variable "chroma_release" {
   description = "The chroma release to deploy"
   type        = string
-  default     = "0.4.20"
+  default     = "0.4.22"
 }
 
 variable "zone" {
   type    = string
   default = "us-central1-a"
+}
+
+data "http" "startup_script_remote" {
+  url = "https://raw.githubusercontent.com/chroma-core/chroma/main/examples/deployments/aws-terraform/startup.sh"
+}
+
+data "template_file" "user_data" {
+  template = data.http.startup_script_remote.response_body
+
+  vars = {
+    chroma_release         = var.chroma_release
+    enable_auth            = var.enable_auth
+    auth_type              = var.auth_type
+    basic_auth_credentials = "${local.basic_auth_credentials.username}:${local.basic_auth_credentials.password}"
+    token_auth_credentials = random_password.chroma_token.result
+  }
 }
 
 variable "image" {
