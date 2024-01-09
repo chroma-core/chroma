@@ -1,6 +1,6 @@
 import argparse
 import os
-from typing import List, Dict
+from typing import List
 
 import google.generativeai as genai
 import chromadb

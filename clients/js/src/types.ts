@@ -154,4 +154,3 @@ export type DeleteParams = {
     where?: Where,
     whereDocument?: WhereDocument
 }
-

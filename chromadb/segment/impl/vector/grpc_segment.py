@@ -2,12 +2,11 @@ from overrides import EnforceOverrides, override
 from typing import List, Optional, Sequence
 from chromadb.config import System
 from chromadb.proto.convert import (
-    from_proto_vector,
     from_proto_vector_embedding_record,
     from_proto_vector_query_result,
     to_proto_vector,
 )
-from chromadb.segment import MetadataReader, VectorReader
+from chromadb.segment import VectorReader
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
