@@ -54,6 +54,20 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI
 
 
+from collections.abc import Container, Mapping
+
+
+def subdict(d: Mapping, keys: Container) -> dict:
+    """return a subdict with only the given keys
+
+    >>> subdict(dict(a=1, b=2, c=3), ['a', 'c'])
+    {'a': 1, 'c': 3}
+    """
+    return {k: v for k, v in d.items() if k in keys}
+
+
+DFLT_FILTER_INCLUDE = False
+
 class Collection(BaseModel):
     name: str
     id: UUID
@@ -175,6 +189,8 @@ class Collection(BaseModel):
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],
+        *,
+        filter_include = DFLT_FILTER_INCLUDE,
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -186,6 +202,7 @@ class Collection(BaseModel):
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
+            filter_include: If True, only return the keys in include (plus "ids"). Defaults to False. Optional.
 
         Returns:
             GetResult: A GetResult object containing the results.
@@ -229,6 +246,10 @@ class Collection(BaseModel):
         # Remove URIs from the result if they weren't requested
         if "uris" not in include:
             get_results["uris"] = None
+            
+        if filter_include:
+            keep_keys = ['ids'] + [key for key in include if key != 'ids']
+            return subdict(get_results, keep_keys)
 
         return get_results
 
@@ -258,6 +279,8 @@ class Collection(BaseModel):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],
+        *,
+        filter_include = DFLT_FILTER_INCLUDE,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -269,6 +292,7 @@ class Collection(BaseModel):
             where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
+            filter_include: If True, only return the keys in include (plus "ids"). Defaults to False. Optional.
 
         Returns:
             QueryResult: A QueryResult object containing the results.
@@ -364,6 +388,10 @@ class Collection(BaseModel):
         if "uris" not in include:
             query_results["uris"] = None
 
+        if filter_include:
+            keep_keys = ['ids'] + [key for key in include if key != 'ids']
+            return subdict(query_results, keep_keys)
+        
         return query_results
 
     def modify(

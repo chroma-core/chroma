@@ -244,3 +244,64 @@ class CollectionStateMachine(RuleBasedStateMachine):
 def test_collections(caplog: pytest.LogCaptureFixture, api: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(api))  # type: ignore
+
+
+def test_collections_get_and_query_with_filter_include():
+    """Test Collections.get and Collection.query with filter_include=True"""
+    from chromadb import EphemeralClient
+
+    collection = EphemeralClient().get_or_create_collection('test_filter_include')
+    # Empty the collection
+    if ids := collection.get()['ids']:
+        collection.delete(ids)
+
+    collection.add(ids=['apple', 'banana'], documents=['crumble', 'split'])
+
+    assert collection.get() == {
+        'ids': ['apple', 'banana'],
+        'embeddings': None,
+        'metadatas': [None, None],
+        'documents': ['crumble', 'split'],
+        'uris': None,
+        'data': None,
+    }
+
+
+    # Now see that there's only 3 fields (the default include value of Collection.get)
+    # which correspond to the default of the include argument of Collection.get, 
+    # plus the ids field
+    assert collection.get(filter_include=True) == {
+        'ids': ['apple', 'banana'],
+        'metadatas': [None, None],
+        'documents': ['crumble', 'split'],
+    }
+
+    # If I explicitly ask for only the uris field, I should get only the uris field
+    # (always, plus the uris field)
+    assert collection.get(include=['uris'], filter_include=True) == {
+        'ids': ['apple', 'banana'],
+        'uris': [None, None],
+    }
+
+    # Default query method behavior
+    result = collection.query(query_texts='split', n_results=1)
+    assert list(result) == [
+        'ids',
+        'distances',
+        'metadatas',
+        'embeddings',
+        'documents',
+        'uris',
+        'data',
+    ]
+
+    # Modified query method behavior
+    filtered_result = collection.query(
+        query_texts='split', 
+        n_results=1, 
+        include=['documents', 'distances'],
+        filter_include=True
+    )
+    assert list(filtered_result) == ['ids', 'distances', 'documents']
+    
+ 
