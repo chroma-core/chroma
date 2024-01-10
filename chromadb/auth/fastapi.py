@@ -1,4 +1,4 @@
-# FAST API code
+import chromadb
 from contextvars import ContextVar
 from functools import wraps
 import logging
@@ -28,6 +28,7 @@ from chromadb.auth import (
 )
 from chromadb.auth.registry import resolve_provider
 from chromadb.errors import AuthorizationError
+from chromadb.server.fastapi.utils import fastapi_json_response
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -116,7 +117,7 @@ class FastAPIChromaAuthMiddleware(ChromaAuthMiddleware):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
+class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
     def __init__(
         self, app: ASGIApp, auth_middleware: FastAPIChromaAuthMiddleware
     ) -> None:
@@ -143,7 +144,7 @@ class FastAPIChromaAuthMiddlewareWrapper(BaseHTTPMiddleware):
             FastAPIServerAuthenticationRequest(request)
         )
         if not response or not response.success():
-            return AuthorizationError("Unauthorized").fastapi_json_response()
+            return fastapi_json_response(AuthorizationError("Unauthorized"))
 
         request.state.user_identity = response.get_user_identity()
         return await call_next(request)
@@ -159,7 +160,9 @@ authz_provider: ContextVar[Optional[ServerAuthorizationProvider]] = ContextVar(
 overwrite_singleton_tenant_database_access_from_auth: bool = False
 
 
-def set_overwrite_singleton_tenant_database_access_from_auth(overwrite: bool = False) -> None:
+def set_overwrite_singleton_tenant_database_access_from_auth(
+    overwrite: bool = False,
+) -> None:
     global overwrite_singleton_tenant_database_access_from_auth
     overwrite_singleton_tenant_database_access_from_auth = overwrite
 
@@ -221,14 +224,19 @@ def authz_context(
                     if desired_tenant and "tenant" in kwargs:
                         if isinstance(kwargs["tenant"], str):
                             kwargs["tenant"] = desired_tenant
-                        elif isinstance(kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant):
+                        elif isinstance(
+                            kwargs["tenant"], chromadb.server.fastapi.types.CreateTenant
+                        ):
                             kwargs["tenant"].name = desired_tenant
                     databases = request.state.user_identity.get_user_databases()
                     if databases and len(databases) == 1 and "database" in kwargs:
                         desired_database = databases[0]
                         if isinstance(kwargs["database"], str):
                             kwargs["database"] = desired_database
-                        elif isinstance(kwargs["database"], chromadb.server.fastapi.types.CreateDatabase):
+                        elif isinstance(
+                            kwargs["database"],
+                            chromadb.server.fastapi.types.CreateDatabase,
+                        ):
                             kwargs["database"].name = desired_database
 
             return f(*args, **kwargs)
@@ -294,7 +302,7 @@ class FastAPIChromaAuthzMiddleware(ChromaAuthzMiddleware[ASGIApp, Request]):
         raise NotImplementedError("Not implemented yet")
 
 
-class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):
+class FastAPIChromaAuthzMiddlewareWrapper(BaseHTTPMiddleware):  # type: ignore
     def __init__(
         self, app: ASGIApp, authz_middleware: FastAPIChromaAuthzMiddleware
     ) -> None:
