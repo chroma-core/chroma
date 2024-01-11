@@ -7,8 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
-
-import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
@@ -30,7 +28,6 @@ from chromadb.auth.fastapi_utils import (
     attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.server
 import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
@@ -53,6 +50,8 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+
+from chromadb.server.fastapi.utils import fastapi_json_response
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -82,7 +81,7 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return e.fastapi_json_response()
+        return fastapi_json_response(e)
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)

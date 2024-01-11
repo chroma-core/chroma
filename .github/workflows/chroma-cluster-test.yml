@@ -17,6 +17,7 @@ jobs:
         python: ['3.8']
         platform: [ubuntu-latest]
         testfile: ["chromadb/test/ingest/test_producer_consumer.py",
+                   "chromadb/test/db/test_system.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",]
     runs-on: ${{ matrix.platform }}
     steps:

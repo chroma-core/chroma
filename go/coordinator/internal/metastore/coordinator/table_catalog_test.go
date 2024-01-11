@@ -92,10 +92,10 @@ func TestCatalog_GetCollections(t *testing.T) {
 	collectionAndMetadataList := []*dbmodel.CollectionAndMetadata{
 		{
 			Collection: &dbmodel.Collection{
-				ID:   "00000000-0000-0000-0000-000000000001",
-				Name: &name,
-				//Topic: "test_topic",
-				Ts: types.Timestamp(1234567890),
+				ID:    "00000000-0000-0000-0000-000000000001",
+				Name:  &name,
+				Topic: &collectionTopic,
+				Ts:    types.Timestamp(1234567890),
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{
 				{
@@ -121,11 +121,11 @@ func TestCatalog_GetCollections(t *testing.T) {
 	// assert that the collections were returned as expected
 	metadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	metadata.Add("test_key", &model.CollectionMetadataValueStringType{Value: "test_value"})
-	assert.Equal(t, []*model.CreateCollection{
+	assert.Equal(t, []*model.Collection{
 		{
-			ID:   types.MustParse("00000000-0000-0000-0000-000000000001"),
-			Name: "test_collection",
-			//Topic:    "test_topic",
+			ID:       types.MustParse("00000000-0000-0000-0000-000000000001"),
+			Name:     "test_collection",
+			Topic:    collectionTopic,
 			Ts:       types.Timestamp(1234567890),
 			Metadata: metadata,
 		},

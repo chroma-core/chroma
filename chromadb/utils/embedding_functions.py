@@ -1,4 +1,8 @@
+import hashlib
 import logging
+from functools import cached_property
+
+from tenacity import stop_after_attempt, wait_random, retry, retry_if_exception
 
 from chromadb.api.types import (
     Document,
@@ -15,20 +19,34 @@ from pathlib import Path
 import os
 import tarfile
 import requests
-from typing import Any, Dict, List, Mapping, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union, cast
 import numpy as np
 import numpy.typing as npt
 import importlib
 import inspect
+import json
 import sys
-from typing import Optional
 
 try:
     from chromadb.is_thin_client import is_thin_client
 except ImportError:
     is_thin_client = False
 
+if TYPE_CHECKING:
+    from onnxruntime import InferenceSession
+    from tokenizers import Tokenizer
+
 logger = logging.getLogger(__name__)
+
+
+def _verify_sha256(fname: str, expected_sha256: str) -> bool:
+    sha256_hash = hashlib.sha256()
+    with open(fname, "rb") as f:
+        # Read and update hash in chunks to avoid using too much memory
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest() == expected_sha256
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -348,8 +366,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_DOWNLOAD_URL = (
         "https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz"
     )
-    tokenizer = None
-    model = None
+    _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
 
     # https://github.com/python/mypy/issues/7291 mypy makes you type the constructor if
     # no args
@@ -391,6 +408,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_random(min=1, max=3),
+        retry=retry_if_exception(lambda e: "does not match expected SHA256" in str(e)),
+    )
     def _download(self, url: str, fname: str, chunk_size: int = 1024) -> None:
         resp = requests.get(url, stream=True)
         total = int(resp.headers.get("content-length", 0))
@@ -404,6 +427,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             for data in resp.iter_content(chunk_size=chunk_size):
                 size = file.write(data)
                 bar.update(size)
+        if not _verify_sha256(fname, self._MODEL_SHA256):
+            # if the integrity of the file is not verified, remove it
+            os.remove(fname)
+            raise ValueError(
+                f"Downloaded file {fname} does not match expected SHA256 hash. Corrupted download or malicious file."
+            )
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
@@ -443,46 +472,45 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             all_embeddings.append(embeddings)
         return np.concatenate(all_embeddings)
 
-    def _init_model_and_tokenizer(self) -> None:
-        if self.model is None and self.tokenizer is None:
-            self.tokenizer = self.Tokenizer.from_file(
-                os.path.join(
-                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
-                )
+    @cached_property
+    def tokenizer(self) -> "Tokenizer":
+        tokenizer = self.Tokenizer.from_file(
+            os.path.join(
+                self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
             )
-            # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
-            # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
-            self.tokenizer.enable_truncation(max_length=256)
-            self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+        )
+        # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
+        # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
+        tokenizer.enable_truncation(max_length=256)
+        tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+        return tokenizer
 
-            if self._preferred_providers is None or len(self._preferred_providers) == 0:
-                if len(self.ort.get_available_providers()) > 0:
-                    logger.debug(
-                        f"WARNING: No ONNX providers provided, defaulting to available providers: "
-                        f"{self.ort.get_available_providers()}"
-                    )
-                self._preferred_providers = self.ort.get_available_providers()
-            elif not set(self._preferred_providers).issubset(
-                set(self.ort.get_available_providers())
-            ):
-                raise ValueError(
-                    f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
+    @cached_property
+    def model(self) -> "InferenceSession":
+        if self._preferred_providers is None or len(self._preferred_providers) == 0:
+            if len(self.ort.get_available_providers()) > 0:
+                logger.debug(
+                    f"WARNING: No ONNX providers provided, defaulting to available providers: "
+                    f"{self.ort.get_available_providers()}"
                 )
-            self.model = self.ort.InferenceSession(
-                os.path.join(
-                    self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"
-                ),
-                # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
-                # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
-                providers=self._preferred_providers,
+            self._preferred_providers = self.ort.get_available_providers()
+        elif not set(self._preferred_providers).issubset(
+            set(self.ort.get_available_providers())
+        ):
+            raise ValueError(
+                f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
             )
+        return self.ort.InferenceSession(
+            os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
+            # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
+            # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
+            providers=self._preferred_providers,
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-        self._init_model_and_tokenizer()
-        res = cast(Embeddings, self._forward(input).tolist())
-        return res
+        return cast(Embeddings, self._forward(input).tolist())
 
     def _download_model_if_not_exists(self) -> None:
         onnx_files = [
@@ -504,6 +532,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(
                 os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
+            ) or not _verify_sha256(
+                os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                self._MODEL_SHA256,
             ):
                 self._download(
                     url=self.MODEL_DOWNLOAD_URL,
@@ -582,7 +613,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
         self._task_type = task_type
         self._task_title = None
-        if self._task_type is "RETRIEVAL_DOCUMENT":
+        if self._task_type == "RETRIEVAL_DOCUMENT":
             self._task_title = "Embedding of single string"
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -679,6 +710,53 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                 embeddings.append(self._encode_image(cast(Image, item)))
             elif is_document(item):
                 embeddings.append(self._encode_text(cast(Document, item)))
+        return embeddings
+
+
+class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(
+        self,
+        session: "boto3.Session",  # Quote for forward reference
+        model_name: str = "amazon.titan-embed-text-v1",
+        **kwargs: Any,
+    ):
+        """Initialize AmazonBedrockEmbeddingFunction.
+
+        Args:
+            session (boto3.Session): The boto3 session to use.
+            model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
+            **kwargs: Additional arguments to pass to the boto3 client.
+
+        Example:
+            >>> import boto3
+            >>> session = boto3.Session(profile_name="profile", region_name="us-east-1")
+            >>> bedrock = AmazonBedrockEmbeddingFunction(session=session)
+            >>> texts = ["Hello, world!", "How are you?"]
+            >>> embeddings = bedrock(texts)
+        """
+
+        self._model_name = model_name
+
+        self._client = session.client(
+            service_name="bedrock-runtime",
+            **kwargs,
+        )
+
+    def __call__(self, input: Documents) -> Embeddings:
+        accept = "application/json"
+        content_type = "application/json"
+        embeddings = []
+        for text in input:
+            input_body = {"inputText": text}
+            body = json.dumps(input_body)
+            response = self._client.invoke_model(
+                body=body,
+                modelId=self._model_name,
+                accept=accept,
+                contentType=content_type,
+            )
+            embedding = json.load(response.get("body")).get("embedding")
+            embeddings.append(embedding)
         return embeddings
 
 
