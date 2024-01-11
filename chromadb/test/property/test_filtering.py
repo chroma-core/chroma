@@ -70,7 +70,6 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         if "%" in val or "_" in val:
             val1 = val.replace("%", "(.*)").replace("_", ".")
             doc = str(metadata_key)
-            # print(key, val1, doc, re.search(val1, doc))
             return re.search(val1, doc) is not None
         return val in str(metadata_key)
     elif op == "$nlike":
@@ -78,7 +77,6 @@ def _filter_where_clause(clause: Where, metadata: Metadata) -> bool:
         if "%" in val or "_" in val:
             val1 = val.replace("%", "(.*)").replace("_", ".")
             doc = str(metadata_key)
-            # print(key, val1, doc, re.search(val1, doc))
             return re.search(val1, doc) is None
         return val not in str(metadata_key)
     # The following conditions only make sense for numeric values
@@ -205,9 +203,7 @@ def test_filterable_metadata_get(
         with pytest.raises(Exception):
             coll.add(**record_set)
         return
-    # print(record_set)
     coll.add(**record_set)
-
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
@@ -241,10 +237,8 @@ def test_filterable_metadata_get_lf(
         with pytest.raises(Exception):
             coll.add(**record_set)
         return
-    # print(record_set)
     coll.add(**record_set)
     for filter in filters:
-        # print(filter)
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
         assert sorted(result_ids) == sorted(expected_ids)

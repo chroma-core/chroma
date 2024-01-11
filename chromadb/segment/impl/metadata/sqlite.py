@@ -534,6 +534,7 @@ def _where_clause(
         LiteralValue,
         Dict[WhereOperator, LiteralValue],
         Dict[InclusionExclusionOperator, List[LiteralValue]],
+        
     ],
     table: Table,
 ) -> Criterion:

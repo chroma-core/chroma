@@ -248,7 +248,7 @@ def collections(
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
-    like_fields_size = 2
+    like_fields_size = 5
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
@@ -279,7 +279,6 @@ def collections(
         while len(known_metadata_keys) < 5:
             key = draw(safe_text)
             known_metadata_keys[key] = draw(st.one_of(*safe_values))
-    # print("keys", known_metadata_keys)
     if has_documents is None:
         has_documents = draw(st.booleans())
     if uses_metadata_like is None:
@@ -345,7 +344,7 @@ def metadata(draw: st.DrawFn, collection: Collection) -> types.Metadata:
         sampling_dict: Dict[str, st.SearchStrategy[Union[str, int, float]]] = {
             k: st.just(v) for k, v in collection.known_metadata_keys.items()
         }
-        #
+        
         metadata.update(draw(st.fixed_dictionaries({}, optional=sampling_dict)))
         blacklist_categories = ("Cc", "Cs")
         for k in collection.known_metadata_strkeys:
