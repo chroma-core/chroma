@@ -171,8 +171,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
             # Return just the embeddings
-            emb = [result.embedding for result in sorted_embeddings]
-            return cast(Embeddings, emb)
+            return cast(Embeddings,  [result.embedding for result in sorted_embeddings])
         else:
             if self._api_type == "azure":
                 embeddings = self._client.create(
