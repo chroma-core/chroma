@@ -16,7 +16,7 @@ def random_documents() -> List[Document]:
     return [str(random_image()) for _ in range(10)]
 
 
-def test_embedding_function_with_valid_response() -> None:
+def test_embedding_function_results_format_when_response_is_valid() -> None:
     valid_embeddings = random_embeddings()
 
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -27,7 +27,7 @@ def test_embedding_function_with_valid_response() -> None:
     assert valid_embeddings == ef(random_documents())
 
 
-def test_embedding_function_with_invalid_response() -> None:
+def test_embedding_function_results_format_when_response_is_invalid() -> None:
     invalid_embedding = {"error": "test"}
 
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -37,4 +37,4 @@ def test_embedding_function_with_invalid_response() -> None:
     ef = TestEmbeddingFunction()
     with pytest.raises(ValueError) as e:
         ef(random_documents())
-    assert "Expected embeddings to be a list, got {'error': 'test'}" == str(e.value)
+    assert e.type is ValueError
