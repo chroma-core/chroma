@@ -189,8 +189,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
             # Return just the embeddings
-            emb1 = [result["embedding"] for result in sorted_embeddings]
-            return cast(Embeddings, emb1)
+            return cast(
+                Embeddings, [result["embedding"] for result in sorted_embeddings]
+            )
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
