@@ -8,6 +8,7 @@ import {
     ClientAuthProtocolAdapter,
     IsomorphicFetchClientAuthProtocolAdapter
 } from "./auth";
+import { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction';
 import { AdminClient } from './AdminClient';
 
 const DEFAULT_TENANT = "default_tenant"
@@ -144,6 +145,11 @@ export class ChromaClient {
         metadata,
         embeddingFunction
     }: CreateCollectionParams): Promise<Collection> {
+
+        if (embeddingFunction === undefined) {
+            embeddingFunction = new DefaultEmbeddingFunction();
+        }
+      
         const newCollection = await this.api
             .createCollection(this.tenant, this.database, {
                 name,
@@ -185,6 +191,11 @@ export class ChromaClient {
         metadata,
         embeddingFunction
     }: GetOrCreateCollectionParams): Promise<Collection> {
+
+        if (embeddingFunction === undefined) {
+            embeddingFunction = new DefaultEmbeddingFunction();
+        }
+
         const newCollection = await this.api
             .createCollection(this.tenant, this.database, {
                 name,
