@@ -172,21 +172,14 @@ def _filter_embedding_set(
 
 
 collection_st = st.shared(
-    strategies.collections(add_filterable_data=True, with_hnsw_params=True),
+    strategies.collections(add_filterable_data=True, with_hnsw_params=True,uses_metadata_like=True),
     key="coll",
 )
-collection_st_lf = st.shared(
-    strategies.collections(
-        add_filterable_data=True, with_hnsw_params=True, uses_metadata_like=True
-    ),
-    key="coll",
-)
+
 recordset_st = st.shared(
     strategies.recordsets(collection_st, max_size=1000), key="recordset"
 )
-recordset_st_lf = st.shared(
-    strategies.recordsets(collection_st_lf, max_size=1000), key="recordset"
-)
+
 
 
 @settings(
@@ -201,40 +194,6 @@ recordset_st_lf = st.shared(
     filters=st.lists(strategies.filters(collection_st, recordset_st), min_size=1),
 )
 def test_filterable_metadata_get(
-    caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
-) -> None:
-    caplog.set_level(logging.ERROR)
-
-    api.reset()
-    coll = api.create_collection(
-        name=collection.name,
-        metadata=collection.metadata,  # type: ignore
-        embedding_function=collection.embedding_function,
-    )
-
-    if not invariants.is_metadata_valid(invariants.wrap_all(record_set)):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
-    coll.add(**record_set)
-    for filter in filters:
-        result_ids = coll.get(**filter)["ids"]
-        expected_ids = _filter_embedding_set(record_set, filter)
-        assert sorted(result_ids) == sorted(expected_ids)
-
-
-@settings(
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-    ]
-)  # type: ignore
-@given(
-    collection=collection_st_lf,
-    record_set=recordset_st_lf,
-    filters=st.lists(strategies.filters(collection_st_lf, recordset_st_lf), min_size=1),
-)
-def test_filterable_metadata_get_lf(
     caplog, api: ServerAPI, collection: strategies.Collection, record_set, filters
 ) -> None:
     caplog.set_level(logging.ERROR)
@@ -422,73 +381,7 @@ def test_boolean_metadata(api: ServerAPI) -> None:
     assert res["ids"] == ["1", "3"]
 
 
-@settings(
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-    ]
-)
-@given(
-    collection=collection_st_lf,
-    record_set=recordset_st_lf,
-    filters=st.lists(
-        strategies.filters(collection_st_lf, recordset_st_lf, include_all_ids=True),
-        min_size=1,
-    ),
-)
-def test_filterable_metadata_query_lf(
-    caplog: pytest.LogCaptureFixture,
-    api: ServerAPI,
-    collection: strategies.Collection,
-    record_set: strategies.RecordSet,
-    filters: List[strategies.Filter],
-) -> None:
-    caplog.set_level(logging.ERROR)
 
-    api.reset()
-    coll = api.create_collection(
-        name=collection.name,
-        metadata=collection.metadata,  # type: ignore
-        embedding_function=collection.embedding_function,
-    )
-    normalized_record_set = invariants.wrap_all(record_set)
-
-    if not invariants.is_metadata_valid(normalized_record_set):
-        with pytest.raises(Exception):
-            coll.add(**record_set)
-        return
-
-    coll.add(**record_set)
-    total_count = len(normalized_record_set["ids"])
-    # Pick a random vector
-    random_query: Embedding
-    if collection.has_embeddings:
-        assert normalized_record_set["embeddings"] is not None
-        assert all(isinstance(e, list) for e in normalized_record_set["embeddings"])
-        random_query = normalized_record_set["embeddings"][
-            random.randint(0, total_count - 1)
-        ]
-    else:
-        assert isinstance(normalized_record_set["documents"], list)
-        assert collection.embedding_function is not None
-        random_query = collection.embedding_function(
-            [normalized_record_set["documents"][random.randint(0, total_count - 1)]]
-        )[0]
-    for filter in filters:
-        result_ids = set(
-            coll.query(
-                query_embeddings=random_query,
-                n_results=total_count,
-                where=filter["where"],
-                where_document=filter["where_document"],
-            )["ids"][0]
-        )
-        expected_ids = set(
-            _filter_embedding_set(
-                cast(strategies.RecordSet, normalized_record_set), filter
-            )
-        )
-        assert len(result_ids.intersection(expected_ids)) == len(result_ids)
 
 def test_get_empty(api: ServerAPI) -> None:
     """Tests that calling get() with empty filters returns nothing"""
