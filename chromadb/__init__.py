@@ -2,6 +2,7 @@ from typing import Dict, Optional
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
+from chromadb.auth.token import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, ClientAPI
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.4.15"
+__version__ = "0.4.22"
 
 # Workaround to deal with Colab's old sqlite3 version
 try:
@@ -156,20 +157,77 @@ def HttpClient(
         port: The port of the Chroma server. Defaults to "8000".
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
+        settings: A dictionary of settings to communicate with the chroma server.
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
 
-    if headers is None:
-        headers = {}
     if settings is None:
         settings = Settings()
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    if settings.chroma_server_host and settings.chroma_server_host != host:
+        raise ValueError(
+            f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
+        )
     settings.chroma_server_host = host
+    if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
+        raise ValueError(
+            f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
+        )
     settings.chroma_server_http_port = port
     settings.chroma_server_ssl_enabled = ssl
     settings.chroma_server_headers = headers
+
+    return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
+def CloudClient(
+    tenant: str,
+    database: str,
+    api_key: Optional[str] = None,
+    settings: Optional[Settings] = None,
+    *,  # Following arguments are keyword-only, intended for testing only.
+    cloud_host: str = "api.trychroma.com",
+    cloud_port: str = "8000",
+    enable_ssl: bool = True,
+) -> ClientAPI:
+    """
+    Creates a client to connect to a tennant and database on the Chroma cloud.
+
+    Args:
+        tenant: The tenant to use for this client.
+        database: The database to use for this client.
+        api_key: The api key to use for this client.
+    """
+
+    # If no API key is provided, try to load it from the environment variable
+    if api_key is None:
+        import os
+
+        api_key = os.environ.get("CHROMA_API_KEY")
+
+    # If the API key is still not provided, prompt the user
+    if api_key is None:
+        print(
+            "\033[93mDon't have an API key?\033[0m Get one at https://app.trychroma.com"
+        )
+        api_key = input("Please enter your Chroma API key: ")
+
+    if settings is None:
+        settings = Settings()
+
+    settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    settings.chroma_server_host = cloud_host
+    settings.chroma_server_http_port = cloud_port
+    # Always use SSL for cloud
+    settings.chroma_server_ssl_enabled = enable_ssl
+
+    settings.chroma_client_auth_provider = "chromadb.auth.token.TokenAuthClientProvider"
+    settings.chroma_client_auth_credentials = api_key
+    settings.chroma_client_auth_token_transport_header = (
+        TokenTransportHeader.X_CHROMA_TOKEN.name
+    )
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 

@@ -8,11 +8,15 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
+    Embeddable,
     EmbeddingFunction,
+    DataLoader,
     Embeddings,
     IDs,
     Include,
+    Loadable,
     Metadatas,
+    URIs,
     Where,
     QueryResult,
     GetResult,
@@ -40,8 +44,16 @@ class BaseAPI(ABC):
     #
 
     @abstractmethod
-    def list_collections(self) -> Sequence[Collection]:
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Collection]:
         """List all collections.
+        Args:
+            limit: The maximum number of entries to return. Defaults to None.
+            offset: The number of entries to skip before returning. Defaults to None.
+
         Returns:
             Sequence[Collection]: A list of collections
 
@@ -54,11 +66,29 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
+    def count_collections(self) -> int:
+        """Count the number of collections.
+
+        Returns:
+            int: The number of collections.
+
+        Examples:
+            ```python
+            client.count_collections()
+            # 1
+            ```
+        """
+        pass
+
+    @abstractmethod
     def create_collection(
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
         """Create a new collection with the given name and metadata.
@@ -68,6 +98,7 @@ class BaseAPI(ABC):
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
             get_or_create: If True, return the existing collection if it exists.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The newly created collection.
@@ -91,13 +122,19 @@ class BaseAPI(ABC):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get a collection with the given name.
         Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The collection
@@ -118,13 +155,20 @@ class BaseAPI(ABC):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         """Get or create a collection with the given name and metadata.
         Args:
             name: The name of the collection to get or create
-            metadata: Optional metadata to associate with the collection
+            metadata: Optional metadata to associate with the collection. If
+            the collection alredy exists, the metadata will be updated if
+            provided and not None. If the collection does not exist, the
+            new collection will be created with the provided metadata.
             embedding_function: Optional function to use to embed documents
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             The collection
@@ -185,6 +229,7 @@ class BaseAPI(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
@@ -195,6 +240,7 @@ class BaseAPI(ABC):
             embedding: The sequence of embeddings to add.
             metadata: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
 
         Returns:
             True if the embeddings were added successfully.
@@ -209,6 +255,7 @@ class BaseAPI(ABC):
         embeddings: Optional[Embeddings] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Update entries in a collection specified by UUID.
 
@@ -218,7 +265,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to update. Defaults to None.
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
-
+            uris: URIs of data sources for each embedding. Defaults to None.
         Returns:
             True if the embeddings were updated successfully.
         """
@@ -232,6 +279,7 @@ class BaseAPI(ABC):
         embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
     ) -> bool:
         """[Internal] Add or update entries in the a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
@@ -243,6 +291,7 @@ class BaseAPI(ABC):
             embeddings: The sequence of embeddings to add
             metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
+            uris: URIs of data sources for each embedding. Defaults to None.
         """
         pass
 
@@ -475,8 +524,19 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     @override
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
+        pass
+
+    @abstractmethod
+    @override
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int:
         pass
 
     @abstractmethod
@@ -485,7 +545,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -497,7 +560,11 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_collection(
         self,
         name: str,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        id: Optional[UUID] = None,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:
@@ -509,7 +576,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         name: str,
         metadata: Optional[CollectionMetadata] = None,
-        embedding_function: Optional[EmbeddingFunction] = ef.DefaultEmbeddingFunction(),
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Collection:

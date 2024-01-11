@@ -28,6 +28,7 @@ from chromadb.types import (
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
 from asyncio import Event, wait_for, TimeoutError
+import uuid
 
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
@@ -103,6 +104,7 @@ def sample_embeddings() -> Iterator[SubmitEmbeddingRecord]:
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
             operation=Operation.ADD,
+            collection_id=uuid.uuid4(),
         )
         return record
 

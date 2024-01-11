@@ -13,7 +13,7 @@ class ChromaError(Exception, EnforceOverrides):
 
     @classmethod
     @abstractmethod
-    def name(self) -> str:
+    def name(cls) -> str:
         """Return the error name"""
         pass
 
@@ -57,10 +57,30 @@ class InvalidUUIDError(ChromaError):
         return "InvalidUUID"
 
 
+class InvalidHTTPVersion(ChromaError):
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InvalidHTTPVersion"
+
+
+class AuthorizationError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 401
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "AuthorizationError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
     "InvalidUUID": InvalidUUIDError,
+    "InvalidHTTPVersion": InvalidHTTPVersion,
+    "AuthorizationError": AuthorizationError,
 }

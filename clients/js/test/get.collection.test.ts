@@ -20,8 +20,6 @@ test("it should get a collection", async () => {
   expect(["test1"]).toEqual(expect.arrayContaining(results2.ids));
 });
 
-
-
 test("wrong code returns an error", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });

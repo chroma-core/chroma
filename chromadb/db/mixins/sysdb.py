@@ -226,7 +226,13 @@ class SqlSysDB(SqlDB, SysDB):
 
         topic = self._assignment_policy.assign_collection(id)
         collection = Collection(
-            id=id, topic=topic, name=name, metadata=metadata, dimension=dimension
+            id=id,
+            topic=topic,
+            name=name,
+            metadata=metadata,
+            dimension=dimension,
+            tenant=tenant,
+            database=database,
         )
 
         with self.tx() as cur:
@@ -361,6 +367,8 @@ class SqlSysDB(SqlDB, SysDB):
         name: Optional[str] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Get collections by name, embedding function and/or metadata"""
 
@@ -379,6 +387,7 @@ class SqlSysDB(SqlDB, SysDB):
 
         collections_t = Table("collections")
         metadata_t = Table("collection_metadata")
+        databases_t = Table("databases")
         q = (
             self.querybuilder()
             .from_(collections_t)
@@ -387,6 +396,8 @@ class SqlSysDB(SqlDB, SysDB):
                 collections_t.name,
                 collections_t.topic,
                 collections_t.dimension,
+                databases_t.name,
+                databases_t.tenant_id,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -394,6 +405,8 @@ class SqlSysDB(SqlDB, SysDB):
             )
             .left_join(metadata_t)
             .on(collections_t.id == metadata_t.collection_id)
+            .left_join(databases_t)
+            .on(collections_t.database_id == databases_t.id)
             .orderby(collections_t.id)
         )
         if id:
@@ -403,7 +416,9 @@ class SqlSysDB(SqlDB, SysDB):
         if name:
             q = q.where(collections_t.name == ParameterValue(name))
 
-        if tenant and database:
+        # Only if we have a name, tenant and database do we need to filter databases
+        # Given an id, we can uniquely identify the collection so we don't need to filter databases
+        if id is None and tenant and database:
             databases_t = Table("databases")
             q = q.where(
                 collections_t.database_id
@@ -413,6 +428,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .where(databases_t.name == ParameterValue(database))
                 .where(databases_t.tenant_id == ParameterValue(tenant))
             )
+        # cant set limit and offset here because this is metadata and we havent reduced yet
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())
@@ -433,8 +449,16 @@ class SqlSysDB(SqlDB, SysDB):
                         name=name,
                         metadata=metadata,
                         dimension=dimension,
+                        tenant=str(rows[0][5]),
+                        database=str(rows[0][4]),
                     )
                 )
+
+            # apply limit and offset
+            if limit is not None:
+                collections = collections[offset:offset+limit]
+            else:
+                collections = collections[offset:]
 
             return collections
 

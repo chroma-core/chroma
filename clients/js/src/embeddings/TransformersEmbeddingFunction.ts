@@ -1,11 +1,15 @@
-import { importOptionalModule } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 // Dynamically import module
 let TransformersApi: Promise<any>;
 
 export class TransformersEmbeddingFunction implements IEmbeddingFunction {
-  private pipelinePromise: Promise<any> | null;
+  private pipelinePromise?: Promise<any> | null;
+  private transformersApi: any;
+  private model: string;
+  private revision: string;
+  private quantized: boolean;
+  private progress_callback: Function | null;
 
   /**
    * TransformersEmbeddingFunction constructor.
@@ -26,22 +30,26 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
     quantized?: boolean;
     progress_callback?: Function | null;
   } = {}) {
-    try {
-      // Use dynamic import to support browser environments because we do not have a bundler that handles browser support.
-      // The util importOptionalModule is used to prevent issues when bundlers try to locate the dependency even when it's optional.
-      TransformersApi = importOptionalModule("@xenova/transformers");
-    } catch (e) {
-      throw new Error(
-        "Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`."
-      );
-    }
+    this.model = model;
+    this.revision = revision;
+    this.quantized = quantized;
+    this.progress_callback = progress_callback;
+  }
 
-    // Store a promise that resolves to the pipeline
+  public async generate(texts: string[]): Promise<number[][]> {
+    await this.loadClient();
+
+     // Store a promise that resolves to the pipeline
     this.pipelinePromise = new Promise(async (resolve, reject) => {
       try {
-        const { pipeline } = await TransformersApi;
+        const pipeline = this.transformersApi
+
+        const quantized = this.quantized
+        const revision = this.revision
+        const progress_callback = this.progress_callback
+
         resolve(
-          await pipeline("feature-extraction", model, {
+          await pipeline("feature-extraction", this.model, {
             quantized,
             revision,
             progress_callback,
@@ -51,11 +59,41 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
         reject(e);
       }
     });
-  }
 
-  public async generate(texts: string[]): Promise<number[][]> {
     let pipe = await this.pipelinePromise;
     let output = await pipe(texts, { pooling: "mean", normalize: true });
     return output.tolist();
+  }
+
+  private async loadClient() {
+      if(this.transformersApi) return;
+      try {
+          // eslint-disable-next-line global-require,import/no-extraneous-dependencies
+          let { pipeline } = await TransformersEmbeddingFunction.import();
+          TransformersApi = pipeline;
+      } catch (_a) {
+          // @ts-ignore
+          if (_a.code === 'MODULE_NOT_FOUND') {
+              throw new Error("Please install the @xenova/transformers package to use the TransformersEmbeddingFunction, `npm install -S @xenova/transformers`");
+          }
+          throw _a; // Re-throw other errors
+      }
+      this.transformersApi = TransformersApi;
+  }
+
+  /** @ignore */
+  static async import(): Promise<{
+      // @ts-ignore
+      pipeline: typeof import("@xenova/transformers");
+  }> {
+      try {
+          // @ts-ignore
+          const { pipeline } = await import("@xenova/transformers");
+          return { pipeline };
+      } catch (e) {
+          throw new Error(
+              "Please install @xenova/transformers as a dependency with, e.g. `yarn add @xenova/transformers`"
+          );
+      }
   }
 }

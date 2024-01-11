@@ -1,4 +1,4 @@
-FROM golang:1.20-alpine as build
+FROM golang:1.20-alpine3.18 as build
 
 RUN apk add --no-cache make git build-base bash
 
@@ -10,7 +10,15 @@ RUN cd /src/chroma-coordinator \
 
 FROM alpine:3.17.3
 
-RUN apk add --no-cache bash bash-completion
+RUN apk add --no-cache bash bash-completion jq findutils
+
+# As of 6 Dec 2023, the atlas package isn't in Alpine's main package manager, only
+# testing. So we have to add the testing repository to get it.
+RUN apk add \
+    --no-cache \
+    --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing \
+    --repository http://dl-cdn.alpinelinux.org/alpine/edge/main \
+    atlas
 
 RUN mkdir /chroma-coordinator
 WORKDIR /chroma-coordinator
@@ -18,6 +26,6 @@ WORKDIR /chroma-coordinator
 COPY --from=build /src/chroma-coordinator/bin/chroma /chroma-coordinator/bin/chroma
 ENV PATH=$PATH:/chroma-coordinator/bin
 
-RUN chroma completion bash > ~/.bashrc
+COPY --from=build /src/chroma-coordinator/migrations /chroma-coordinator/migrations
 
 CMD /bin/bash

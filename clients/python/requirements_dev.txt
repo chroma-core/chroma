@@ -1,0 +1,8 @@
+build>=1.0.3
+fastapi>=0.95.2
+hypothesis
+hypothesis[numpy]
+opentelemetry-instrumentation-fastapi>=0.41b0
+pypika==0.48.9
+pytest
+uvicorn[standard]==0.18.3
