@@ -305,8 +305,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
         # Return just the embeddings
-        embedding = [result["embedding"] for result in sorted_embeddings]
-        return cast(Embeddings, embedding)
+        return cast(Embeddings, [result["embedding"] for result in sorted_embeddings])
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
