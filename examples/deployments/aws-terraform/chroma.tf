@@ -51,8 +51,10 @@ resource "aws_security_group" "chroma_sg" {
 }
 
 resource "aws_key_pair" "chroma-keypair" {
-  key_name   = "chroma-keypair"  # Replace with your desired key pair name
+  count      = var.import_keypair ? 1 : 0
+  key_name   = var.keypair_name  # Replace with your desired key pair name
   public_key = file(var.ssh_public_key)  # Replace with the path to your public key file
+
 }
 
 data "aws_ami" "ubuntu" {
@@ -78,7 +80,7 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "chroma_instance" {
   ami             = data.aws_ami.ubuntu.id
   instance_type   = var.instance_type
-  key_name        = "chroma-keypair"
+  key_name        = var.keypair_name
   security_groups = [aws_security_group.chroma_sg.name]
 
   user_data = data.template_file.user_data.rendered

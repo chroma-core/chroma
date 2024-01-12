@@ -46,6 +46,7 @@ cat <<EOF > docker-compose.override.yaml
 version: '3.8'
 services:
   server:
+    restart: always
     volumes:
       - /chroma-data:/chroma/chroma
 EOF

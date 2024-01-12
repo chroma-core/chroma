@@ -23,7 +23,7 @@ export TF_VAR_render_api_token=<render_api_token>
 # Your Render.com user email
 export TF_VAR_render_user_email=<render_user_email>
 #set the chroma release to deploy
-export TF_VAR_chroma_release="0.4.13"
+export TF_VAR_chroma_release="0.4.20"
 # the region to deploy to. At the time of writing only oregon and frankfurt are available
 export TF_VAR_region="oregon"
 #enable basic auth for the chroma instance

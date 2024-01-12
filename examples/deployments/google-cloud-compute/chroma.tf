@@ -43,13 +43,7 @@ resource "google_compute_instance" "chroma" {
     ssh-keys = "${var.vm_user}:${file(var.ssh_public_key)}"
   }
 
-  metadata_startup_script = templatefile("${path.module}/startup.sh", {
-    chroma_release         = var.chroma_release,
-    enable_auth            = var.enable_auth,
-    auth_type              = var.auth_type,
-    basic_auth_credentials = "${local.basic_auth_credentials.username}:${local.basic_auth_credentials.password}",
-    token_auth_credentials = random_password.chroma_token.result,
-  })
+  metadata_startup_script = data.template_file.user_data.rendered
 
   provisioner "remote-exec" {
     inline = [

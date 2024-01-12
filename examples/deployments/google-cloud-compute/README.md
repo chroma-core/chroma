@@ -33,18 +33,26 @@ Generate SSH key to use with your chroma instance (so you can SSH to the GCP VM)
 > Note: This is optional. You can use your own existing SSH key if you prefer.
 
 ```bash
-ssh-keygen -t RSA -b 4096 -C "Chroma AWS Key" -N "" -f ./chroma-aws && chmod 400 ./chroma-aws
+ssh-keygen -t RSA -b 4096 -C "Chroma SSH Keypair" -N "" -f ./chroma_id_rsa && chmod 400 ./chroma_id_rsa
 ```
 
 ```bash
-export TF_VAR_project_id=<your_project_id> #take note of this as it must be present in all of the subsequent steps
-export TF_ssh_public_key="./chroma-aws.pub" #path to the public key you generated above (or can be different if you want to use your own key)
-export TF_ssh_private_key="./chroma-aws" #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
-export TF_VAR_chroma_release="0.4.9" #set the chroma release to deploy
-export TF_VAR_zone="us-central1-a" # AWS region to deploy the chroma instance to
-export TF_VAR_public_access="true" #enable public access to the chroma instance on port 8000
-export TF_VAR_enable_auth="true" #enable basic auth for the chroma instance
-export TF_VAR_auth_type="token" #The auth type to use for the chroma instance (token or basic)
+#take note of this as it must be present in all of the subsequent steps
+export TF_VAR_project_id=<your_project_id>
+#path to the public key you generated above (or can be different if you want to use your own key)
+export TF_ssh_public_key="./chroma_id_rsa.pub"
+#path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
+export TF_ssh_private_key="./chroma_id_rsa"
+#set the chroma release to deploy
+export TF_VAR_chroma_release="0.4.20"
+# AWS region to deploy the chroma instance to
+export TF_VAR_zone="us-central1-a"
+#enable public access to the chroma instance on port 8000
+export TF_VAR_public_access="true"
+#enable basic auth for the chroma instance
+export TF_VAR_enable_auth="true"
+#The auth type to use for the chroma instance (token or basic)
+export TF_VAR_auth_type="token"
 terraform apply -auto-approve
 ```
 
@@ -127,7 +135,7 @@ curl -v http://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
 To SSH to your instance:
 
 ```bash
-ssh -i ./chroma-aws debian@$instance_public_ip
+ssh -i ./chroma_id_rsa debian@$instance_public_ip
 ```
 
 ### 5. Destroy your application
