@@ -801,6 +801,35 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             self._api_url, json={"inputs": input}
         ).json()
 
+class TogetherEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    This class is used to get embeddings for a list of texts from together's embedding models.
+    It requires an API key and a model name. The default model name is "togethercomputer/m2-bert-80M-8k-retrieval".
+    """
+    def __init__(self, api_key: str, model_name: str = "togethercomputer/m2-bert-80M-8k-retrieval"):
+        try:
+            import together
+        except ImportError:
+            raise ValueError(
+                "The toether python package is not installed. Please install it with `pip install together`"
+            )
+        together.api_key = api_key
+        self.model_name = model_name
+        self.client = together.Together()
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        """
+        Get the embeddings for a list of texts.
+
+        Args:
+            input (Documents): A list of texts to get embeddings for.
+
+        Returns:
+            Embeddings: The embeddings for the texts.
+        """
+        outputs = self.client.embeddings.create(input = input, model=self.model_name)
+        return [outputs.data[i].embedding for i in range(len(input))]
+
 
 # List of all classes in this module
 _classes = [
