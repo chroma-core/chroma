@@ -41,4 +41,3 @@ const queryData = await collection.query({
 ## License
 
 Apache 2.0
-

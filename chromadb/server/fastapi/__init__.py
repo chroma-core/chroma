@@ -50,6 +50,8 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+
+from chromadb.server.fastapi.utils import fastapi_json_response
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -79,7 +81,7 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return e.fastapi_json_response()
+        return fastapi_json_response(e)
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
