@@ -3,6 +3,54 @@ import chroma from "./initClient";
 import { IncludeEnum } from "../src/types";
 import { IDS, DOCUMENTS, EMBEDDINGS, METADATAS } from "./data";
 
+test('it should return true on success', async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+  const update = await collection.update({
+    ids: ["test1"],
+    embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
+    metadatas: [{ test: "test1new" }],
+    documents: ["doc1new"]
+  });
+
+  expect(update)
+
+})
+
+test('it should return an error on undefined embeddingFunction', async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  collection.embeddingFunction = undefined;
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+  expect(async () => {
+    await collection.update({
+      ids: ["test1"],
+      documents: ["doc1new"]
+    });
+  })
+  .rejects
+  .toThrowError("embeddingFunction is undefined. Please configure an embedding function");
+
+})
+
+test('it should return an error on undefined embeddings, metadatas, and documents', async () => {
+  await chroma.reset();
+  const collection = await chroma.createCollection({ name: "test" });
+  await collection.add({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
+
+  expect(async () => {
+    await collection.update({
+      ids: ["test1"],
+    });
+  })
+  .rejects
+  .toThrowError("embeddings, documents, and metadatas cannot all be undefined");
+
+})
+
 test("it should get embedding with matching documents", async () => {
   await chroma.reset();
   const collection = await chroma.createCollection({ name: "test" });
