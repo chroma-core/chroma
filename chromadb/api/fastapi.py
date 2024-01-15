@@ -649,4 +649,7 @@ def raise_chroma_error(resp: requests.Response) -> None:
     try:
         resp.raise_for_status()
     except requests.HTTPError:
-        raise (Exception(resp.text))
+        if "ValueError" in resp.text:
+            raise ValueError(resp.text)
+        else:
+            raise (Exception(resp.text))
