@@ -5,6 +5,8 @@ import uvicorn
 import os
 import webbrowser
 
+from chromadb.utils.client_utils import _upgrade_check
+
 app = typer.Typer()
 
 _logo = """
@@ -50,6 +52,11 @@ def run(
         "\033[1mGetting started guide\033[0m: https://docs.trychroma.com/getting-started\n\n"
     )
 
+    upgrade_message = _upgrade_check()
+    if upgrade_message:
+        for m in upgrade_message:
+            typer.echo(m)
+
     # set ENV variable for PERSIST_DIRECTORY to path
     os.environ["IS_PERSISTENT"] = "True"
     os.environ["PERSIST_DIRECTORY"] = path
@@ -69,7 +76,6 @@ def run(
         "log_config": f"{chromadb_path}/log_config.yml",
         "timeout_keep_alive": 30,
     }
-
     if test:
         return
 

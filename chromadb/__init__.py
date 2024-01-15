@@ -37,6 +37,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "__version__",
 ]
 
 logger = logging.getLogger(__name__)

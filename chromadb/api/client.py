@@ -28,6 +28,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
+from chromadb.utils.client_utils import _upgrade_check
 
 
 class SharedSystemClient:
@@ -137,6 +138,7 @@ class Client(SharedSystemClient, ClientAPI):
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
+        _upgrade_check()
         self.tenant = tenant
         self.database = database
         # Create an admin client for verifying that databases and tenants exist
