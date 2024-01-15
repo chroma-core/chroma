@@ -1,3 +1,4 @@
+from types import NoneType
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
@@ -278,7 +279,9 @@ def validate_metadata(metadata: Metadata) -> Metadata:
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(value, (str, int, float)):
+        if not isinstance(value, bool) and not isinstance(
+            value, (str, int, float, NoneType)
+        ):
             raise ValueError(
                 f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value).__name__}"
             )

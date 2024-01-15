@@ -861,7 +861,10 @@ def _records(
     for i, id in enumerate(ids):
         metadata = None
         if metadatas:
-            metadata = metadatas[i]
+            if not metadatas[i]:
+                metadata = {"___METADATA_TOMBSTONE___": True}
+            else:
+                metadata = metadatas[i]
 
         if documents:
             document = documents[i]
