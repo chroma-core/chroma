@@ -5,12 +5,6 @@ use crate::{
 };
 use thiserror::Error;
 
-/*
-===========================================
-Operation
-===========================================
-*/
-
 #[derive(Debug, PartialEq)]
 pub(crate) enum Operation {
     Add,
