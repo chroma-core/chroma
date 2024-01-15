@@ -20,10 +20,13 @@ public:
         if (space_name == "l2")
         {
             l2space = new hnswlib::L2Space(dim);
+            normalize = false;
         }
         if (space_name == "ip")
         {
             l2space = new hnswlib::InnerProductSpace(dim);
+            // For IP, we expect the vectors to be normalized
+            normalize = false;
         }
         if (space_name == "cosine")
         {
