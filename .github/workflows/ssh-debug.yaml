@@ -3,32 +3,28 @@ name: SSH Debug
 on:
  push:
     branches:
-      - hammad/kubernetes_segment_directory
+      - hammad/rust_hnsw_index
 
 jobs:
   debug:
     strategy:
         matrix:
-          python: ['3.10']
           platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
+    - name: Checkout chroma-hnswlib
+      uses: actions/checkout@v3
+      with:
+        repository: chroma-core/hnswlib
+        path: hnswlib
     - name: Checkout
       uses: actions/checkout@v3
-    - name: Set up Python ${{ matrix.python }}
-      uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python }}
-    - name: Install test dependencies
-      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
-    - name: Start minikube
-      id: minikube
-      uses: medyagh/setup-minikube@latest
-      with:
-        minikube-version: latest
-        kubernetes-version: latest
-        driver: docker
-        addons: ingress, ingress-dns
-        start-args: '--profile chroma-test'
+        path: chroma
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v2
+    - name: Build
+      run: cargo build --verbose
+      working-directory: chroma
     - name: Setup upterm session
       uses: lhotari/action-upterm@v1
