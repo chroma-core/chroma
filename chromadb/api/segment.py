@@ -41,6 +41,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    METADATA_TOMBSTONE,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -862,7 +863,7 @@ def _records(
         metadata = None
         if metadatas:
             if not metadatas[i]:
-                metadata = {"___METADATA_TOMBSTONE___": True}
+                metadata = {METADATA_TOMBSTONE: True}
             else:
                 metadata = metadatas[i]
 

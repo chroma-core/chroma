@@ -28,6 +28,7 @@ OneOrMany = Union[T, List[T]]
 # URIs
 URI = str
 URIs = List[URI]
+METADATA_TOMBSTONE = "___METADATA_TOMBSTONE___"
 
 
 def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
