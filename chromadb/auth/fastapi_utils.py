@@ -34,8 +34,7 @@ def attr_from_resource_object(
     def _wrap(**wkwargs: Any) -> Dict[str, Any]:
         obj = find_key_with_value_of_type(type, **wkwargs)
         if additional_attrs:
-            obj.update({k: wkwargs["function_kwargs"][k]
-                       for k in additional_attrs})
+            obj.update({k: wkwargs["function_kwargs"][k] for k in additional_attrs})
         return obj
 
     return partial(_wrap, **kwargs)
@@ -47,7 +46,8 @@ def attr_from_collection_lookup(
     def _wrap(**kwargs: Any) -> Dict[str, Any]:
         _api = cast(ServerAPI, kwargs["api"])
         col = _api.get_collection(
-            id=string_to_uuid(kwargs["function_kwargs"][collection_id_arg]))
+            id=string_to_uuid(kwargs["function_kwargs"][collection_id_arg])
+        )
         return {"tenant": col.tenant, "database": col.database}
 
     return partial(_wrap, **kwargs)
