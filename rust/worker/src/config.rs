@@ -84,6 +84,9 @@ impl RootConfig {
 /// ## Description of parameters
 /// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided
 /// - num_indexing_threads: The number of indexing threads to use. If not provided, defaults to the number of cores on the machine.
+/// - pulsar_tenant: The pulsar tenant to use. Must be provided.
+/// - pulsar_namespace: The pulsar namespace to use. Must be provided.
+/// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
 /// In order to set the enviroment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
