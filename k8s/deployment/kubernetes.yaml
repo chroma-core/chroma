@@ -193,9 +193,6 @@ spec:
             - "--pulsar-admin-url=http://pulsar.chroma:8080"
             - "--pulsar-url=pulsar://pulsar.chroma:6650"
             - "--notifier-provider=pulsar"
-            - "--pulsar-tenant=test-tenant"
-            - "--pulsar-namespace=test-topic"
-            - "--assignment-policy=simple"
           image: chroma-coordinator
           imagePullPolicy: IfNotPresent
           name: coordinator
