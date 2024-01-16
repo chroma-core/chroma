@@ -1,6 +1,7 @@
 mod assignment;
 mod config;
 mod errors;
+mod index;
 mod types;
 
 mod chroma_proto {

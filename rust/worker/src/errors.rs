@@ -2,6 +2,8 @@
 // gRPC spec. https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 // Custom errors can use these codes in order to allow for generic handling
 
+use std::error::Error;
+
 pub(crate) enum ErrorCodes {
     // OK is returned on success, we use "Success" since Ok is a keyword in Rust.
     Success = 0,
@@ -39,6 +41,6 @@ pub(crate) enum ErrorCodes {
     DataLoss = 15,
 }
 
-pub(crate) trait ChromaError {
+pub(crate) trait ChromaError: Error {
     fn code(&self) -> ErrorCodes;
 }

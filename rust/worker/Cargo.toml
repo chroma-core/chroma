@@ -19,6 +19,7 @@ num_cpus = "1.16.0"
 murmur3 = "0.5.2"
 thiserror = "1.0.50"
 num-bigint = "0.4.4"
+tempfile = "3.8.1"
 
 [build-dependencies]
 tonic-build = "0.10"
