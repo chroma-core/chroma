@@ -4,7 +4,8 @@ use futures::{StreamExt, TryStreamExt};
 use prost::Message;
 use std::{
     collections::{HashMap, HashSet},
-    sync::RwLock,
+    fmt::Debug,
+    sync::{Arc, RwLock},
 };
 
 use crate::{
@@ -16,13 +17,17 @@ use crate::{
     config::{Configurable, WorkerConfig},
     errors::{ChromaError, ErrorCodes},
     memberlist::{CustomResourceMemberlistProvider, Memberlist},
+    sysdb::sysdb::{GrpcSysDb, SysDb},
     system::{Component, ComponentContext, ComponentHandle, Handler, StreamHandler},
+    types::{EmbeddingRecord, EmbeddingRecordConversionError, SeqId},
 };
 
 use pulsar::{
     consumer::topic, Consumer, DeserializeMessage, Payload, Pulsar, SubType, TokioExecutor,
 };
 use thiserror::Error;
+
+use super::message_id::PulsarMessageIdWrapper;
 
 /// An ingest component is responsible for ingesting data into the system from the log
 /// stream.
@@ -31,17 +36,26 @@ use thiserror::Error;
 pub(crate) struct Ingest {
     assignment_policy: RwLock<Box<dyn AssignmentPolicy + Sync + Send>>,
     assigned_topics: RwLock<Vec<String>>,
-    topic_to_handle: RwLock<HashMap<String, ComponentHandle>>,
+    topic_to_handle: RwLock<HashMap<String, ComponentHandle<PulsarIngestTopic>>>,
     queue_size: usize,
     my_ip: String,
     pulsar_tenant: String,
     pulsar_namespace: String,
     pulsar: Pulsar<TokioExecutor>,
+    sysdb: Box<dyn SysDb>,
 }
 
 impl Component for Ingest {
     fn queue_size(&self) -> usize {
-        self.queue_size
+        return self.queue_size;
+    }
+}
+
+impl Debug for Ingest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ingest")
+            .field("queue_size", &self.queue_size)
+            .finish()
     }
 }
 
@@ -68,6 +82,7 @@ impl Configurable for Ingest {
             worker_config.pulsar_tenant.clone(),
             worker_config.pulsar_namespace.clone(),
         );
+
         let pulsar = match Pulsar::builder(worker_config.pulsar_url.clone(), TokioExecutor)
             .build()
             .await
@@ -77,6 +92,16 @@ impl Configurable for Ingest {
                 return Err(Box::new(IngestConfigurationError::PulsarError(e)));
             }
         };
+
+        // TODO: Sysdb should have a dynamic resolution in sysdb
+        let sysdb = GrpcSysDb::try_from_config(worker_config).await;
+        let sysdb = match sysdb {
+            Ok(sysdb) => sysdb,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
         let ingest = Ingest {
             assignment_policy: RwLock::new(Box::new(assignment_policy)),
             assigned_topics: RwLock::new(vec![]),
@@ -86,6 +111,7 @@ impl Configurable for Ingest {
             pulsar: pulsar,
             pulsar_tenant: worker_config.pulsar_tenant.clone(),
             pulsar_namespace: worker_config.pulsar_namespace.clone(),
+            sysdb: Box::new(sysdb),
         };
         Ok(ingest)
     }
@@ -108,10 +134,9 @@ impl Ingest {
 
 #[async_trait]
 impl Handler<Memberlist> for Ingest {
-    async fn handle(&self, msg: Memberlist, ctx: &ComponentContext<Memberlist, Self>) {
+    async fn handle(&mut self, msg: Memberlist, ctx: &ComponentContext<Self>) {
         let mut new_assignments = HashSet::new();
         let candidate_topics: Vec<String> = self.get_topics();
-
         // Scope for assigner write lock to be released so we don't hold it over await
         {
             let mut assigner = match self.assignment_policy.write() {
@@ -151,12 +176,12 @@ impl Handler<Memberlist> for Ingest {
                     // Compute the diff between the current assignments and the new assignments
                     for topic in assigned_topics.iter() {
                         if !new_assignments.contains(topic) {
-                            to_remove.push(topic.clone());
+                            to_remove.push(topic.to_string());
                         }
                     }
                     for topic in new_assignments.iter() {
                         if !assigned_topics.contains(*topic) {
-                            to_add.push(topic.clone());
+                            to_add.push(topic.to_string());
                         }
                     }
                 }
@@ -200,9 +225,9 @@ impl Handler<Memberlist> for Ingest {
                 .await
                 .unwrap();
 
-            let ingest_topic_component = PulsarIngestTopic::new(consumer);
+            let ingest_topic_component = PulsarIngestTopic::new(consumer, self.sysdb.clone());
 
-            let (handle, _) = ctx.system.clone().start_component(ingest_topic_component);
+            let handle = ctx.system.clone().start_component(ingest_topic_component);
 
             // Bookkeep the handle so we can shut the stream down later
             match self.topic_to_handle.write() {
@@ -235,12 +260,23 @@ impl DeserializeMessage for chroma_proto::SubmitEmbeddingRecord {
 
 struct PulsarIngestTopic {
     consumer: RwLock<Option<Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>>>,
+    sysdb: Box<dyn SysDb>,
+}
+
+impl Debug for PulsarIngestTopic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PulsarIngestTopic").finish()
+    }
 }
 
 impl PulsarIngestTopic {
-    fn new(consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>) -> Self {
+    fn new(
+        consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor>,
+        sysdb: Box<dyn SysDb>,
+    ) -> Self {
         PulsarIngestTopic {
             consumer: RwLock::new(Some(consumer)),
+            sysdb: sysdb,
         }
     }
 }
@@ -249,22 +285,8 @@ impl Component for PulsarIngestTopic {
     fn queue_size(&self) -> usize {
         1000
     }
-}
 
-#[async_trait]
-impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic {
-    async fn handle(
-        &self,
-        _message: Option<chroma_proto::SubmitEmbeddingRecord>,
-        _ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, PulsarIngestTopic>,
-    ) -> () {
-        // No-op
-    }
-
-    fn on_start(
-        &self,
-        ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, Self>,
-    ) -> () {
+    fn on_start(&self, ctx: &ComponentContext<Self>) -> () {
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),
             Err(err) => None,
@@ -278,8 +300,21 @@ impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic 
         let stream = stream.then(|result| async {
             match result {
                 Ok(msg) => {
-                    let msg = msg.deserialize();
-                    return Some(msg);
+                    // Convert the Pulsar Message to an EmbeddingRecord
+                    let proto_embedding_record = msg.deserialize();
+                    let id = msg.message_id;
+                    let seq_id: SeqId = PulsarMessageIdWrapper(id).into();
+                    let embedding_record: Result<EmbeddingRecord, EmbeddingRecordConversionError> =
+                        (proto_embedding_record, seq_id).try_into();
+                    match embedding_record {
+                        Ok(embedding_record) => {
+                            return Some(Arc::new(embedding_record));
+                        }
+                        Err(err) => {
+                            // TODO: Handle and log
+                        }
+                    }
+                    None
                 }
                 Err(err) => {
                     // TODO: Log an error
@@ -294,13 +329,25 @@ impl Handler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic 
 }
 
 #[async_trait]
-impl StreamHandler<Option<chroma_proto::SubmitEmbeddingRecord>> for PulsarIngestTopic {
+impl Handler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {
     async fn handle(
-        &self,
-        message: Option<chroma_proto::SubmitEmbeddingRecord>,
-        _ctx: &ComponentContext<Option<chroma_proto::SubmitEmbeddingRecord>, PulsarIngestTopic>,
+        &mut self,
+        message: Option<Arc<EmbeddingRecord>>,
+        _ctx: &ComponentContext<PulsarIngestTopic>,
     ) -> () {
-        println!("Received stream message: {:?}", message);
-        // This will be where we filter the message and add it to the corresponding tenant queue
+        // Use the sysdb to tenant id for the embedding record
+        let embedding_record = match message {
+            Some(embedding_record) => embedding_record,
+            None => {
+                return;
+            }
+        };
+        let coll = self
+            .sysdb
+            .get_collections(Some(embedding_record.collection_id), None, None, None, None)
+            .await;
     }
 }
+
+#[async_trait]
+impl StreamHandler<Option<Arc<EmbeddingRecord>>> for PulsarIngestTopic {}

@@ -1,10 +1,12 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use async_trait::async_trait;
 use futures::Stream;
 use tokio::select;
 
-use super::{executor::ComponentExecutor, system::System};
+use super::{
+    executor::ComponentExecutor, sender::Sender, system::System, Receiver, ReceiverImpl, Wrapper,
+};
 
 #[derive(Debug, PartialEq)]
 /// The state of a component
@@ -24,37 +26,33 @@ pub(crate) enum ComponentState {
 /// for how the system should run it.
 /// # Methods
 /// - queue_size: The size of the queue to use for the component before it starts dropping messages
-pub(crate) trait Component {
+/// - on_start: Called when the component is started
+pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
+    fn on_start(&self, ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
 /// # Methods
 /// - handle: Handle a message
-/// - on_start: Called when the component is started
 #[async_trait]
 pub(crate) trait Handler<M>
 where
-    Self: Component + Sized + Send + Sync + 'static,
+    Self: Component + Sized + 'static,
 {
-    async fn handle(&self, message: M, ctx: &ComponentContext<M, Self>) -> ();
-
-    fn on_start(&self, ctx: &ComponentContext<M, Self>) -> () {}
+    async fn handle(&mut self, message: M, ctx: &ComponentContext<Self>) -> ();
 }
 
 /// A stream handler is a component that can process messages of a given type from a stream.
 /// # Methods
 /// - handle: Handle a message from a stream
 /// - register_stream: Register a stream to be processed, this is provided and you do not need to implement it
-#[async_trait]
 pub(crate) trait StreamHandler<M>
 where
-    Self: Component + Sized + Send + Sync + 'static,
-    M: Send + Sync + 'static,
+    Self: Component + 'static + Handler<M>,
+    M: Send + Debug + 'static,
 {
-    async fn handle(&self, message: M, ctx: &ComponentContext<M, Self>) -> ();
-
-    fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<M, Self>) -> ()
+    fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>) -> ()
     where
         S: Stream + Send + Stream<Item = M> + 'static,
     {
@@ -67,21 +65,25 @@ where
 /// # Fields
 /// - cancellation_token: A cancellation token that can be used to stop the component
 /// - state: The state of the component
-pub(crate) struct ComponentHandle {
+/// - join_handle: The join handle for the component, used to join on the component
+pub(crate) struct ComponentHandle<C: Component> {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: ComponentState,
     join_handle: Option<tokio::task::JoinHandle<()>>,
+    sender: Sender<C>,
 }
 
-impl ComponentHandle {
+impl<C: Component> ComponentHandle<C> {
     pub(super) fn new(
         cancellation_token: tokio_util::sync::CancellationToken,
         join_handle: tokio::task::JoinHandle<()>,
+        sender: Sender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: ComponentState::Running,
             join_handle: Some(join_handle),
+            sender: sender,
         }
     }
 
@@ -102,17 +104,25 @@ impl ComponentHandle {
     pub(crate) fn state(&self) -> &ComponentState {
         return &self.state;
     }
+
+    pub(crate) fn receiver<M>(&self) -> Box<dyn Receiver<M> + Send>
+    where
+        C: Handler<M>,
+        M: Send + Debug + 'static,
+    {
+        let sender = self.sender.sender.clone();
+        Box::new(ReceiverImpl::new(sender))
+    }
 }
 
 /// The component context is passed to all Component Handler methods
-pub(crate) struct ComponentContext<M, C>
+pub(crate) struct ComponentContext<C>
 where
-    C: Component + Send + Sync + 'static,
+    C: Component + 'static,
 {
     pub(crate) system: System,
-    pub(super) sender: tokio::sync::broadcast::Sender<M>,
+    pub(super) sender: Sender<C>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
-    pub(super) system_component: Arc<C>, // A reference to the component that is running in the system
 }
 
 #[cfg(test)]
@@ -123,6 +133,7 @@ mod tests {
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[derive(Debug)]
     struct TestComponent {
         queue_size: usize,
         counter: Arc<AtomicUsize>,
@@ -139,34 +150,21 @@ mod tests {
 
     #[async_trait]
     impl Handler<usize> for TestComponent {
-        async fn handle(
-            &self,
-            message: usize,
-            _ctx: &ComponentContext<usize, TestComponent>,
-        ) -> () {
-            self.counter.fetch_add(message, Ordering::SeqCst);
-        }
-
-        fn on_start(&self, ctx: &ComponentContext<usize, TestComponent>) -> () {
-            let test_stream = stream::iter(vec![1, 2, 3]);
-            self.register_stream(test_stream, ctx);
-        }
-    }
-
-    #[async_trait]
-    impl StreamHandler<usize> for TestComponent {
-        async fn handle(
-            &self,
-            message: usize,
-            _ctx: &ComponentContext<usize, TestComponent>,
-        ) -> () {
+        async fn handle(&mut self, message: usize, _ctx: &ComponentContext<TestComponent>) -> () {
             self.counter.fetch_add(message, Ordering::SeqCst);
         }
     }
+
+    impl StreamHandler<usize> for TestComponent {}
 
     impl Component for TestComponent {
         fn queue_size(&self) -> usize {
             return self.queue_size;
+        }
+
+        fn on_start(&self, ctx: &ComponentContext<TestComponent>) -> () {
+            let test_stream = stream::iter(vec![1, 2, 3]);
+            self.register_stream(test_stream, ctx);
         }
     }
 
@@ -175,10 +173,10 @@ mod tests {
         let mut system = System::new();
         let counter = Arc::new(AtomicUsize::new(0));
         let component = TestComponent::new(10, counter.clone());
-        let (mut handle, tx) = system.start_component(component);
-        tx.send(1).unwrap();
-        tx.send(2).unwrap();
-        tx.send(3).unwrap();
+        let mut handle = system.start_component(component);
+        handle.sender.send(1).await.unwrap();
+        handle.sender.send(2).await.unwrap();
+        handle.sender.send(3).await.unwrap();
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         handle.stop();
@@ -187,7 +185,7 @@ mod tests {
         assert_eq!(*handle.state(), ComponentState::Stopped);
         // With the streaming data and the messages we should have 12
         assert_eq!(counter.load(Ordering::SeqCst), 12);
-        let res = tx.send(4);
+        let res = handle.sender.send(4).await;
         // Expect an error because the component is stopped
         assert!(res.is_err());
     }

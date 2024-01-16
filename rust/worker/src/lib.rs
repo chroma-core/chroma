@@ -31,7 +31,7 @@ pub async fn worker_entrypoint() {
         }
     };
 
-    let memberlist =
+    let mut memberlist =
         match memberlist::CustomResourceMemberlistProvider::try_from_config(&config.worker).await {
             Ok(memberlist) => memberlist,
             Err(err) => {
@@ -42,9 +42,10 @@ pub async fn worker_entrypoint() {
 
     // Boot the system
     let mut system = system::System::new();
-    let (mut ingest_handle, ingest_sender) = system.start_component(ingest);
-    memberlist.subscribe(ingest_sender);
-    let (mut memberlist_handle, _) = system.start_component(memberlist);
+    let mut ingest_handle = system.start_component(ingest);
+    let recv = ingest_handle.receiver();
+    memberlist.subscribe(recv);
+    let mut memberlist_handle = system.start_component(memberlist);
     // Join on all handles
     let _ = tokio::join!(ingest_handle.join(), memberlist_handle.join());
 }
