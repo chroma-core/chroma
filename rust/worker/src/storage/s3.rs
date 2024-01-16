@@ -8,6 +8,7 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
+use super::Storage;
 use async_trait::async_trait;
 use aws_sdk_s3;
 use aws_sdk_s3::error::SdkError;
