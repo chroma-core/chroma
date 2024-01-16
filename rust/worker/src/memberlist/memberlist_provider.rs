@@ -180,7 +180,7 @@ impl Component for CustomResourceMemberlistProvider {
         self.queue_size
     }
 
-    fn on_start(&self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
+    fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
         self.connect_to_kube_stream(ctx);
     }
 }

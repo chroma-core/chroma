@@ -221,7 +221,7 @@ impl Handler<Memberlist> for Ingest {
 
         // Subscribe to new topics
         for topic in to_add.iter() {
-            println!("HERE Adding topic: {}", topic);
+            println!("Adding topic: {}", topic);
             // Do the subscription and register the stream to this ingest component
             let consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor> = self
                 .pulsar
