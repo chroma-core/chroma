@@ -7,9 +7,14 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
+pub(crate) enum SegmentType {
+    HnswDistributed,
+}
+
+#[derive(Debug, PartialEq)]
 pub(crate) struct Segment {
     pub(crate) id: Uuid,
-    pub(crate) r#type: String,
+    pub(crate) r#type: SegmentType,
     pub(crate) scope: SegmentScope,
     pub(crate) topic: Option<String>,
     pub(crate) collection: Option<Uuid>,
@@ -24,12 +29,15 @@ pub(crate) enum SegmentConversionError {
     MetadataValueConversionError(#[from] MetadataValueConversionError),
     #[error(transparent)]
     SegmentScopeConversionError(#[from] SegmentScopeConversionError),
+    #[error("Invalid segment type")]
+    InvalidSegmentType,
 }
 
 impl ChromaError for SegmentConversionError {
     fn code(&self) -> crate::errors::ErrorCodes {
         match self {
             SegmentConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
+            SegmentConversionError::InvalidSegmentType => ErrorCodes::InvalidArgument,
             SegmentConversionError::SegmentScopeConversionError(e) => e.code(),
             SegmentConversionError::MetadataValueConversionError(e) => e.code(),
         }
@@ -64,9 +72,16 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             Err(e) => return Err(SegmentConversionError::SegmentScopeConversionError(e)),
         };
 
+        let segment_type = match proto_segment.r#type.as_str() {
+            "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
+            _ => {
+                return Err(SegmentConversionError::InvalidUuid);
+            }
+        };
+
         Ok(Segment {
             id: segment_uuid,
-            r#type: proto_segment.r#type,
+            r#type: segment_type,
             scope: scope,
             topic: proto_segment.topic,
             collection: collection_uuid,
@@ -95,7 +110,7 @@ mod tests {
         );
         let proto_segment = chroma_proto::Segment {
             id: "00000000-0000-0000-0000-000000000000".to_string(),
-            r#type: "foo".to_string(),
+            r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
             scope: chroma_proto::SegmentScope::Vector as i32,
             topic: Some("test".to_string()),
             collection: Some("00000000-0000-0000-0000-000000000000".to_string()),
@@ -103,7 +118,7 @@ mod tests {
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
         assert_eq!(converted_segment.id, Uuid::nil());
-        assert_eq!(converted_segment.r#type, "foo".to_string());
+        assert_eq!(converted_segment.r#type, SegmentType::HnswDistributed);
         assert_eq!(converted_segment.scope, SegmentScope::VECTOR);
         assert_eq!(converted_segment.topic, Some("test".to_string()));
         assert_eq!(converted_segment.collection, Some(Uuid::nil()));

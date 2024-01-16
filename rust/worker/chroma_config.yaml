@@ -23,3 +23,5 @@ worker:
         Grpc:
             host: "localhost"
             port: 50051
+    segment_manager:
+        storage_path: "./tmp/segment_manager/"

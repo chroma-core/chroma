@@ -18,6 +18,12 @@ pub(crate) enum ComponentState {
     Stopped,
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum ComponentRuntime {
+    Global,
+    Dedicated,
+}
+
 /// A component is a processor of work that can be run in a system.
 /// It has a queue of messages that it can process.
 /// Others can send messages to the component.
@@ -29,7 +35,10 @@ pub(crate) enum ComponentState {
 /// - on_start: Called when the component is started
 pub(crate) trait Component: Send + Sized + Debug + 'static {
     fn queue_size(&self) -> usize;
-    fn on_start(&self, ctx: &ComponentContext<Self>) -> () {}
+    fn runtime() -> ComponentRuntime {
+        ComponentRuntime::Global
+    }
+    fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -76,13 +85,16 @@ pub(crate) struct ComponentHandle<C: Component> {
 impl<C: Component> ComponentHandle<C> {
     pub(super) fn new(
         cancellation_token: tokio_util::sync::CancellationToken,
-        join_handle: tokio::task::JoinHandle<()>,
+        // Components with a dedicated runtime do not have a join handle
+        // and instead use a one shot channel to signal completion
+        // TODO: implement this
+        join_handle: Option<tokio::task::JoinHandle<()>>,
         sender: Sender<C>,
     ) -> Self {
         ComponentHandle {
             cancellation_token: cancellation_token,
             state: ComponentState::Running,
-            join_handle: Some(join_handle),
+            join_handle: join_handle,
             sender: sender,
         }
     }
@@ -121,8 +133,8 @@ where
     C: Component + 'static,
 {
     pub(crate) system: System,
-    pub(super) sender: Sender<C>,
-    pub(super) cancellation_token: tokio_util::sync::CancellationToken,
+    pub(crate) sender: Sender<C>,
+    pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
 }
 
 #[cfg(test)]
@@ -162,7 +174,7 @@ mod tests {
             return self.queue_size;
         }
 
-        fn on_start(&self, ctx: &ComponentContext<TestComponent>) -> () {
+        fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

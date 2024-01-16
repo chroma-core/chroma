@@ -91,18 +91,50 @@ where
     }
 }
 
-// Reciever
+// Reciever Traits
 
 #[async_trait]
-pub(crate) trait Receiver<M>: Send + Sync {
+pub(crate) trait Receiver<M>: Send + Sync + ReceiverClone<M> {
     async fn send(&self, message: M) -> Result<(), ChannelError>;
 }
+
+trait ReceiverClone<M> {
+    fn clone_box(&self) -> Box<dyn Receiver<M>>;
+}
+
+impl<M> Clone for Box<dyn Receiver<M>> {
+    fn clone(&self) -> Box<dyn Receiver<M>> {
+        self.clone_box()
+    }
+}
+
+impl<T, M> ReceiverClone<M> for T
+where
+    T: 'static + Receiver<M> + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Receiver<M>> {
+        Box::new(self.clone())
+    }
+}
+
+// Reciever Impls
 
 pub(super) struct ReceiverImpl<C>
 where
     C: Component,
 {
     pub(super) sender: tokio::sync::mpsc::Sender<Wrapper<C>>,
+}
+
+impl<C> Clone for ReceiverImpl<C>
+where
+    C: Component,
+{
+    fn clone(&self) -> Self {
+        ReceiverImpl {
+            sender: self.sender.clone(),
+        }
+    }
 }
 
 impl<C> ReceiverImpl<C>

@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_int};
 use crate::errors::{ChromaError, ErrorCodes};
 
 use super::{Index, IndexConfig, PersistentIndex};
+use crate::types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use thiserror::Error;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
@@ -27,6 +28,86 @@ pub(crate) struct HnswIndexConfig {
     pub(crate) ef_search: usize,
     pub(crate) random_seed: usize,
     pub(crate) persist_path: String,
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum HnswIndexFromSegmentError {
+    #[error("Missing config `{0}`")]
+    MissingConfig(String),
+}
+
+impl ChromaError for HnswIndexFromSegmentError {
+    fn code(&self) -> ErrorCodes {
+        crate::errors::ErrorCodes::InvalidArgument
+    }
+}
+
+impl HnswIndexConfig {
+    pub(crate) fn from_segment(
+        segment: &Segment,
+        persist_path: &std::path::Path,
+    ) -> Result<HnswIndexConfig, Box<dyn ChromaError>> {
+        let persist_path = match persist_path.to_str() {
+            Some(persist_path) => persist_path,
+            None => {
+                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                    "persist_path".to_string(),
+                )))
+            }
+        };
+        let metadata = match &segment.metadata {
+            Some(metadata) => metadata,
+            None => {
+                // TODO: This should error, but the configuration is not stored correctly
+                // after the configuration is refactored to be always stored and doesn't rely on defaults we can fix this
+                return Ok(HnswIndexConfig {
+                    max_elements: 1000,
+                    m: 16,
+                    ef_construction: 100,
+                    ef_search: 10,
+                    random_seed: 0,
+                    persist_path: persist_path.to_string(),
+                });
+                // return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                //     "metadata".to_string(),
+                // )))
+            }
+        };
+
+        fn get_metadata_value_as<'a, T>(
+            metadata: &'a Metadata,
+            key: &str,
+        ) -> Result<T, Box<dyn ChromaError>>
+        where
+            T: TryFrom<&'a MetadataValue, Error = MetadataValueConversionError>,
+        {
+            let res = match metadata.get(key) {
+                Some(value) => T::try_from(value),
+                None => {
+                    return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                        key.to_string(),
+                    )))
+                }
+            };
+            match res {
+                Ok(value) => Ok(value),
+                Err(e) => Err(Box::new(e)),
+            }
+        }
+
+        let max_elements = get_metadata_value_as::<i32>(metadata, "hsnw:max_elements")?;
+        let m = get_metadata_value_as::<i32>(metadata, "hnsw:m")?;
+        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:ef_construction")?;
+        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:ef_search")?;
+        return Ok(HnswIndexConfig {
+            max_elements: max_elements as usize,
+            m: m as usize,
+            ef_construction: ef_construction as usize,
+            ef_search: ef_search as usize,
+            random_seed: 0,
+            persist_path: persist_path.to_string(),
+        });
+    }
 }
 
 #[repr(C)]

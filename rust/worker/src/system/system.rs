@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use futures::Stream;
 use futures::StreamExt;
+use tokio::runtime::Builder;
 use tokio::{pin, select};
 
+use super::ComponentRuntime;
 // use super::executor::StreamComponentExecutor;
 use super::sender::{self, Sender, Wrapper};
 use super::{executor, ComponentContext};
@@ -25,7 +27,7 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&mut self, component: C) -> ComponentHandle<C>
+    pub(crate) fn start_component<C>(&mut self, mut component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {
@@ -43,8 +45,23 @@ impl System {
             component,
             self.clone(),
         );
-        let join_handle = tokio::spawn(async move { executor.run(rx).await });
-        return ComponentHandle::new(cancel_token, join_handle, sender);
+
+        match C::runtime() {
+            ComponentRuntime::Global => {
+                let join_handle = tokio::spawn(async move { executor.run(rx).await });
+                return ComponentHandle::new(cancel_token, Some(join_handle), sender);
+            }
+            ComponentRuntime::Dedicated => {
+                println!("Spawning on dedicated thread");
+                // Spawn on a dedicated thread
+                let mut rt = Builder::new_current_thread().enable_all().build().unwrap();
+                let join_handle = std::thread::spawn(move || {
+                    rt.block_on(async move { executor.run(rx).await });
+                });
+                // TODO: Implement Join for dedicated threads
+                return ComponentHandle::new(cancel_token, None, sender);
+            }
+        }
     }
 
     pub(super) fn register_stream<C, S, M>(&self, stream: S, ctx: &ComponentContext<C>)

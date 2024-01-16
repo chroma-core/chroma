@@ -4,6 +4,7 @@ mod errors;
 mod index;
 mod ingest;
 mod memberlist;
+mod segment;
 mod sysdb;
 mod system;
 mod types;
@@ -22,8 +23,9 @@ pub async fn worker_entrypoint() {
     // for now we expose the config to pub and inject it into the components
 
     // The two root components are ingest, and the gRPC server
+    let mut system: system::System = system::System::new();
 
-    let ingest = match ingest::Ingest::try_from_config(&config.worker).await {
+    let mut ingest = match ingest::Ingest::try_from_config(&config.worker).await {
         Ok(ingest) => ingest,
         Err(err) => {
             println!("Failed to create ingest component: {:?}", err);
@@ -40,12 +42,44 @@ pub async fn worker_entrypoint() {
             }
         };
 
+    let mut scheduler = ingest::RoundRobinScheduler::new();
+
+    let segment_manager = match segment::SegmentManager::try_from_config(&config.worker).await {
+        Ok(segment_manager) => segment_manager,
+        Err(err) => {
+            println!("Failed to create segment manager component: {:?}", err);
+            return;
+        }
+    };
+
+    let mut segment_ingestor_receivers =
+        Vec::with_capacity(config.worker.num_indexing_threads as usize);
+    for _ in 0..config.worker.num_indexing_threads {
+        let segment_ingestor = segment::SegmentIngestor::new(segment_manager.clone());
+        let segment_ingestor_handle = system.start_component(segment_ingestor);
+        let recv = segment_ingestor_handle.receiver();
+        segment_ingestor_receivers.push(recv);
+    }
+
     // Boot the system
-    let mut system = system::System::new();
+    // memberlist -> ingest -> scheduler -> NUM_THREADS x segment_ingestor
+
+    for recv in segment_ingestor_receivers {
+        scheduler.subscribe(recv);
+    }
+
+    let mut scheduler_handler = system.start_component(scheduler);
+    ingest.subscribe(scheduler_handler.receiver());
+
     let mut ingest_handle = system.start_component(ingest);
     let recv = ingest_handle.receiver();
     memberlist.subscribe(recv);
     let mut memberlist_handle = system.start_component(memberlist);
+
     // Join on all handles
-    let _ = tokio::join!(ingest_handle.join(), memberlist_handle.join());
+    let _ = tokio::join!(
+        ingest_handle.join(),
+        memberlist_handle.join(),
+        scheduler_handler.join()
+    );
 }

@@ -59,6 +59,39 @@ pub(crate) enum MetadataValue {
     Str(String),
 }
 
+impl TryFrom<&MetadataValue> for i32 {
+    type Error = MetadataValueConversionError;
+
+    fn try_from(value: &MetadataValue) -> Result<Self, Self::Error> {
+        match value {
+            MetadataValue::Int(value) => Ok(*value),
+            _ => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
+impl TryFrom<&MetadataValue> for f64 {
+    type Error = MetadataValueConversionError;
+
+    fn try_from(value: &MetadataValue) -> Result<Self, Self::Error> {
+        match value {
+            MetadataValue::Float(value) => Ok(*value),
+            _ => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
+impl TryFrom<&MetadataValue> for String {
+    type Error = MetadataValueConversionError;
+
+    fn try_from(value: &MetadataValue) -> Result<Self, Self::Error> {
+        match value {
+            MetadataValue::Str(value) => Ok(value.clone()),
+            _ => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum MetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str")]

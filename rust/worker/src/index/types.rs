@@ -1,10 +1,47 @@
 use crate::errors::{ChromaError, ErrorCodes};
+use crate::types::{MetadataValue, Segment};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub(crate) struct IndexConfig {
     pub(crate) dimensionality: i32,
     pub(crate) distance_function: DistanceFunction,
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum IndexConfigFromSegmentError {
+    #[error("No space defined")]
+    NoSpaceDefined,
+}
+
+impl ChromaError for IndexConfigFromSegmentError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IndexConfigFromSegmentError::NoSpaceDefined => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+impl IndexConfig {
+    pub(crate) fn from_segment(
+        segment: &Segment,
+        dimensionality: i32,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let space = match segment.metadata {
+            Some(ref metadata) => match metadata.get("hnsw:space") {
+                Some(MetadataValue::Str(space)) => space,
+                _ => "l2",
+            },
+            None => "l2",
+        };
+        match DistanceFunction::try_from(space) {
+            Ok(distance_function) => Ok(IndexConfig {
+                dimensionality: dimensionality,
+                distance_function: distance_function,
+            }),
+            Err(e) => Err(Box::new(e)),
+        }
+    }
 }
 
 /// The index trait.
