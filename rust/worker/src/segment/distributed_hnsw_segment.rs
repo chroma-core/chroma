@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -5,12 +6,13 @@ use std::sync::Arc;
 
 use crate::errors::ChromaError;
 use crate::index::{HnswIndex, HnswIndexConfig, Index, IndexConfig};
-use crate::types::{EmbeddingRecord, Operation, Segment};
+use crate::types::{EmbeddingRecord, Operation, Segment, VectorEmbeddingRecord};
 
 pub(crate) struct DistributedHNSWSegment {
     index: Arc<RwLock<HnswIndex>>,
     id: AtomicUsize,
     user_id_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    id_to_user_id: Arc<RwLock<HashMap<usize, String>>>,
     index_config: IndexConfig,
     hnsw_config: HnswIndexConfig,
 }
@@ -33,6 +35,7 @@ impl DistributedHNSWSegment {
             index: index,
             id: AtomicUsize::new(0),
             user_id_to_id: Arc::new(RwLock::new(HashMap::new())),
+            id_to_user_id: Arc::new(RwLock::new(HashMap::new())),
             index_config: index_config,
             hnsw_config,
         });
@@ -63,7 +66,10 @@ impl DistributedHNSWSegment {
                             self.user_id_to_id
                                 .write()
                                 .insert(record.id.clone(), next_id);
-                            println!("DIS SEGMENT Adding item: {}", next_id);
+                            self.id_to_user_id
+                                .write()
+                                .insert(next_id, record.id.clone());
+                            println!("Segment adding item: {}", next_id);
                             self.index.read().add(next_id, &vector);
                         }
                         None => {
@@ -80,5 +86,51 @@ impl DistributedHNSWSegment {
                 }
             }
         }
+    }
+
+    pub(crate) fn get_records(&self, ids: Vec<String>) -> Vec<Box<VectorEmbeddingRecord>> {
+        let mut records = Vec::new();
+        let user_id_to_id = self.user_id_to_id.read();
+        let index = self.index.read();
+        for id in ids {
+            let internal_id = match user_id_to_id.get(&id) {
+                Some(internal_id) => internal_id,
+                None => {
+                    // TODO: Error
+                    return records;
+                }
+            };
+            let vector = index.get(*internal_id);
+            match vector {
+                Some(vector) => {
+                    let record = VectorEmbeddingRecord {
+                        id: id,
+                        seq_id: BigInt::from(0),
+                        vector,
+                    };
+                    records.push(Box::new(record));
+                }
+                None => {
+                    // TODO: error
+                }
+            }
+        }
+        return records;
+    }
+
+    pub(crate) fn query(&self, vector: &[f32], k: usize) -> (Vec<String>, Vec<f32>) {
+        let index = self.index.read();
+        let mut return_user_ids = Vec::new();
+        let (ids, distances) = index.query(vector, k);
+        let user_ids = self.id_to_user_id.read();
+        for id in ids {
+            match user_ids.get(&id) {
+                Some(user_id) => return_user_ids.push(user_id.clone()),
+                None => {
+                    // TODO: error
+                }
+            };
+        }
+        return (return_user_ids, distances);
     }
 }

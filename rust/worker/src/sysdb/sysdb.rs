@@ -87,6 +87,7 @@ impl Configurable for GrpcSysDb {
             SysDbConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
+                println!("Connecting to sysdb at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
                 let client = sys_db_client::SysDbClient::connect(connection_string).await;
                 match client {

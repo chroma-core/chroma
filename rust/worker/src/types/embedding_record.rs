@@ -166,6 +166,58 @@ fn vec_to_f32(bytes: &[u8]) -> Result<&[f32], VectorConversionError> {
     }
 }
 
+fn f32_to_vec(vector: &[f32]) -> Vec<u8> {
+    unsafe {
+        std::slice::from_raw_parts(
+            vector.as_ptr() as *const u8,
+            vector.len() * std::mem::size_of::<f32>(),
+        )
+    }
+    .to_vec()
+}
+
+impl TryFrom<(Vec<f32>, ScalarEncoding, usize)> for chroma_proto::Vector {
+    type Error = VectorConversionError;
+
+    fn try_from(
+        (vector, encoding, dimension): (Vec<f32>, ScalarEncoding, usize),
+    ) -> Result<Self, Self::Error> {
+        let proto_vector = chroma_proto::Vector {
+            vector: f32_to_vec(&vector),
+            encoding: encoding as i32,
+            dimension: dimension as i32,
+        };
+        Ok(proto_vector)
+    }
+}
+
+/*
+===========================================
+Vector Embedding Record
+===========================================
+*/
+
+#[derive(Debug)]
+pub(crate) struct VectorEmbeddingRecord {
+    pub(crate) id: String,
+    pub(crate) seq_id: SeqId,
+    pub(crate) vector: Vec<f32>,
+}
+
+/*
+===========================================
+Vector Query Result
+===========================================
+ */
+
+#[derive(Debug)]
+pub(crate) struct VectorQueryResult {
+    pub(crate) id: String,
+    pub(crate) seq_id: SeqId,
+    pub(crate) distance: f32,
+    pub(crate) vector: Option<Vec<f32>>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
