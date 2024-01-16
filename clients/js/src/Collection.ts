@@ -240,7 +240,6 @@ export class Collection {
             },
             this.api.options
         )
-            .then(() => true)
             .then(handleSuccess)
             .catch(handleError);
 
@@ -406,7 +405,6 @@ export class Collection {
                 },
                 this.api.options
             )
-            .then(() => true)
             .then(handleSuccess)
             .catch(handleError);
 

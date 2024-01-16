@@ -507,8 +507,8 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    def update(self, collection_id: str, add: UpdateEmbedding) -> None:
-        self._api._update(
+    def update(self, collection_id: str, add: UpdateEmbedding) -> bool:
+        return self._api._update(
             ids=add.ids,
             collection_id=_uuid(collection_id),
             embeddings=add.embeddings,
@@ -526,8 +526,8 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    def upsert(self, collection_id: str, upsert: AddEmbedding) -> None:
-        self._api._upsert(
+    def upsert(self, collection_id: str, upsert: AddEmbedding) -> bool:
+        return self._api._upsert(
             collection_id=_uuid(collection_id),
             ids=upsert.ids,
             embeddings=upsert.embeddings,  # type: ignore

@@ -7,7 +7,7 @@ test('it should return true on success', async () => {
     const collection = await chroma.createCollection({ name: "test" });
     
     const upsert = await collection.upsert({ ids: IDS, embeddings: EMBEDDINGS, metadatas: METADATAS, documents: DOCUMENTS });
-    expect(upsert)
+    expect(upsert).toBe(true)
     
     const count = await collection.count()
     expect(count).toBe(3)

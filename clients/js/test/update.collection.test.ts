@@ -15,7 +15,7 @@ test('it should return true on success', async () => {
     documents: ["doc1new"]
   });
 
-  expect(update)
+  expect(update).toBe(true)
 
 })
 
