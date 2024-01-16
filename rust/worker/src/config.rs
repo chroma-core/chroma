@@ -16,10 +16,10 @@ const ENV_PREFIX: &str = "CHROMA_";
 /// variables take precedence over values in the YAML file.
 /// By default, it is read from the current working directory,
 /// with the filename chroma_config.yaml.
-struct RootConfig {
+pub(crate) struct RootConfig {
     // The root config object wraps the worker config object so that
     // we can share the same config file between multiple services.
-    worker: WorkerConfig,
+    pub worker: WorkerConfig,
 }
 
 impl RootConfig {
@@ -37,7 +37,7 @@ impl RootConfig {
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub fn load() -> Self {
+    pub(crate) fn load() -> Self {
         return Self::load_from_path(DEFAULT_CONFIG_PATH);
     }
 
@@ -56,7 +56,7 @@ impl RootConfig {
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub fn load_from_path(path: &str) -> Self {
+    pub(crate) fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
@@ -100,9 +100,11 @@ pub(crate) struct WorkerConfig {
     pub(crate) num_indexing_threads: u32,
     pub(crate) pulsar_tenant: String,
     pub(crate) pulsar_namespace: String,
+    pub(crate) pulsar_url: String,
     pub(crate) kube_namespace: String,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
+    pub(crate) ingest: crate::ingest::config::IngestConfig,
 }
 
 /// # Description
@@ -133,6 +135,7 @@ mod tests {
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
+                    pulsar_url: "pulsar://localhost:6650"
                     kube_namespace: "chroma"
                     assignment_policy:
                         RendezvousHashing:
@@ -141,6 +144,8 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
+                    ingest:
+                        queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -164,6 +169,7 @@ mod tests {
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
+                    pulsar_url: "pulsar://localhost:6650"
                     kube_namespace: "chroma"
                     assignment_policy:
                         RendezvousHashing:
@@ -172,6 +178,8 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
+                    ingest:
+                        queue_size: 100
 
                 "#,
             );
@@ -212,6 +220,7 @@ mod tests {
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
                     kube_namespace: "chroma"
+                    pulsar_url: "pulsar://localhost:6650"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
@@ -219,6 +228,8 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
+                    ingest:
+                        queue_size: 100
 
                 "#,
             );
@@ -236,6 +247,7 @@ mod tests {
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_TENANT", "A");
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_NAMESPACE", "B");
             let _ = jail.set_env("CHROMA_WORKER__KUBE_NAMESPACE", "C");
+            let _ = jail.set_env("CHROMA_WORKER__PULSAR_URL", "pulsar://localhost:6650");
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
@@ -247,6 +259,8 @@ mod tests {
                         CustomResource:
                             memberlist_name: "worker-memberlist"
                             queue_size: 100
+                    ingest:
+                        queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
