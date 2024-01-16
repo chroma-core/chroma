@@ -1,5 +1,8 @@
+use async_trait::async_trait;
 use figment::providers::{Env, Format, Serialized, Yaml};
 use serde::Deserialize;
+
+use crate::errors::ChromaError;
 
 const DEFAULT_CONFIG_PATH: &str = "chroma_config.yaml";
 const ENV_PREFIX: &str = "CHROMA_";
@@ -97,7 +100,9 @@ pub(crate) struct WorkerConfig {
     pub(crate) num_indexing_threads: u32,
     pub(crate) pulsar_tenant: String,
     pub(crate) pulsar_namespace: String,
+    pub(crate) kube_namespace: String,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
 }
 
 /// # Description
@@ -105,8 +110,11 @@ pub(crate) struct WorkerConfig {
 /// # Notes
 /// This trait is used to configure structs from the config object.
 /// Components that need to be configured from the config object should implement this trait.
+#[async_trait]
 pub(crate) trait Configurable {
-    fn from_config(config: WorkerConfig) -> Self;
+    async fn try_from_config(worker_config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>>
+    where
+        Self: Sized;
 }
 
 #[cfg(test)]
@@ -125,9 +133,14 @@ mod tests {
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
+                    kube_namespace: "chroma"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
+                            queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -135,6 +148,7 @@ mod tests {
             assert_eq!(config.worker.num_indexing_threads, 4);
             assert_eq!(config.worker.pulsar_tenant, "public");
             assert_eq!(config.worker.pulsar_namespace, "default");
+            assert_eq!(config.worker.kube_namespace, "chroma");
             Ok(())
         });
     }
@@ -150,9 +164,15 @@ mod tests {
                     num_indexing_threads: 4
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
+                    kube_namespace: "chroma"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
+                            queue_size: 100
+
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -160,6 +180,7 @@ mod tests {
             assert_eq!(config.worker.num_indexing_threads, 4);
             assert_eq!(config.worker.pulsar_tenant, "public");
             assert_eq!(config.worker.pulsar_namespace, "default");
+            assert_eq!(config.worker.kube_namespace, "chroma");
             Ok(())
         });
     }
@@ -190,9 +211,15 @@ mod tests {
                     my_ip: "192.0.0.1"
                     pulsar_tenant: "public"
                     pulsar_namespace: "default"
+                    kube_namespace: "chroma"
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
+                            queue_size: 100
+
                 "#,
             );
             let config = RootConfig::load();
@@ -208,6 +235,7 @@ mod tests {
             let _ = jail.set_env("CHROMA_WORKER__MY_IP", "192.0.0.1");
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_TENANT", "A");
             let _ = jail.set_env("CHROMA_WORKER__PULSAR_NAMESPACE", "B");
+            let _ = jail.set_env("CHROMA_WORKER__KUBE_NAMESPACE", "C");
             let _ = jail.create_file(
                 "chroma_config.yaml",
                 r#"
@@ -215,6 +243,10 @@ mod tests {
                     assignment_policy:
                         RendezvousHashing:
                             hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            memberlist_name: "worker-memberlist"
+                            queue_size: 100
                 "#,
             );
             let config = RootConfig::load();
@@ -222,6 +254,7 @@ mod tests {
             assert_eq!(config.worker.num_indexing_threads, num_cpus::get() as u32);
             assert_eq!(config.worker.pulsar_tenant, "A");
             assert_eq!(config.worker.pulsar_namespace, "B");
+            assert_eq!(config.worker.kube_namespace, "C");
             Ok(())
         });
     }

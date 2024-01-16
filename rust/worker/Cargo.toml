@@ -15,11 +15,16 @@ async-trait = "0.1.74"
 uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+futures = "0.3"
 num_cpus = "1.16.0"
 murmur3 = "0.5.2"
 thiserror = "1.0.50"
 num-bigint = "0.4.4"
 tempfile = "3.8.1"
+schemars = "0.8.16"
+kube = { version = "0.87.1", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.20.0", features = ["latest"] }
 
 [build-dependencies]
 tonic-build = "0.10"
