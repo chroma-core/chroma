@@ -1,6 +1,8 @@
-use std::sync::RwLock;
+use std::sync::Arc;
+use std::{fmt::Debug, sync::RwLock};
 
 use super::config::{CustomResourceMemberlistProviderConfig, MemberlistProviderConfig};
+use crate::system::{Receiver, Sender};
 use crate::{
     config::{Configurable, WorkerConfig},
     errors::{ChromaError, ErrorCodes},
@@ -18,21 +20,17 @@ use kube::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::{pin, sync::broadcast::Sender};
 use tokio_util::sync::CancellationToken;
 
 /* =========== Basic Types ============== */
-
 pub(crate) type Memberlist = Vec<String>;
 
 #[async_trait]
 pub(crate) trait MemberlistProvider: Component + Configurable {
-    async fn get_memberlist(&self) -> Memberlist;
-    fn subscribe(&self, sender: Sender<Memberlist>) -> ();
+    fn subscribe(&mut self, receiver: Box<dyn Receiver<Memberlist> + Send>) -> ();
 }
 
 /* =========== CRD ============== */
-
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "chroma.cluster",
@@ -52,7 +50,6 @@ pub(crate) struct Member {
 }
 
 /* =========== CR Provider ============== */
-
 pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
@@ -60,7 +57,17 @@ pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
-    subscribers: RwLock<Vec<Sender<Memberlist>>>,
+    subscribers: Vec<Box<dyn Receiver<Memberlist> + Send>>,
+}
+
+impl Debug for CustomResourceMemberlistProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomResourceMemberlistProvider")
+            .field("memberlist_name", &self.memberlist_name)
+            .field("kube_ns", &self.kube_ns)
+            .field("queue_size", &self.queue_size)
+            .finish()
+    }
 }
 
 #[derive(Error, Debug)]
@@ -105,7 +112,7 @@ impl Configurable for CustomResourceMemberlistProvider {
             memberlist_cr_client: memberlist_cr_client,
             queue_size: my_config.queue_size,
             current_memberlist: RwLock::new(vec![]),
-            subscribers: RwLock::new(vec![]),
+            subscribers: vec![],
         };
         Ok(c)
     }
@@ -127,14 +134,11 @@ impl CustomResourceMemberlistProvider {
             memberlist_cr_client: memberlist_cr_client,
             queue_size: queue_size,
             current_memberlist: RwLock::new(vec![]),
-            subscribers: RwLock::new(vec![]),
+            subscribers: vec![],
         }
     }
 
-    fn connect_to_kube_stream(
-        &self,
-        ctx: &ComponentContext<Option<MemberListKubeResource>, CustomResourceMemberlistProvider>,
-    ) {
+    fn connect_to_kube_stream(&self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
         let memberlist_cr_client =
             Api::<MemberListKubeResource>::namespaced(self.kube_client.clone(), &self.kube_ns);
 
@@ -156,25 +160,17 @@ impl CustomResourceMemberlistProvider {
         self.register_stream(stream, ctx);
     }
 
-    fn notify_subscribers(&self) -> () {
-        let subscribers = match self.subscribers.read() {
-            Ok(subscribers) => subscribers,
-            Err(err) => {
-                // TODO: Log error and attempt recovery
-                return;
-            }
-        };
-
+    async fn notify_subscribers(&self) -> () {
         let curr_memberlist = match self.current_memberlist.read() {
-            Ok(curr_memberlist) => curr_memberlist,
+            Ok(curr_memberlist) => curr_memberlist.clone(),
             Err(err) => {
                 // TODO: Log error and attempt recovery
                 return;
             }
         };
 
-        for subscriber in subscribers.iter() {
-            let _ = subscriber.send(curr_memberlist.clone());
+        for subscriber in self.subscribers.iter() {
+            let _ = subscriber.send(curr_memberlist.clone()).await;
         }
     }
 }
@@ -183,14 +179,18 @@ impl Component for CustomResourceMemberlistProvider {
     fn queue_size(&self) -> usize {
         self.queue_size
     }
+
+    fn on_start(&self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
+        self.connect_to_kube_stream(ctx);
+    }
 }
 
 #[async_trait]
-impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {
+impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {
     async fn handle(
-        &self,
+        &mut self,
         event: Option<MemberListKubeResource>,
-        _ctx: &ComponentContext<Option<MemberListKubeResource>, CustomResourceMemberlistProvider>,
+        _ctx: &ComponentContext<CustomResourceMemberlistProvider>,
     ) {
         match event {
             Some(memberlist) => {
@@ -221,7 +221,7 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
                     }
                 }
                 // Inform subscribers
-                self.notify_subscribers();
+                self.notify_subscribers().await;
             }
             None => {
                 // Stream closed or error
@@ -230,47 +230,12 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
     }
 }
 
-#[async_trait]
-impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {
-    async fn handle(
-        &self,
-        _message: Option<MemberListKubeResource>,
-        _ctx: &ComponentContext<Option<MemberListKubeResource>, CustomResourceMemberlistProvider>,
-    ) {
-        // No-op
-    }
-
-    fn on_start(
-        &self,
-        ctx: &ComponentContext<Option<MemberListKubeResource>, CustomResourceMemberlistProvider>,
-    ) {
-        self.connect_to_kube_stream(ctx);
-    }
-}
+impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {}
 
 #[async_trait]
 impl MemberlistProvider for CustomResourceMemberlistProvider {
-    async fn get_memberlist(&self) -> Memberlist {
-        let curr_memberlist_handle = self.current_memberlist.read();
-        match curr_memberlist_handle {
-            Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(err) => {
-                // TODO: Log an error
-                vec![]
-            }
-        }
-    }
-
-    fn subscribe(&self, sender: Sender<Memberlist>) -> () {
-        let subscribers_handle = self.subscribers.write();
-        match subscribers_handle {
-            Ok(mut subscribers) => {
-                subscribers.push(sender);
-            }
-            Err(err) => {
-                // TODO: log and handle lock poisoning
-            }
-        }
+    fn subscribe(&mut self, sender: Box<dyn Receiver<Memberlist> + Send>) -> () {
+        self.subscribers.push(sender);
     }
 }
 
@@ -286,7 +251,6 @@ mod tests {
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder
         // and demonstration of how to use the memberlist provider.
-        // This is commented out for now to avoid breaking CI.
         // let kube_ns = "chroma".to_string();
         // let kube_client = Client::try_default().await.unwrap();
         // let memberlist_provider = CustomResourceMemberlistProvider::new(
@@ -296,6 +260,6 @@ mod tests {
         //     10,
         // );
         // let mut system = System::new();
-        // let (handle, _) = system.start_component(memberlist_provider);
+        // let handle = system.start_component(memberlist_provider);
     }
 }
