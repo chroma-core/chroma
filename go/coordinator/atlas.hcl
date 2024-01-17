@@ -12,7 +12,7 @@ data "external_schema" "gorm" {
 
 env "gorm" {
   src = data.external_schema.gorm.url
-  dev = "postgres://localhost:5432/dev?sslmode=disable"
+  dev = "mysql://tidb.ootbbu125szh.clusters.tidb-cloud.com:4000?tls=true"
   migration {
     dir = "file://migrations"
   }

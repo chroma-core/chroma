@@ -33,9 +33,9 @@ func init() {
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")
 	Cmd.Flags().StringVar(&conf.Username, "username", "root", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.Password, "password", "", "MetaTable password")
-	Cmd.Flags().StringVar(&conf.Address, "db-address", "127.0.0.1", "MetaTable db address")
-	Cmd.Flags().IntVar(&conf.Port, "db-port", 5432, "MetaTable db port")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "", "MetaTable db name")
+	Cmd.Flags().StringVar(&conf.Address, "db-address", "tidb.ootbbu125szh.clusters.tidb-cloud.com", "MetaTable db address")
+	Cmd.Flags().IntVar(&conf.Port, "db-port", 4000, "MetaTable db port")
+	Cmd.Flags().StringVar(&conf.DBName, "db-name", "emuY1ktyq5Tq4nGx", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
 	Cmd.Flags().IntVar(&conf.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
 
