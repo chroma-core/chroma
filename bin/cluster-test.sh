@@ -46,13 +46,7 @@ sleep 10
 
 export CHROMA_CLUSTER_TEST_ONLY=1
 export CHROMA_SERVER_HOST=$(kubectl get svc server -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export PULSAR_BROKER_URL=$(kubectl get svc pulsar -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export CHROMA_COORDINATOR_HOST=$(kubectl get svc coordinator -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export CHROMA_SERVER_GRPC_PORT="50051"
-
 echo "Chroma Server is running at port $CHROMA_SERVER_HOST"
-echo "Pulsar Broker is running at port $PULSAR_BROKER_URL"
-echo "Chroma Coordinator is running at port $CHROMA_COORDINATOR_HOST"
 
 echo testing: python -m pytest "$@"
 python -m pytest "$@"
