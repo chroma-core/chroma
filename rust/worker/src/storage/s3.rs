@@ -153,9 +153,11 @@ impl Storage for S3Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_get() {
+        // Set up credentials assuming minio is running locally
         let cred = aws_sdk_s3::config::Credentials::new(
             "minio",
             "minio123",
@@ -163,6 +165,8 @@ mod tests {
             None,
             "loaded-from-env",
         );
+
+        // Set up s3 client
         let config = aws_sdk_s3::config::Builder::new()
             .endpoint_url("http://127.0.0.1:9000".to_string())
             .credentials_provider(cred)
@@ -171,26 +175,25 @@ mod tests {
             .force_path_style(true)
             .build();
         let client = aws_sdk_s3::Client::from_conf(config);
-        client.list_buckets().send().await.unwrap();
+
         let storage = S3Storage {
             bucket: "test".to_string(),
             client: client,
         };
         storage.create_bucket().await.unwrap();
-        // write some data to a test file, put it in s3, get it back and verify its contents
+
+        // Write some data to a test file, put it in s3, get it back and verify its contents
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+
         let test_data = "test data";
-        let test_file_in = "./test_data/test_file";
-        let test_file_out = "./test_data/test_file_out";
-        std::fs::write(test_file_in, test_data).unwrap();
-        storage.put("test", test_file_in).await;
-        storage.get("test", test_file_out).await;
+        let test_file_in = format!("{}/test_file_in", persist_path);
+        let test_file_out = format!("{}/test_file_out", persist_path);
+        std::fs::write(&test_file_in, test_data).unwrap();
+        storage.put("test", &test_file_in).await.unwrap();
+        storage.get("test", &test_file_out).await.unwrap();
 
         let contents = std::fs::read_to_string(test_file_out).unwrap();
         assert_eq!(contents, test_data);
-
-        // print current working directory
-        let path = std::env::current_dir().unwrap();
-        println!("The current directory is {}", path.display());
-        storage.get("test", "./test_data/test_file").await;
     }
 }
