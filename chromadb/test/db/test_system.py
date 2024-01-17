@@ -20,13 +20,16 @@ from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
+PULSAR_TENANT = "default"
+PULSAR_NAMESPACE = "default"
+
 # These are the sample collections that are used in the tests below. Tests can override
 # the fields as needed.
 sample_collections = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000001",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/00000000-0000-0000-0000-000000000001",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -35,7 +38,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000002",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/00000000-0000-0000-0000-000000000002",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -44,7 +47,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000003",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/00000000-0000-0000-0000-000000000003",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,

@@ -1,12 +1,12 @@
 import argparse
 import os
 from typing import List, Dict
-
+from openai.types.chat import ChatCompletionMessageParam
 import openai
 import chromadb
 
 
-def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
+def build_prompt(query: str, context: List[str]) -> List[ChatCompletionMessageParam]:
     """
     Builds a prompt for the LLM. #
 
@@ -21,10 +21,10 @@ def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
     context (List[str]): The context of the query, returned by embedding search.
 
     Returns:
-    A prompt for the LLM (List[Dict[str, str]]).
+    A prompt for the LLM (List[ChatCompletionMessageParam]).
     """
 
-    system = {
+    system: ChatCompletionMessageParam = {
         "role": "system",
         "content": "I am going to ask you a question, which I would like you to answer"
         "based only on the provided context, and not any other information."
@@ -32,11 +32,11 @@ def build_prompt(query: str, context: List[str]) -> List[Dict[str, str]]:
         'say "I am not sure", then try to make a guess.'
         "Break your answer up into nicely readable paragraphs.",
     }
-    user = {
+    user: ChatCompletionMessageParam = {
         "role": "user",
         "content": f"The question is {query}. Here is all the context you have:"
         f'{(" ").join(context)}',
-    }
+    } 
 
     return [system, user]
 
@@ -52,7 +52,7 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
     Returns:
     A response to the question.
     """
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model=model_name,
         messages=build_prompt(query, context),
     )
