@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+pub(crate) mod config;
 pub(crate) mod s3;
 
 #[async_trait]

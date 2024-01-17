@@ -8,7 +8,9 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::Storage;
+use super::{config::StorageConfig, Storage};
+use crate::config::{Configurable, WorkerConfig};
+use crate::errors::ChromaError;
 use async_trait::async_trait;
 use aws_sdk_s3;
 use aws_sdk_s3::error::SdkError;
@@ -71,6 +73,21 @@ impl S3Storage {
 }
 
 #[async_trait]
+impl Configurable for S3Storage {
+    async fn try_from_config(config: &WorkerConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config.storage {
+            StorageConfig::S3(s3_config) => {
+                let config = aws_config::load_from_env().await;
+                let client = aws_sdk_s3::Client::new(&config);
+
+                let storage = S3Storage::new(&s3_config.bucket, client);
+                return Ok(storage);
+            }
+        }
+    }
+}
+
+#[async_trait]
 impl Storage for S3Storage {
     async fn get(&self, key: &str, path: &str) -> Result<(), String> {
         let mut file = std::fs::File::create(path);
@@ -117,7 +134,6 @@ impl Storage for S3Storage {
         }
     }
 
-    // TODO: switch to Path instead of &str
     async fn put(&self, key: &str, path: &str) -> Result<(), String> {
         // Puts from a file on disk to s3.
         let bytestream = ByteStream::from_path(path).await;
