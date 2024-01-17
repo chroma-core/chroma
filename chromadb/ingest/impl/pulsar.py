@@ -120,6 +120,8 @@ class PulsarProducer(Producer, EnforceOverrides):
 
         wait(futures)
 
+        print(f"DEBUG: published to topic {topic_name}")
+
         results: List[SeqId] = []
         for future in futures:
             exception = future.exception()

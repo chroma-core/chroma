@@ -5,6 +5,7 @@ use crate::{
     types::VectorQueryResult,
 };
 use async_trait::async_trait;
+use aws_config::meta;
 use k8s_openapi::api::node;
 use num_bigint::BigInt;
 use parking_lot::{
@@ -45,15 +46,43 @@ impl SegmentManager {
     pub(crate) async fn write_record(&mut self, record: Box<EmbeddingRecord>) {
         let collection_id = record.collection_id;
         let mut target_segment = None;
-        // TODO: don't assume 1:1 mapping between collection and segment
         {
             let segments = self.get_segments(&collection_id).await;
+            // Find the active segment for the collection
             target_segment = match segments {
                 Ok(found_segments) => {
                     if found_segments.len() == 0 {
                         return; // TODO: handle no segment found
                     }
-                    Some(found_segments[0].clone())
+                    let mut found_segment = None;
+                    for s in found_segments.iter() {
+                        if s.scope == SegmentScope::VECTOR {
+                            println!("Found vector segment with id {}", s.id);
+                            println!("With metadata {:?}", s.metadata);
+                            match s.metadata {
+                                Some(ref metadata) => match metadata.get("segment_state") {
+                                    Some(state) => match state {
+                                        MetadataValue::Str(state) => {
+                                            if state == "ACTIVE" {
+                                                found_segment = Some(s.clone());
+                                                break;
+                                            }
+                                        }
+                                        _ => {
+                                            continue;
+                                        }
+                                    },
+                                    None => {
+                                        continue;
+                                    }
+                                },
+                                None => {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    found_segment
                 }
                 Err(_) => {
                     // TODO: throw an error and log no segment found

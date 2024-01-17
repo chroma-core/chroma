@@ -7,7 +7,7 @@ from chromadb.proto.convert import (
     to_proto_vector,
 )
 from chromadb.segment import VectorReader
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
+from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
@@ -96,7 +96,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     @override
     def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
         # Great example of why language sharing is nice.
-        segment_metadata = PersistentHnswParams.extract(metadata)
+        segment_metadata = HnswParams.extract(metadata)
         return segment_metadata
 
     @override

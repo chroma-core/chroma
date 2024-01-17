@@ -177,6 +177,7 @@ class SegmentAPI(ServerAPI):
             segments = self._manager.create_segments(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
+                print(f"Created segments with metadata: {segment['metadata']}")
 
         # TODO: This event doesn't capture the get_or_create case appropriately
         self._product_telemetry_client.capture(
