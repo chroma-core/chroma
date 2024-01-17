@@ -26,3 +26,6 @@ worker:
             port: 50051
     segment_manager:
         storage_path: "./tmp/segment_manager/"
+    storage:
+        S3:
+            bucket: "chroma-storage"

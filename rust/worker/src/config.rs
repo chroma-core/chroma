@@ -108,6 +108,7 @@ pub(crate) struct WorkerConfig {
     pub(crate) ingest: crate::ingest::config::IngestConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) segment_manager: crate::segment::config::SegmentManagerConfig,
+    pub(crate) storage: crate::storage::config::StorageConfig,
 }
 
 /// # Description
@@ -156,7 +157,9 @@ mod tests {
                             port: 50051
                     segment_manager:
                         storage_path: "/tmp"
-
+                    storage:
+                        S3:
+                            bucket: "chroma"
                 "#,
             );
             let config = RootConfig::load();
@@ -198,6 +201,9 @@ mod tests {
                             port: 50051
                     segment_manager:
                         storage_path: "/tmp"
+                    storage:
+                        S3:
+                            bucket: "chroma"
 
                 "#,
             );
@@ -255,6 +261,9 @@ mod tests {
                             port: 50051
                     segment_manager:
                         storage_path: "/tmp"
+                    storage:
+                        S3:
+                            bucket: "chroma"
 
                 "#,
             );
@@ -293,6 +302,9 @@ mod tests {
                             port: 50051
                     segment_manager:
                         storage_path: "/tmp"
+                    storage:
+                        S3:
+                            bucket: "chroma"
                 "#,
             );
             let config = RootConfig::load();
