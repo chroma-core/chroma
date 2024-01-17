@@ -26,6 +26,7 @@ minikube addons enable ingress-dns -p chroma-test
 eval $(minikube -p chroma-test docker-env)
 docker build -t server:latest -f Dockerfile .
 docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile .
+docker build -t worker -f rust/worker/Dockerfile . --build-arg CHROMA_KUBERNETES_INTEGRATION=1
 
 # Apply the kubernetes manifests
 kubectl apply -f k8s/deployment
