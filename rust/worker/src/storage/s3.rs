@@ -156,6 +156,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
     async fn test_get() {
         // Set up credentials assuming minio is running locally
         let cred = aws_sdk_s3::config::Credentials::new(
