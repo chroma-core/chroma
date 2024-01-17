@@ -15,6 +15,7 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
+
 from pathlib import Path
 import os
 import tarfile
@@ -73,11 +74,14 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, input: Documents) -> Embeddings:
-        return cast(Embeddings, self._model.encode(
-            list(input),
-            convert_to_numpy=True,
-            normalize_embeddings=self._normalize_embeddings,
-        ).tolist())
+        return cast(
+            Embeddings,
+            self._model.encode(
+                list(input),
+                convert_to_numpy=True,
+                normalize_embeddings=self._normalize_embeddings,
+            ).tolist(),
+        )
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -91,7 +95,9 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = SentenceModel(model_name_or_path=model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
-        return cast(Embeddings, self._model.encode(list(input), convert_to_numpy=True).tolist())  # noqa E501
+        return cast(
+            Embeddings, self._model.encode(list(input), convert_to_numpy=True).tolist()
+        )  # noqa E501
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -184,12 +190,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e.index
-            )
+            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)
 
             # Return just the embeddings
-            return cast(Embeddings,  [result.embedding for result in sorted_embeddings])
+            return cast(Embeddings, [result.embedding for result in sorted_embeddings])
         else:
             if self._api_type == "azure":
                 embeddings = self._client.create(
@@ -201,9 +205,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e["index"]
-            )
+            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
             # Return just the embeddings
             return cast(
@@ -269,9 +271,13 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding API for each document
-        return cast(Embeddings, self._session.post(
-            self._api_url, json={"inputs": input, "options": {"wait_for_model": True}}
-        ).json())
+        return cast(
+            Embeddings,
+            self._session.post(
+                self._api_url,
+                json={"inputs": input, "options": {"wait_for_model": True}},
+            ).json(),
+        )
 
 
 class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -716,7 +722,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        session: "boto3.Session",  # Quote for forward reference
+        session: "boto3.Session",  # noqa: F821 # Quote for forward reference
         model_name: str = "amazon.titan-embed-text-v1",
         **kwargs: Any,
     ):
@@ -798,9 +804,9 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding Server API for each document
-        return cast (Embeddings,self._session.post(
-            self._api_url, json={"inputs": input}
-        ).json())
+        return cast(
+            Embeddings, self._session.post(self._api_url, json={"inputs": input}).json()
+        )
 
 
 # List of all classes in this module
