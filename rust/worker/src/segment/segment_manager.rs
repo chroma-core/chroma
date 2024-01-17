@@ -57,6 +57,7 @@ impl SegmentManager {
                     let mut found_segment = None;
                     for s in found_segments.iter() {
                         if s.scope == SegmentScope::VECTOR {
+                            // TODO: change this to a trace log
                             println!("Found vector segment with id {}", s.id);
                             println!("With metadata {:?}", s.metadata);
                             match s.metadata {
