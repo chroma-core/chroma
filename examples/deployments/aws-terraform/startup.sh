@@ -29,16 +29,16 @@ if [ "$${enable_auth}" = "true" ] && [ "$${auth_type}" = "basic" ] && [ ! -z "$$
   docker run --rm --entrypoint htpasswd httpd:2 -Bbn $username $password > server.htpasswd
   cat <<EOF > .env
 CHROMA_SERVER_AUTH_CREDENTIALS_FILE="/chroma/server.htpasswd"
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider'
-CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.basic.BasicAuthServerProvider'
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdFileServerAuthCredentialsProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 EOF
 fi
 
 if [ "$${enable_auth}" = "true" ] && [ "$${auth_type}" = "token" ] && [ ! -z "$${token_auth_credentials}" ]; then
   cat <<EOF > .env
 CHROMA_SERVER_AUTH_CREDENTIALS="$${token_auth_credentials}" \
-CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER='chromadb.auth.token.TokenConfigServerAuthCredentialsProvider'
-CHROMA_SERVER_AUTH_PROVIDER='chromadb.auth.token.TokenAuthServerProvider'
+CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.token.TokenConfigServerAuthCredentialsProvider"
+CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
 EOF
 fi
 
