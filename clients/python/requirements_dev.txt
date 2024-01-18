@@ -1,3 +1,4 @@
+build>=1.0.3
 fastapi>=0.95.2
 hypothesis
 hypothesis[numpy]

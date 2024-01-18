@@ -6,12 +6,15 @@ import (
 
 	"github.com/chroma/chroma-coordinator/cmd/flag"
 	"github.com/chroma/chroma-coordinator/internal/grpccoordinator"
+	"github.com/chroma/chroma-coordinator/internal/grpccoordinator/grpcutils"
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var (
-	conf = grpccoordinator.Config{}
+	conf = grpccoordinator.Config{
+		GrpcConfig: &grpcutils.GrpcConfig{},
+	}
 
 	Cmd = &cobra.Command{
 		Use:   "coordinator",
@@ -22,8 +25,9 @@ var (
 )
 
 func init() {
+
 	// GRPC
-	flag.GRPCAddr(Cmd, &conf.BindAddress)
+	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")
@@ -38,7 +42,7 @@ func init() {
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")
 	Cmd.Flags().StringVar(&conf.PulsarURL, "pulsar-url", "pulsar://localhost:6650", "Pulsar url")
-	Cmd.Flags().StringVar(&conf.PulsarTenant, "pulsar-tenant", "public", "Pulsar tenant")
+	Cmd.Flags().StringVar(&conf.PulsarTenant, "pulsar-tenant", "default", "Pulsar tenant")
 	Cmd.Flags().StringVar(&conf.PulsarNamespace, "pulsar-namespace", "default", "Pulsar namespace")
 
 	// Notification

@@ -7,8 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import status
 from uuid import UUID
-
-import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
@@ -30,12 +28,12 @@ from chromadb.auth.fastapi_utils import (
     attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.server
 import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
     InvalidUUIDError,
+    InvalidDimensionException,
     InvalidHTTPVersion,
 )
 from chromadb.server.fastapi.types import (
@@ -52,6 +50,8 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+
+from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -81,7 +81,7 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return e.fastapi_json_response()
+        return fastapi_json_response(e)
     except Exception as e:
         logger.exception(e)
         return JSONResponse(
@@ -96,13 +96,6 @@ async def check_http_version_middleware(
     if http_version not in ["1.1", "2"]:
         raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
     return await call_next(request)
-
-
-def _uuid(uuid_str: str) -> UUID:
-    try:
-        return UUID(uuid_str)
-    except ValueError:
-        raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
