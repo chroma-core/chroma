@@ -25,6 +25,9 @@ COPY --from=builder /install /usr/local
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 COPY ./ /chroma
 
+RUN chmod +x /docker_entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["/docker_entrypoint.sh"]
+ENTRYPOINT ["/docker_entrypoint.sh"]
+CMD [ "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"]
