@@ -3,6 +3,7 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"gorm.io/driver/postgres"
 	"reflect"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -10,7 +11,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -30,7 +31,40 @@ type DBConfig struct {
 	MaxOpenConns int
 }
 
-func Connect(cfg DBConfig) (*gorm.DB, error) {
+func ConnectTiDB(cfg DBConfig) (*gorm.DB, error) {
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&tls=%s",
+		cfg.Username, cfg.Password, cfg.Address, cfg.Port, cfg.DBName, "false")
+
+	ormLogger := logger.Default
+	ormLogger.LogMode(logger.Info)
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	log.Info("TiDB connected success",
+		zap.String("host", cfg.Address),
+		zap.String("database", cfg.DBName),
+		zap.Error(err))
+
+	globalDB = db
+
+	log.Info("TiDB: AutoMigrate")
+	db.AutoMigrate(&dbmodel.Tenant{})
+	db.AutoMigrate(&dbmodel.Database{})
+	db.AutoMigrate(&dbmodel.Collection{})
+	db.AutoMigrate(&dbmodel.CollectionMetadata{})
+	db.AutoMigrate(&dbmodel.Segment{})
+	db.AutoMigrate(&dbmodel.SegmentMetadata{})
+	db.AutoMigrate(&dbmodel.Notification{})
+
+	return db, nil
+}
+
+func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
 		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port)
 

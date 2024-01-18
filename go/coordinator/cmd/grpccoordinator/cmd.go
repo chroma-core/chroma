@@ -30,14 +30,21 @@ func init() {
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
 
 	// System Catalog
-	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "memory", "System catalog provider")
+	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "tidb", "System catalog provider")
 	Cmd.Flags().StringVar(&conf.Username, "username", "root", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.Password, "password", "", "MetaTable password")
-	Cmd.Flags().StringVar(&conf.Address, "db-address", "tidb.ootbbu125szh.clusters.tidb-cloud.com", "MetaTable db address")
-	Cmd.Flags().IntVar(&conf.Port, "db-port", 4000, "MetaTable db port")
-	Cmd.Flags().StringVar(&conf.DBName, "db-name", "emuY1ktyq5Tq4nGx", "MetaTable db name")
+	Cmd.Flags().StringVar(&conf.Address, "db-address", "127.0.0.1", "MetaTable db address")
+	Cmd.Flags().IntVar(&conf.Port, "db-port", 5432, "MetaTable db port")
+	Cmd.Flags().StringVar(&conf.DBName, "db-name", "", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
 	Cmd.Flags().IntVar(&conf.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
+
+	// TiDB
+	Cmd.Flags().StringVar(&conf.TiDBHost, "tidb_host", "tidb.ootbbu125szh.clusters.tidb-cloud.com", "TiDB host")
+	Cmd.Flags().IntVar(&conf.TiDBPort, "tidb_port", 4000, "TiDB port")
+	Cmd.Flags().StringVar(&conf.TiDBUser, "tidb_user", "root", "TiDB user")
+	Cmd.Flags().StringVar(&conf.TiDBPassword, "tidb_password", "emuY1ktyq5Tq4nGx", "TiDB password")
+	Cmd.Flags().StringVar(&conf.TiDBDBName, "tidb_db_name", "test", "TiDB DB name")
 
 	// Pulsar
 	Cmd.Flags().StringVar(&conf.PulsarAdminURL, "pulsar-admin-url", "http://localhost:8080", "Pulsar admin url")
@@ -53,7 +60,7 @@ func init() {
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
 	Cmd.Flags().StringVar(&conf.WorkerMemberlistName, "worker-memberlist-name", "worker-memberlist", "Worker memberlist name")
-	Cmd.Flags().StringVar(&conf.AssignmentPolicy, "assignment-policy", "rendezvous", "Assignment policy")
+	Cmd.Flags().StringVar(&conf.AssignmentPolicy, "assignment-policy", "simple", "Assignment policy")
 	Cmd.Flags().DurationVar(&conf.WatchInterval, "watch-interval", 60*time.Second, "Watch interval")
 }
 

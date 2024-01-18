@@ -37,6 +37,13 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 
+	// TiDB config
+	TiDBHost     string
+	TiDBPort     int
+	TiDBUser     string
+	TiDBPassword string
+	TiDBDBName   string
+
 	// Notification config
 	NotificationStoreProvider string
 	NotifierProvider          string
@@ -86,7 +93,22 @@ func New(config Config) (*Server, error) {
 			MaxIdleConns: config.MaxIdleConns,
 			MaxOpenConns: config.MaxOpenConns,
 		}
-		db, err := dbcore.Connect(dBConfig)
+
+		db, err := dbcore.ConnectPostgres(dBConfig)
+		if err != nil {
+			return nil, err
+		}
+		return NewWithGrpcProvider(config, grpcutils.Default, db)
+	} else if config.SystemCatalogProvider == "tidb" {
+		dBConfig := dbcore.DBConfig{
+			Username: config.TiDBUser,
+			Password: config.TiDBPassword,
+			Address:  config.TiDBHost,
+			Port:     config.TiDBPort,
+			DBName:   config.TiDBDBName,
+		}
+
+		db, err := dbcore.ConnectTiDB(dBConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +197,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 			return nil, err
 		}
 
-    s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
 		if err != nil {
