@@ -1466,10 +1466,14 @@ def test_dimensionality_exception_upsert(api):
 
 
 def test_ssl_self_signed(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
 
 
 def test_ssl_self_signed_without_ssl_verify(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
     _port = client_ssl._server._settings.chroma_server_http_port
     with pytest.raises(ValueError) as e:
@@ -1482,6 +1486,8 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
 
 
 def test_ssl_self_signed_with_verify_false(client_ssl):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
     _port = client_ssl._server._settings.chroma_server_http_port
     with pytest.warns(InsecureRequestWarning) as record:
