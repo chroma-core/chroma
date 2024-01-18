@@ -6,4 +6,7 @@ x509_extensions = usr_cert
 CN = localhost
 
 [usr_cert]
-subjectAltName = localhost
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
