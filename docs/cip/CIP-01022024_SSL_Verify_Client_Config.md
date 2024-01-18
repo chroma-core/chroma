@@ -19,6 +19,9 @@ Both of approaches yielded the same results.
 > **IMPORTANT:** It should be noted that we do not recommend or encourage the use of self-signed certificates in
 > production environments.
 
+We also provide a sample notebook that to help the reader run a local Chroma server with a self-signed certificate and
+configure the client to trust the certificate. The notebook can be found in [assets/CIP-01022024-test_self_signed.ipynb](./assets/CIP-01022024-test_self_signed.ipynb).
+
 ## Public Interfaces
 
 New settings variable `chroma_server_ssl_verify` accepting either a boolean or a path to a certificate file. If the

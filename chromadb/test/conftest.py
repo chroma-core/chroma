@@ -48,7 +48,6 @@ hypothesis.settings.register_profile(
 )
 hypothesis.settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
-
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
 
 
@@ -76,6 +75,10 @@ def generate_self_signed_certificate() -> None:
             "-nodes",
             "-subj",
             "/CN=localhost",
+            "-config",
+            os.path.abspath(
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "/openssl.cnf")
+            ),
         ]
     )
 

@@ -1465,48 +1465,6 @@ def test_dimensionality_exception_upsert(api):
     assert "dimensionality" in str(e.value)
 
 
-#
-# # Generate a self-signed certificate fixture
-# @pytest.fixture(scope="session")
-# def generate_self_signed_certificate() -> str:
-#     subprocess.run(
-#         ["openssl", "req", "-x509", "-newkey", "rsa:4096", "-keyout", "serverkey.pem", "-out", "servercert.pem", "-days", "365",
-#          "-nodes", "-subj", "/CN=localhost"])
-#     return "./cert.pem"
-#
-#
-# def run_ssl_server():
-#     uvicorn.run(app, host="127.0.0.1", port=8000, ssl_keyfile="key.pem", ssl_certfile="cert.pem")
-#
-#
-# def _await_ssl_server(attempts: int = 0) -> None:
-#     try:
-#         requests.get("https://localhost:8000/api/v1", verify=False)
-#     except ConnectionError as e:
-#         print(e)
-#         if attempts > 15:
-#             raise e
-#         else:
-#             print("Waiting for server to start...")
-#             time.sleep(4)
-#             _await_ssl_server(attempts + 1)
-#     except Exception as e:
-#         print(type(e))
-#         raise e
-#
-#
-# # Start a uvicorn process with given settings including the SSL self-signed certificate
-# @pytest.fixture(scope="session")
-# def start_uvicorn_process():
-#     ctx = multiprocessing.get_context("spawn")
-#     proc = ctx.Process(target=run_ssl_server, daemon=True)
-#     proc.start()
-#     _await_ssl_server()
-#     yield proc
-#     proc.kill()
-
-
-# Send a request to the server with given SSL context
 def test_ssl_self_signed(client_ssl):
     client_ssl.heartbeat()
 
