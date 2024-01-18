@@ -29,7 +29,7 @@ services:
       - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY}
       - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
     ports:
-      - 8002:8002
+      - 8000:8000
     networks:
       - net
 
