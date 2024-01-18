@@ -108,10 +108,7 @@ func New(config Config) (*Server, error) {
 			DBName:   config.TiDBDBName,
 		}
 
-		db, err := dbcore.ConnectTiDB(dBConfig)
-		if err != nil {
-			return nil, err
-		}
+		db := dbcore.ConnectTiDB(dBConfig)
 		return NewWithGrpcProvider(config, grpcutils.Default, db)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")

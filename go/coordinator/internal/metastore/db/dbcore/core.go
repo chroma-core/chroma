@@ -31,8 +31,8 @@ type DBConfig struct {
 	MaxOpenConns int
 }
 
-func ConnectTiDB(cfg DBConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&tls=%s",
+func ConnectTiDB(cfg DBConfig) *gorm.DB {
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&tls=%s&parseTime=true",
 		cfg.Username, cfg.Password, cfg.Address, cfg.Port, cfg.DBName, "false")
 
 	ormLogger := logger.Default
@@ -61,7 +61,7 @@ func ConnectTiDB(cfg DBConfig) (*gorm.DB, error) {
 	db.AutoMigrate(&dbmodel.SegmentMetadata{})
 	db.AutoMigrate(&dbmodel.Notification{})
 
-	return db, nil
+	return db
 }
 
 func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
@@ -148,14 +148,20 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-	if err != nil {
-		panic("failed to connect database")
+func ConfigTiDBForTesting() *gorm.DB {
+	dBConfig := DBConfig{
+		Username: "root",
+		Password: "emuY1ktyq5Tq4nGx",
+		Address:  "tidb.ootbbu125szh.clusters.tidb-cloud.com",
+		Port:     4000,
+		DBName:   "test",
 	}
-	SetGlobalDB(db)
+	db := ConnectTiDB(dBConfig)
+	CreateTestTables(db)
+	return db
+}
+
+func CreateTestTables(db *gorm.DB) {
 	// Setup tenant related tables
 	db.Migrator().DropTable(&dbmodel.Tenant{})
 	db.Migrator().CreateTable(&dbmodel.Tenant{})
@@ -188,5 +194,16 @@ func ConfigDatabaseForTesting() *gorm.DB {
 	// Setup notification related tables
 	db.Migrator().DropTable(&dbmodel.Notification{})
 	db.Migrator().CreateTable(&dbmodel.Notification{})
+}
+
+func ConfigDatabaseForTesting() *gorm.DB {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	if err != nil {
+		panic("failed to connect database")
+	}
+	SetGlobalDB(db)
+	CreateTestTables(db)
 	return db
 }
