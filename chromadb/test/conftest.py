@@ -59,6 +59,12 @@ def skip_if_not_cluster() -> pytest.MarkDecorator:
 
 
 def generate_self_signed_certificate() -> None:
+    config_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "openssl.cnf"
+    )
+    print(f"Config path: {config_path}")  # Debug print to verify path
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
     subprocess.run(
         [
             "openssl",
@@ -76,9 +82,7 @@ def generate_self_signed_certificate() -> None:
             "-subj",
             "/CN=localhost",
             "-config",
-            os.path.abspath(
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "/openssl.cnf")
-            ),
+            config_path,
         ]
     )
 
