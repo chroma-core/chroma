@@ -3,6 +3,7 @@ package grpccoordinator
 import (
 	"context"
 	"errors"
+	"google.golang.org/grpc"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -16,7 +17,6 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"gorm.io/gorm"
 )
@@ -182,25 +182,32 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 	s.coordinator = coordinator
 	s.coordinator.Start()
-	if !config.Testing {
-		memberlist_manager, err := createMemberlistManager(config)
-		if err != nil {
-			return nil, err
-		}
-
-		// Start the memberlist manager
-		err = memberlist_manager.Start()
-		if err != nil {
-			return nil, err
-		}
-
-		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
-			coordinatorpb.RegisterSysDBServer(registrar, s)
-		})
-		if err != nil {
-			return nil, err
-		}
+	log.Info("Started coordinator")
+	s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+		coordinatorpb.RegisterSysDBServer(registrar, s)
+	})
+	if err != nil {
+		return nil, err
 	}
+	//if !config.Testing {
+	//	memberlist_manager, err := createMemberlistManager(config)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//
+	//	// Start the memberlist manager
+	//	err = memberlist_manager.Start()
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//
+	//	s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+	//		coordinatorpb.RegisterSysDBServer(registrar, s)
+	//	})
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	// }
 	return s, nil
 }
 

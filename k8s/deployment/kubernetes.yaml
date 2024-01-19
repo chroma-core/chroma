@@ -194,7 +194,6 @@ spec:
             - "--pulsar-url=pulsar://pulsar.chroma:6650"
             - "--notifier-provider=pulsar"
             - "--system-catalog-provider=tidb"
-            - "--assignment-policy=simple"
           image: chroma-coordinator
           imagePullPolicy: IfNotPresent
           name: coordinator

@@ -229,6 +229,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 		if len(existing) != 0 {
 			if createCollection.GetOrCreate {
+				log.Info("collection already exists", zap.Any("collection", existing[0]))
 				collection := convertCollectionToModel(existing)[0]
 				if createCollection.Metadata != nil && !createCollection.Metadata.Equals(collection.Metadata) {
 					updatedCollection, err := tc.UpdateCollection(ctx, &model.UpdateCollection{
