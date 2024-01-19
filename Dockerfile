@@ -27,7 +27,13 @@ COPY ./ /chroma
 
 RUN chmod +x /docker_entrypoint.sh
 
+ENV CHROMA_HOST_ADDR "0.0.0.0"
+ENV CHROMA_HOST_PORT 8000
+ENV CHROMA_WORKERS 1
+ENV CHROMA_LOG_CONFIG "chromadb/log_config.yml"
+ENV CHROMA_TIMEOUT_KEEP_ALIVE 30
+
 EXPOSE 8000
 
 ENTRYPOINT ["/docker_entrypoint.sh"]
-CMD [ "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"]
+CMD [ "--workers ${CHROMA_WORKERS} --host ${CHROMA_HOST_ADDR} --port ${CHROMA_HOST_PORT} --proxy-headers --log-config ${CHROMA_LOG_CONFIG} --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE}"]
