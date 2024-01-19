@@ -222,14 +222,13 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), &collectionName, nil, tenantID, databaseName)
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, nil, tenantID, databaseName)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err
 		}
 		if len(existing) != 0 {
 			if createCollection.GetOrCreate {
-				log.Info("collection already exists", zap.Any("collection", existing[0]))
 				collection := convertCollectionToModel(existing)[0]
 				if createCollection.Metadata != nil && !createCollection.Metadata.Equals(collection.Metadata) {
 					updatedCollection, err := tc.UpdateCollection(ctx, &model.UpdateCollection{
