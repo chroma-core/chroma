@@ -61,7 +61,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
-        cache_folder:str | None = None,
+        cache_folder: Optional[str] = None,
     ):
         if model_name not in self.models:
             try:
