@@ -72,15 +72,19 @@
     "node": ">=14.17.0"
   },
   "dependencies": {
-    "isomorphic-fetch": "^3.0.0",
-    "cliui": "^8.0.1"
+    "cliui": "^8.0.1",
+    "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.496.0",
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@aws-sdk/client-bedrock-runtime": {
+      "optional": true
+    },
     "@google/generative-ai": {
       "optional": true
     },

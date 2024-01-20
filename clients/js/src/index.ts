@@ -11,6 +11,7 @@ export { DefaultEmbeddingFunction } from './embeddings/DefaultEmbeddingFunction'
 export { HuggingFaceEmbeddingServerFunction } from './embeddings/HuggingFaceEmbeddingServerFunction';
 export { JinaEmbeddingFunction } from './embeddings/JinaEmbeddingFunction';
 export { GoogleGenerativeAiEmbeddingFunction } from './embeddings/GoogleGeminiEmbeddingFunction';
+export { AmazonBedrockEmbeddingFunction } from './embeddings/AmazonBedrockEmbeddingFunction';
 
 export {
     IncludeEnum,
