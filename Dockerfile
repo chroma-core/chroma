@@ -11,7 +11,7 @@ WORKDIR /install
 
 COPY ./requirements.txt requirements.txt
 
-RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade --prefix="/install" -r requirements.txt 
 
 FROM python:3.10-slim-bookworm as final
 
