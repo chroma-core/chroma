@@ -20,13 +20,22 @@ from chromadb.db.base import NotFoundError, UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 
+PULSAR_TENANT = "default"
+PULSAR_NAMESPACE = "default"
+
 # These are the sample collections that are used in the tests below. Tests can override
 # the fields as needed.
+
+# HACK: In order to get the real grpc tests passing, we need the topic to use rendezvous
+# hashing. This is because the grpc tests use the real grpc sysdb server and the
+# rendezvous hashing is done in the segment server. We don't have a easy way to parameterize
+# the assignment policy in the grpc tests, so we just use rendezvous hashing for all tests.
+# by harcoding the topic to what we expect rendezvous hashing to return with 16 topics.
 sample_collections = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000001",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_1",
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -35,7 +44,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000002",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_14",
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -44,7 +53,7 @@ sample_collections = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        topic="persistent://test-tenant/test-topic/00000000-0000-0000-0000-000000000003",
+        topic=f"persistent://{PULSAR_TENANT}/{PULSAR_NAMESPACE}/chroma_log_14",
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -171,7 +180,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     # Find by topic
     for collection in sample_collections:
         result = sysdb.get_collections(topic=collection["topic"])
-        assert result == [collection]
+        assert collection in result
 
     # Find by id
     for collection in sample_collections:

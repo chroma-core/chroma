@@ -6,6 +6,7 @@ mod ingest;
 mod memberlist;
 mod segment;
 mod server;
+mod storage;
 mod sysdb;
 mod system;
 mod types;

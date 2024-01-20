@@ -16,6 +16,7 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+from tenacity import retry
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -193,6 +194,9 @@ class EmbeddingFunction(Protocol[D]):
             return validate_embeddings(maybe_cast_one_to_many_embedding(result))
 
         setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)
 
 
 def validate_embedding_function(

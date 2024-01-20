@@ -43,6 +43,10 @@ spec:
           env:
             - name: CHROMA_WORKER__PULSAR_URL
               value: pulsar://pulsar.chroma:6650
+            - name: CHROMA_WORKER__PULSAR_NAMESPACE
+              value: default
+            - name: CHROMA_WORKER__PULSAR_TENANT
+              value: default
             - name: CHROMA_WORKER__MY_IP
               valueFrom:
                 fieldRef:

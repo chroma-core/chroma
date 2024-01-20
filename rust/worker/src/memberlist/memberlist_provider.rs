@@ -246,20 +246,21 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
     async fn it_can_work() {
         // TODO: This only works if you have a kubernetes cluster running locally with a memberlist
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder
         // and demonstration of how to use the memberlist provider.
-        // let kube_ns = "chroma".to_string();
-        // let kube_client = Client::try_default().await.unwrap();
-        // let memberlist_provider = CustomResourceMemberlistProvider::new(
-        //     "worker-memberlist".to_string(),
-        //     kube_client.clone(),
-        //     kube_ns.clone(),
-        //     10,
-        // );
-        // let mut system = System::new();
-        // let handle = system.start_component(memberlist_provider);
+        let kube_ns = "chroma".to_string();
+        let kube_client = Client::try_default().await.unwrap();
+        let memberlist_provider = CustomResourceMemberlistProvider::new(
+            "worker-memberlist".to_string(),
+            kube_client.clone(),
+            kube_ns.clone(),
+            10,
+        );
+        let mut system = System::new();
+        let handle = system.start_component(memberlist_provider);
     }
 }
