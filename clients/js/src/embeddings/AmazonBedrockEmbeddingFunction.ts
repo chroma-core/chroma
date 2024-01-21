@@ -4,12 +4,15 @@ let amazonBedrockApi: any;
 
 export class AmazonBedrockEmbeddingFunction implements IEmbeddingFunction {
   private model: string;
-  private readonly configuration: any; // Assume this is BedrockRuntimeClientConfig
+  private configuration: any; // Assume this is BedrockRuntimeClientConfig
   private amazonBedrockApi?: any;
   private invokeCommand?: any;
 
-  constructor({ config, model }: { config: any; model?: string }) {
+  constructor({ config, model }: { config: any; model?: string}) {
     this.configuration = config;
+    if (!this.configuration.region) {
+      this.configuration.region = "us-east-1";
+    }
     this.model = model || "amazon.titan-embed-text-v1";
   }
 
