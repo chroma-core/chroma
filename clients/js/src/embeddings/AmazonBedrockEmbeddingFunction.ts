@@ -41,7 +41,7 @@ export class AmazonBedrockEmbeddingFunction implements IEmbeddingFunction {
     await this.loadClient();
     const td = new TextDecoder();
     const embeddings: number[][] = [];
-    texts.forEach(async text => {
+    return Promise.all(texts.map(async text => {
       const input = {
         modelId: this.model,
         contentType: "application/json",
@@ -51,9 +51,9 @@ export class AmazonBedrockEmbeddingFunction implements IEmbeddingFunction {
       const command = new this.invokeCommand(input);
       const response = await this.amazonBedrockApi.send(command);
       const parsedBody = JSON.parse(td.decode(response.body));
-      embeddings.push(parsedBody.embedding);
-    });
-    return embeddings;
+      return parsedBody.embedding;
+    }
+    ));
   }
 
   /** @ignore */
@@ -63,7 +63,7 @@ export class AmazonBedrockEmbeddingFunction implements IEmbeddingFunction {
   }> {
     try {
       // @ts-ignore
-      const { default: amazonBedrock } = await import("@aws-sdk/client-bedrock-runtime");
+      const amazonBedrock  = await import("@aws-sdk/client-bedrock-runtime");
       return { amazonBedrock };
     } catch (_a) {
       throw new Error(
