@@ -34,12 +34,29 @@ ingestion and able to tolerate eventual consistency.
 
 ### Benefits
 
-- Our observation and experimentation indicate 5x speedup in data ingestion when batch ingestion mode is enabled( ~40m
-  with batching off vs ~8m with batching on), It is important to observe that batching does not affect the data query
-  availability.
+- Our observation and experimentation indicate 5x speedup (when multi-threading) in data ingestion when batch ingestion
+  mode is enabled( ~40m with batching off vs ~8m with batching on), It is important to observe that batching does not
+  affect the data availability for querying.
 - Reduction in server backpressure, as the data is queued in WAL and the client is not blocked until the data is
   ingested into segment indices. Our observations and tests show that this enables many (we tested with 20) concurrent
   clients to ingest data without any backpressure from the server.
+- Decoupling ingestion speed from HNSW index updates. This is especially important for large collections, where the
+  HNSW index updates are slow and can cause ingestion backpressure.
+
+Below are diagrams of ingestion with and without batching enabled:
+
+**Ingestion without Batching of ~1M dataset**
+
+![CIP-01212024-ingestion-times-normal.png](assets/CIP-01212024-ingestion-times-normal.png)
+
+**Ingestion with Batching of ~1M dataset**
+
+![CIP-01212024-ingestion-times-batch.png](assets/CIP-01212024-ingestion-times-batch.png)
+
+
+> Note: The dataset used for both tests is with pre-computed OpenAI Ada-02
+>
+embeddings ([KShivendu/dbpedia-entities-openai-1M](https://huggingface.co/datasets/KShivendu/dbpedia-entities-openai-1M))
 
 ### Considerations
 
