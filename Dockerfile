@@ -18,7 +18,8 @@ FROM python:3.10-slim-bookworm as final
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
     gcc \
-    g++ && \
+    g++ \
+    sqlite3 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /chroma
