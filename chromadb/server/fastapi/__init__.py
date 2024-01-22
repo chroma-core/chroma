@@ -141,6 +141,8 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
 
+        self._app.on_event("shutdown")(self.shutdown)
+
         if settings.chroma_server_authz_provider:
             self._app.add_middleware(
                 FastAPIChromaAuthzMiddlewareWrapper,
@@ -279,6 +281,9 @@ class FastAPI(chromadb.server.Server):
 
         use_route_names_as_operation_ids(self._app)
         instrument_fastapi(self._app)
+
+    def shutdown(self) -> None:
+        self._system.stop()
 
     def app(self) -> fastapi.FastAPI:
         return self._app
