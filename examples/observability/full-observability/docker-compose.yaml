@@ -1,0 +1,86 @@
+version: '3'
+networks:
+  net:
+    driver: bridge
+services:
+  server:
+    image: server
+    build:
+      context: ${PWD}
+      dockerfile: Dockerfile
+    volumes:
+      - ${PWD}/chroma:/chroma/chroma
+      # Be aware that indexed data are located in "/chroma/chroma/"
+      # Default configuration for persist_directory in chromadb/config.py
+    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config chromadb/log_config.yml
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_SERVER_AUTH_PROVIDER=${CHROMA_SERVER_AUTH_PROVIDER}
+      - CHROMA_SERVER_AUTH_CREDENTIALS_FILE=${CHROMA_SERVER_AUTH_CREDENTIALS_FILE}
+      - CHROMA_SERVER_AUTH_CREDENTIALS=${CHROMA_SERVER_AUTH_CREDENTIALS}
+      - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=${CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER}
+      - PERSIST_DIRECTORY=${PERSIST_DIRECTORY:-/chroma/chroma}
+      - CHROMA_OTEL_COLLECTION_ENDPOINT=http://otel-collector:4317/
+      - CHROMA_OTEL_EXPORTER_HEADERS=${CHROMA_OTEL_EXPORTER_HEADERS}
+      - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME:-chroma}
+      - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY:-all}
+      - chroma_otel_traces_enabled=true
+      - chroma_otel_metrics_enabled=true
+      - chroma_otel_logs_enabled=true
+    ports:
+      - 8000:8000
+    depends_on: [ otel-collector ]
+    networks:
+      - net
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    command: [ "--config=/etc/otel-collector-config.yaml" ]
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "55681:55681" # zPages
+      - "9091:9090" # Prometheus metrics
+    networks:
+      - net
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana-provisioning/datasources/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./config/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    networks:
+      - net
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - net
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - "9411:9411"
+    networks:
+      - net
+  loki:
+    image: grafana/loki:latest
+    volumes:
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - net
+volumes:
+  grafana_data:
+    driver: local
+  loki-data:
+    driver: local

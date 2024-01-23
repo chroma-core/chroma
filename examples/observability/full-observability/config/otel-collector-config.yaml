@@ -1,0 +1,26 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+exporters:
+  logging: # this is more for debug, you'll need a specific exporter for Grafana
+  zipkin:
+    endpoint: "http://zipkin:9411/api/v2/spans"
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+  loki: # Hypothetical, replace with your chosen log exporter
+    endpoint: "http://loki:3100/loki/api/v1/push"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [zipkin]
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      exporters: [loki]

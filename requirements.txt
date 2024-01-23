@@ -9,11 +9,14 @@ mmh3>=4.0.1
 numpy>=1.22.5
 onnxruntime>=1.14.1
 opentelemetry-api>=1.2.0
-opentelemetry-exporter-otlp-proto-grpc>=1.2.0
+opentelemetry-exporter-otlp>=1.22.0
+opentelemetry-exporter-otlp-proto-grpc>=1.22.0
 opentelemetry-instrumentation-fastapi>=0.41b0
-opentelemetry-sdk>=1.2.0
+opentelemetry-instrumentation-logging>=0.43b0
+opentelemetry-sdk>=1.22.0
 overrides==7.3.1
 posthog==2.4.0
+psutil>=5.9.7
 pulsar-client==3.1.0
 pydantic>=1.9
 pypika==0.48.9

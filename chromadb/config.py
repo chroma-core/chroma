@@ -227,6 +227,9 @@ class Settings(BaseSettings):  # type: ignore
     chroma_otel_service_name: Optional[str] = "chromadb"
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
+    chroma_otel_traces_enabled: bool = True
+    chroma_otel_metrics_enabled: bool = False
+    chroma_otel_logs_enabled: bool = False
 
     allow_reset: bool = False
 
@@ -349,6 +352,9 @@ class System(Component):
         self.settings = settings
         self._instances = {}
         super().__init__(self)
+        if not is_thin_client:
+            telemetry = importlib.import_module("chromadb.telemetry.opentelemetry")
+            self.require(telemetry.OpenTelemetryClient)
 
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
