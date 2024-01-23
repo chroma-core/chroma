@@ -116,6 +116,7 @@ class Settings(BaseSettings):  # type: ignore
     is_persistent: bool = False
     persist_directory: str = "./chroma"
 
+    chroma_memory_limit: int = 0
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
