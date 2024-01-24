@@ -324,6 +324,10 @@ impl Component for PulsarIngestTopic {
         let stream = stream.then(|result| async {
             match result {
                 Ok(msg) => {
+                    println!(
+                        "PulsarIngestTopic received message with id: {:?}",
+                        msg.message_id
+                    );
                     // Convert the Pulsar Message to an EmbeddingRecord
                     let proto_embedding_record = msg.deserialize();
                     let id = msg.message_id;
@@ -336,12 +340,14 @@ impl Component for PulsarIngestTopic {
                         }
                         Err(err) => {
                             // TODO: Handle and log
+                            println!("PulsarIngestTopic received error while performing conversion: {:?}", err);
                         }
                     }
                     None
                 }
                 Err(err) => {
                     // TODO: Log an error
+                    println!("PulsarIngestTopic received error: {:?}", err);
                     // Put this on a dead letter queue, this concept does not exist in our
                     // system yet
                     None
