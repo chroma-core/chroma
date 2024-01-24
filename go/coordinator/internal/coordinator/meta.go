@@ -243,17 +243,44 @@ func (mt *MetaTable) GetCollections(ctx context.Context, collectionID types.Uniq
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	if _, ok := mt.tenantDatabaseCollectionCache[tenantID]; !ok {
-		log.Error("tenant not found", zap.Any("tenantID", tenantID))
-		return nil, common.ErrTenantNotFound
-	}
-	if _, ok := mt.tenantDatabaseCollectionCache[tenantID][databaseName]; !ok {
-		return nil, common.ErrDatabaseNotFound
-	}
-	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache[tenantID][databaseName]))
-	for _, collection := range mt.tenantDatabaseCollectionCache[tenantID][databaseName] {
-		if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
-			collections = append(collections, collection)
+	// There are three cases
+	// In the case of getting by id, we do not care about the tenant and database name.
+	// In the case of getting by name, we need the fully qualified path of the collection which is the tenant/database/name.
+	// In the case of getting by topic, we need the fully qualified path of the collection which is the tenant/database/topic.
+	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache))
+	if collectionID != types.NilUniqueID() {
+		found := false
+		// Case 1: getting by id
+		// Due to how the cache is constructed, we iterate over the whole cache to find the collection.
+		// This is not efficient but it is not a problem for now because the number of collections is small.
+		// HACK warning. TODO: fix this when we remove the cache.
+		for _, search_databases := range mt.tenantDatabaseCollectionCache {
+			for _, search_collections := range search_databases {
+				for _, collection := range search_collections {
+					if collection.ID == collectionID {
+						collections = append(collections, collection)
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			return nil, common.ErrCollectionNotFound
+		}
+	} else {
+		// Case 2 & 3: getting by name or topic
+		// Note: The support for case 3 is not correct here, we shouldn't require the database name and tenant to get by topic.
+		if _, ok := mt.tenantDatabaseCollectionCache[tenantID]; !ok {
+			log.Error("tenant not found", zap.Any("tenantID", tenantID))
+			return nil, common.ErrTenantNotFound
+		}
+		if _, ok := mt.tenantDatabaseCollectionCache[tenantID][databaseName]; !ok {
+			return nil, common.ErrDatabaseNotFound
+		}
+		for _, collection := range mt.tenantDatabaseCollectionCache[tenantID][databaseName] {
+			if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
+				collections = append(collections, collection)
+			}
 		}
 	}
 	log.Info("meta collections", zap.Any("collections", collections))
