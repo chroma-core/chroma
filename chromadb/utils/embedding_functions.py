@@ -751,9 +751,29 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         accept = "application/json"
         content_type = "application/json"
-        embeddings = []
-        for text in input:
-            input_body = {"inputText": text}
+        provider = self._model_name.split('.')[0]
+        if provider == "amazon":
+            embeddings = []
+            for text in input:
+                input_body = {
+                    "inputText": text
+                }
+                body = json.dumps(input_body)
+                response = self._client.invoke_model(
+                    body=body,
+                    modelId=self._model_name,
+                    accept=accept,
+                    contentType=content_type,
+                )
+                embedding = json.load(response.get("body")).get("embedding")
+                embeddings.append(embedding)
+        elif provider == "cohere":
+            # See Amazon Bedrock User Guide > Cohere Embed models for more information
+            # https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed.html
+            input_body = {
+                "texts": input,
+                "input_type": "search_document"
+            }
             body = json.dumps(input_body)
             response = self._client.invoke_model(
                 body=body,
@@ -761,8 +781,9 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 accept=accept,
                 contentType=content_type,
             )
-            embedding = json.load(response.get("body")).get("embedding")
-            embeddings.append(embedding)
+            embeddings = json.load(response.get("body")).get("embeddings")
+        else:
+            raise NotImplemented
         return embeddings
 
 
