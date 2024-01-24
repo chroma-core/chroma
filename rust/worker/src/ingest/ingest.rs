@@ -145,6 +145,10 @@ impl Handler<Memberlist> for Ingest {
     async fn handle(&mut self, msg: Memberlist, ctx: &ComponentContext<Self>) {
         let mut new_assignments = HashSet::new();
         let candidate_topics: Vec<String> = self.get_topics();
+        println!(
+            "Performing assignment for topics: {:?}. My ip: {}",
+            candidate_topics, self.my_ip
+        );
         // Scope for assigner write lock to be released so we don't hold it over await
         {
             let mut assigner = match self.assignment_policy.write() {
