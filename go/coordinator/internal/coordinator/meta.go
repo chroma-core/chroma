@@ -249,7 +249,6 @@ func (mt *MetaTable) GetCollections(ctx context.Context, collectionID types.Uniq
 	// In the case of getting by topic, we need the fully qualified path of the collection which is the tenant/database/topic.
 	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache))
 	if collectionID != types.NilUniqueID() {
-		found := false
 		// Case 1: getting by id
 		// Due to how the cache is constructed, we iterate over the whole cache to find the collection.
 		// This is not efficient but it is not a problem for now because the number of collections is small.
@@ -257,15 +256,11 @@ func (mt *MetaTable) GetCollections(ctx context.Context, collectionID types.Uniq
 		for _, search_databases := range mt.tenantDatabaseCollectionCache {
 			for _, search_collections := range search_databases {
 				for _, collection := range search_collections {
-					if collection.ID == collectionID {
+					if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
 						collections = append(collections, collection)
-						found = true
 					}
 				}
 			}
-		}
-		if !found {
-			return nil, common.ErrCollectionNotFound
 		}
 	} else {
 		// Case 2 & 3: getting by name or topic
