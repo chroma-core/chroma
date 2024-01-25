@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Sequence, Set, Type, cast
+from typing import Any, Dict, List, Sequence, Set
 from uuid import UUID
-from chromadb.config import Settings, System, get_class, get_fqn
+from chromadb.config import Settings, System
 from chromadb.ingest import CollectionAssignmentPolicy, Consumer
 from chromadb.proto.chroma_pb2_grpc import (
     # SegmentServerServicer,
@@ -12,18 +12,13 @@ import chromadb.proto.chroma_pb2 as proto
 import grpc
 from concurrent import futures
 from chromadb.proto.convert import (
-    from_proto_segment,
-    to_proto_seq_id,
-    to_proto_vector,
-    to_proto_vector_embedding_record,
+    to_proto_vector_embedding_record
 )
-from chromadb.segment import SegmentImplementation, SegmentType, VectorReader
+from chromadb.segment import SegmentImplementation, SegmentType
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
-    OpenTelemetryGranularity,
-    trace_method,
+    OpenTelemetryClient
 )
-from chromadb.types import EmbeddingRecord, ScalarEncoding, Segment, SegmentScope
+from chromadb.types import EmbeddingRecord
 from chromadb.segment.distributed import MemberlistProvider, Memberlist
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 from chromadb.ingest.impl.pulsar_admin import PulsarAdmin

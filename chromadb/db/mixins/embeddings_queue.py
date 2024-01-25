@@ -325,7 +325,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         start = start or self._next_seq_id()
         end = end or self.max_seqid()
         if not isinstance(start, int) or not isinstance(end, int):
-            raise ValueError("SeqIDs must be integers for sql-based EmbeddingsDB")
+            raise TypeError("SeqIDs must be integers for sql-based EmbeddingsDB")
         if start >= end:
             raise ValueError(f"Invalid SeqID range: {start} to {end}")
         return start, end

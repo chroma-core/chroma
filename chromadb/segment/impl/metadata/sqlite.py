@@ -486,7 +486,7 @@ class SqliteMetadataSegment(MetadataReader):
     def _where_map_criterion(
         self, q: QueryBuilder, where: Where, metadata_t: Table, embeddings_t: Table
     ) -> Criterion:
-        clause: list[Criterion] = []
+        clause: List[Criterion] = []
         for k, v in where.items():
             if k == "$and":
                 criteria = [

@@ -362,6 +362,13 @@ def test_modify_error_on_existing_name(api):
     with pytest.raises(Exception):
         c2.modify(name="testspace")
 
+def test_modify_warn_on_DF_change(api, caplog):
+    api.reset()
+
+    collection = api.create_collection("testspace")
+
+    with pytest.raises(Exception, match="not supported") as e:
+        collection.modify(metadata={"hnsw:space": "cosine"})
 
 def test_metadata_cru(api):
     api.reset()
@@ -506,8 +513,8 @@ def test_metadata_add_get_int_float(api):
     assert items["metadatas"][0]["int_value"] == 1
     assert items["metadatas"][0]["float_value"] == 1.001
     assert items["metadatas"][1]["int_value"] == 2
-    assert type(items["metadatas"][0]["int_value"]) == int
-    assert type(items["metadatas"][0]["float_value"]) == float
+    assert isinstance(items["metadatas"][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0]["float_value"], float)
 
 
 def test_metadata_add_query_int_float(api):
@@ -521,8 +528,8 @@ def test_metadata_add_query_int_float(api):
     assert items["metadatas"] is not None
     assert items["metadatas"][0][0]["int_value"] == 1
     assert items["metadatas"][0][0]["float_value"] == 1.001
-    assert type(items["metadatas"][0][0]["int_value"]) == int
-    assert type(items["metadatas"][0][0]["float_value"]) == float
+    assert isinstance(items["metadatas"][0][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0][0]["float_value"], float)
 
 
 def test_metadata_get_where_string(api):

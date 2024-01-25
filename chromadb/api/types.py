@@ -17,6 +17,7 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+from tenacity import retry
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -229,6 +230,20 @@ class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
 
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Raise an exception if __call__ is not defined since it is expected to be defined
+        call = getattr(cls, "__call__")
+
+        def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
+            result = call(self, input)
+            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+
+        setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)
+
 
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],
@@ -297,7 +312,7 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         raise ValueError(f"Expected metadata to be a non-empty dict, got {metadata}")
     for key, value in metadata.items():
         if not isinstance(key, str):
-            raise ValueError(
+            raise TypeError(
                 f"Expected metadata key to be a str, got {key} which is a {type(key)}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately

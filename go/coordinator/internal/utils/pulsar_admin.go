@@ -34,7 +34,7 @@ func CreateTopics(pulsarAdminURL string, tenant string, namespace string, topics
 			log.Info("Topic already exists", zap.String("topic", topic), zap.Any("metadata", metadata))
 			continue
 		}
-		err = admin.Topics().Create(*topicName, 1)
+		err = admin.Topics().Create(*topicName, 0)
 		if err != nil {
 			log.Error("Failed to create topic", zap.Error(err))
 			return err

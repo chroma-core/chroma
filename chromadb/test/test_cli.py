@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from chromadb.api.client import SharedSystemClient
 from chromadb.cli.cli import app
+from chromadb.cli.utils import set_log_file_path
 
 runner = CliRunner()
 
@@ -59,3 +60,6 @@ def test_system_info_with_remote() -> None:
     assert "chroma_version" in result.stdout
     assert "python_version" in result.stdout
     assert "datetime" in result.stdout
+def test_utils_set_log_file_path() -> None:
+    log_config = set_log_file_path("chromadb/log_config.yml", "test.log")
+    assert log_config["handlers"]["file"]["filename"] == "test.log"

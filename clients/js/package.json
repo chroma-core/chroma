@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.7.2",
+  "version": "1.8.1",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -77,7 +77,7 @@
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
-    "cohere-ai": "^5.0.0 || ^6.0.0",
+    "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
