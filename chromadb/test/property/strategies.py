@@ -236,7 +236,7 @@ def embedding_function_strategy(
 
 
 @dataclass
-class Collection():
+class Collection:
     name: str
     id: uuid.UUID
     metadata: Optional[types.Metadata]

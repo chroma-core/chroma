@@ -30,21 +30,18 @@ from chromadb.config import System, get_class
 memory_limit = 100
 
 
+# Helper class to keep tract of the last use id
 class LastUse:
     def __init__(self, n: int):
         self.n = n
         self.store = []
 
     def add(self, id: uuid.UUID):
-        # Check if new_id is already in the list
         if id in self.store:
-            # Move the existing ID to the end of the list
             self.store.remove(id)
             self.store.append(id)
         else:
-            # Add new_id to the list
             self.store.append(id)
-            # Keep only the last N IDs
             while len(self.store) > self.n:
                 self.store.pop(0)
         return self.store
@@ -58,6 +55,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     collections = Bundle("collections")
     collection_size_store: Dict[uuid.UUID, int] = {}
     segment_collection: Dict[uuid.UUID, uuid.UUID] = {}
+
     def __init__(self, system: System):
         super().__init__()
         self.segment_manager = system.require(SegmentManager)
@@ -67,7 +65,6 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         self.collection_created_counter = 0
         self.sysdb = system.require(SysDB)
         self.system = system
-
 
     @invariant()
     def last_queried_segments_should_be_in_cache(self):

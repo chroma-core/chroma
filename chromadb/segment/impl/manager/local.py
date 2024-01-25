@@ -34,13 +34,14 @@ if platform.system() != "Windows":
 elif platform.system() == "Windows":
     import ctypes
 
-
 SEGMENT_TYPE_IMPLS = {
     SegmentType.SQLITE: "chromadb.segment.impl.metadata.sqlite.SqliteMetadataSegment",
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
     SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
-def get_directory_size(directory: str):
+
+
+def get_directory_size(directory: str) -> int:
     total_size = 0
     for dirpath, _, filenames in os.walk(directory):
         for f in filenames:
@@ -85,8 +86,8 @@ class LocalSegmentManager(SegmentManager):
             else:
                 self._max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
             segment_limit = (
-                self._max_file_handles
-                // PersistentLocalHnswSegment.get_file_handle_count()
+                    self._max_file_handles
+                    // PersistentLocalHnswSegment.get_file_handle_count()
             )
             self._vector_instances_file_handle_cache = LRUCache(
                 segment_limit, callback=lambda _, v: v.close_persistent_index()
@@ -153,22 +154,23 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def _get_segment_disk_size(self, collection_id: UUID) -> float:
+    def _get_segment_disk_size(self, collection_id: UUID) -> int:
         segments = self._sysdb.get_segments(collection=collection_id, scope=SegmentScope.VECTOR)
         if len(segments) == 0:
             return 0
-        size = get_directory_size(os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
+        size = get_directory_size(
+            os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
         return size
 
-
     def _cleanup_segment(self, collection_id: UUID, target_size: int):
-        segment_sizes = {id: self._get_segment_disk_size(id) for id in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[id]}
+        segment_sizes = {id: self._get_segment_disk_size(id) for id in self._segment_cache if
+                         SegmentScope.VECTOR in self._segment_cache[id]}
         total_size = sum(segment_sizes.values())
         new_segment_size = self._get_segment_disk_size(collection_id)
 
         while total_size + new_segment_size >= target_size and self._segment_cache.keys():
             oldest_key = min(
-                (k for k in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[k]), 
+                (k for k in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[k]),
                 key=lambda k: self._segment_cache[k][SegmentScope.VECTOR]["last_used"],
                 default=None
             )
@@ -184,7 +186,6 @@ class LocalSegmentManager(SegmentManager):
             else:
                 break
 
-
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
 
@@ -194,7 +195,7 @@ class LocalSegmentManager(SegmentManager):
             scope = SegmentScope.VECTOR
         else:
             raise ValueError(f"Invalid segment type: {type}")
-        
+
         if scope not in self._segment_cache[collection_id]:
             memory_limit = self._system.settings.require("chroma_memory_limit_bytes")
             if type == VectorReader and self._system.settings.require("is_persistent") and memory_limit > 0:
