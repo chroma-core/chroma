@@ -11,25 +11,28 @@ import (
 	"go.uber.org/zap"
 )
 
-// ICoordinator is an interface that defines the methods for interacting with the
-// Chroma Coordinator. It is designed in a way that can be run standalone without
-// spinning off the GRPC service.
-type ICoordinator interface {
-	common.Component
-	ResetState(ctx context.Context) error
-	CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
-	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, dataName string) ([]*model.Collection, error)
-	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
-	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
-	CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
-	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
-	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
-	UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
-	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error)
-	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
-	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
-	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
-}
+type (
+	// ICoordinator is an interface that defines the methods for interacting with the
+	// Chroma Coordinator. It is designed in a way that can be run standalone without
+	// spinning off the GRPC service.
+	ICoordinator interface {
+		common.Component
+		ResetState(ctx context.Context) error
+		CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, error)
+		GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, collectionTopic *string, tenantID string, dataName string) ([]*model.Collection, error)
+		DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
+		UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
+		CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
+		GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, topic *string, collectionID types.UniqueID) ([]*model.Segment, error)
+		DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
+		UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
+		CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error)
+		GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
+		CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
+		GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
+		PushLogs(ctx context.Context, collectionID types.UniqueID, recordContent []string) error
+	}
+)
 
 func (s *Coordinator) ResetState(ctx context.Context) error {
 	return s.meta.ResetState(ctx)
@@ -118,6 +121,10 @@ func (s *Coordinator) UpdateSegment(ctx context.Context, updateSegment *model.Up
 		return nil, err
 	}
 	return segment, nil
+}
+
+func (s *Coordinator) PushLogs(ctx context.Context, collectionID types.UniqueID, recordContent []string) error {
+	return s.meta.PushLogs(ctx, collectionID, recordContent)
 }
 
 func verifyCreateCollection(collection *model.CreateCollection) error {

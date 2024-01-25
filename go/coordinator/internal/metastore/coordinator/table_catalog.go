@@ -562,3 +562,14 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 	log.Debug("segment updated", zap.Any("segment", result))
 	return result, nil
 }
+
+func (tc *Catalog) PushLogs(ctx context.Context, collectionID types.UniqueID, recordContent []string) error {
+	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		err := tc.metaDomain.RecordLogDb(txCtx).PushLogs(collectionID, recordContent)
+		if err != nil {
+			log.Error("error pushing logs", zap.Error(err))
+			return err
+		}
+		return nil
+	})
+}

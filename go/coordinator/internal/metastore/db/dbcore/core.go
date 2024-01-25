@@ -59,6 +59,7 @@ func ConnectTiDB(cfg DBConfig) *gorm.DB {
 	db.AutoMigrate(&dbmodel.CollectionMetadata{})
 	db.AutoMigrate(&dbmodel.Segment{})
 	db.AutoMigrate(&dbmodel.SegmentMetadata{})
+	db.AutoMigrate(&dbmodel.RecordLog{})
 	db.AutoMigrate(&dbmodel.Notification{})
 
 	return db
@@ -190,6 +191,10 @@ func CreateTestTables(db *gorm.DB) {
 	db.Migrator().DropTable(&dbmodel.SegmentMetadata{})
 	db.Migrator().CreateTable(&dbmodel.Segment{})
 	db.Migrator().CreateTable(&dbmodel.SegmentMetadata{})
+
+	// Setup record log related tables
+	db.Migrator().DropTable(&dbmodel.RecordLog{})
+	db.Migrator().CreateTable(&dbmodel.RecordLog{})
 
 	// Setup notification related tables
 	db.Migrator().DropTable(&dbmodel.Notification{})

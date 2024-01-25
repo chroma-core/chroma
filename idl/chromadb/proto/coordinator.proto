@@ -127,6 +127,26 @@ message Notification {
   string status = 4;
 }
 
+message PushLogsRequest {
+  string collection_id = 1;
+  repeated string records = 2;
+}
+
+message PushLogsResponse {
+  int64 record_id = 1;
+  int32 record_count = 2;
+}
+
+message PullLogsRequest {
+  string collection_id = 1;
+  int64 start_from_id = 2;
+  int32 batch_size = 3;
+}
+
+message PullLogsResponse {
+  repeated string records = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (ChromaResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -141,4 +161,6 @@ service SysDB {
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (ChromaResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ChromaResponse) {}
+  rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
 }
