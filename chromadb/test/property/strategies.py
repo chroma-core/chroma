@@ -269,7 +269,7 @@ def collections(
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
-    like_fields_size = 5
+    like_fields_size = 3
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
