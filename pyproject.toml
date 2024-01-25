@@ -53,6 +53,13 @@ target-version = ['py38', 'py39', 'py310', 'py311']
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
+[tool.mypy]
+ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = ["chromadb.proto.*"]
+ignore_errors = true
+
 [project.scripts]
 chroma = "chromadb.cli.cli:app"
 
