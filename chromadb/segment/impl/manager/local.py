@@ -40,9 +40,9 @@ SEGMENT_TYPE_IMPLS = {
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
     SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
-def get_size(start_path: str):
+def get_directory_size(directory: str):
     total_size = 0
-    for dirpath, _, filenames in os.walk(start_path):
+    for dirpath, _, filenames in os.walk(directory):
         for f in filenames:
             fp = os.path.join(dirpath, f)
             # skip if it is symbolic link
@@ -157,7 +157,7 @@ class LocalSegmentManager(SegmentManager):
         segments = self._sysdb.get_segments(collection=collection_id, scope=SegmentScope.VECTOR)
         if len(segments) == 0:
             return 0
-        size = get_size(os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
+        size = get_directory_size(os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
         return size
 
 

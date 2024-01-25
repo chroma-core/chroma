@@ -57,7 +57,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     collections: Bundle[strategies.Collection]
     collections = Bundle("collections")
     collection_size_store: Dict[uuid.UUID, int] = {}
-
+    segment_collection: Dict[uuid.UUID, uuid.UUID] = {}
     def __init__(self, system: System):
         super().__init__()
         self.segment_manager = system.require(SegmentManager)
@@ -67,6 +67,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         self.collection_created_counter = 0
         self.sysdb = system.require(SysDB)
         self.system = system
+
 
     @invariant()
     def last_queried_segments_should_be_in_cache(self):
@@ -102,6 +103,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         segments = self.segment_manager.create_segments(asdict(coll))
         for segment in segments:
             self.sysdb.create_segment(segment)
+            self.segment_collection[segment["id"]] = coll.id
         self.collection_created_counter += 1
         self.collection_size_store[coll.id] = random.randint(0, memory_limit)
         return multiple(coll)
@@ -113,11 +115,13 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         assert segment is not None
 
     @staticmethod
-    def mock_collection_size(self, collection_id):
+    def mock_directory_size(directory: str):
+        path_id = directory.split("/").pop()
+        collection_id = SegmentManagerStateMachine.segment_collection[uuid.UUID(path_id)]
         return SegmentManagerStateMachine.collection_size_store[collection_id]
 
 
-@patch.object(LocalSegmentManager, '_get_segment_disk_size', SegmentManagerStateMachine.mock_collection_size)
+@patch('chromadb.segment.impl.manager.local.get_directory_size', SegmentManagerStateMachine.mock_directory_size)
 def test_segment_manager(caplog: pytest.LogCaptureFixture, system: System) -> None:
     system.settings.chroma_memory_limit_bytes = memory_limit
     run_state_machine_as_test(
