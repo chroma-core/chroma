@@ -226,7 +226,6 @@ impl Handler<Memberlist> for Ingest {
 
         // Subscribe to new topics
         for topic in to_add.iter() {
-            println!("Adding topic: {}", topic);
             // Do the subscription and register the stream to this ingest component
             let consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor> = self
                 .pulsar
@@ -236,6 +235,7 @@ impl Handler<Memberlist> for Ingest {
                 .build()
                 .await
                 .unwrap();
+            println!("Created consumer for topic: {}", topic);
 
             let scheduler = match &self.scheduler {
                 Some(scheduler) => scheduler.clone(),
@@ -311,9 +311,13 @@ impl Component for PulsarIngestTopic {
     }
 
     fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
+        println!("Starting PulsarIngestTopic for topic");
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),
-            Err(err) => None,
+            Err(err) => {
+                println!("Failed to take consumer handle: {:?}", err);
+                None
+            }
         };
         let stream = match stream {
             Some(stream) => stream,
@@ -382,7 +386,10 @@ impl Handler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {
         let coll = match coll {
             Ok(coll) => coll,
             Err(err) => {
-                // TODO: Log error and handle. How do we want to deal with this?
+                println!(
+                    "PulsarIngestTopic received error while fetching collection: {:?}",
+                    err
+                );
                 return;
             }
         };
@@ -390,7 +397,7 @@ impl Handler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {
         let coll = match coll.first() {
             Some(coll) => coll,
             None => {
-                // TODO: Log error, as we found no collection with this id
+                println!("PulsarIngestTopic received empty collection");
                 return;
             }
         };
