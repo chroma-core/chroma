@@ -722,6 +722,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         topic="test_topic_a",
         collection=sample_collections[0]["id"],
         metadata=metadata,
+        last_used = 0
     )
 
     sysdb.reset_state()

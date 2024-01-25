@@ -153,7 +153,7 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def _get_segment_disk_size(self, collection_id: UUID):
+    def _get_segment_disk_size(self, collection_id: UUID) -> float:
         segments = self._sysdb.get_segments(collection=collection_id, scope=SegmentScope.VECTOR)
         size = get_size(os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
         return size
@@ -161,11 +161,11 @@ class LocalSegmentManager(SegmentManager):
 
     def _cleanup_segment(self, collection_id: UUID, target_size: int):
         # Dictionary to store the size of each segment
-        segment_sizes = {id: self._get_segment_disk_size(id) for id in self._segment_cache.keys()}
+        segment_sizes = {id: self._get_segment_disk_size(id) for id in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[id]}
         total_size = sum(segment_sizes.values())
         new_segment_size = self._get_segment_disk_size(collection_id)
 
-        while total_size + new_segment_size > target_size and self._segment_cache.keys():
+        while total_size + new_segment_size >= target_size and self._segment_cache.keys():
             oldest_key = min(
                 (k for k in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[k]), 
                 key=lambda k: self._segment_cache[k][SegmentScope.VECTOR]["last_used"],
@@ -181,7 +181,7 @@ class LocalSegmentManager(SegmentManager):
                 # Update total_size and remove the segment from cache and sizes dictionary
                 total_size -= segment_sizes[oldest_key]
                 del segment_sizes[oldest_key]
-                del self._segment_cache[oldest_key]
+                del self._segment_cache[oldest_key][SegmentScope.VECTOR]
             else:
                 break
 
@@ -196,7 +196,7 @@ class LocalSegmentManager(SegmentManager):
         else:
             raise ValueError(f"Invalid segment type: {type}")
         
-        if scope not in self._segment_cache[collection_id]:
+        if collection_id not in self._segment_cache or scope not in self._segment_cache[collection_id]:
             memory_limit = self._system.settings.require("chroma_memory_limit")
             if type == VectorReader and self._system.settings.require("is_persistent") and memory_limit > 0:
                 self._cleanup_segment(collection_id, memory_limit)

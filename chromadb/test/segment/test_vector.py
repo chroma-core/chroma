@@ -115,6 +115,7 @@ def create_random_segment_definition() -> Segment:
         topic="persistent://test/test/test_topic_1",
         collection=None,
         metadata=test_hnsw_config,
+        last_used=0,
     )
 
 
