@@ -195,7 +195,7 @@ class LocalSegmentManager(SegmentManager):
         else:
             raise ValueError(f"Invalid segment type: {type}")
         
-        if collection_id not in self._segment_cache or scope not in self._segment_cache[collection_id]:
+        if scope not in self._segment_cache[collection_id]:
             memory_limit = self._system.settings.require("chroma_memory_limit_bytes")
             if type == VectorReader and self._system.settings.require("is_persistent") and memory_limit > 0:
                 self._cleanup_segment(collection_id, memory_limit)

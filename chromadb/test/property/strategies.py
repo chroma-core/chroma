@@ -235,7 +235,8 @@ def embedding_function_strategy(
     )
 
 
-class Collection(TypedDict):
+@dataclass
+class Collection():
     name: str
     id: uuid.UUID
     metadata: Optional[types.Metadata]

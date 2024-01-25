@@ -2,7 +2,8 @@ import uuid
 
 import pytest
 import chromadb.test.property.strategies as strategies
-from unittest.mock import patch, Mock
+from unittest.mock import patch
+from dataclasses import asdict
 import random
 from hypothesis.stateful import (
     Bundle,
@@ -98,17 +99,17 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     def create_segment(
             self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
-        segments = self.segment_manager.create_segments(coll)
+        segments = self.segment_manager.create_segments(asdict(coll))
         for segment in segments:
             self.sysdb.create_segment(segment)
         self.collection_created_counter += 1
-        self.collection_size_store[coll["id"]] = random.randint(0, memory_limit)
+        self.collection_size_store[coll.id] = random.randint(0, memory_limit)
         return multiple(coll)
 
     @rule(coll=collections)
     def get_segment(self, coll: strategies.Collection) -> None:
-        segment = self.segment_manager.get_segment(collection_id=coll["id"], type=VectorReader)
-        self.last_use.add(coll["id"])
+        segment = self.segment_manager.get_segment(collection_id=coll.id, type=VectorReader)
+        self.last_use.add(coll.id)
         assert segment is not None
 
     @staticmethod
