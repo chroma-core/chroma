@@ -13,23 +13,23 @@ from typing_extensions import Literal
 import platform
 
 
-in_pydantic_v2 = False
+IN_PYDANTIC_V2 = False
 try:
     from pydantic import BaseSettings
 except ImportError:
-    in_pydantic_v2 = True
+    IN_PYDANTIC_V2 = True
     from pydantic.v1 import BaseSettings
     from pydantic.v1 import validator
 
-if not in_pydantic_v2:
+if not IN_PYDANTIC_V2:
     from pydantic import validator  # type: ignore # noqa
 
 # The thin client will have a flag to control which implementations to use
-is_thin_client = False
+IS_THIN_CLIENT = False
 try:
-    from chromadb.is_thin_client import is_thin_client  # type: ignore
+    from chromadb.IS_THIN_CLIENT import IS_THIN_CLIENT  # type: ignore
 except ImportError:
-    is_thin_client = False
+    IS_THIN_CLIENT = False
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,120 @@ DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
 
-class Settings(BaseSettings):  # type: ignore
+class ServerSettings(BaseSettings):  # type: ignore
+    chroma_server_host: Optional[str] = None
+    chroma_server_headers: Optional[Dict[str, str]] = None
+    chroma_server_http_port: Optional[str] = None
+    chroma_server_ssl_enabled: Optional[bool] = False
+    chroma_server_api_default_path: Optional[str] = "/api/v1"
+    chroma_server_grpc_port: Optional[str] = None
+    # eg ["http://localhost:3000"]
+    chroma_server_cors_allow_origins: List[str] = []
+
+    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+    def empty_str_to_none(cls, v: str) -> Optional[str]:
+        if type(v) is str and v.strip() == "":
+            return None
+        return v
+
+    chroma_server_nofile: Optional[int] = None
+
+    pulsar_broker_url: Optional[str] = None
+    pulsar_admin_port: Optional[str] = "8080"
+    pulsar_broker_port: Optional[str] = "6650"
+
+    chroma_server_auth_provider: Optional[str] = None
+
+    @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
+    def chroma_server_auth_provider_non_empty(cls: type, v: str) -> Optional[str]:
+        if v and not v.strip():
+            raise ValueError(
+                "chroma_server_auth_provider cannot be empty or just whitespace"
+            )
+        return v
+
+    chroma_server_auth_configuration_provider: Optional[str] = None
+    chroma_server_auth_configuration_file: Optional[str] = None
+    chroma_server_auth_credentials_provider: Optional[str] = None
+    chroma_server_auth_credentials_file: Optional[str] = None
+    chroma_server_auth_credentials: Optional[str] = None
+
+    @validator(
+        "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
+    )
+    def chroma_server_auth_credentials_file_non_empty_file_exists(
+        cls: type, v: str
+    ) -> Optional[str]:
+        if v and not v.strip():
+            raise ValueError(
+                "chroma_server_auth_credentials_file cannot be empty or just whitespace"
+            )
+        if v and not os.path.isfile(os.path.join(v)):
+            raise ValueError(
+                f"chroma_server_auth_credentials_file [{v}] does not exist"
+            )
+        return v
+
+    chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
+        "/api/v1": ["GET"],
+        "/api/v1/heartbeat": ["GET"],
+        "/api/v1/version": ["GET"],
+    }
+
+    chroma_server_auth_token_transport_header: Optional[str] = None
+    chroma_server_authz_provider: Optional[str] = None
+    chroma_server_authz_config_file: Optional[str] = None
+    chroma_server_authz_config: Optional[Dict[str, Any]] = None
+
+    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
+        "/api/v1": ["GET"],
+        "/api/v1/heartbeat": ["GET"],
+        "/api/v1/version": ["GET"],
+    }
+
+    @validator(
+        "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
+    )
+    def chroma_server_authz_config_file_non_empty_file_exists(
+        cls: type, v: str
+    ) -> Optional[str]:
+        if v and not v.strip():
+            raise ValueError(
+                "chroma_server_authz_config_file cannot be empty or just whitespace"
+            )
+        if v and not os.path.isfile(os.path.join(v)):
+            raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
+        return v
+
+    chroma_server_authz_config_provider: Optional[
+        str
+    ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
+
+
+class ClientSettings(BaseSettings):  # type: ignore
+    chroma_client_auth_credentials_provider: Optional[
+        str
+    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
+    chroma_client_auth_protocol_adapter: Optional[
+        str
+    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
+    chroma_client_auth_credentials_file: Optional[str] = None
+    chroma_client_auth_credentials: Optional[str] = None
+    chroma_client_auth_token_transport_header: Optional[str] = None
+
+    chroma_client_auth_provider: Optional[str] = None
+
+    anonymized_telemetry: bool = True
+
+    chroma_otel_collection_endpoint: Optional[str] = ""
+    chroma_otel_service_name: Optional[str] = "chromadb"
+    chroma_otel_collection_headers: Dict[str, str] = {}
+    chroma_otel_granularity: Optional[str] = None
+
+
+class SettingsBase(BaseSettings):  # type: ignore
     environment: str = ""
+    allow_reset: bool = False
 
     # Legacy config has to be kept around because pydantic will error
     # on nonexisting keys
@@ -116,132 +228,25 @@ class Settings(BaseSettings):  # type: ignore
     is_persistent: bool = False
     persist_directory: str = "./chroma"
 
-    chroma_server_host: Optional[str] = None
-    chroma_server_headers: Optional[Dict[str, str]] = None
-    chroma_server_http_port: Optional[str] = None
-    chroma_server_ssl_enabled: Optional[bool] = False
-    chroma_server_api_default_path: Optional[str] = "/api/v1"
-    chroma_server_grpc_port: Optional[str] = None
-    # eg ["http://localhost:3000"]
-    chroma_server_cors_allow_origins: List[str] = []
-
-    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
-    def empty_str_to_none(cls, v: str) -> Optional[str]:
-        if type(v) is str and v.strip() == "":
-            return None
-        return v
-
-    chroma_server_nofile: Optional[int] = None
-
-    pulsar_broker_url: Optional[str] = None
-    pulsar_admin_port: Optional[str] = "8080"
-    pulsar_broker_port: Optional[str] = "6650"
-
-    chroma_server_auth_provider: Optional[str] = None
-
-    @validator("chroma_server_auth_provider", pre=True, always=True, allow_reuse=True)
-    def chroma_server_auth_provider_non_empty(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_provider cannot be empty or just whitespace"
-            )
-        return v
-
-    chroma_server_auth_configuration_provider: Optional[str] = None
-    chroma_server_auth_configuration_file: Optional[str] = None
-    chroma_server_auth_credentials_provider: Optional[str] = None
-    chroma_server_auth_credentials_file: Optional[str] = None
-    chroma_server_auth_credentials: Optional[str] = None
-
-    @validator(
-        "chroma_server_auth_credentials_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_auth_credentials_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_auth_credentials_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(
-                f"chroma_server_auth_credentials_file [{v}] does not exist"
-            )
-        return v
-
-    chroma_client_auth_provider: Optional[str] = None
-    chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
-    }
-
-    chroma_client_auth_credentials_provider: Optional[
-        str
-    ] = "chromadb.auth.providers.ConfigurationClientAuthCredentialsProvider"
-    chroma_client_auth_protocol_adapter: Optional[
-        str
-    ] = "chromadb.auth.providers.RequestsClientAuthProtocolAdapter"
-    chroma_client_auth_credentials_file: Optional[str] = None
-    chroma_client_auth_credentials: Optional[str] = None
-    chroma_client_auth_token_transport_header: Optional[str] = None
-    chroma_server_auth_token_transport_header: Optional[str] = None
-
-    chroma_server_authz_provider: Optional[str] = None
-
-    chroma_server_authz_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
-    }
-    chroma_server_authz_config_file: Optional[str] = None
-
-    chroma_server_authz_config: Optional[Dict[str, Any]] = None
-
-    @validator(
-        "chroma_server_authz_config_file", pre=True, always=True, allow_reuse=True
-    )
-    def chroma_server_authz_config_file_non_empty_file_exists(
-        cls: Type["Settings"], v: str
-    ) -> Optional[str]:
-        if v and not v.strip():
-            raise ValueError(
-                "chroma_server_authz_config_file cannot be empty or just whitespace"
-            )
-        if v and not os.path.isfile(os.path.join(v)):
-            raise ValueError(f"chroma_server_authz_config_file [{v}] does not exist")
-        return v
-
-    chroma_server_authz_config_provider: Optional[
-        str
-    ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
-
-    # TODO comment
-    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
-
-    anonymized_telemetry: bool = True
-
-    chroma_otel_collection_endpoint: Optional[str] = ""
-    chroma_otel_service_name: Optional[str] = "chromadb"
-    chroma_otel_collection_headers: Dict[str, str] = {}
-    chroma_otel_granularity: Optional[str] = None
-
-    allow_reset: bool = False
-
     migrations: Literal["none", "validate", "apply"] = "apply"
     # you cannot change the hash_algorithm after migrations have already been applied once
     # this is intended to be a first-time setup configuration
     migrations_hash_algorithm: Literal["md5", "sha256"] = "md5"
 
+    # TODO comment
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+
+
+class Settings(SettingsBase, ClientSettings, ServerSettings):
     def require(self, key: str) -> Any:
-        """Return the value of a required config key, or raise an exception if it is not
-        set"""
-        val = self[key]
-        if val is None:
+        """
+        Return the value of a required config key, or raise an exception if it is not set
+        """
+        value = self[key]
+        # Raise an exception if the value is None
+        if value is None:
             raise ValueError(f"Missing required config value '{key}'")
-        return val
+        return value
 
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
@@ -301,7 +306,7 @@ class System(Component):
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
-        if is_thin_client:
+        if IS_THIN_CLIENT:
             # The thin client is a system with only the API component
             if settings["chroma_api_impl"] != "chromadb.api.fastapi.FastAPI":
                 raise RuntimeError(
