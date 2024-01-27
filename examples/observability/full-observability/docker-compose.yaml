@@ -29,6 +29,7 @@ services:
       - chroma_otel_logs_enabled=true
     ports:
       - 8000:8000
+    restart: always
     depends_on: [ otel-collector ]
     networks:
       - net
@@ -42,6 +43,7 @@ services:
       - "4318:4318" # OTLP HTTP
       - "55681:55681" # zPages
       - "9091:9090" # Prometheus metrics
+    restart: unless-stopped
     networks:
       - net
   grafana:
@@ -55,6 +57,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     ports:
       - "3000:3000"
+    restart: unless-stopped
     networks:
       - net
   prometheus:
@@ -63,12 +66,24 @@ services:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+    restart: unless-stopped
     networks:
       - net
   zipkin:
     image: openzipkin/zipkin:latest
+    environment:
+      - STORAGE_TYPE=mysql
+      - MYSQL_HOST=zipkin-storage
+      - MYSQL_USER=zipkin
+      - MYSQL_PASS=zipkin
     ports:
       - "9411:9411"
+    restart: unless-stopped
+    networks:
+      - net
+  zipkin-storage:
+    image: openzipkin/zipkin-mysql:${TAG:-latest}
+    restart: unless-stopped
     networks:
       - net
   loki:
@@ -77,6 +92,7 @@ services:
       - loki-data:/loki
     ports:
       - "3100:3100"
+    restart: unless-stopped
     networks:
       - net
 volumes:

@@ -10,6 +10,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
+    histogram,
 )
 from chromadb.types import (
     EmbeddingRecord,
@@ -124,6 +125,11 @@ class LocalHnswSegment(VectorReader):
         return results
 
     @trace_method("LocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL)
+    @histogram(
+        name="LocalHnswSegment.query_vectors",
+        unit="ms",
+        description="HNSW index query times.",
+    )
     @override
     def query_vectors(
         self, query: VectorQuery
@@ -233,6 +239,11 @@ class LocalHnswSegment(VectorReader):
             index.resize_index(max(new_size, DEFAULT_CAPACITY))
 
     @trace_method("LocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL)
+    @histogram(
+        "LocalHnswSegment._apply_batch",
+        unit="ms",
+        description="Time to transfer bruteforce to HNSW index.",
+    )
     def _apply_batch(self, batch: Batch) -> None:
         """Apply a batch of changes, as atomically as possible."""
         deleted_ids = batch.get_deleted_ids()

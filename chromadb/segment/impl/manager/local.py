@@ -18,6 +18,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
+from chromadb.telemetry.opentelemetry.segments import register_segment_manager_metrics
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
@@ -84,6 +85,7 @@ class LocalSegmentManager(SegmentManager):
         for instance in self._instances.values():
             instance.start()
         super().start()
+        register_segment_manager_metrics(self._opentelemetry_client, self)
 
     @override
     def stop(self) -> None:

@@ -4,6 +4,11 @@ receivers:
       grpc:
       http:
 
+processors:
+  batch:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 90
 exporters:
   logging: # this is more for debug, you'll need a specific exporter for Grafana
   zipkin:
@@ -17,9 +22,11 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
+      processors: [batch, memory_limiter]
       exporters: [zipkin]
     metrics:
       receivers: [otlp]
+      processors: [batch, memory_limiter]
       exporters: [prometheus]
     logs:
       receivers: [otlp]

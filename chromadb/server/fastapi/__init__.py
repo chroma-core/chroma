@@ -52,13 +52,15 @@ import logging
 
 from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import register_baseline_metrics
+from chromadb.telemetry.opentelemetry.otel import span_proxy_context
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
-    span_proxy_context,
+    instrument_fastapi,
+    get_current_span_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ async def catch_exceptions_middleware(
         try:
             return await call_next(request)
         except Exception as e:
-            trace_id = OpenTelemetryClient.get_current_span_id()
+            trace_id = get_current_span_id()
             if isinstance(e, ChromaError):
                 ex = fastapi_json_response(e, trace_id=trace_id)
             else:
@@ -290,8 +292,8 @@ class FastAPI(chromadb.server.Server):
         self._app.include_router(self.router)
 
         use_route_names_as_operation_ids(self._app)
-        self._opentelemetry_client.instrument_fastapi(self._app)
-        register_baseline_metrics(self._opentelemetry_client)
+        instrument_fastapi(self._app)
+        register_baseline_metrics(self._opentelemetry_client, self._system.settings)
 
     def app(self) -> fastapi.FastAPI:
         return self._app

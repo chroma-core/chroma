@@ -222,12 +222,13 @@ class Settings(BaseSettings):  # type: ignore
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
     anonymized_telemetry: bool = True
-
+    # TODO remove the OTEL config below as it has been moved to chromadb.telemetry.opentelemetry.TelemetrySettings
+    chroma_otel_enabled: bool = False
     chroma_otel_collection_endpoint: Optional[str] = ""
     chroma_otel_service_name: Optional[str] = "chromadb"
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
-    chroma_otel_traces_enabled: bool = True
+    chroma_otel_traces_enabled: bool = False
     chroma_otel_metrics_enabled: bool = False
     chroma_otel_logs_enabled: bool = False
 
@@ -352,9 +353,6 @@ class System(Component):
         self.settings = settings
         self._instances = {}
         super().__init__(self)
-        if not is_thin_client:
-            telemetry = importlib.import_module("chromadb.telemetry.opentelemetry")
-            self.require(telemetry.OpenTelemetryClient)
 
     def instance(self, type: Type[T]) -> T:
         """Return an instance of the component type specified. If the system is running,
