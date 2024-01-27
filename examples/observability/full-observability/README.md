@@ -19,3 +19,21 @@ Under dashboards, you will find the `Chroma Basic` dashboard.
 ```bash
 docker compose -f examples/observability/full-observability/docker-compose.yaml down --volumes --rmi
 ```
+
+## Dashboard Examples
+
+**Core Metrics:**
+
+![img.png](img.png)
+
+**Network:**
+
+![img_1.png](img_1.png)
+
+**Memory and CPU:**
+
+![img_2.png](img_2.png)
+
+**Logs:**
+
+![img_3.png](img_3.png)
