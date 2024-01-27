@@ -1,6 +1,7 @@
 import sqlite3
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Set
+from typing import Any, Set, Tuple, Dict, Optional, Union
 import threading
 from overrides import override
 
@@ -13,7 +14,7 @@ class Connection:
     _conn: sqlite3.Connection
 
     def __init__(
-        self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
+            self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
     ):
         self._pool = pool
         self._db_file = db_file
@@ -119,41 +120,86 @@ class PerThreadPool(Pool):
     """Maintains a connection per thread. For now this does not maintain a cap on the number of connections, but it could be
     extended to do so and block on connect() if the cap is reached.
     """
-
-    _connections: Set[Connection]
+    # the connection dict holds a tuple of (connection, is_checked_out, last_used_time), if the last_used_time is None that implies that the connection is checked out
+    _connections: Dict[Union[int, str], Tuple[Connection, bool, Optional[float]]]
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
     _is_uri_: bool
 
-    def __init__(self, db_file: str, is_uri: bool = False):
-        self._connections = set()
+    def __init__(
+            self, db_file: str, is_uri: bool = False, connection_lru_time_seconds: int = 60
+    ):
+        self._connections = dict()
         self._connection = threading.local()
         self._lock = threading.Lock()
         self._db_file = db_file
         self._is_uri = is_uri
+        self._connection_lru_time_seconds = connection_lru_time_seconds
+
+    @staticmethod
+    def _get_thread_id() -> Union[int, str]:
+        return threading.current_thread().ident or threading.current_thread().name
+
+    def _checkout(self, _new_conn: bool = False, *args, **kwargs) -> Connection:
+        with self._lock:
+            if _new_conn is None:
+                _conn = self._connections[PerThreadPool._get_thread_id()]
+            else:
+                self._connection.conn = Connection(
+                    self, self._db_file, self._is_uri, *args, **kwargs
+                )
+                _conn = (self._connection.conn, True, None)
+            self._connections[PerThreadPool._get_thread_id()] = (_conn[0], True, None)
+            return _conn[0]
+
+    def _checkin(self) -> None:
+        with self._lock:
+            self._connections[PerThreadPool._get_thread_id()] = (
+                self._connections[PerThreadPool._get_thread_id()][0],
+                False,
+                time.time(),
+            )
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
-        if hasattr(self._connection, "conn") and self._connection.conn is not None:
-            return self._connection.conn  # type: ignore # cast doesn't work here for some reason
+        _thread_id = PerThreadPool._get_thread_id()
+        self._lru_close()
+        if (
+                hasattr(self._connection, "conn")
+                and self._connection.conn is not None
+                and _thread_id in self._connections.keys()
+        ):
+            return self._checkout()
         else:
-            new_connection = Connection(
-                self, self._db_file, self._is_uri, *args, **kwargs
-            )
-            self._connection.conn = new_connection
-            with self._lock:
-                self._connections.add(new_connection)
-            return new_connection
+            return self._checkout(True, *args, **kwargs)
+
+    def _lru_close(self) -> None:
+        with self._lock:
+            ids_to_remove = []
+            for _id, conn in self._connections.items():
+                if _id == threading.current_thread().ident:
+                    continue
+                if (
+                        conn[2] is not None
+                        and conn[2] < time.time() - self._connection_lru_time_seconds
+                ):
+                    try:
+                        conn[0].close_actual()
+                    except sqlite3.ProgrammingError:
+                        pass
+                    ids_to_remove.append(_id)
+            for _id in ids_to_remove:
+                del self._connections[_id]
 
     @override
     def close(self) -> None:
         with self._lock:
-            for conn in self._connections:
-                conn.close_actual()
+            for _, conn in self._connections.items():
+                conn[0].close_actual()
             self._connections.clear()
             self._connection = threading.local()
 
     @override
     def return_to_pool(self, conn: Connection) -> None:
-        pass  # Each thread gets its own connection, so we don't need to return it to the pool
+        self._checkin()
