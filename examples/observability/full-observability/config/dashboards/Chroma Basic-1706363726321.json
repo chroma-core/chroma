@@ -19,7 +19,6 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 2,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -1017,8 +1016,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1750,30 +1748,11 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": [],
+  "tags": [
+    "chromadb"
+  ],
   "templating": {
-    "list": [
-      {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "hide": 0,
-        "label": "tqweq",
-        "name": "query0",
-        "options": [
-          {
-            "selected": true,
-            "text": "",
-            "value": ""
-          }
-        ],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
-      }
-    ]
+    "list": []
   },
   "time": {
     "from": "now-1h",
@@ -1783,6 +1762,6 @@
   "timezone": "",
   "title": "Chroma Basic",
   "uid": "a23dfb8c-45ee-4e9a-bc57-31035df59e60",
-  "version": 16,
+  "version": 18,
   "weekStart": ""
 }
