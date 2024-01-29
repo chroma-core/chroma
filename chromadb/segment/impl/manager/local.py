@@ -7,7 +7,7 @@ from chromadb.segment import (
     VectorReader,
     S,
 )
-import time
+from chromadb.segment.impl.manager.cache.cache import SegmentLRUCache, BasicCache,SegmentCache
 import os
 
 from chromadb.config import System, get_class
@@ -24,7 +24,6 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.types import Collection, Operation, Segment, SegmentScope, Metadata
 from typing import Dict, Type, Sequence, Optional, cast
 from uuid import UUID, uuid4
-from collections import defaultdict
 import platform
 
 from chromadb.utils.lru_cache import LRUCache
@@ -61,9 +60,6 @@ class LocalSegmentManager(SegmentManager):
     _vector_instances_file_handle_cache: LRUCache[
         UUID, PersistentLocalHnswSegment
     ]  # LRU cache to manage file handles across vector segment instances
-    _segment_cache: Dict[
-        UUID, Dict[SegmentScope, Segment]
-    ]  # Tracks which segments are loaded for a given collection
     _vector_segment_type: SegmentType = SegmentType.HNSW_LOCAL_MEMORY
     _lock: Lock
     _max_file_handles: int
@@ -74,7 +70,13 @@ class LocalSegmentManager(SegmentManager):
         self._system = system
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
-        self._segment_cache = defaultdict(dict)
+        self.segment_cache: Dict[SegmentScope, SegmentCache] = {SegmentScope.METADATA: BasicCache()}
+        if system.settings.chroma_segment_cache_policy is "LRU" and system.settings.chroma_memory_limit_bytes > 0:
+            self.segment_cache[SegmentScope.VECTOR] = SegmentLRUCache(capacity=system.settings.chroma_memory_limit_bytes,callback=lambda k, v: self.callback_cache_evict(v), size_func=lambda k: self._get_segment_disk_size(k))
+        else:
+            self.segment_cache[SegmentScope.VECTOR] = BasicCache()
+
+
         self._lock = Lock()
 
         # TODO: prototyping with distributed segment for now, but this should be a configurable option
@@ -92,6 +94,11 @@ class LocalSegmentManager(SegmentManager):
             self._vector_instances_file_handle_cache = LRUCache(
                 segment_limit, callback=lambda _, v: v.close_persistent_index()
             )
+
+    def callback_cache_evict(self, segment: Segment):
+        instance = self._instance(segment)
+        instance.stop()
+
 
     @override
     def start(self) -> None:
@@ -111,7 +118,9 @@ class LocalSegmentManager(SegmentManager):
             instance.stop()
             instance.reset_state()
         self._instances = {}
-        self._segment_cache = defaultdict(dict)
+        self.segment_cache[SegmentScope.METADATA].reset()
+        self.segment_cache[SegmentScope.VECTOR].reset()
+
         super().reset_state()
 
     @trace_method(
@@ -144,10 +153,10 @@ class LocalSegmentManager(SegmentManager):
                     instance = self.get_segment(collection_id, MetadataReader)
                     instance.delete()
                 del self._instances[segment["id"]]
-            if collection_id in self._segment_cache:
-                if segment["scope"] in self._segment_cache[collection_id]:
-                    del self._segment_cache[collection_id][segment["scope"]]
-                del self._segment_cache[collection_id]
+            if segment["scope"] is SegmentScope.VECTOR:
+                self.segment_cache[SegmentScope.VECTOR].pop(collection_id)
+            if segment["scope"] is SegmentScope.METADATA:
+                self.segment_cache[SegmentScope.METADATA].pop(collection_id)
         return [s["id"] for s in segments]
 
     @trace_method(
@@ -162,33 +171,14 @@ class LocalSegmentManager(SegmentManager):
             os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
         return size
 
-    def _cleanup_segment(self, collection_id: UUID, target_size: int):
-        segment_sizes = {id: self._get_segment_disk_size(id) for id in self._segment_cache if
-                         SegmentScope.VECTOR in self._segment_cache[id]}
-        total_size = sum(segment_sizes.values())
-        new_segment_size = self._get_segment_disk_size(collection_id)
-
-        while total_size + new_segment_size >= target_size and self._segment_cache.keys():
-            oldest_key = min(
-                (k for k in self._segment_cache if SegmentScope.VECTOR in self._segment_cache[k]),
-                key=lambda k: self._segment_cache[k][SegmentScope.VECTOR]["last_used"],
-                default=None
-            )
-
-            if oldest_key is not None:
-                # Stop the instance and remove from cache
-                instance = self._instance(self._segment_cache[oldest_key][SegmentScope.VECTOR])
-                instance.stop()
-                # Update total_size and remove the segment from cache and sizes dictionary
-                total_size -= segment_sizes[oldest_key]
-                del segment_sizes[oldest_key]
-                del self._segment_cache[oldest_key]
-            else:
-                break
-
+    def _get_segment_sysdb(self, collection_id:UUID,  scope: SegmentScope):
+        segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
+        known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
+        # Get the first segment of a known type
+        segment = next(filter(lambda s: s["type"] in known_types, segments))
+        return segment
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
-
         if type == MetadataReader:
             scope = SegmentScope.METADATA
         elif type == VectorReader:
@@ -196,21 +186,15 @@ class LocalSegmentManager(SegmentManager):
         else:
             raise ValueError(f"Invalid segment type: {type}")
 
-        if scope not in self._segment_cache[collection_id]:
-            memory_limit = self._system.settings.require("chroma_memory_limit_bytes")
-            if type == VectorReader and self._system.settings.require("is_persistent") and memory_limit > 0:
-                self._cleanup_segment(collection_id, memory_limit)
-            segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
-            known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
-            # Get the first segment of a known type
-            segment = next(filter(lambda s: s["type"] in known_types, segments))
-            self._segment_cache[collection_id][scope] = segment
+        segment = self.segment_cache[scope].get(collection_id)
+        if segment is None:
+            segment = self._get_segment_sysdb(collection_id, scope)
+            self.segment_cache[scope].set(collection_id, segment)
 
         # Instances must be atomically created, so we use a lock to ensure that only one thread
         # creates the instance.
-        self._segment_cache[collection_id][scope]["last_used"] = time.time()
         with self._lock:
-            instance = self._instance(self._segment_cache[collection_id][scope])
+            instance = self._instance(segment)
         return cast(S, instance)
 
     @trace_method(

@@ -27,8 +27,8 @@ from chromadb.types import SegmentScope
 from chromadb.db.system import SysDB
 from chromadb.config import System, get_class
 
+# Memory limit use for testing
 memory_limit = 100
-
 
 # Helper class to keep tract of the last use id
 class LastUse:
@@ -74,13 +74,13 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
             cache_sum += self.collection_size_store[id]
             if cache_sum >= memory_limit and index is not 0:
                 break
-            assert self.segment_manager._segment_cache[id][SegmentScope.VECTOR] is not None
+            assert id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache
             index += 1
 
     @invariant()
     @precondition(lambda self: self.system.settings.is_persistent is True)
     def cache_should_not_be_bigger_than_settings(self):
-        segment_sizes = {id: self.collection_size_store[id] for id in self.segment_manager._segment_cache}
+        segment_sizes = {id: self.collection_size_store[id] for id in self.segment_manager.segment_cache[SegmentScope.VECTOR].cache}
         total_size = sum(segment_sizes.values())
         if len(segment_sizes) != 1:
             assert total_size <= memory_limit
@@ -111,6 +111,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
         self.last_use.add(coll.id)
         assert segment is not None
 
+
     @staticmethod
     def mock_directory_size(directory: str):
         path_id = directory.split("/").pop()
@@ -121,5 +122,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
 @patch('chromadb.segment.impl.manager.local.get_directory_size', SegmentManagerStateMachine.mock_directory_size)
 def test_segment_manager(caplog: pytest.LogCaptureFixture, system: System) -> None:
     system.settings.chroma_memory_limit_bytes = memory_limit
+    system.settings.chroma_segment_cache_policy = "LRU"
+
     run_state_machine_as_test(
         lambda: SegmentManagerStateMachine(system=system))
