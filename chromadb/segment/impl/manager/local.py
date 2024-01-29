@@ -27,6 +27,8 @@ from uuid import UUID, uuid4
 import platform
 
 from chromadb.utils.lru_cache import LRUCache
+from chromadb.utils.directory import get_directory_size
+
 
 if platform.system() != "Windows":
     import resource
@@ -38,19 +40,6 @@ SEGMENT_TYPE_IMPLS = {
     SegmentType.HNSW_LOCAL_MEMORY: "chromadb.segment.impl.vector.local_hnsw.LocalHnswSegment",
     SegmentType.HNSW_LOCAL_PERSISTED: "chromadb.segment.impl.vector.local_persistent_hnsw.PersistentLocalHnswSegment",
 }
-
-
-def get_directory_size(directory: str) -> int:
-    total_size = 0
-    for dirpath, _, filenames in os.walk(directory):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            # skip if it is symbolic link
-            if not os.path.islink(fp):
-                total_size += os.path.getsize(fp)
-
-    return total_size
-
 
 class LocalSegmentManager(SegmentManager):
     _sysdb: SysDB
