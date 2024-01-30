@@ -1,6 +1,6 @@
 .PHONY: build
 build:
-	go build -v -o bin/chroma ./cmd
+	go build -gcflags "all=-N -l" -v  -o bin/chroma ./cmd
 
 test: build
 	go test -cover -race ./...

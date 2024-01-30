@@ -1,3 +1,9 @@
+FROM golang:1.20-alpine3.18 AS debugger
+# adding git is a must for `go get` to work
+RUN apk add --no-cache git
+WORKDIR /go/bin
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
 FROM golang:1.20-alpine3.18 as build
 
 RUN apk add --no-cache make git build-base bash
@@ -22,10 +28,12 @@ RUN apk add \
 
 RUN mkdir /chroma-coordinator
 WORKDIR /chroma-coordinator
-
+ADD ./go/coordinator /src/chroma-coordinator
 COPY --from=build /src/chroma-coordinator/bin/chroma /chroma-coordinator/bin/chroma
 ENV PATH=$PATH:/chroma-coordinator/bin
 
 COPY --from=build /src/chroma-coordinator/migrations /chroma-coordinator/migrations
+COPY --from=debugger /go/bin/dlv /dlv
+ADD . /src/chroma-coordinator
 
 CMD /bin/bash

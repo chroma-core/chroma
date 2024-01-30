@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Attach to Process",
+            "type": "go",
+            "request": "attach",
+            "mode": "remote",
+            "remotePath": "/src/chroma-coordinator",
+            "port": 40000,
+            "host": "127.0.0.1"
+        }
+    ]
+}

@@ -16,7 +16,6 @@ spec:
     spec:
       containers:
         - command:
-            - "chroma"
             - "coordinator"
             - "--pulsar-admin-url=http://pulsar.chroma:8080"
             - "--pulsar-url=pulsar://pulsar.chroma:6650"
