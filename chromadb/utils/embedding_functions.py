@@ -15,6 +15,7 @@ from chromadb.api.types import (
     is_image,
     is_document,
 )
+
 from pathlib import Path
 import os
 import tarfile
@@ -73,11 +74,14 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         self._normalize_embeddings = normalize_embeddings
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(  # type: ignore
-            list(input),
-            convert_to_numpy=True,
-            normalize_embeddings=self._normalize_embeddings,
-        ).tolist()
+        return cast(
+            Embeddings,
+            self._model.encode(
+                list(input),
+                convert_to_numpy=True,
+                normalize_embeddings=self._normalize_embeddings,
+            ).tolist(),
+        )
 
 
 class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -91,7 +95,9 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model = SentenceModel(model_name_or_path=model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self._model.encode(list(input), convert_to_numpy=True).tolist()  # type: ignore # noqa E501
+        return cast(
+            Embeddings, self._model.encode(list(input), convert_to_numpy=True).tolist()
+        )  # noqa E501
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -184,12 +190,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e.index
-            )  # type: ignore
+            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)
 
             # Return just the embeddings
-            return [result.embedding for result in sorted_embeddings]
+            return cast(Embeddings, [result.embedding for result in sorted_embeddings])
         else:
             if self._api_type == "azure":
                 embeddings = self._client.create(
@@ -201,12 +205,12 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e["index"]
-            )  # type: ignore
+            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
             # Return just the embeddings
-            return [result["embedding"] for result in sorted_embeddings]
+            return cast(
+                Embeddings, [result["embedding"] for result in sorted_embeddings]
+            )
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -267,9 +271,13 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding API for each document
-        return self._session.post(  # type: ignore
-            self._api_url, json={"inputs": input, "options": {"wait_for_model": True}}
-        ).json()
+        return cast(
+            Embeddings,
+            self._session.post(
+                self._api_url,
+                json={"inputs": input, "options": {"wait_for_model": True}},
+            ).json(),
+        )
 
 
 class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -309,7 +317,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> embeddings = jina_ai_fn(input)
         """
         # Call Jina AI Embedding API
-        resp = self._session.post(  # type: ignore
+        resp = self._session.post(
             self._api_url, json={"input": input, "model": self._model_name}
         ).json()
         if "data" not in resp:
@@ -318,10 +326,10 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         embeddings = resp["data"]
 
         # Sort resulting embeddings by index
-        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])  # type: ignore
+        sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
         # Return just the embeddings
-        return [result["embedding"] for result in sorted_embeddings]
+        return cast(Embeddings, [result["embedding"] for result in sorted_embeddings])
 
 
 class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -344,11 +352,11 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         if self._instruction is None:
-            return self._model.encode(input).tolist()  # type: ignore
+            return cast(Embeddings, self._model.encode(input).tolist())
 
         texts_with_instructions = [[self._instruction, text] for text in input]
-        # type: ignore
-        return self._model.encode(texts_with_instructions).tolist()
+
+        return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
 
 
 # In order to remove dependencies on sentence-transformers, which in turn depends on
@@ -434,14 +442,15 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Use pytorches default epsilon for division by zero
     # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
-    def _normalize(self, v: npt.NDArray) -> npt.NDArray:  # type: ignore
+    def _normalize(self, v: npt.NDArray) -> npt.NDArray:
         norm = np.linalg.norm(v, axis=1)
         norm[norm == 0] = 1e-12
-        return v / norm[:, np.newaxis]  # type: ignore
+        return cast(npt.NDArray, v / norm[:, np.newaxis])
 
-    # type: ignore
     def _forward(self, documents: List[str], batch_size: int = 32) -> npt.NDArray:
         # We need to cast to the correct type because the type checker doesn't know that init_model_and_tokenizer will set the values
+        self.tokenizer = cast(self.Tokenizer, self.tokenizer)
+        self.model = cast(self.ort.InferenceSession, self.model)
         all_embeddings = []
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
@@ -713,7 +722,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
 class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        session: "boto3.Session",  # Quote for forward reference
+        session: "boto3.Session",  # noqa: F821 # Quote for forward reference
         model_name: str = "amazon.titan-embed-text-v1",
         **kwargs: Any,
     ):
@@ -795,9 +804,9 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding Server API for each document
-        return self._session.post(  # type: ignore
-            self._api_url, json={"inputs": input}
-        ).json()
+        return cast(
+            Embeddings, self._session.post(self._api_url, json={"inputs": input}).json()
+        )
 
 
 # List of all classes in this module

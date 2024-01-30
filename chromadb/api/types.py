@@ -16,6 +16,7 @@ from chromadb.types import (
     WhereDocument,
 )
 from inspect import signature
+from tenacity import retry
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -182,6 +183,20 @@ class IndexMetadata(TypedDict):
 class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Raise an exception if __call__ is not defined since it is expected to be defined
+        call = getattr(cls, "__call__")
+
+        def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
+            result = call(self, input)
+            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+
+        setattr(cls, "__call__", __call__)
+
+    def embed_with_retries(self, input: D, **retry_kwargs: Dict) -> Embeddings:
+        return retry(**retry_kwargs)(self.__call__)(input)
 
 
 def validate_embedding_function(
