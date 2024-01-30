@@ -7,6 +7,7 @@ from chromadb.segment import (
     VectorReader,
     S,
 )
+import logging
 from chromadb.segment.impl.manager.cache.cache import SegmentLRUCache, BasicCache,SegmentCache
 import os
 
@@ -58,6 +59,7 @@ class LocalSegmentManager(SegmentManager):
         self._sysdb = self.require(SysDB)
         self._system = system
         self._opentelemetry_client = system.require(OpenTelemetryClient)
+        self.logger = logging.getLogger(__name__)
         self._instances = {}
         self.segment_cache: Dict[SegmentScope, SegmentCache] = {SegmentScope.METADATA: BasicCache()}
         if system.settings.chroma_segment_cache_policy == "LRU" and system.settings.chroma_memory_limit_bytes > 0:
@@ -87,8 +89,11 @@ class LocalSegmentManager(SegmentManager):
             )
 
     def callback_cache_evict(self, segment: Segment):
+        collection_id = segment["collection"]
+        self.logger.info(f"LRU cache evict collection {collection_id}")
         instance = self._instance(segment)
         instance.stop()
+        del self._instances[segment["id"]]
 
 
     @override

@@ -87,7 +87,7 @@ class SegmentLRUCache(BasicCache):
         total_size = sum(key_sizes.values())
         index = 0
         # Evict items if capacity is exceeded
-        while total_size + item_size > self.capacity:
+        while total_size + item_size > self.capacity and len(self.history) > index:
             key_delete = self.history[index]
             if key_delete in self.cache:
                 self.callback(key_delete, self.cache[key_delete])
