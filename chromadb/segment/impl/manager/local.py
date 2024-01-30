@@ -59,9 +59,12 @@ class LocalSegmentManager(SegmentManager):
         self._system = system
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
-        self.segment_cache: Dict[SegmentScope, SegmentCache] = {SegmentScope.METADATA: BasicCache(), SegmentScope.VECTOR: BasicCache()}
-        if system.settings.chroma_segment_cache_policy is "LRU" and system.settings.chroma_memory_limit_bytes > 0:
-            self.segment_cache[SegmentScope.VECTOR] = SegmentLRUCache(capacity=system.settings.chroma_memory_limit_bytes,callback=lambda k, v: self.callback_cache_evict(v), size_func=lambda k: self._get_segment_disk_size(k))
+        self.segment_cache: Dict[SegmentScope, SegmentCache] = {SegmentScope.METADATA: BasicCache()}
+        try:
+            if system.settings.chroma_segment_cache_policy is "LRU" and system.settings.require("chroma_memory_limit_bytes"):
+                self.segment_cache[SegmentScope.VECTOR] = SegmentLRUCache(capacity=system.settings.chroma_memory_limit_bytes,callback=lambda k, v: self.callback_cache_evict(v), size_func=lambda k: self._get_segment_disk_size(k))
+        except:
+            self.segment_cache[SegmentScope.VECTOR] = BasicCache()
 
 
 
@@ -106,9 +109,7 @@ class LocalSegmentManager(SegmentManager):
             instance.stop()
             instance.reset_state()
         self._instances = {}
-        self.segment_cache[SegmentScope.METADATA].reset()
         self.segment_cache[SegmentScope.VECTOR].reset()
-
         super().reset_state()
 
     @trace_method(
@@ -155,6 +156,7 @@ class LocalSegmentManager(SegmentManager):
         segments = self._sysdb.get_segments(collection=collection_id, scope=SegmentScope.VECTOR)
         if len(segments) == 0:
             return 0
+        # With local segment manager (single server chroma), a collection always have one segment.
         size = get_directory_size(
             os.path.join(self._system.settings.require("persist_directory"), str(segments[0]["id"])))
         return size
