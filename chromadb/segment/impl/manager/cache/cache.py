@@ -6,8 +6,6 @@ from typing import Dict, Optional
 from abc import ABC, abstractmethod
 
 class SegmentCache(ABC):
-    cache: Dict[uuid.UUID, Segment] = {}
-
     @abstractmethod
     def get(self, key: uuid.UUID) -> Optional[Segment]:
         pass
@@ -26,7 +24,8 @@ class SegmentCache(ABC):
 
 
 class BasicCache(SegmentCache):
-    cache: Dict[uuid.UUID, Segment] = {}
+    def __init__(self):
+        self.cache:Dict[uuid.UUID, Segment] = {}
 
     @override
     def get(self, key: uuid.UUID) -> Optional[Segment]:
