@@ -60,11 +60,11 @@ class LocalSegmentManager(SegmentManager):
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
         self.segment_cache: Dict[SegmentScope, SegmentCache] = {SegmentScope.METADATA: BasicCache()}
-        try:
-            if system.settings.chroma_segment_cache_policy is "LRU" and system.settings.require("chroma_memory_limit_bytes"):
-                self.segment_cache[SegmentScope.VECTOR] = SegmentLRUCache(capacity=system.settings.chroma_memory_limit_bytes,callback=lambda k, v: self.callback_cache_evict(v), size_func=lambda k: self._get_segment_disk_size(k))
-        except:
+        if system.settings.chroma_segment_cache_policy is "LRU" and system.settings.chroma_memory_limit_bytes > 0:
+            self.segment_cache[SegmentScope.VECTOR] = SegmentLRUCache(capacity=system.settings.chroma_memory_limit_bytes,callback=lambda k, v: self.callback_cache_evict(v), size_func=lambda k: self._get_segment_disk_size(k))
+        else:
             self.segment_cache[SegmentScope.VECTOR] = BasicCache()
+
 
 
 
