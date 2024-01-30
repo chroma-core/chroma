@@ -47,7 +47,6 @@ class Segment(TypedDict):
     id: UUID
     type: NamespacedName
     scope: SegmentScope
-    last_used: int
     # If a segment has a topic, it implies that this segment is a consumer of the topic
     # and indexes the contents of the topic.
     topic: Optional[str]

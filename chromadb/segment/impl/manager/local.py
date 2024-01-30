@@ -231,6 +231,5 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         scope=scope,
         topic=collection["topic"],
         collection=collection["id"],
-        metadata=metadata,
-        last_used=0
+        metadata=metadata
     )

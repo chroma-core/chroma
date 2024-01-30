@@ -7,7 +7,6 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given, settings
 from chromadb import AdminClient
-from hypothesis.core import reproduce_failure
 
 from chromadb.api import AdminAPI, ServerAPI
 from chromadb.api.models.Collection import Collection
