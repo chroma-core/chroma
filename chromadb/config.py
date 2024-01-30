@@ -62,9 +62,6 @@ _legacy_config_values = {
     "chromadb.api.local.LocalAPI",
 }
 
-
-
-
 # TODO: Don't use concrete types here to avoid circular deps. Strings are fine for right here!
 _abstract_type_keys: Dict[str, str] = {
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
@@ -326,8 +323,6 @@ class System(Component):
                 logger.error(
                     f"Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
                 )
-
-
 
         # Apply the nofile limit if set
         if settings["chroma_server_nofile"] is not None:
