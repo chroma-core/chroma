@@ -1,4 +1,3 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +20,7 @@ spec:
             - "--pulsar-admin-url=http://pulsar.chroma:8080"
             - "--pulsar-url=pulsar://pulsar.chroma:6650"
             - "--notifier-provider=pulsar"
-          image: chroma-coordinator
+          image: coordinator
           imagePullPolicy: IfNotPresent
           name: coordinator
           ports:

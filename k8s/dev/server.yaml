@@ -1,4 +1,3 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,19 +45,6 @@ spec:
               value: "50051"
             - name: CHROMA_COORDINATOR_HOST
               value: "coordinator.chroma"
-          readinessProbe:
-#            httpGet:
-#              path: /api/v1/heartbeat
-#              port: 8000
-#            initialDelaySeconds: 10
-#            periodSeconds: 5
-          # livenessProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: 8000
-          #   initialDelaySeconds: 20
-          #   periodSeconds: 10
-      # Ephemeral for now
       volumes:
         - name: chroma
           emptyDir: {}

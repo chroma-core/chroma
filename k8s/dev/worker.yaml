@@ -1,4 +1,3 @@
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,10 +35,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-          # livenessProbe:
-          #   grpc:
-          #     port: 50051
-          #   initialDelaySeconds: 10
       volumes:
         - name: chroma
           emptyDir: {}
