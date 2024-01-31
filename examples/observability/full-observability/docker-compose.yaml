@@ -76,6 +76,7 @@ services:
       - MYSQL_HOST=zipkin-storage
       - MYSQL_USER=zipkin
       - MYSQL_PASS=zipkin
+      - JAVA_OPTS=-Xms1g -Xmx1g -XX:+ExitOnOutOfMemoryError
     ports:
       - "9411:9411"
     restart: unless-stopped
