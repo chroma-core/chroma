@@ -1,8 +1,9 @@
 import sqlite3
+import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Set, Tuple, Dict, Optional, Union
-import threading
+from typing import Any, Set, Optional
+
 from overrides import override
 
 
@@ -12,9 +13,12 @@ class Connection:
     _pool: "Pool"
     _db_file: str
     _conn: sqlite3.Connection
+    _lock: threading.Lock
+    _is_closed: bool
+    _last_used: Optional[float]
 
     def __init__(
-            self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
+        self, pool: "Pool", db_file: str, is_uri: bool, *args: Any, **kwargs: Any
     ):
         self._pool = pool
         self._db_file = db_file
@@ -22,6 +26,8 @@ class Connection:
             db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
         )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
+        self._lock = threading.Lock()
+        self._is_closed = False
 
     def execute(self, sql: str, parameters=...) -> sqlite3.Cursor:  # type: ignore
         if parameters is ...:
@@ -39,7 +45,29 @@ class Connection:
 
     def close_actual(self) -> None:
         """Actually closes the connection to the db"""
+        with self._lock:
+            if self._is_closed:
+                raise RuntimeError("Connection is already closed")
+            self._is_closed = True
         self._conn.close()
+
+    @property
+    def last_used(self) -> Optional[float]:
+        return self._last_used
+
+    @property
+    def is_closed(self) -> bool:
+        with self._lock:
+            return self._is_closed
+
+    def checkout(self) -> None:
+        """Checkout the connection from the pool."""
+        with self._lock:
+            self._last_used = None
+
+    def checkin(self) -> None:
+        with self._lock:
+            self._last_used = time.time()
 
 
 class Pool(ABC):
@@ -120,86 +148,107 @@ class PerThreadPool(Pool):
     """Maintains a connection per thread. For now this does not maintain a cap on the number of connections, but it could be
     extended to do so and block on connect() if the cap is reached.
     """
-    # the connection dict holds a tuple of (connection, is_checked_out, last_used_time), if the last_used_time is None that implies that the connection is checked out
-    _connections: Dict[Union[int, str], Tuple[Connection, bool, Optional[float]]]
+
+    _connections: Set[Connection]
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
     _is_uri_: bool
 
     def __init__(
-            self, db_file: str, is_uri: bool = False, connection_lru_time_seconds: int = 60
+        self,
+        db_file: str,
+        is_uri: bool = False,
+        min_size: int = 5,
+        max_size: int = 20,
+        connection_ttl: int = 60,
+        lru_check_interval: int = 120,
     ):
-        self._connections = dict()
+        """
+        Creates a new thread pool.
+        Max size is best-effort, but the pool will try to maintain at least min_size connections.
+        """
+        if connection_ttl <= 0:
+            raise ValueError("Connection TTL must be greater than 0")
+        if min_size <= 0:
+            raise ValueError("Min size must be greater than 0")
+        if max_size <= 0 or max_size < min_size:
+            raise ValueError(
+                "Max size must be greater than min size and greater than 0"
+            )
+        if lru_check_interval <= 0:
+            raise ValueError("LRU check interval must be greater than 0")
+        self._connections = set()
         self._connection = threading.local()
         self._lock = threading.Lock()
         self._db_file = db_file
         self._is_uri = is_uri
-        self._connection_lru_time_seconds = connection_lru_time_seconds
-
-    @staticmethod
-    def _get_thread_id() -> Union[int, str]:
-        return threading.current_thread().ident or threading.current_thread().name
-
-    def _checkout(self, _new_conn: bool = False, *args, **kwargs) -> Connection:
-        with self._lock:
-            if _new_conn is None:
-                _conn = self._connections[PerThreadPool._get_thread_id()]
-            else:
-                self._connection.conn = Connection(
-                    self, self._db_file, self._is_uri, *args, **kwargs
-                )
-                _conn = (self._connection.conn, True, None)
-            self._connections[PerThreadPool._get_thread_id()] = (_conn[0], True, None)
-            return _conn[0]
-
-    def _checkin(self) -> None:
-        with self._lock:
-            self._connections[PerThreadPool._get_thread_id()] = (
-                self._connections[PerThreadPool._get_thread_id()][0],
-                False,
-                time.time(),
-            )
+        self._min_size = min_size
+        self._max_size = max_size
+        self._lru_check_interval = (
+            lru_check_interval  # How often to check for connections to remove
+        )
+        self._connection_ttl = (
+            connection_ttl  # Time to live for a connection in seconds
+        )
+        self._lru_last_check = time.time()
 
     @override
     def connect(self, *args: Any, **kwargs: Any) -> Connection:
-        _thread_id = PerThreadPool._get_thread_id()
-        self._lru_close()
         if (
-                hasattr(self._connection, "conn")
-                and self._connection.conn is not None
-                and _thread_id in self._connections.keys()
+            hasattr(self._connection, "conn")
+            and self._connection.conn is not None
+            and not self._connection.conn.is_closed
         ):
-            return self._checkout()
+            self._connection.conn.checkout()
+            return self._connection.conn  # type: ignore # cast doesn't work here for some reason
         else:
-            return self._checkout(True, *args, **kwargs)
-
-    def _lru_close(self) -> None:
-        with self._lock:
-            ids_to_remove = []
-            for _id, conn in self._connections.items():
-                if _id == threading.current_thread().ident:
-                    continue
+            new_connection = Connection(
+                self, self._db_file, self._is_uri, *args, **kwargs
+            )
+            self._connection.conn = new_connection
+            new_connection.checkout()
+            with self._lock:
+                self._connections.add(new_connection)
                 if (
-                        conn[2] is not None
-                        and conn[2] < time.time() - self._connection_lru_time_seconds
-                ):
-                    try:
-                        conn[0].close_actual()
-                    except sqlite3.ProgrammingError:
-                        pass
-                    ids_to_remove.append(_id)
-            for _id in ids_to_remove:
-                del self._connections[_id]
+                    len(self._connections) >= self._max_size
+                ):  # if we've reached the maximum we attempt to remove LRU connection
+                    self._lru_remove_from_pool()
+            return new_connection
 
     @override
     def close(self) -> None:
         with self._lock:
-            for _, conn in self._connections.items():
-                conn[0].close_actual()
+            for conn in self._connections:
+                conn.close_actual()
             self._connections.clear()
             self._connection = threading.local()
 
+    def _lru_remove_from_pool(self) -> None:
+        now = time.time()
+        if self._lru_last_check > now - self._lru_check_interval:
+            return
+        with self._lock:
+            connections_to_remove = []
+            if len(self._connections) < self._min_size:
+                return
+            for conn in self._connections:
+                if (
+                    conn.last_used is not None
+                    and conn.last_used < now - self._connection_ttl
+                ):
+                    connections_to_remove.append(conn)
+                    conn.close_actual()
+                if (
+                    len(self._connections) - len(connections_to_remove)
+                    <= self._min_size
+                ):
+                    break
+            for conn in connections_to_remove:
+                self._connections.remove(conn)
+            self._lru_last_check = time.time()
+
     @override
     def return_to_pool(self, conn: Connection) -> None:
-        self._checkin()
+        conn.checkin()
+        self._lru_remove_from_pool()
