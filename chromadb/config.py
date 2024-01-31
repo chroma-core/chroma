@@ -132,6 +132,7 @@ class Settings(BaseSettings):  # type: ignore
         return v
 
     chroma_server_nofile: Optional[int] = None
+    chroma_scheduler_class: Optional[str] = "chromadb.scheduling.apscheduler.APScheduler"
 
     pulsar_broker_url: Optional[str] = None
     pulsar_admin_port: Optional[str] = "8080"
