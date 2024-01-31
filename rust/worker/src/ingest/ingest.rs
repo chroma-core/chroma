@@ -145,6 +145,10 @@ impl Handler<Memberlist> for Ingest {
     async fn handle(&mut self, msg: Memberlist, ctx: &ComponentContext<Self>) {
         let mut new_assignments = HashSet::new();
         let candidate_topics: Vec<String> = self.get_topics();
+        println!(
+            "Performing assignment for topics: {:?}. My ip: {}",
+            candidate_topics, self.my_ip
+        );
         // Scope for assigner write lock to be released so we don't hold it over await
         {
             let mut assigner = match self.assignment_policy.write() {
@@ -222,7 +226,6 @@ impl Handler<Memberlist> for Ingest {
 
         // Subscribe to new topics
         for topic in to_add.iter() {
-            println!("Adding topic: {}", topic);
             // Do the subscription and register the stream to this ingest component
             let consumer: Consumer<chroma_proto::SubmitEmbeddingRecord, TokioExecutor> = self
                 .pulsar
@@ -232,6 +235,7 @@ impl Handler<Memberlist> for Ingest {
                 .build()
                 .await
                 .unwrap();
+            println!("Created consumer for topic: {}", topic);
 
             let scheduler = match &self.scheduler {
                 Some(scheduler) => scheduler.clone(),
@@ -307,9 +311,13 @@ impl Component for PulsarIngestTopic {
     }
 
     fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
+        println!("Starting PulsarIngestTopic for topic");
         let stream = match self.consumer.write() {
             Ok(mut consumer_handle) => consumer_handle.take(),
-            Err(err) => None,
+            Err(err) => {
+                println!("Failed to take consumer handle: {:?}", err);
+                None
+            }
         };
         let stream = match stream {
             Some(stream) => stream,
@@ -320,6 +328,10 @@ impl Component for PulsarIngestTopic {
         let stream = stream.then(|result| async {
             match result {
                 Ok(msg) => {
+                    println!(
+                        "PulsarIngestTopic received message with id: {:?}",
+                        msg.message_id
+                    );
                     // Convert the Pulsar Message to an EmbeddingRecord
                     let proto_embedding_record = msg.deserialize();
                     let id = msg.message_id;
@@ -332,12 +344,14 @@ impl Component for PulsarIngestTopic {
                         }
                         Err(err) => {
                             // TODO: Handle and log
+                            println!("PulsarIngestTopic received error while performing conversion: {:?}", err);
                         }
                     }
                     None
                 }
                 Err(err) => {
                     // TODO: Log an error
+                    println!("PulsarIngestTopic received error: {:?}", err);
                     // Put this on a dead letter queue, this concept does not exist in our
                     // system yet
                     None
@@ -372,7 +386,10 @@ impl Handler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {
         let coll = match coll {
             Ok(coll) => coll,
             Err(err) => {
-                // TODO: Log error and handle. How do we want to deal with this?
+                println!(
+                    "PulsarIngestTopic received error while fetching collection: {:?}",
+                    err
+                );
                 return;
             }
         };
@@ -380,7 +397,7 @@ impl Handler<Option<Box<EmbeddingRecord>>> for PulsarIngestTopic {
         let coll = match coll.first() {
             Some(coll) => coll,
             None => {
-                // TODO: Log error, as we found no collection with this id
+                println!("PulsarIngestTopic received empty collection");
                 return;
             }
         };
