@@ -3,6 +3,7 @@ import hypothesis
 import hypothesis.strategies as st
 from typing import Any, Optional, List, Dict, Union, cast
 from typing_extensions import TypedDict
+import uuid
 import numpy as np
 import numpy.typing as npt
 import chromadb.api.types as types
@@ -237,15 +238,16 @@ def embedding_function_strategy(
 @dataclass
 class Collection:
     name: str
+    id: uuid.UUID
     metadata: Optional[types.Metadata]
     dimension: int
     dtype: npt.DTypeLike
+    topic: str
     known_metadata_keys: types.Metadata
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
     embedding_function: Optional[types.EmbeddingFunction[Embeddable]] = None
-
 
 @st.composite
 def collections(
@@ -309,7 +311,9 @@ def collections(
     embedding_function = draw(embedding_function_strategy(dimension, dtype))
 
     return Collection(
+        id=uuid.uuid4(),
         name=name,
+        topic="topic",
         metadata=metadata,
         dimension=dimension,
         dtype=dtype,
