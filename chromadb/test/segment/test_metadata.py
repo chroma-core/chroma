@@ -722,7 +722,7 @@ def test_delete_single_fts_record(
     q_fts = (
         _db.querybuilder()
         .from_(fts_t)
-        .delete()
+        .select()
         .where(
             fts_t.rowid.isin(
                 _db.querybuilder()
@@ -736,7 +736,7 @@ def test_delete_single_fts_record(
     sql, params = get_sql(q_fts)
     with _db.tx() as cur:
         res = cur.execute(sql, params)
-        # assert that the segment is gone
+        # assert that the ids that are deleted from the segment are also gone from the fts table
         assert len(res.fetchall()) == 0
 
 
