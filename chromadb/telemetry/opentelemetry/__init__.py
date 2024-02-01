@@ -81,7 +81,7 @@ OtelAttributes = Dict[
 ]
 
 
-class OpelInstrumentation(ABC, EnforceOverrides):
+class OtelInstrumentation(ABC, EnforceOverrides):
     """
     An abstract class for OpenTelemetry instrumentation.
     """
@@ -143,7 +143,7 @@ class OpelInstrumentation(ABC, EnforceOverrides):
         :param description: The description of the gauge.
 
         Example:
-            >>> OpelInstrumentation.add_observable_gauge("my_gauge", lambda: return psutil.cpu_percent(), "percent", "CPU Usage")
+            >>> OtelInstrumentation.add_observable_gauge("my_gauge", lambda: return psutil.cpu_percent(), "percent", "CPU Usage")
         """
         ...
 
@@ -163,7 +163,7 @@ class OpelInstrumentation(ABC, EnforceOverrides):
         :param description: The description of the counter.
 
         Example:
-            >>> OpelInstrumentation.add_observable_counter("my_counter", lambda: return psutil.net_io_counters().bytes_sent, "bytes", "Bytes out")
+            >>> OtelInstrumentation.add_observable_counter("my_counter", lambda: return psutil.net_io_counters().bytes_sent, "bytes", "Bytes out")
         """
         ...
 
@@ -203,10 +203,10 @@ class OpelInstrumentation(ABC, EnforceOverrides):
         ...
 
 
-_otel_instance: Optional[OpelInstrumentation] = None
+_otel_instance: Optional[OtelInstrumentation] = None
 
 
-def get_otel_client() -> Optional[OpelInstrumentation]:
+def get_otel_client() -> Optional[OtelInstrumentation]:
     global _otel_instance
     if (
         not telemetry_settings.chroma_otel_collection_endpoint
@@ -216,7 +216,7 @@ def get_otel_client() -> Optional[OpelInstrumentation]:
 
     if _otel_instance is None:
         _otel_package = importlib.import_module("chromadb.telemetry.opentelemetry.otel")
-        _otel_instance = cast(OpelInstrumentation, _otel_package.otel_client)
+        _otel_instance = cast(OtelInstrumentation, _otel_package.otel_client)
     return _otel_instance
 
 

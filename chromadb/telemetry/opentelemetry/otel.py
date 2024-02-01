@@ -37,7 +37,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     OtelAttributes,
     telemetry_settings,
-    OpelInstrumentation,
+    OtelInstrumentation,
 )
 
 
@@ -51,7 +51,7 @@ from chromadb.telemetry.opentelemetry import (
 # logs_enabled = False
 
 
-class OtelClient(OpelInstrumentation):
+class OtelClient(OtelInstrumentation):
     """A client for OpenTelemetry."""
 
     def __init__(self) -> None:
