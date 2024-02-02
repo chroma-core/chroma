@@ -22,7 +22,7 @@ We propose to instrument Chroma with [OpenTelemetry](https://opentelemetry.io/do
 - Chroma's default behavior will remain the same: events will be logged to the console with configurable severity levels.
 - We will add a flag, `--opentelemetry-mode={api, sdk}` to instruct Chroma to export OTel data in either [API or SDK mode](https://stackoverflow.com/questions/72963553/opentelemetry-api-vs-sdk).
 - We will add another flag, `--opentelemtry-detail={partial, full}`, to specify the level of detail desired from OTel.
-  - With `partial` detail, Chroma's top-level API calls will produce a single span. This mode is suitable for end-users of Chroma who are not intimately familiar with its operation but use it as part of their production system. 
+  - With `partial` detail, Chroma's top-level API calls will produce a single span. This mode is suitable for end-users of Chroma who are not intimately familiar with its operation but use it as part of their production system.
   - `full` detail will emit spans for Chroma's sub-operations, enabling Chroma maintainers to monitor performance and diagnose issues.
 - For now Chroma's OTel integrations will need to be specified with environment variables. As the [OTel file configuration project](https://github.com/MrAlias/otel-schema/pull/44) matures we will integrate support for file-based OTel configuration.
 

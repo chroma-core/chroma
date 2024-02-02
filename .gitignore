@@ -3,6 +3,9 @@
 
 **/__pycache__
 
+go/coordinator/bin/
+go/coordinator/**/testdata/
+
 *.log
 
 **/data__nogit

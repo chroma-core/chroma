@@ -202,12 +202,21 @@ class FastAPI(ServerAPI):
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @override
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
         """Returns a list of all collections"""
         resp = self._session.get(
             self._api_url + "/collections",
-            params={"tenant": tenant, "database": database},
+            params={
+                "tenant": tenant,
+                "database": database,
+                "limit": limit,
+                "offset": offset,
+            },
         )
         raise_chroma_error(resp)
         json_collections = resp.json()
@@ -216,6 +225,19 @@ class FastAPI(ServerAPI):
             collections.append(Collection(self, **json_collection))
 
         return collections
+
+    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @override
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int:
+        """Returns a count of collections"""
+        resp = self._session.get(
+            self._api_url + "/count_collections",
+            params={"tenant": tenant, "database": database},
+        )
+        raise_chroma_error(resp)
+        return cast(int, resp.json())
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -510,7 +532,7 @@ class FastAPI(ServerAPI):
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return True
 
     @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
@@ -533,7 +555,7 @@ class FastAPI(ServerAPI):
         resp = self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
         )
-        resp.raise_for_status()
+        raise_chroma_error(resp)
         return True
 
     @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)

@@ -26,6 +26,7 @@ minikube addons enable ingress-dns -p chroma-test
 eval $(minikube -p chroma-test docker-env)
 docker build -t server:latest -f Dockerfile .
 docker build -t chroma-coordinator:latest -f go/coordinator/Dockerfile .
+docker build -t worker -f rust/worker/Dockerfile . --build-arg CHROMA_KUBERNETES_INTEGRATION=1
 
 # Apply the kubernetes manifests
 kubectl apply -f k8s/deployment
@@ -34,7 +35,7 @@ kubectl apply -f k8s/cr
 kubectl apply -f k8s/test
 
 # Wait for the pods in the chroma namespace to be ready
-kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=300s
+kubectl wait --namespace chroma --for=condition=Ready pods --all --timeout=400s
 
 # Run mini kube tunnel in the background to expose the service
 minikube tunnel -c true -p chroma-test &
@@ -45,8 +46,8 @@ sleep 10
 
 export CHROMA_CLUSTER_TEST_ONLY=1
 export CHROMA_SERVER_HOST=$(kubectl get svc server -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export PULSAR_BROKER_URL=$(kubectl get svc pulsar -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-export CHROMA_COORDINATOR_HOST=$(kubectl get svc coordinator -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+export PULSAR_BROKER_URL=$(kubectl get svc pulsar-lb -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+export CHROMA_COORDINATOR_HOST=$(kubectl get svc coordinator-lb -n chroma -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
 export CHROMA_SERVER_GRPC_PORT="50051"
 
 echo "Chroma Server is running at port $CHROMA_SERVER_HOST"

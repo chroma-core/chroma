@@ -2,6 +2,7 @@ package memberlist_manager
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -35,6 +36,7 @@ const (
 const MemberLabel = "member-type"
 
 type KubernetesWatcher struct {
+	mu             sync.Mutex
 	stopCh         chan struct{}
 	isRunning      bool
 	clientSet      kubernetes.Interface      // clientset for the coordinator
@@ -74,7 +76,9 @@ func (w *KubernetesWatcher) Start() error {
 			}
 			if err == nil {
 				ip := objPod.Status.PodIP
+				w.mu.Lock()
 				w.ipToKey[ip] = key
+				w.mu.Unlock()
 				w.notify(ip)
 			} else {
 				log.Error("Error while getting key from object", zap.Error(err))
@@ -154,7 +158,9 @@ func (w *KubernetesWatcher) notify(update string) {
 }
 
 func (w *KubernetesWatcher) GetStatus(node_ip string) (Status, error) {
+	w.mu.Lock()
 	key, ok := w.ipToKey[node_ip]
+	w.mu.Unlock()
 	if !ok {
 		return NotReady, nil
 	}

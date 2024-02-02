@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence, Optional
 import fastapi
 from fastapi import FastAPI as _FastAPI, Response
 from fastapi.responses import JSONResponse
@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
-import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, QueryResult
 from chromadb.auth import (
@@ -22,18 +21,17 @@ from chromadb.auth.fastapi import (
     FastAPIChromaAuthzMiddleware,
     FastAPIChromaAuthzMiddlewareWrapper,
     authz_context,
+    set_overwrite_singleton_tenant_database_access_from_auth,
 )
 from chromadb.auth.fastapi_utils import (
     attr_from_collection_lookup,
     attr_from_resource_object,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-import chromadb.server
 import chromadb.api
 from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
-    InvalidUUIDError,
     InvalidDimensionException,
     InvalidHTTPVersion,
 )
@@ -51,6 +49,8 @@ from chromadb.server.fastapi.types import (
 from starlette.requests import Request
 
 import logging
+
+from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
 from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
@@ -80,9 +80,7 @@ async def catch_exceptions_middleware(
     try:
         return await call_next(request)
     except ChromaError as e:
-        return JSONResponse(
-            content={"error": e.name(), "message": e.message()}, status_code=e.code()
-        )
+        return fastapi_json_response(e)
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
@@ -95,13 +93,6 @@ async def check_http_version_middleware(
     if http_version not in ["1.1", "2"]:
         raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
     return await call_next(request)
-
-
-def _uuid(uuid_str: str) -> UUID:
-    try:
-        return UUID(uuid_str)
-    except ValueError:
-        raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
 
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
@@ -150,6 +141,8 @@ class FastAPI(chromadb.server.Server):
             allow_methods=["*"],
         )
 
+        self._app.on_event("shutdown")(self.shutdown)
+
         if settings.chroma_server_authz_provider:
             self._app.add_middleware(
                 FastAPIChromaAuthzMiddlewareWrapper,
@@ -161,6 +154,9 @@ class FastAPI(chromadb.server.Server):
                 FastAPIChromaAuthMiddlewareWrapper,
                 auth_middleware=self._api.require(FastAPIChromaAuthMiddleware),
             )
+        set_overwrite_singleton_tenant_database_access_from_auth(
+            settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+        )
 
         self.router = ChromaAPIRouter()
 
@@ -203,6 +199,12 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route(
             "/api/v1/collections",
             self.list_collections,
+            methods=["GET"],
+            response_model=None,
+        )
+        self.router.add_api_route(
+            "/api/v1/count_collections",
+            self.count_collections,
             methods=["GET"],
             response_model=None,
         )
@@ -280,6 +282,9 @@ class FastAPI(chromadb.server.Server):
         use_route_names_as_operation_ids(self._app)
         instrument_fastapi(self._app)
 
+    def shutdown(self) -> None:
+        self._system.stop()
+
     def app(self) -> fastapi.FastAPI:
         return self._app
 
@@ -354,9 +359,33 @@ class FastAPI(chromadb.server.Server):
         ),
     )
     def list_collections(
-        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> Sequence[Collection]:
-        return self._api.list_collections(tenant=tenant, database=database)
+        return self._api.list_collections(
+            limit=limit, offset=offset, tenant=tenant, database=database
+        )
+
+    @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.COUNT_COLLECTIONS,
+        resource=DynamicAuthzResource(
+            id="*",
+            type=AuthzResourceTypes.DB,
+            attributes=AuthzDynamicParams.dict_from_function_kwargs(
+                arg_names=["tenant", "database"]
+            ),
+        ),
+    )
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        return self._api.count_collections(tenant=tenant, database=database)
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @authz_context(

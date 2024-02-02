@@ -7,6 +7,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/common"
 	"github.com/chroma/chroma-coordinator/internal/metastore"
 	"github.com/chroma/chroma-coordinator/internal/model"
+	"github.com/chroma/chroma-coordinator/internal/notification"
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -27,6 +28,7 @@ type IMeta interface {
 	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
 	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
+	SetNotificationProcessor(notificationProcessor notification.NotificationProcessor)
 }
 
 // MetaTable is an implementation of IMeta. It loads the system catalog during startup
@@ -41,6 +43,7 @@ type MetaTable struct {
 	segmentsCache                 map[types.UniqueID]*model.Segment
 	tenantDatabaseCollectionCache map[string]map[string]map[types.UniqueID]*model.Collection
 	tenantDatabaseCache           map[string]map[string]*model.Database
+	notificationProcessor         notification.NotificationProcessor
 }
 
 var _ IMeta = (*MetaTable)(nil)
@@ -108,6 +111,10 @@ func (mt *MetaTable) reload() error {
 		mt.segmentsCache[segment.ID] = segment
 	}
 	return nil
+}
+
+func (mt *MetaTable) SetNotificationProcessor(notificationProcessor notification.NotificationProcessor) {
+	mt.notificationProcessor = notificationProcessor
 }
 
 func (mt *MetaTable) ResetState(ctx context.Context) error {
@@ -219,6 +226,16 @@ func (mt *MetaTable) AddCollection(ctx context.Context, createCollection *model.
 	}
 	mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID] = collection
 	log.Info("collection added", zap.Any("collection", mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID]))
+
+	triggerMessage := notification.TriggerMessage{
+		Msg: model.Notification{
+			CollectionID: collection.ID.String(),
+			Type:         model.NotificationTypeCreateCollection,
+			Status:       model.NotificationStatusPending,
+		},
+		ResultChan: make(chan error),
+	}
+	mt.notificationProcessor.Trigger(ctx, triggerMessage)
 	return collection, nil
 }
 
@@ -226,17 +243,39 @@ func (mt *MetaTable) GetCollections(ctx context.Context, collectionID types.Uniq
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	if _, ok := mt.tenantDatabaseCollectionCache[tenantID]; !ok {
-		log.Error("tenant not found", zap.Any("tenantID", tenantID))
-		return nil, common.ErrTenantNotFound
-	}
-	if _, ok := mt.tenantDatabaseCollectionCache[tenantID][databaseName]; !ok {
-		return nil, common.ErrDatabaseNotFound
-	}
-	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache[tenantID][databaseName]))
-	for _, collection := range mt.tenantDatabaseCollectionCache[tenantID][databaseName] {
-		if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
-			collections = append(collections, collection)
+	// There are three cases
+	// In the case of getting by id, we do not care about the tenant and database name.
+	// In the case of getting by name, we need the fully qualified path of the collection which is the tenant/database/name.
+	// In the case of getting by topic, we need the fully qualified path of the collection which is the tenant/database/topic.
+	collections := make([]*model.Collection, 0, len(mt.tenantDatabaseCollectionCache))
+	if collectionID != types.NilUniqueID() {
+		// Case 1: getting by id
+		// Due to how the cache is constructed, we iterate over the whole cache to find the collection.
+		// This is not efficient but it is not a problem for now because the number of collections is small.
+		// HACK warning. TODO: fix this when we remove the cache.
+		for _, search_databases := range mt.tenantDatabaseCollectionCache {
+			for _, search_collections := range search_databases {
+				for _, collection := range search_collections {
+					if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
+						collections = append(collections, collection)
+					}
+				}
+			}
+		}
+	} else {
+		// Case 2 & 3: getting by name or topic
+		// Note: The support for case 3 is not correct here, we shouldn't require the database name and tenant to get by topic.
+		if _, ok := mt.tenantDatabaseCollectionCache[tenantID]; !ok {
+			log.Error("tenant not found", zap.Any("tenantID", tenantID))
+			return nil, common.ErrTenantNotFound
+		}
+		if _, ok := mt.tenantDatabaseCollectionCache[tenantID][databaseName]; !ok {
+			return nil, common.ErrDatabaseNotFound
+		}
+		for _, collection := range mt.tenantDatabaseCollectionCache[tenantID][databaseName] {
+			if model.FilterCollection(collection, collectionID, collectionName, collectionTopic) {
+				collections = append(collections, collection)
+			}
 		}
 	}
 	log.Info("meta collections", zap.Any("collections", collections))
@@ -271,6 +310,16 @@ func (mt *MetaTable) DeleteCollection(ctx context.Context, deleteCollection *mod
 	}
 	delete(collections, collectionID)
 	log.Info("collection deleted", zap.Any("collection", deleteCollection))
+
+	triggerMessage := notification.TriggerMessage{
+		Msg: model.Notification{
+			CollectionID: collectionID.String(),
+			Type:         model.NotificationTypeDeleteCollection,
+			Status:       model.NotificationStatusPending,
+		},
+		ResultChan: make(chan error),
+	}
+	mt.notificationProcessor.Trigger(ctx, triggerMessage)
 	return nil
 }
 

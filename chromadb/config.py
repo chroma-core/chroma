@@ -80,7 +80,6 @@ _abstract_type_keys: Dict[str, str] = {
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
-
 class Settings(BaseSettings):  # type: ignore
     environment: str = ""
 
@@ -115,6 +114,9 @@ class Settings(BaseSettings):  # type: ignore
 
     is_persistent: bool = False
     persist_directory: str = "./chroma"
+
+    chroma_memory_limit_bytes: int = 0
+    chroma_segment_cache_policy: Optional[str] = None
 
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
@@ -218,6 +220,9 @@ class Settings(BaseSettings):  # type: ignore
         str
     ] = "chromadb.auth.authz.LocalUserConfigAuthorizationConfigurationProvider"
 
+    # TODO comment
+    chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
+
     anonymized_telemetry: bool = True
 
     chroma_otel_collection_endpoint: Optional[str] = ""
@@ -309,6 +314,15 @@ class System(Component):
         for key in _legacy_config_keys:
             if settings[key] is not None:
                 raise ValueError(LEGACY_ERROR)
+
+        if settings["chroma_segment_cache_policy"] is not None and settings["chroma_segment_cache_policy"] != "LRU":
+            logger.error(
+                f"Failed to set chroma_segment_cache_policy: Only LRU is available."
+            )
+            if settings["chroma_memory_limit_bytes"] == 0:
+                logger.error(
+                    f"Failed to set chroma_segment_cache_policy: chroma_memory_limit_bytes is require."
+                )
 
         # Apply the nofile limit if set
         if settings["chroma_server_nofile"] is not None:
