@@ -657,3 +657,23 @@ def test_delete_segment(
         res = cur.execute(sql, params)
         # assert that the segment is gone
         assert len(res.fetchall()) == 0
+
+    fts_t = Table("embedding_fulltext_search")
+    q_fts = (
+        _db.querybuilder()
+        .from_(fts_t)
+        .select()
+        .where(
+            fts_t.rowid.isin(
+                _db.querybuilder()
+                .from_(t)
+                .select(t.id)
+                .where(t.segment_id == ParameterValue(_db.uuid_to_db(_id)))
+            )
+        )
+    )
+    sql, params = get_sql(q_fts)
+    with _db.tx() as cur:
+        res = cur.execute(sql, params)
+        # assert that all FTS rows are gone
+        assert len(res.fetchall()) == 0
