@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+from time import sleep
+
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import DEFAULT_TENANT
 
@@ -33,7 +35,7 @@ def test_multiple_clients_concurrently(client: Client) -> None:
 
     with ThreadPoolExecutor(max_workers=CLIENT_COUNT) as executor:
         executor.map(run_target, range(CLIENT_COUNT))
-
+    executor.shutdown(wait=True)
     # Create a final client, which will be used to verify the collections were created
     client = Client(settings=client._system.settings)
 

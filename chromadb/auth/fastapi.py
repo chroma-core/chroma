@@ -1,3 +1,6 @@
+import asyncio
+
+import chromadb
 from contextvars import ContextVar
 from functools import wraps
 import logging
@@ -173,7 +176,7 @@ def authz_context(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
-        def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
+        async def wrapped(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
             _dynamic_kwargs = {
                 "api": args[0]._api,
                 "function": f,
@@ -239,6 +242,8 @@ def authz_context(
                         ):
                             kwargs["database"].name = desired_database
 
+            if asyncio.iscoroutinefunction(f):
+                return await f(*args, **kwargs)
             return f(*args, **kwargs)
 
         return wrapped
