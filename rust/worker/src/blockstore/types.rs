@@ -28,7 +28,13 @@ impl<K: PartialOrd + Clone> Eq for BlockfileKey<K> {}
 
 pub(crate) trait BlockfileValue {}
 
-impl BlockfileValue for String {}
+// TODO: align with rust collection conventions for this trait
+pub(crate) trait SplittableBlockFileValue<V: BlockfileValue + PartialOrd>:
+    BlockfileValue
+{
+    fn get_at_index(&self, index: usize) -> Result<&V, Box<dyn ChromaError>>;
+    fn len(&self) -> usize;
+}
 
 pub(crate) trait Blockfile<K: PartialEq + PartialOrd + Clone, V: BlockfileValue> {
     // TODO: check the into string pattern
@@ -36,12 +42,24 @@ pub(crate) trait Blockfile<K: PartialEq + PartialOrd + Clone, V: BlockfileValue>
     where
         Self: Sized;
     fn get(&self, key: BlockfileKey<K>) -> Result<&V, Box<dyn ChromaError>>;
+    fn get_by_prefix(
+        &self,
+        prefix: String,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
     fn set(&mut self, key: BlockfileKey<K>, value: V) -> Result<(), Box<dyn ChromaError>>;
 }
 
-pub(crate) trait SplittableBlockFile<K: PartialEq + PartialOrd + Clone, V: BlockfileValue>:
-    Blockfile<K, V>
+pub(crate) trait SplittableBlockFile<
+    K: PartialEq + PartialOrd + Clone,
+    VV: BlockfileValue + PartialOrd,
+    V: SplittableBlockFileValue<VV>,
+>: Blockfile<K, V>
 {
+    fn get_with_value_hint(
+        &self,
+        key: BlockfileKey<K>,
+        value_hint: VV,
+    ) -> Result<&V, Box<dyn ChromaError>>;
 }
 
 struct HashMapBlockfile<K: PartialEq + PartialOrd + Clone, V> {
@@ -67,6 +85,19 @@ impl<K: PartialEq + PartialOrd + Hash + Clone, V: BlockfileValue> Blockfile<K, V
         }
     }
 
+    fn get_by_prefix(
+        &self,
+        prefix: String,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+        let mut result = Vec::new();
+        for (key, value) in self.map.iter() {
+            if key.prefix == prefix {
+                result.push((key, value));
+            }
+        }
+        Ok(result)
+    }
+
     fn set(&mut self, key: BlockfileKey<K>, value: V) -> Result<(), Box<dyn ChromaError>> {
         self.map.insert(key, value);
         Ok(())
@@ -75,10 +106,23 @@ impl<K: PartialEq + PartialOrd + Hash + Clone, V: BlockfileValue> Blockfile<K, V
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use super::*;
 
+    impl BlockfileValue for String {}
+    impl Debug for BlockfileKey<String> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "BlockfileKey(prefix: {}, key: {})",
+                self.prefix, self.key
+            )
+        }
+    }
+
     #[test]
-    fn test_blockstore() {
+    fn test_blockfile_set_get() {
         let mut blockfile = HashMapBlockfile::open("test").unwrap();
         let key = BlockfileKey {
             prefix: "text_prefix".to_string(),
@@ -88,5 +132,25 @@ mod tests {
         let value = blockfile.get(key);
         // downcast to string
         assert_eq!(value.unwrap(), "value1");
+    }
+
+    #[test]
+    fn test_blockfile_get_by_prefix() {
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key1 = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key1".to_string(),
+        };
+        let key2 = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key2".to_string(),
+        };
+        let _res = blockfile.set(key1.clone(), "value1".to_string()).unwrap();
+        let _res = blockfile.set(key2.clone(), "value2".to_string()).unwrap();
+        let values = blockfile.get_by_prefix("text_prefix".to_string()).unwrap();
+        assert_eq!(values.len(), 2);
+        // May return values in any order
+        assert!(values.contains(&(&key1.clone(), &"value1".to_string())));
+        assert!(values.contains(&(&key2.clone(), &"value2".to_string())));
     }
 }
