@@ -129,12 +129,12 @@ message Notification {
 
 message PushLogsRequest {
   string collection_id = 1;
-  repeated string records = 2;
+  repeated SubmitEmbeddingRecord records = 2;
 }
 
 message PushLogsResponse {
-  int64 record_id = 1;
-  int32 record_count = 2;
+  int32 record_count = 1;
+  Status status = 2;
 }
 
 message PullLogsRequest {
@@ -144,7 +144,8 @@ message PullLogsRequest {
 }
 
 message PullLogsResponse {
-  repeated string records = 1;
+  repeated SubmitEmbeddingRecord records = 1;
+  Status status = 2;
 }
 
 service SysDB {

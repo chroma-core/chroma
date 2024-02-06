@@ -26,7 +26,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, topic *string, t
 	query := s.db.Table("collections").
 		Select("collections.id, collections.name, collections.topic, collections.dimension, collections.database_id, databases.name, databases.tenant_id, collection_metadata.key, collection_metadata.str_value, collection_metadata.int_value, collection_metadata.float_value").
 		Joins("LEFT JOIN collection_metadata ON collections.id = collection_metadata.collection_id").
-		Joins("INNER JOIN `databases` ON collections.database_id = databases.id").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.id")
 
 	query = query.Where("databases.name = ?", databaseName)

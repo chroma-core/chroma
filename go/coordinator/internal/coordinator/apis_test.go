@@ -228,7 +228,7 @@ func TestCreateGetDeleteCollections(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	//db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -332,7 +332,7 @@ func TestUpdateCollections(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -414,7 +414,7 @@ func TestUpdateCollections(t *testing.T) {
 func TestCreateUpdateWithDatabase(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -474,7 +474,7 @@ func TestCreateUpdateWithDatabase(t *testing.T) {
 func TestGetMultipleWithDatabase(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, "new_database")
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -516,7 +516,7 @@ func TestGetMultipleWithDatabase(t *testing.T) {
 func TestCreateDatabaseWithTenants(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -607,7 +607,7 @@ func TestCreateDatabaseWithTenants(t *testing.T) {
 
 func TestCreateGetDeleteTenants(t *testing.T) {
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(nil)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -727,7 +727,7 @@ func TestCreateGetDeleteSegments(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)
@@ -831,7 +831,7 @@ func TestUpdateSegment(t *testing.T) {
 	sampleCollections := SampleCollections(t, common.DefaultTenant, common.DefaultDatabase)
 
 	// db := dbcore.ConfigDatabaseForTesting()
-	db := dbcore.ConfigTiDBForTesting()
+	db := dbcore.ConfigAuroraForTesting()
 	ctx := context.Background()
 	assignmentPolicy := NewMockAssignmentPolicy(sampleCollections)
 	c, err := NewCoordinator(ctx, assignmentPolicy, db, nil, nil)

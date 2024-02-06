@@ -26,5 +26,4 @@ type Catalog interface {
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetTenants(ctx context.Context, getTenant *model.GetTenant, ts types.Timestamp) (*model.Tenant, error)
 	GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*model.Tenant, error)
-	PushLogs(ctx context.Context, id types.UniqueID, content []string) error
 }

@@ -34,4 +34,7 @@ var (
 
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
+
+	// Record Log errors
+	ErrPushLogs = errors.New("error pushing logs")
 )

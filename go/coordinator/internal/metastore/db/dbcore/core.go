@@ -11,10 +11,11 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -29,30 +30,17 @@ type DBConfig struct {
 	DBName       string
 	MaxIdleConns int
 	MaxOpenConns int
+	Region       string
 }
 
-func ConnectTiDB(cfg DBConfig) *gorm.DB {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&tls=%s&parseTime=true",
-		cfg.Username, cfg.Password, cfg.Address, cfg.Port, cfg.DBName, "false")
-
-	ormLogger := logger.Default
-	ormLogger.LogMode(logger.Info)
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-
+func ConnectAurora(cfg DBConfig) *gorm.DB {
+	log.Info("ConnectAurora", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.String("region", cfg.Region), zap.Int("port", cfg.Port))
+	db, err := ConnectPostgres(cfg)
 	if err != nil {
 		panic(err)
 	}
 
-	log.Info("TiDB connected success",
-		zap.String("host", cfg.Address),
-		zap.String("database", cfg.DBName),
-		zap.Error(err))
-
-	globalDB = db
-
-	log.Info("TiDB: AutoMigrate")
+	log.Info("Aurora: AutoMigrate")
 	db.AutoMigrate(&dbmodel.Tenant{})
 	db.AutoMigrate(&dbmodel.Database{})
 	db.AutoMigrate(&dbmodel.Collection{})
@@ -149,15 +137,17 @@ func GetDB(ctx context.Context) *gorm.DB {
 	return globalDB.WithContext(ctx)
 }
 
-func ConfigTiDBForTesting() *gorm.DB {
+func ConfigAuroraForTesting() *gorm.DB {
 	dBConfig := DBConfig{
-		Username: "root",
-		Password: "emuY1ktyq5Tq4nGx",
-		Address:  "tidb.ootbbu125szh.clusters.tidb-cloud.com",
-		Port:     4000,
+		Username: "postgres",
+		Password: "z7_UHv7f2_Pz9Js9BkHN",
+		Address:  "test-instance-1.cd2rjkzioeat.us-west-2.rds.amazonaws.com",
+		Port:     5432,
 		DBName:   "test",
+		Region:   "us-west-2",
 	}
-	db := ConnectTiDB(dBConfig)
+	db := ConnectAurora(dBConfig)
+	SetGlobalDB(db)
 	CreateTestTables(db)
 	return db
 }

@@ -31,7 +31,6 @@ type IMeta interface {
 	CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error)
 	GetTenant(ctx context.Context, getTenant *model.GetTenant) (*model.Tenant, error)
 	SetNotificationProcessor(notificationProcessor notification.NotificationProcessor)
-	PushLogs(ctx context.Context, id types.UniqueID, content []string) error
 }
 
 // MetaTable is an implementation of IMeta. It loads the system catalog during startup
@@ -408,8 +407,4 @@ func (mt *MetaTable) UpdateSegment(ctx context.Context, updateSegment *model.Upd
 	mt.segmentsCache[updateSegment.ID] = segment
 	log.Info("segment updated", zap.Any("segment", segment))
 	return segment, nil
-}
-
-func (mt *MetaTable) PushLogs(ctx context.Context, id types.UniqueID, content []string) error {
-	return mt.catalog.PushLogs(ctx, id, content)
 }

@@ -6,46 +6,57 @@ import (
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"time"
 )
 
 type recordLogDb struct {
 	db *gorm.DB
 }
 
-func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordContent []string) error {
-	var tso int64
-	s.db.Raw("select @@tidb_current_ts").Scan(&tso)
-	var collectionIDStr = types.FromUniqueID(collectionID)
-	log.Info("PushLogs",
-		zap.String("collectionID", *collectionIDStr),
-		zap.Int64("ID", tso),
-		zap.Int("count", len(recordContent)))
+func (s *recordLogDb) PushLogs(collectionID types.UniqueID, recordsContent [][]byte) (int, error) {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var timestamp = time.Now().UnixNano()
+		var collectionIDStr = types.FromUniqueID(collectionID)
+		log.Info("PushLogs",
+			zap.String("collectionID", *collectionIDStr),
+			zap.Int64("timestamp", timestamp),
+			zap.Int("count", len(recordsContent)))
 
-	var recordLogs []*dbmodel.RecordLog
-	for index := range recordContent {
-		recordLogs = append(recordLogs, &dbmodel.RecordLog{
-			CollectionID: collectionIDStr,
-			ID:           tso,
-			Offset:       index,
-			Record:       &recordContent[index],
-		})
+		var recordLogs []*dbmodel.RecordLog
+		for index := range recordsContent {
+			recordLogs = append(recordLogs, &dbmodel.RecordLog{
+				CollectionID: collectionIDStr,
+				Timestamp:    timestamp,
+				Record:       &recordsContent[index],
+			})
+		}
+		err := tx.CreateInBatches(recordLogs, len(recordLogs)).Error
+		if err != nil {
+			log.Error("Batch insert error", zap.Error(err))
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("PushLogs error", zap.Error(err))
+		return 0, err
 	}
-	return s.db.CreateInBatches(recordLogs, len(recordLogs)).Error
+	return len(recordsContent), nil
 }
 
-func (s *recordLogDb) PullLogsFromID(collectionID types.UniqueID, id int64, batch_size int) ([]*dbmodel.RecordLog, error) {
+func (s *recordLogDb) PullLogs(collectionID types.UniqueID, id int64, batchSize int) ([]*dbmodel.RecordLog, error) {
 	var collectionIDStr = types.FromUniqueID(collectionID)
-	log.Info("PullLogsFromID",
+	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
 		zap.Int64("ID", id),
-		zap.Int("batch_size", batch_size))
+		zap.Int("batch_size", batchSize))
 
 	var recordLogs []*dbmodel.RecordLog
-	s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Order("offset").Limit(batch_size).Find(&recordLogs)
-	log.Info("PullLogsFromID",
+	s.db.Where("collection_id = ? AND id >= ?", collectionIDStr, id).Order("id").Limit(batchSize).Find(&recordLogs)
+	log.Info("PullLogs",
 		zap.String("collectionID", *collectionIDStr),
 		zap.Int64("ID", id),
-		zap.Int("batch_size", batch_size),
+		zap.Int("batch_size", batchSize),
 		zap.Int("count", len(recordLogs)))
 	return recordLogs, nil
 }

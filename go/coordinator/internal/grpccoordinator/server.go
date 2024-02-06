@@ -3,7 +3,6 @@ package grpccoordinator
 import (
 	"context"
 	"errors"
-	"google.golang.org/grpc"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -17,6 +16,7 @@ import (
 	"github.com/chroma/chroma-coordinator/internal/utils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"gorm.io/gorm"
 )
@@ -37,12 +37,13 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 
-	// TiDB config
-	TiDBHost     string
-	TiDBPort     int
-	TiDBUser     string
-	TiDBPassword string
-	TiDBDBName   string
+	// Aurora config
+	AuroraHost     string
+	AuroraPort     int
+	AuroraUser     string
+	AuroraDBName   string
+	AuroraRegion   string
+	AuroraPassword string
 
 	// Notification config
 	NotificationStoreProvider string
@@ -99,16 +100,15 @@ func New(config Config) (*Server, error) {
 			return nil, err
 		}
 		return NewWithGrpcProvider(config, grpcutils.Default, db)
-	} else if config.SystemCatalogProvider == "tidb" {
+	} else if config.SystemCatalogProvider == "aurora" {
 		dBConfig := dbcore.DBConfig{
-			Username: config.TiDBUser,
-			Password: config.TiDBPassword,
-			Address:  config.TiDBHost,
-			Port:     config.TiDBPort,
-			DBName:   config.TiDBDBName,
+			Username: config.AuroraUser,
+			Address:  config.AuroraHost,
+			Port:     config.AuroraPort,
+			DBName:   config.AuroraDBName,
 		}
 
-		db := dbcore.ConnectTiDB(dBConfig)
+		db := dbcore.ConnectAurora(dBConfig)
 		return NewWithGrpcProvider(config, grpcutils.Default, db)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
@@ -182,32 +182,25 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	}
 	s.coordinator = coordinator
 	s.coordinator.Start()
-	log.Info("Started coordinator")
-	s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
-		coordinatorpb.RegisterSysDBServer(registrar, s)
-	})
-	if err != nil {
-		return nil, err
+	if !config.Testing {
+		//memberlist_manager, err := createMemberlistManager(config)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//
+		//// Start the memberlist manager
+		//err = memberlist_manager.Start()
+		//if err != nil {
+		//	return nil, err
+		//}
+
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+			coordinatorpb.RegisterSysDBServer(registrar, s)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
-	//if !config.Testing {
-	//	memberlist_manager, err := createMemberlistManager(config)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//
-	//	// Start the memberlist manager
-	//	err = memberlist_manager.Start()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//
-	//	s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
-	//		coordinatorpb.RegisterSysDBServer(registrar, s)
-	//	})
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	// }
 	return s, nil
 }
 

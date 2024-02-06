@@ -5,7 +5,10 @@ go 1.20
 require (
 	ariga.io/atlas-provider-gorm v0.1.1
 	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
+	github.com/aws/aws-sdk-go v1.32.6
+	github.com/go-sql-driver/mysql v1.7.0
 	github.com/google/uuid v1.3.1
+	github.com/lib/pq v1.10.7
 	github.com/pingcap/log v1.1.0
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.7.0
@@ -33,11 +36,11 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
-	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/jmespath/go-jmespath v0.3.0 // indirect
 	github.com/klauspost/compress v1.14.4 // indirect
 	github.com/linkedin/goavro/v2 v2.9.8 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
