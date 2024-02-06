@@ -20,13 +20,30 @@ Both of approaches yielded the same results.
 > production environments.
 
 We also provide a sample notebook that to help the reader run a local Chroma server with a self-signed certificate and
-configure the client to trust the certificate. The notebook can be found in [assets/CIP-01022024-test_self_signed.ipynb](./assets/CIP-01022024-test_self_signed.ipynb).
+configure the client to trust the certificate. The notebook can be found
+in [assets/CIP-01022024-test_self_signed.ipynb](./assets/CIP-01022024-test_self_signed.ipynb).
 
 ## Public Interfaces
 
+> **Note:** The following changes are only applicable to Chroma HttpClient.
+
 New settings variable `chroma_server_ssl_verify` accepting either a boolean or a path to a certificate file. If the
-value is a path to a certificate file, the file will be used to verify the server's certificate. The value is passed
-as `verify` parameter to `requests.Session` of the `FastAPI` client.
+value is a path to a certificate file, the file will be used to verify the server's certificate. If the value is a
+boolean, the SSL certificate verification can be bypassed (`false`) or enforced (`true`).
+
+The value is passed as `verify` parameter to `requests.Session` of the `FastAPI` client. See
+requests [documentation](https://requests.readthedocs.io/en/latest/user/advanced/#ssl-cert-verification) for
+more details.
+
+Example Usage:
+
+```python
+import chromadb
+from chromadb import Settings
+client = chromadb.HttpClient(host="localhost",port="8443",ssl=True, settings=Settings(chroma_server_ssl_verify='./servercert.pem'))
+# or with boolean
+client = chromadb.HttpClient(host="localhost",port="8443",ssl=True, settings=Settings(chroma_server_ssl_verify=False))
+```
 
 ### Resources
 
