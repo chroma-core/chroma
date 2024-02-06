@@ -1,7 +1,7 @@
+use crate::errors::ChromaError;
+use arrow::array::Int32Array;
 use core::panic;
 use std::hash::{Hash, Hasher};
-
-use crate::errors::ChromaError;
 
 #[derive(Clone)]
 pub(crate) struct BlockfileKey<K: PartialEq + PartialOrd + Clone> {
@@ -47,6 +47,35 @@ pub(crate) trait Blockfile<K: PartialEq + PartialOrd + Clone, V: BlockfileValue>
         prefix: String,
     ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
     fn set(&mut self, key: BlockfileKey<K>, value: V) -> Result<(), Box<dyn ChromaError>>;
+
+    // TODO: the naming of these methods are off since they don't mention the prefix
+    // THOUGHT: make prefix optional and if its included, then it will be used to filter the results
+    // Get all values with a given prefix where the key is greater than the given key
+    fn get_gt(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
+
+    // Get all values with a given prefix where the key is less than the given key
+    fn get_lt(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
+
+    // Get all values with a given prefix where the key is greater than or equal to the given key
+    fn get_gte(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
+
+    fn get_lte(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>>;
 }
 
 pub(crate) trait SplittableBlockFile<
@@ -102,6 +131,62 @@ impl<K: PartialEq + PartialOrd + Hash + Clone, V: BlockfileValue> Blockfile<K, V
         self.map.insert(key, value);
         Ok(())
     }
+
+    fn get_gt(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+        let mut result = Vec::new();
+        for (k, v) in self.map.iter() {
+            if k.prefix == prefix && k.key > key {
+                result.push((k, v));
+            }
+        }
+        Ok(result)
+    }
+
+    fn get_gte(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+        let mut result = Vec::new();
+        for (k, v) in self.map.iter() {
+            if k.prefix == prefix && k.key >= key {
+                result.push((k, v));
+            }
+        }
+        Ok(result)
+    }
+
+    fn get_lt(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+        let mut result = Vec::new();
+        for (k, v) in self.map.iter() {
+            if k.prefix == prefix && k.key < key {
+                result.push((k, v));
+            }
+        }
+        Ok(result)
+    }
+
+    fn get_lte(
+        &self,
+        prefix: String,
+        key: K,
+    ) -> Result<Vec<(&BlockfileKey<K>, &V)>, Box<dyn ChromaError>> {
+        let mut result = Vec::new();
+        for (k, v) in self.map.iter() {
+            if k.prefix == prefix && k.key <= key {
+                result.push((k, v));
+            }
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -152,5 +237,47 @@ mod tests {
         // May return values in any order
         assert!(values.contains(&(&key1.clone(), &"value1".to_string())));
         assert!(values.contains(&(&key2.clone(), &"value2".to_string())));
+    }
+
+    impl BlockfileValue for Int32Array {}
+    impl BlockfileValue for i32 {}
+
+    #[test]
+    fn test_storing_arrow_in_blockfile() {
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key1".to_string(),
+        };
+        let array = Int32Array::from(vec![1, 2, 3]);
+        let _res = blockfile.set(key.clone(), array).unwrap();
+        let value = blockfile.get(key).unwrap();
+        assert_eq!(value, &Int32Array::from(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_blockfile_get_gt() {
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key1 = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key1".to_string(),
+        };
+        let key2 = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key2".to_string(),
+        };
+        let key3 = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "key3".to_string(),
+        };
+        let _res = blockfile.set(key1.clone(), 1).unwrap();
+        let _res = blockfile.set(key2.clone(), 2).unwrap();
+        let _res = blockfile.set(key3.clone(), 3).unwrap();
+        let values = blockfile
+            .get_gt("text_prefix".to_string(), "key1".to_string())
+            .unwrap();
+        assert_eq!(values.len(), 2);
+        assert!(values.contains(&(&key2.clone(), &2)));
+        assert!(values.contains(&(&key3.clone(), &3)));
     }
 }
