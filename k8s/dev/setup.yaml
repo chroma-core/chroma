@@ -1,0 +1,100 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: chroma
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memberlist-reader
+rules:
+- apiGroups:
+  - chroma.cluster
+  resources:
+  - memberlists
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memberlist-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: memberlist-reader
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: chroma
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: chroma
+  name: pod-list-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-list-role-binding
+  namespace: chroma
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: chroma
+roleRef:
+  kind: Role
+  name: pod-list-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: memberlists.chroma.cluster
+spec:
+  group: chroma.cluster
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                members:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url: # Rename to ip
+                        type: string
+                        pattern: '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$'
+  scope: Namespaced
+  names:
+    plural: memberlists
+    singular: memberlist
+    kind: MemberList
+    shortNames:
+      - ml
+---
+apiVersion: chroma.cluster/v1
+kind: MemberList
+metadata:
+  name: worker-memberlist
+  namespace: chroma
+spec:
+  members:
