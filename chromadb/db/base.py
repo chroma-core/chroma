@@ -23,6 +23,12 @@ class UniqueConstraintError(Exception):
     pass
 
 
+class PushLogsError(Exception):
+    """Error raised when there is an issue pushing logs to the database"""
+
+    pass
+
+
 class Cursor(Protocol):
     """Reifies methods we use from a DBAPI2 Cursor since DBAPI2 is not typed."""
 

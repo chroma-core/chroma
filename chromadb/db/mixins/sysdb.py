@@ -1,9 +1,10 @@
-from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
+from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set, List
 from uuid import UUID
 from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
+from chromadb import proto
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import (
     Cursor,
@@ -14,6 +15,7 @@ from chromadb.db.base import (
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.proto.chroma_pb2 import SubmitEmbeddingRecord
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -456,7 +458,7 @@ class SqlSysDB(SqlDB, SysDB):
 
             # apply limit and offset
             if limit is not None:
-                collections = collections[offset:offset+limit]
+                collections = collections[offset : offset + limit]
             else:
                 collections = collections[offset:]
 
@@ -650,6 +652,16 @@ class SqlSysDB(SqlDB, SysDB):
                         metadata,
                         set(metadata.keys()),
                     )
+
+    @trace_method("SqlSysDB.push_logs", OpenTelemetryGranularity.ALL)
+    @override
+    def push_logs(
+        self,
+        id: UUID,
+        records: List[SubmitEmbeddingRecord],
+    ) -> int:
+        """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
+        pass
 
     @trace_method("SqlSysDB._metadata_from_rows", OpenTelemetryGranularity.ALL)
     def _metadata_from_rows(

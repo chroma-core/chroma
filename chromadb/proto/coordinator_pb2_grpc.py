@@ -17,80 +17,80 @@ class SysDBStub(object):
             channel: A grpc.Channel.
         """
         self.CreateDatabase = channel.unary_unary(
-                '/chroma.SysDB/CreateDatabase',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/CreateDatabase",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.GetDatabase = channel.unary_unary(
-                '/chroma.SysDB/GetDatabase',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseResponse.FromString,
-                )
+            "/chroma.SysDB/GetDatabase",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseResponse.FromString,
+        )
         self.CreateTenant = channel.unary_unary(
-                '/chroma.SysDB/CreateTenant',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/CreateTenant",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.GetTenant = channel.unary_unary(
-                '/chroma.SysDB/GetTenant',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantResponse.FromString,
-                )
+            "/chroma.SysDB/GetTenant",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantResponse.FromString,
+        )
         self.CreateSegment = channel.unary_unary(
-                '/chroma.SysDB/CreateSegment',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/CreateSegment",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.DeleteSegment = channel.unary_unary(
-                '/chroma.SysDB/DeleteSegment',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/DeleteSegment",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.GetSegments = channel.unary_unary(
-                '/chroma.SysDB/GetSegments',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsResponse.FromString,
-                )
+            "/chroma.SysDB/GetSegments",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsResponse.FromString,
+        )
         self.UpdateSegment = channel.unary_unary(
-                '/chroma.SysDB/UpdateSegment',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/UpdateSegment",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.CreateCollection = channel.unary_unary(
-                '/chroma.SysDB/CreateCollection',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionResponse.FromString,
-                )
+            "/chroma.SysDB/CreateCollection",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionResponse.FromString,
+        )
         self.DeleteCollection = channel.unary_unary(
-                '/chroma.SysDB/DeleteCollection',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/DeleteCollection",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.GetCollections = channel.unary_unary(
-                '/chroma.SysDB/GetCollections',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
-                )
+            "/chroma.SysDB/GetCollections",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
+        )
         self.UpdateCollection = channel.unary_unary(
-                '/chroma.SysDB/UpdateCollection',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/UpdateCollection",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.ResetState = channel.unary_unary(
-                '/chroma.SysDB/ResetState',
-                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-                )
+            "/chroma.SysDB/ResetState",
+            request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
+        )
         self.PushLogs = channel.unary_unary(
-                '/chroma.SysDB/PushLogs',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsResponse.FromString,
-                )
+            "/chroma.SysDB/PushLogs",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsResponse.FromString,
+        )
         self.PullLogs = channel.unary_unary(
-                '/chroma.SysDB/PullLogs',
-                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsRequest.SerializeToString,
-                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsResponse.FromString,
-                )
+            "/chroma.SysDB/PullLogs",
+            request_serializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsRequest.SerializeToString,
+            response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsResponse.FromString,
+        )
 
 
 class SysDBServicer(object):
@@ -99,432 +99,613 @@ class SysDBServicer(object):
     def CreateDatabase(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetDatabase(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def CreateTenant(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetTenant(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def CreateSegment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def DeleteSegment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetSegments(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def UpdateSegment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def CreateCollection(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def DeleteCollection(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetCollections(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def UpdateCollection(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def ResetState(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def PushLogs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def PullLogs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
 
 def add_SysDBServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'CreateDatabase': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateDatabase,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'GetDatabase': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetDatabase,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseResponse.SerializeToString,
-            ),
-            'CreateTenant': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateTenant,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'GetTenant': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetTenant,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantResponse.SerializeToString,
-            ),
-            'CreateSegment': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateSegment,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'DeleteSegment': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteSegment,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'GetSegments': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetSegments,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsResponse.SerializeToString,
-            ),
-            'UpdateSegment': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateSegment,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'CreateCollection': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateCollection,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionResponse.SerializeToString,
-            ),
-            'DeleteCollection': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteCollection,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'GetCollections': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetCollections,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.SerializeToString,
-            ),
-            'UpdateCollection': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateCollection,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'ResetState': grpc.unary_unary_rpc_method_handler(
-                    servicer.ResetState,
-                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
-                    response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
-            ),
-            'PushLogs': grpc.unary_unary_rpc_method_handler(
-                    servicer.PushLogs,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsResponse.SerializeToString,
-            ),
-            'PullLogs': grpc.unary_unary_rpc_method_handler(
-                    servicer.PullLogs,
-                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsRequest.FromString,
-                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsResponse.SerializeToString,
-            ),
+        "CreateDatabase": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateDatabase,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "GetDatabase": grpc.unary_unary_rpc_method_handler(
+            servicer.GetDatabase,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseResponse.SerializeToString,
+        ),
+        "CreateTenant": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateTenant,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "GetTenant": grpc.unary_unary_rpc_method_handler(
+            servicer.GetTenant,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetTenantResponse.SerializeToString,
+        ),
+        "CreateSegment": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateSegment,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "DeleteSegment": grpc.unary_unary_rpc_method_handler(
+            servicer.DeleteSegment,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "GetSegments": grpc.unary_unary_rpc_method_handler(
+            servicer.GetSegments,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsResponse.SerializeToString,
+        ),
+        "UpdateSegment": grpc.unary_unary_rpc_method_handler(
+            servicer.UpdateSegment,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "CreateCollection": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateCollection,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionResponse.SerializeToString,
+        ),
+        "DeleteCollection": grpc.unary_unary_rpc_method_handler(
+            servicer.DeleteCollection,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "GetCollections": grpc.unary_unary_rpc_method_handler(
+            servicer.GetCollections,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.SerializeToString,
+        ),
+        "UpdateCollection": grpc.unary_unary_rpc_method_handler(
+            servicer.UpdateCollection,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "ResetState": grpc.unary_unary_rpc_method_handler(
+            servicer.ResetState,
+            request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            response_serializer=chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.SerializeToString,
+        ),
+        "PushLogs": grpc.unary_unary_rpc_method_handler(
+            servicer.PushLogs,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.PushLogsResponse.SerializeToString,
+        ),
+        "PullLogs": grpc.unary_unary_rpc_method_handler(
+            servicer.PullLogs,
+            request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsRequest.FromString,
+            response_serializer=chromadb_dot_proto_dot_coordinator__pb2.PullLogsResponse.SerializeToString,
+        ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'chroma.SysDB', rpc_method_handlers)
+        "chroma.SysDB", rpc_method_handlers
+    )
     server.add_generic_rpc_handlers((generic_handler,))
 
 
- # This class is part of an EXPERIMENTAL API.
+# This class is part of an EXPERIMENTAL API.
 class SysDB(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def CreateDatabase(request,
+    def CreateDatabase(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/CreateDatabase',
+            "/chroma.SysDB/CreateDatabase",
             chromadb_dot_proto_dot_coordinator__pb2.CreateDatabaseRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def GetDatabase(request,
+    def GetDatabase(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetDatabase',
+            "/chroma.SysDB/GetDatabase",
             chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetDatabaseResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def CreateTenant(request,
+    def CreateTenant(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/CreateTenant',
+            "/chroma.SysDB/CreateTenant",
             chromadb_dot_proto_dot_coordinator__pb2.CreateTenantRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def GetTenant(request,
+    def GetTenant(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetTenant',
+            "/chroma.SysDB/GetTenant",
             chromadb_dot_proto_dot_coordinator__pb2.GetTenantRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetTenantResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def CreateSegment(request,
+    def CreateSegment(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/CreateSegment',
+            "/chroma.SysDB/CreateSegment",
             chromadb_dot_proto_dot_coordinator__pb2.CreateSegmentRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def DeleteSegment(request,
+    def DeleteSegment(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/DeleteSegment',
+            "/chroma.SysDB/DeleteSegment",
             chromadb_dot_proto_dot_coordinator__pb2.DeleteSegmentRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def GetSegments(request,
+    def GetSegments(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetSegments',
+            "/chroma.SysDB/GetSegments",
             chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetSegmentsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def UpdateSegment(request,
+    def UpdateSegment(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/UpdateSegment',
+            "/chroma.SysDB/UpdateSegment",
             chromadb_dot_proto_dot_coordinator__pb2.UpdateSegmentRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def CreateCollection(request,
+    def CreateCollection(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/CreateCollection',
+            "/chroma.SysDB/CreateCollection",
             chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.CreateCollectionResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def DeleteCollection(request,
+    def DeleteCollection(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/DeleteCollection',
+            "/chroma.SysDB/DeleteCollection",
             chromadb_dot_proto_dot_coordinator__pb2.DeleteCollectionRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def GetCollections(request,
+    def GetCollections(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetCollections',
+            "/chroma.SysDB/GetCollections",
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def UpdateCollection(request,
+    def UpdateCollection(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/UpdateCollection',
+            "/chroma.SysDB/UpdateCollection",
             chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def ResetState(request,
+    def ResetState(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/ResetState',
+            "/chroma.SysDB/ResetState",
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             chromadb_dot_proto_dot_chroma__pb2.ChromaResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def PushLogs(request,
+    def PushLogs(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/PushLogs',
+            "/chroma.SysDB/PushLogs",
             chromadb_dot_proto_dot_coordinator__pb2.PushLogsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.PushLogsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )
 
     @staticmethod
-    def PullLogs(request,
+    def PullLogs(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
             target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/PullLogs',
+            "/chroma.SysDB/PullLogs",
             chromadb_dot_proto_dot_coordinator__pb2.PullLogsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.PullLogsResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+        )

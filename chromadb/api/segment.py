@@ -1,6 +1,7 @@
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
+from chromadb.proto.convert import to_proto_submit
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -374,17 +375,21 @@ class SegmentAPI(ServerAPI):
         ):
             self._validate_embedding_record(coll, r)
             records_to_submit.append(r)
-        self._producer.submit_embeddings(coll["topic"], records_to_submit)
 
-        self._product_telemetry_client.capture(
-            CollectionAddEvent(
-                collection_uuid=str(collection_id),
-                add_amount=len(ids),
-                with_metadata=len(ids) if metadatas is not None else 0,
-                with_documents=len(ids) if documents is not None else 0,
-                with_uris=len(ids) if uris is not None else 0,
-            )
-        )
+        protos_to_submit = [to_proto_submit(embedding) for embedding in embeddings]
+        self._sysdb.push_logs(collection_id, protos_to_submit)
+
+        # self._producer.submit_embeddings(coll["topic"], records_to_submit)
+        #
+        # self._product_telemetry_client.capture(
+        #     CollectionAddEvent(
+        #         collection_uuid=str(collection_id),
+        #         add_amount=len(ids),
+        #         with_metadata=len(ids) if metadatas is not None else 0,
+        #         with_documents=len(ids) if documents is not None else 0,
+        #         with_uris=len(ids) if uris is not None else 0,
+        #     )
+        # )
         return True
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)

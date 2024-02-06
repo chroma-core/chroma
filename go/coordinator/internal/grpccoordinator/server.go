@@ -106,6 +106,8 @@ func New(config Config) (*Server, error) {
 			Address:  config.AuroraHost,
 			Port:     config.AuroraPort,
 			DBName:   config.AuroraDBName,
+			Region:   config.AuroraRegion,
+			Password: config.AuroraPassword,
 		}
 
 		db := dbcore.ConnectAurora(dBConfig)
