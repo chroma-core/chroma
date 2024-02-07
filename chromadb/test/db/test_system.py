@@ -721,7 +721,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         scope=SegmentScope.VECTOR,
         topic="test_topic_a",
         collection=sample_collections[0]["id"],
-        metadata=metadata,
+        metadata=metadata
     )
 
     sysdb.reset_state()

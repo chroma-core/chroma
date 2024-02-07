@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        member-type: worker
+    spec:
+      containers:
+        - name: worker
+          image: worker
+          imagePullPolicy: IfNotPresent
+          command: ["cargo", "run"]
+          ports:
+            - containerPort: 50051
+          volumeMounts:
+            - name: chroma
+              mountPath: /index_data
+          env:
+            - name: CHROMA_WORKER__PULSAR_URL
+              value: pulsar://pulsar.chroma:6650
+            - name: CHROMA_WORKER__PULSAR_NAMESPACE
+              value: default
+            - name: CHROMA_WORKER__PULSAR_TENANT
+              value: default
+            - name: CHROMA_WORKER__MY_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      volumes:
+        - name: chroma
+          emptyDir: {}

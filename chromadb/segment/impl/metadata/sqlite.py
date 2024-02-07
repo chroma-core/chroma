@@ -573,6 +573,7 @@ class SqliteMetadataSegment(MetadataReader):
     def delete(self) -> None:
         t = Table("embeddings")
         t1 = Table("embedding_metadata")
+        t2 = Table("embedding_fulltext_search")
         q0 = (
             self._db.querybuilder()
             .from_(t1)
@@ -603,7 +604,23 @@ class SqliteMetadataSegment(MetadataReader):
                 )
             )
         )
+        q_fts = (
+            self._db.querybuilder()
+            .from_(t2)
+            .delete()
+            .where(
+                t2.rowid.isin(
+                    self._db.querybuilder()
+                    .from_(t)
+                    .select(t.id)
+                    .where(
+                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+                    )
+                )
+            )
+        )
         with self._db.tx() as cur:
+            cur.execute(*get_sql(q_fts))
             cur.execute(*get_sql(q0))
             cur.execute(*get_sql(q))
 
