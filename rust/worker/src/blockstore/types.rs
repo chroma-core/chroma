@@ -1,5 +1,8 @@
 use crate::errors::ChromaError;
-use arrow::array::Int32Array;
+use arrow::array::{
+    Array, ArrayRef, Int32Array, Int32Builder, ListArray, ListBuilder, StructArray, StructBuilder,
+};
+use arrow::datatypes::{DataType, Field};
 use core::panic;
 use std::hash::{Hash, Hasher};
 
@@ -189,9 +192,18 @@ impl<K: PartialEq + PartialOrd + Hash + Clone, V: BlockfileValue> Blockfile<K, V
     }
 }
 
+// struct SparseIndex<K: PartialEq + PartialOrd + Clone, V> {
+//     boundaries: arrow::datatypes::DataType::Struct,
+// }
+
+// struct ParquetBlockfile<K: PartialEq + PartialOrd + Clone, V> {}
+
 #[cfg(test)]
 mod tests {
-    use std::fmt::Debug;
+    use std::{fmt::Debug, sync::Arc};
+
+    use k8s_openapi::List;
+    use prost_types::Struct;
 
     use super::*;
 
@@ -279,5 +291,90 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values.contains(&(&key2.clone(), &2)));
         assert!(values.contains(&(&key3.clone(), &3)));
+    }
+
+    impl BlockfileValue for StructArray {}
+
+    #[test]
+    fn test_learning_arrow_struct() {
+        // positional inverted index is term -> doc_ids -> positions
+        // lets construct ["term1", "term2"] -> [[1, 2, 3], [4]] -> [[[0], [0, 1], [0, 1, 2]], [[10]]]
+        // this is implemented as two KV
+        // term1 -> Struct(ids: [1,2,3], pos: [[0], [0, 1], [0, 1, 2]])
+        // term2 -> Struct(ids: [4], pos: [[10]])
+        let mut id_list_builder = Int32Builder::new();
+        id_list_builder.append_value(1);
+        id_list_builder.append_value(2);
+        id_list_builder.append_value(3);
+        let id_list = id_list_builder.finish();
+
+        let mut pos_list_builder = ListBuilder::new(Int32Builder::new());
+        // Create the first list [[0], [0, 1], [0, 1, 2]]
+        let term1 = pos_list_builder.values();
+        term1.append_value(0);
+        pos_list_builder.append(true);
+        let term1 = pos_list_builder.values();
+        term1.append_value(0);
+        term1.append_value(1);
+        pos_list_builder.append(true);
+        let term1 = pos_list_builder.values();
+        term1.append_value(0);
+        term1.append_value(1);
+        term1.append_value(2);
+        pos_list_builder.append(true);
+
+        // TODO: build the ids such that they don't have to be named "item" and be nullable
+        let struct_array = StructArray::from(vec![
+            (
+                Arc::new(Field::new("id_list", DataType::Int32, true)),
+                Arc::new(id_list.clone()) as ArrayRef,
+            ),
+            (
+                Arc::new(Field::new_list(
+                    "pos_list",
+                    Arc::new(Field::new("item", DataType::Int32, true)),
+                    true,
+                )),
+                Arc::new(pos_list_builder.finish()) as ArrayRef,
+            ),
+        ]);
+        println!("{:?}", struct_array);
+
+        // Example of how to use the struct array, which is one value for a term
+        let mut blockfile = HashMapBlockfile::open("test").unwrap();
+        let key = BlockfileKey {
+            prefix: "text_prefix".to_string(),
+            key: "term1".to_string(),
+        };
+        let _res = blockfile.set(key.clone(), struct_array).unwrap();
+        let posting_list = blockfile.get(key).unwrap();
+        println!("{:?}", posting_list);
+
+        let ids = posting_list.column(0);
+        let ids = ids.as_any().downcast_ref::<Int32Array>().unwrap();
+        // find index of target id
+        let target_id = 2;
+
+        // imagine this is binary search instead of linear
+        let mut found = false;
+        for i in 0..ids.len() {
+            if ids.is_null(i) {
+                continue;
+            }
+            if ids.value(i) == target_id {
+                found = true;
+                let pos_list = posting_list.column(1);
+                let pos_list = pos_list
+                    .as_any()
+                    .downcast_ref::<ListArray>()
+                    .unwrap()
+                    .value(i);
+                println!(
+                    "Found position list: {:?} for target id: {}",
+                    pos_list, target_id
+                );
+                break;
+            }
+        }
     }
 }
