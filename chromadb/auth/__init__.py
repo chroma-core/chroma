@@ -302,6 +302,7 @@ class AuthzResourceTypes(str, Enum):
     DB = "db"
     COLLECTION = "collection"
     TENANT = "tenant"
+    API = "api"
 
 
 class AuthzResourceActions(str, Enum):
@@ -324,6 +325,7 @@ class AuthzResourceActions(str, Enum):
     UPDATE = "update"
     UPSERT = "upsert"
     RESET = "reset"
+    ENV = "env"
 
 
 @dataclass

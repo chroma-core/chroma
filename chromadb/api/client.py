@@ -19,6 +19,7 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    ClientServerSystemInfo,
 )
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
@@ -84,7 +85,6 @@ class SharedSystemClient:
             identifier = str(uuid.uuid4())
         else:
             raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
-
         return identifier
 
     @staticmethod
@@ -408,6 +408,10 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def get_version(self) -> str:
         return self._server.get_version()
+
+    @override
+    def env(self) -> ClientServerSystemInfo:
+        return self._server.env()
 
     @override
     def get_settings(self) -> Settings:

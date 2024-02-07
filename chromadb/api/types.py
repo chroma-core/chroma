@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
 import numpy as np
@@ -178,6 +179,51 @@ class IndexMetadata(TypedDict):
     # Assume cannot overflow
     total_elements_added: int
     time_created: float
+
+
+class OperatingMode(str, Enum):
+    HTTP_CLIENT = "http client"
+    PERSISTENT_CLIENT = "persistent client"
+    EPHEMERAL_CLIENT = "ephemeral client"
+    SINGLE_NODE_SERVER = "single node server"
+    DISTRIBUTED_SERVER = "distributed server"
+
+    def __str__(self) -> str:
+        return self.value
+
+    def __repr__(self) -> str:
+        return self.value
+
+
+class SystemInfo(TypedDict):
+    chroma_version: str
+    python_version: str
+    is_persistent: bool
+    api: str
+    datetime: str
+    os: str
+    os_version: str
+    os_release: Optional[str]
+    cpu_architecture: Optional[str]
+    cpu_count: Optional[int]
+    cpu_usage: Optional[float]
+    memory_free: Optional[int]
+    memory_total: Optional[int]
+    process_memory_rss: Optional[int]
+    process_memory_vms: Optional[int]
+    persistent_disk_total: Optional[int]
+    persistent_disk_used: Optional[int]
+    persistent_disk_free: Optional[int]
+    mode: OperatingMode
+
+
+class ClientServerSystemInfo(TypedDict):
+    server: Optional[SystemInfo]
+    client: Optional[SystemInfo]
+
+
+Embeddable = Union[Documents, Images]
+D = TypeVar("D", bound=Embeddable, contravariant=True)
 
 
 class EmbeddingFunction(Protocol[D]):

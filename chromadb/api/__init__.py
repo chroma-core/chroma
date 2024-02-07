@@ -21,6 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     GetResult,
     WhereDocument,
+    ClientServerSystemInfo,
 )
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant
@@ -437,6 +438,16 @@ class BaseAPI(ABC):
     def max_batch_size(self) -> int:
         """Return the maximum number of records that can be submitted in a single call
         to submit_embeddings."""
+        pass
+
+    @abstractmethod
+    def env(self) -> ClientServerSystemInfo:
+        """Get system info of the Chroma server.
+
+        Returns:
+            dict: The system info of the Chroma server.
+
+        """
         pass
 
 

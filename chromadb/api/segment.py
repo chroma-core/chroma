@@ -39,6 +39,7 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    ClientServerSystemInfo,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -58,6 +59,7 @@ import time
 import logging
 import re
 
+from chromadb.utils import system_info_utils
 
 logger = logging.getLogger(__name__)
 
@@ -828,6 +830,14 @@ class SegmentAPI(ServerAPI):
                 )
             self._collection_cache[collection_id] = collections[0]
         return self._collection_cache[collection_id]
+
+    @trace_method("SegmentAPI.env", OpenTelemetryGranularity.ALL)
+    @override
+    def env(self) -> ClientServerSystemInfo:
+        response = ClientServerSystemInfo(
+            client=system_info_utils.system_info(api=self), server=None
+        )
+        return response
 
 
 def _records(

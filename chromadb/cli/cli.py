@@ -8,9 +8,13 @@ import uvicorn
 import os
 import webbrowser
 
+from chromadb.cli.env import info as env_info
 from chromadb.cli.utils import set_log_file_path
 
+
 app = typer.Typer()
+
+app.command(help="Local and remote Chroma system information", name="env")(env_info)
 
 _logo = """
                 \033[38;5;069m(((((((((    \033[38;5;203m(((((\033[38;5;220m####

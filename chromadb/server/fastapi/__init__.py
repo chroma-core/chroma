@@ -8,7 +8,11 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from uuid import UUID
 from chromadb.api.models.Collection import Collection
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import (
+    GetResult,
+    QueryResult,
+    SystemInfo,
+)
 from chromadb.auth import (
     AuthzDynamicParams,
     AuthzResourceActions,
@@ -163,6 +167,7 @@ class FastAPI(chromadb.server.Server):
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v1/version", self.version, methods=["GET"])
+        self.router.add_api_route("/api/v1/env", self.env, methods=["GET"])
         self.router.add_api_route("/api/v1/heartbeat", self.heartbeat, methods=["GET"])
         self.router.add_api_route(
             "/api/v1/pre-flight-checks", self.pre_flight_checks, methods=["GET"]
@@ -296,6 +301,22 @@ class FastAPI(chromadb.server.Server):
 
     def version(self) -> str:
         return self._api.get_version()
+
+    @trace_method("FastAPI.env", OpenTelemetryGranularity.OPERATION)
+    @authz_context(
+        action=AuthzResourceActions.ENV,
+        resource=DynamicAuthzResource(
+            type=AuthzResourceTypes.API,
+        ),
+    )
+    def env(self) -> SystemInfo:
+        _local_env = self._api.env()
+        if not _local_env or "client" not in _local_env or not _local_env["client"]:
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to get system info.",
+            )
+        return _local_env["client"]
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @authz_context(

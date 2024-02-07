@@ -1,4 +1,6 @@
 # type: ignore
+from typing import Dict
+
 import requests
 
 import chromadb
@@ -1435,7 +1437,43 @@ def test_invalid_embeddings(api):
     assert "embedding" in str(e.value)
 
 
+def get_property_types() -> Dict[str, str]:
+    return {
+        "chroma_version": "str",
+        "python_version": "str",
+        "is_persistent": "bool",
+        "api": "str",
+        "datetime": "str",
+        "os": "str",
+        "os_version": "str",
+        "os_release": "Optional",
+        "cpu_architecture": "Optional",
+        "cpu_count": "Optional",
+        "cpu_usage": "Optional",
+        "memory_free": "Optional",
+        "memory_total": "Optional",
+        "process_memory_rss": "Optional",
+        "process_memory_vms": "Optional",
+        "persistent_disk_total": "Optional",
+        "persistent_disk_used": "Optional",
+        "persistent_disk_free": "Optional",
+        "mode": "OperatingMode",
+    }
+
+
+def test_system_info(api_obs) -> None:
+    _env = api_obs.env()
+    assert _env is not None
+    for key, _type in get_property_types().items():
+        if _type != "Optional":
+            if "client" in _env.keys() and _env["client"] is not None:
+                assert _env["client"][key] is not None
+            if "server" in _env.keys() and _env["server"] is not None:
+                assert _env["server"][key] is not None
+
+
 # test to make sure update shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_update(api):
     api.reset()
@@ -1446,7 +1484,9 @@ def test_dimensionality_exception_update(api):
         collection.update(**bad_dimensionality_records)
     assert "dimensionality" in str(e.value)
 
+
 # test to make sure upsert shows exception for bad dimensionality
+
 
 def test_dimensionality_exception_upsert(api):
     api.reset()

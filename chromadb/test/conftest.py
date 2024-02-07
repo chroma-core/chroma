@@ -386,6 +386,15 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
+def system_fixture_observability() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [sqlite, sqlite_persistent, fastapi, fastapi_persistent]
+    if "CHROMA_INTEGRATION_TEST" in os.environ:
+        fixtures.append(integration)
+    if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
+        fixtures = [integration]
+    return fixtures
+
+
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
         fastapi_server_basic_auth_param,
@@ -407,6 +416,11 @@ def system_wrong_auth(
     yield next(request.param())
 
 
+@pytest.fixture(scope="module", params=system_fixture_observability())
+def system_obs(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
+    yield next(request.param())
+
+
 @pytest.fixture(scope="module", params=system_fixtures())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
     yield next(request.param())
@@ -421,6 +435,13 @@ def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, No
 def api(system: System) -> Generator[ServerAPI, None, None]:
     system.reset_state()
     api = system.instance(ServerAPI)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def api_obs(system_obs: System) -> Generator[ServerAPI, None, None]:
+    system_obs.reset_state()
+    api = system_obs.instance(ServerAPI)
     yield api
 
 

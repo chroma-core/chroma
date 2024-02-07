@@ -23,7 +23,7 @@ body:
     attributes:
       label: Versions
       description: Your Chroma, Python, and OS versions, as well as whatever else you think relevant. Check that you have [the latest Chroma](https://github.com/chroma-core/chroma/pkgs/container/chroma) as we are a fast moving pre v1.0 project.
-      placeholder: Chroma v0.3.22, Python 3.9.6, MacOS 12.5
+      placeholder: Chroma v0.3.22, Python 3.9.6, MacOS 12.5 or the output of `chroma env info` (see https://docs.trychroma.com/troubleshooting)
 #       value: "A bug happened!"
     validations:
       required: true
