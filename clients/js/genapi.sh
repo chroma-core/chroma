@@ -24,7 +24,7 @@ else
 fi
 
 # Add isomorphic-fetch dependency to runtime.ts
-echo "import 'isomorphic-fetch';" > temp.txt
+echo "import fetch from 'isomorphic-fetch';" > temp.txt
 cat src/generated/runtime.ts >> temp.txt
 mv temp.txt src/generated/runtime.ts
 
