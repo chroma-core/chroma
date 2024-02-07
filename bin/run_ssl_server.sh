@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 
-./bin/generate_self_signed_cert.sh
+sh ./bin/generate_self_signed_cert.sh
 
+rm -rf certs
 mkdir certs
 mv *.pem certs/
 
