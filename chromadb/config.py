@@ -4,7 +4,7 @@ import logging
 import os
 from abc import ABC
 from graphlib import TopologicalSorter
-from typing import Optional, List, Any, Dict, Set, Iterable
+from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
 
 from overrides import EnforceOverrides
@@ -122,6 +122,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[str] = None
     chroma_server_ssl_enabled: Optional[bool] = False
+    # the below config value is only applicable to Chroma HTTP clients
+    chroma_server_ssl_verify: Optional[Union[bool, str]] = None
     chroma_server_api_default_path: Optional[str] = "/api/v1"
     chroma_server_grpc_port: Optional[str] = None
     # eg ["http://localhost:3000"]
