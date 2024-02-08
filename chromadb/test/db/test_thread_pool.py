@@ -38,7 +38,7 @@ def test_with_max_threads(
     def get_warped_time() -> float:
         return warp_time
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         with patch("time.time", side_effect=lambda: get_warped_time()) as _:
             _conn_pool = PerThreadPool(
                 os.path.join(temp_dir, "chroma.sqlite3"),
@@ -68,7 +68,7 @@ def test_negative_values(
     lru_check_interval: int,
     connection_ttl: int,
 ) -> None:
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         with pytest.raises(ValueError) as e:
             PerThreadPool(
                 os.path.join(temp_dir, "chroma.sqlite3"),
