@@ -222,7 +222,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		}
 
 		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), &collectionName, nil, tenantID, databaseName)
+		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, nil, tenantID, databaseName)
 		if err != nil {
 			log.Error("error getting collection", zap.Error(err))
 			return err

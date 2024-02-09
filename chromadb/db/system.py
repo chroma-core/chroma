@@ -1,6 +1,8 @@
 from abc import abstractmethod
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, List
 from uuid import UUID
+
+from chromadb.proto.chroma_pb2 import SubmitEmbeddingRecord
 from chromadb.types import (
     Collection,
     Database,
@@ -135,4 +137,13 @@ class SysDB(Component):
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
+        pass
+
+    @abstractmethod
+    def push_logs(
+        self,
+        id: UUID,
+        records: List[SubmitEmbeddingRecord],
+    ) -> int:
+        """Find collections by id, topic or name. If name is provided, tenant and database must also be provided."""
         pass

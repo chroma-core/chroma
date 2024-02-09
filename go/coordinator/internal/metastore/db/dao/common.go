@@ -40,3 +40,7 @@ func (*metaDomain) SegmentMetadataDb(ctx context.Context) dbmodel.ISegmentMetada
 func (*metaDomain) NotificationDb(ctx context.Context) dbmodel.INotificationDb {
 	return &notificationDb{dbcore.GetDB(ctx)}
 }
+
+func (*metaDomain) RecordLogDb(ctx context.Context) dbmodel.IRecordLogDb {
+	return &recordLogDb{dbcore.GetDB(ctx)}
+}

@@ -5,7 +5,10 @@ go 1.20
 require (
 	ariga.io/atlas-provider-gorm v0.1.1
 	github.com/apache/pulsar-client-go v0.9.1-0.20231030094548-620ecf4addfb
+	github.com/aws/aws-sdk-go v1.32.6
+	github.com/go-sql-driver/mysql v1.7.0
 	github.com/google/uuid v1.3.1
+	github.com/lib/pq v1.10.7
 	github.com/pingcap/log v1.1.0
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.7.0
@@ -14,6 +17,7 @@ require (
 	go.uber.org/zap v1.26.0
 	google.golang.org/grpc v1.58.3
 	google.golang.org/protobuf v1.31.0
+	gorm.io/driver/mysql v1.5.2
 	gorm.io/driver/sqlite v1.5.4
 	gorm.io/gorm v1.25.5
 	k8s.io/apimachinery v0.28.3
@@ -36,6 +40,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
+	github.com/jmespath/go-jmespath v0.3.0 // indirect
 	github.com/klauspost/compress v1.14.4 // indirect
 	github.com/linkedin/goavro/v2 v2.9.8 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
@@ -48,7 +53,6 @@ require (
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
-	gorm.io/driver/mysql v1.5.2 // indirect
 )
 
 require (
@@ -60,7 +64,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
-	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect

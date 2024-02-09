@@ -37,6 +37,14 @@ type Config struct {
 	MaxIdleConns int
 	MaxOpenConns int
 
+	// Aurora config
+	AuroraHost     string
+	AuroraPort     int
+	AuroraUser     string
+	AuroraDBName   string
+	AuroraRegion   string
+	AuroraPassword string
+
 	// Notification config
 	NotificationStoreProvider string
 	NotifierProvider          string
@@ -86,10 +94,23 @@ func New(config Config) (*Server, error) {
 			MaxIdleConns: config.MaxIdleConns,
 			MaxOpenConns: config.MaxOpenConns,
 		}
-		db, err := dbcore.Connect(dBConfig)
+
+		db, err := dbcore.ConnectPostgres(dBConfig)
 		if err != nil {
 			return nil, err
 		}
+		return NewWithGrpcProvider(config, grpcutils.Default, db)
+	} else if config.SystemCatalogProvider == "aurora" {
+		dBConfig := dbcore.DBConfig{
+			Username: config.AuroraUser,
+			Address:  config.AuroraHost,
+			Port:     config.AuroraPort,
+			DBName:   config.AuroraDBName,
+			Region:   config.AuroraRegion,
+			Password: config.AuroraPassword,
+		}
+
+		db := dbcore.ConnectAurora(dBConfig)
 		return NewWithGrpcProvider(config, grpcutils.Default, db)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
@@ -164,18 +185,18 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	s.coordinator = coordinator
 	s.coordinator.Start()
 	if !config.Testing {
-		memberlist_manager, err := createMemberlistManager(config)
-		if err != nil {
-			return nil, err
-		}
+		//memberlist_manager, err := createMemberlistManager(config)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//
+		//// Start the memberlist manager
+		//err = memberlist_manager.Start()
+		//if err != nil {
+		//	return nil, err
+		//}
 
-		// Start the memberlist manager
-		err = memberlist_manager.Start()
-		if err != nil {
-			return nil, err
-		}
-
-    s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
 		if err != nil {

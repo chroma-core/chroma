@@ -180,3 +180,49 @@ class UpdateCollectionRequest(_message.Message):
     metadata: _chroma_pb2.UpdateMetadata
     reset_metadata: bool
     def __init__(self, id: _Optional[str] = ..., topic: _Optional[str] = ..., name: _Optional[str] = ..., dimension: _Optional[int] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
+
+class Notification(_message.Message):
+    __slots__ = ["id", "collection_id", "type", "status"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    id: int
+    collection_id: str
+    type: str
+    status: str
+    def __init__(self, id: _Optional[int] = ..., collection_id: _Optional[str] = ..., type: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+
+class PushLogsRequest(_message.Message):
+    __slots__ = ["collection_id", "records"]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    RECORDS_FIELD_NUMBER: _ClassVar[int]
+    collection_id: str
+    records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.SubmitEmbeddingRecord]
+    def __init__(self, collection_id: _Optional[str] = ..., records: _Optional[_Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]] = ...) -> None: ...
+
+class PushLogsResponse(_message.Message):
+    __slots__ = ["record_count", "status"]
+    RECORD_COUNT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    record_count: int
+    status: _chroma_pb2.Status
+    def __init__(self, record_count: _Optional[int] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+
+class PullLogsRequest(_message.Message):
+    __slots__ = ["collection_id", "start_from_id", "batch_size"]
+    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    START_FROM_ID_FIELD_NUMBER: _ClassVar[int]
+    BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
+    collection_id: str
+    start_from_id: int
+    batch_size: int
+    def __init__(self, collection_id: _Optional[str] = ..., start_from_id: _Optional[int] = ..., batch_size: _Optional[int] = ...) -> None: ...
+
+class PullLogsResponse(_message.Message):
+    __slots__ = ["records", "status"]
+    RECORDS_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    records: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.SubmitEmbeddingRecord]
+    status: _chroma_pb2.Status
+    def __init__(self, records: _Optional[_Iterable[_Union[_chroma_pb2.SubmitEmbeddingRecord, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...

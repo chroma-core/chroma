@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"errors"
+	"github.com/go-sql-driver/mysql"
 	"sync"
 
 	"github.com/chroma/chroma-coordinator/internal/common"
@@ -222,7 +224,14 @@ func (mt *MetaTable) AddCollection(ctx context.Context, createCollection *model.
 	collection, err := mt.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)
 	if err != nil {
 		log.Error("create collection failed", zap.Error(err))
-		return nil, err
+		var me *mysql.MySQLError
+		ok := errors.As(err, &me)
+		if !ok {
+			return nil, err
+		}
+		if me.Number == 1062 {
+			return nil, common.ErrCollectionUniqueConstraintViolation
+		}
 	}
 	mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID] = collection
 	log.Info("collection added", zap.Any("collection", mt.tenantDatabaseCollectionCache[tenantID][databaseName][collection.ID]))
@@ -361,7 +370,16 @@ func (mt *MetaTable) AddSegment(ctx context.Context, createSegment *model.Create
 
 	segment, err := mt.catalog.CreateSegment(ctx, createSegment, createSegment.Ts)
 	if err != nil {
-		return err
+		log.Error("create segment failed", zap.Error(err))
+		var me *mysql.MySQLError
+		ok := errors.As(err, &me)
+		if !ok {
+			log.Error("not ok")
+			return err
+		}
+		if me.Number == 1062 {
+			return common.ErrSegmentUniqueConstraintViolation
+		}
 	}
 	mt.segmentsCache[createSegment.ID] = segment
 	log.Info("segment added", zap.Any("segment", segment))

@@ -46,7 +46,6 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	topic := req.Topic
 	collectionID := req.Collection
 	res := &coordinatorpb.GetSegmentsResponse{}
-
 	parsedSegmentID, err := types.ToUniqueID(segmentID)
 	if err != nil {
 		log.Error("segment id format error", zap.String("segment.id", *segmentID))

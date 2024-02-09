@@ -1,9 +1,12 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
+
+from chromadb import proto
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
-from chromadb.db.base import NotFoundError, UniqueConstraintError
+from chromadb.db.base import NotFoundError, UniqueConstraintError, PushLogsError
 from chromadb.db.system import SysDB
+from chromadb.proto.chroma_pb2 import SubmitEmbeddingRecord
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,
@@ -25,6 +28,8 @@ from chromadb.proto.coordinator_pb2 import (
     GetTenantRequest,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
+    PushLogsRequest,
+    PushLogsResponse,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.types import (
@@ -305,6 +310,21 @@ class GrpcSysDB(SysDB):
         response = self._sys_db_stub.UpdateCollection(request)
         if response.status.code == 404:
             raise NotFoundError()
+
+    @overrides
+    def push_logs(
+        self,
+        id: UUID,
+        records: List[SubmitEmbeddingRecord],
+    ) -> int:
+        request = PushLogsRequest(
+            collection_id=str(id),
+            records=records,
+        )
+        response: PushLogsResponse = self._sys_db_stub.PushLogs(request)
+        if response.status.code != 200:
+            raise PushLogsError()
+        return response.record_count
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)
