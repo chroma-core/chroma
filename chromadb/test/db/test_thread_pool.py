@@ -1,9 +1,9 @@
 import os
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
+from typing import Iterator
 from unittest.mock import patch
 import pytest
 from hypothesis import given
@@ -11,6 +11,29 @@ import hypothesis.strategies as st
 
 from chromadb.db.impl.sqlite import TxWrapper
 from chromadb.db.impl.sqlite_pool import PerThreadPool, Pool
+
+
+import tempfile
+import shutil
+from contextlib import contextmanager
+
+
+@contextmanager
+def temporary_directory_ignore_errors() -> Iterator[str]:
+    temp_dir = tempfile.mkdtemp()
+    try:
+        yield temp_dir
+    finally:
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass  # Ignore cleanup errors
+
+
+# Usage
+with temporary_directory_ignore_errors() as tmpdir:
+    print(f"Temporary directory: {tmpdir}")
+    # Your code here
 
 
 @given(
@@ -38,7 +61,7 @@ def test_with_max_threads(
     def get_warped_time() -> float:
         return warp_time
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+    with temporary_directory_ignore_errors() as temp_dir:
         with patch("time.time", side_effect=lambda: get_warped_time()) as _:
             _conn_pool = PerThreadPool(
                 os.path.join(temp_dir, "chroma.sqlite3"),
@@ -68,7 +91,7 @@ def test_negative_values(
     lru_check_interval: int,
     connection_ttl: int,
 ) -> None:
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+    with temporary_directory_ignore_errors() as temp_dir:
         with pytest.raises(ValueError) as e:
             PerThreadPool(
                 os.path.join(temp_dir, "chroma.sqlite3"),
