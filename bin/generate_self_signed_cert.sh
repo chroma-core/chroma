@@ -2,8 +2,14 @@
 
 if ! command -v openssl &> /dev/null
 then
-    echo "openssl command not found. Please install it and try again."
-    exit
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [ "$ID" == "ubuntu" ] || [ "$ID" == "debian" ]; then
+      sudo apt-get update && sudo apt-get install openssl -y
+    else
+      echo "openssl command not found. Please install it and try again."
+      exit
+    fi
 fi
 
 # check if the openssl.cnf file exists
