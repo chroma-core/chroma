@@ -476,7 +476,11 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected each embedding in the embeddings to be a list, got {embeddings}"
         )
-    for embedding in embeddings:
+    for i,embedding in enumerate(embeddings):
+        if len(embedding) == 0:
+            raise ValueError(
+                f"Expected each embedding in the embeddings to be a non-empty list, got empty embedding at pos {i}"
+            )
         if not all(
             [
                 isinstance(value, (int, float)) and not isinstance(value, bool)
