@@ -5,7 +5,7 @@
 Hybrid search has proven to be a great technique for improving the relevancy of search results.
 
 The concept of rankers is to create a simple yet powerful abstraction that both Chroma and community can build upon. The
-ranker functions are designed to be simple way to produce a score for a given document and query. Fusion of the scores
+ranker functions are designed to be a way to produce a score for a given document and query. Fusion of the scores
 is out of scope for this CIP.
 
 We propose that the ranker functions are implemented in both server and/or client. It is important to observe that not
@@ -22,7 +22,7 @@ The following public interfaces are proposed:
   is used.
 - Changes to `chromadb.api.types.QueryResult` to add an optional ranker score field. The field should contain the id of
   te ranker function and the produced score. Alternatively, a new subclass with extended attributes can be created
-  e.g. `RankerQueryResult`.
+  e.g. `RankerQueryResult` (preferred option).
 
 ### Ranker Functions
 
@@ -31,9 +31,11 @@ We suggest that ranker functions follow similar, if not same signature as embedd
 ```python
 from typing import Union, TypeVar
 from typing_extensions import Protocol
-from chromadb.api.types import RankerQueryResult,QueryResult
-Rankable = Union[str, int,QueryResult]
+from chromadb.api.types import RankerQueryResult, QueryResult
+
+Rankable = Union[str, int, QueryResult]
 R = TypeVar('R', bound=Rankable, contravariant=True)
+
 
 class RankerFunction(Protocol[R]):
     def __call__(self, results: R) -> RankerQueryResult:
@@ -62,6 +64,19 @@ We suggest that the following three ranker functions are implemented as a starti
 
 #### Future Work
 
+As a quick follow to this CIP and related implementation, we suggest the introduction of Fusion Functions which can take
+the output of one or more rankers along with HNSW distance metric and merge them into a single score.
+
 We believe that the ranker functions will play nicely with upcoming pipelines feature.
 
+## Compatibility, Deprecation, and Migration Plan
+
+From API perspective, the changes are backward compatible. The functionality itself will not be backward compatible.
+
 ## Test Plan
+
+API tests with SSL verification enabled and a self-signed certificate.
+
+## Rejected Alternatives
+
+N/A
