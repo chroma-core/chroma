@@ -18,6 +18,8 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
+    histogram,
+    counter,
 )
 from overrides import override
 from collections import defaultdict
@@ -123,6 +125,11 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         return self.submit_embeddings(topic_name, [embedding])[0]
 
     @trace_method("SqlEmbeddingsQueue.submit_embeddings", OpenTelemetryGranularity.ALL)
+    @histogram(
+        name="wal_insert_latency",
+        unit="ms",
+        description="Latency of inserts into the WAL",
+    )
     @override
     def submit_embeddings(
         self, topic_name: str, embeddings: Sequence[SubmitEmbeddingRecord]
@@ -340,6 +347,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             return int(cur.fetchone()[0]) + 1
 
     @trace_method("SqlEmbeddingsQueue._notify_all", OpenTelemetryGranularity.ALL)
+    @counter(
+        name="wal_inserts",
+        unit="count",
+        description="Number of inserts into the WAL",
+        arg_counter_extractor=lambda *args: len(args[2]),
+    )
     def _notify_all(self, topic: str, embeddings: Sequence[EmbeddingRecord]) -> None:
         """Send a notification to each subscriber of the given topic."""
         if self._running:

@@ -51,13 +51,16 @@ from starlette.requests import Request
 import logging
 
 from chromadb.server.fastapi.utils import fastapi_json_response, string_to_uuid as _uuid
-from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
+from chromadb.telemetry.opentelemetry.fastapi import register_baseline_metrics
+from chromadb.telemetry.opentelemetry.otel import span_proxy_context
 from chromadb.types import Database, Tenant
 from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
+    instrument_fastapi,
+    get_current_span_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,13 +80,24 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
 async def catch_exceptions_middleware(
     request: Request, call_next: Callable[[Request], Any]
 ) -> Response:
-    try:
-        return await call_next(request)
-    except ChromaError as e:
-        return fastapi_json_response(e)
-    except Exception as e:
-        logger.exception(e)
-        return JSONResponse(content={"error": repr(e)}, status_code=500)
+    with span_proxy_context("FastAPI.catch_exceptions_middleware") as _:
+        try:
+            return await call_next(request)
+        except Exception as e:
+            trace_id = get_current_span_id()
+            if isinstance(e, ChromaError):
+                ex = fastapi_json_response(e, trace_id=trace_id)
+            else:
+                content = {
+                    "error": repr(e),
+                }
+                headers = {}
+                if trace_id:
+                    content["trace-id"] = trace_id
+                    headers["Trace-Id"] = trace_id
+                ex = JSONResponse(content=content, status_code=500, headers=headers)
+            logger.exception(repr(e))
+        return ex
 
 
 async def check_http_version_middleware(
@@ -281,6 +295,7 @@ class FastAPI(chromadb.server.Server):
 
         use_route_names_as_operation_ids(self._app)
         instrument_fastapi(self._app)
+        register_baseline_metrics(self._opentelemetry_client, self._system.settings)
 
     def shutdown(self) -> None:
         self._system.stop()

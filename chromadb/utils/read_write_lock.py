@@ -2,6 +2,8 @@ import threading
 from types import TracebackType
 from typing import Optional, Type
 
+from chromadb.telemetry.opentelemetry import histogram
+
 
 class ReadWriteLock:
     """A lock object that allows many simultaneous "read locks", but
@@ -62,6 +64,11 @@ class WriteRWLock:
     def __init__(self, rwLock: ReadWriteLock):
         self.rwLock = rwLock
 
+    @histogram(
+        "HNSW_WriteRWLock.wait_time",
+        unit="ms",
+        description="WriteRWLock init times.",
+    )
     def __enter__(self) -> None:
         self.rwLock.acquire_write()
 

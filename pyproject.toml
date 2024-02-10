@@ -26,10 +26,12 @@ dependencies = [
   'typing_extensions >= 4.5.0',
   'pulsar-client>=3.1.0',
   'onnxruntime >= 1.14.1',
-  'opentelemetry-api>=1.2.0',
-  'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
+  'opentelemetry-api>=1.22.0',
+  'opentelemetry-exporter-otlp>=1.22.0',
+  'opentelemetry-exporter-otlp-proto-grpc>=1.22.0',
+  'opentelemetry-instrumentation-logging>=0.43b0',
   'opentelemetry-instrumentation-fastapi>=0.41b0',
-  'opentelemetry-sdk>=1.2.0',
+  'opentelemetry-sdk>=1.22.0',
   'tokenizers >= 0.13.2',
   'pypika >= 0.48.9',
   'tqdm >= 4.65.0',
@@ -43,6 +45,7 @@ dependencies = [
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
   'mmh3>=4.0.1',
+  'psutil>=5.9.7',
 ]
 
 [tool.black]

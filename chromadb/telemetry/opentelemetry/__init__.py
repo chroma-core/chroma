@@ -1,17 +1,37 @@
-from functools import wraps
+import importlib
+from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Sequence, Union
-
-from opentelemetry import trace
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Sequence,
+    Union,
+    Iterable,
+    List,
+    Dict,
+    cast,
 )
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+from overrides import EnforceOverrides
+from pydantic.v1 import BaseSettings
 
 from chromadb.config import Component
 from chromadb.config import System
+
+
+# Settings are only read from the environment
+class TelemetrySettings(BaseSettings):
+    chroma_otel_collection_endpoint: Optional[str] = ""
+    chroma_otel_service_name: Optional[str] = "chromadb"
+    chroma_otel_collection_headers: Dict[str, str] = {}
+    chroma_otel_granularity: Optional[str] = None
+    chroma_otel_traces_enabled: bool = False
+    chroma_otel_metrics_enabled: bool = False
+    chroma_otel_logs_enabled: bool = False
+
+
+telemetry_settings = TelemetrySettings()
 
 
 class OpenTelemetryGranularity(Enum):
@@ -42,119 +62,253 @@ class OpenTelemetryGranularity(Enum):
         return order.index(self) < order.index(other)
 
 
+traces_enabled = False
+metrics_enabled = False
+logs_enabled = False
+
+OtelAttributes = Dict[
+    str,
+    Union[
+        str,
+        bool,
+        float,
+        int,
+        Sequence[str],
+        Sequence[bool],
+        Sequence[float],
+        Sequence[int],
+    ],
+]
+
+
+class OtelInstrumentation(ABC, EnforceOverrides):
+    """
+    An abstract class for OpenTelemetry instrumentation.
+    """
+
+    @abstractmethod
+    def instrument_fastapi(
+        self, app: Any, excluded_urls: Optional[List[str]] = None
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def trace_method(
+        self,
+        trace_name: str,
+        trace_granularity: OpenTelemetryGranularity,
+        attributes: Optional[OtelAttributes] = None,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """A decorator that traces a method."""
+        ...
+
+    @abstractmethod
+    def histogram(
+        self,
+        name: str,
+        unit: str,
+        description: str,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """A decorator that creates a histogram for a method execution."""
+
+    @abstractmethod
+    def counter(
+        self,
+        name: str,
+        unit: str,
+        description: str,
+        arg_counter_extractor: Optional[Callable[..., int]] = None,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """A decorator that creates a counter for a method execution."""
+        ...
+
+    @abstractmethod
+    def add_attributes_to_current_span(self, attributes: OtelAttributes) -> None:
+        """Add attributes to the current span."""
+        ...
+
+    @abstractmethod
+    def add_observable_gauge(
+        self,
+        *,
+        name: str,
+        callback: Callable[[], Union[Union[int, float], Iterable[Union[int, float]]]],
+        unit: str,
+        description: str,
+    ) -> None:
+        """Add an observable gauge to the metrics.
+        :param name: The name of the gauge.
+        :param callback: A callback function that returns the value of the gauge.
+        :param unit: The unit of the gauge.
+        :param description: The description of the gauge.
+
+        Example:
+            >>> OtelInstrumentation.add_observable_gauge("my_gauge", lambda: return psutil.cpu_percent(), "percent", "CPU Usage")
+        """
+        ...
+
+    @abstractmethod
+    def add_observable_counter(
+        self,
+        *,
+        name: str,
+        callback: Callable[[], Union[Union[int, float], Iterable[Union[int, float]]]],
+        unit: str,
+        description: str,
+    ) -> None:
+        """Add an observable counter to the metrics.
+        :param name: The name of the counter.
+        :param callback: A callback function that returns the value of the counter.
+        :param unit: The unit of the counter.
+        :param description: The description of the counter.
+
+        Example:
+            >>> OtelInstrumentation.add_observable_counter("my_counter", lambda: return psutil.net_io_counters().bytes_sent, "bytes", "Bytes out")
+        """
+        ...
+
+    @abstractmethod
+    def add_counter(self, name: str, unit: str, description: str) -> None:
+        """Add a counter to the metrics."""
+        ...
+
+    @abstractmethod
+    def update_counter(self, name: str, value: int) -> None:
+        """Update a counter."""
+        ...
+
+    @abstractmethod
+    def add_histogram(
+        self,
+        name: str,
+        unit: str,
+        description: str,
+    ) -> None:
+        """Add a histogram to the metrics."""
+        ...
+
+    @abstractmethod
+    def record_histogram(
+        self,
+        name: str,
+        value: Union[int, float],
+        attributes: Optional[OtelAttributes] = None,
+    ) -> None:
+        """Record a histogram."""
+        ...
+
+    @abstractmethod
+    def get_current_span_id(self) -> Optional[str]:
+        """Get the current span ID."""
+        ...
+
+
+_otel_instance: Optional[OtelInstrumentation] = None
+
+
+def get_otel_client() -> Optional[OtelInstrumentation]:
+    global _otel_instance
+    if (
+        not telemetry_settings.chroma_otel_collection_endpoint
+        or telemetry_settings.chroma_otel_collection_endpoint == ""
+    ):
+        return None
+
+    if _otel_instance is None:
+        _otel_package = importlib.import_module("chromadb.telemetry.opentelemetry.otel")
+        _otel_instance = cast(OtelInstrumentation, _otel_package.otel_client)
+    return _otel_instance
+
+
 class OpenTelemetryClient(Component):
     def __init__(self, system: System):
         super().__init__(system)
-        otel_init(
-            system.settings.chroma_otel_service_name,
-            system.settings.chroma_otel_collection_endpoint,
-            system.settings.chroma_otel_collection_headers,
-            OpenTelemetryGranularity(
-                system.settings.chroma_otel_granularity
-                if system.settings.chroma_otel_granularity
-                else "none"
-            ),
+        self._otel_client = get_otel_client()
+
+    def add_observable_gauge(
+        self,
+        *,
+        name: str,
+        callback: Callable[[], Union[Union[int, float], Iterable[Union[int, float]]]],
+        unit: str,
+        description: str,
+    ) -> None:
+        if self._otel_client is None:
+            return
+        self._otel_client.add_observable_gauge(
+            name=name, callback=callback, unit=unit, description=description
+        )
+
+    def add_observable_counter(
+        self,
+        *,
+        name: str,
+        callback: Callable[[], Union[Union[int, float], Iterable[Union[int, float]]]],
+        unit: str,
+        description: str,
+    ) -> None:
+        if self._otel_client is None:
+            return
+        self._otel_client.add_observable_counter(
+            name=name, callback=callback, unit=unit, description=description
         )
 
 
-tracer: Optional[trace.Tracer] = None
-granularity: OpenTelemetryGranularity = OpenTelemetryGranularity("none")
+def get_current_span_id() -> Optional[str]:
+    otel_instance = get_otel_client()
+    if not otel_instance:
+        return None
+    return otel_instance.get_current_span_id()
 
 
-def otel_init(
-    otel_service_name: Optional[str],
-    otel_collection_endpoint: Optional[str],
-    otel_collection_headers: Optional[Dict[str, str]],
-    otel_granularity: OpenTelemetryGranularity,
-) -> None:
-    """Initializes module-level state for OpenTelemetry.
-
-    Parameters match the environment variables which configure OTel as documented
-    at https://docs.trychroma.com/observability.
-    - otel_service_name: The name of the service for OTel tagging and aggregation.
-    - otel_collection_endpoint: The endpoint to which OTel spans are sent
-        (e.g. api.honeycomb.com).
-    - otel_collection_headers: The headers to send with OTel spans
-        (e.g. {"x-honeycomb-team": "abc123"}).
-    - otel_granularity: The granularity of the spans to emit.
-    """
-    if otel_granularity == OpenTelemetryGranularity.NONE:
+def instrument_fastapi(app: Any, excluded_urls: Optional[List[str]] = None) -> None:
+    """Instrument a FastAPI application."""
+    otel_instance = get_otel_client()
+    if not otel_instance:
         return
-    resource = Resource(attributes={SERVICE_NAME: str(otel_service_name)})
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(
-        BatchSpanProcessor(
-            # TODO: we may eventually want to make this configurable.
-            OTLPSpanExporter(
-                endpoint=str(otel_collection_endpoint),
-                headers=otel_collection_headers,
-            )
-        )
-    )
-    trace.set_tracer_provider(provider)
-
-    global tracer, granularity
-    tracer = trace.get_tracer(__name__)
-    granularity = otel_granularity
+    otel_instance.instrument_fastapi(app, excluded_urls)
 
 
 def trace_method(
     trace_name: str,
     trace_granularity: OpenTelemetryGranularity,
-    attributes: Optional[
-        Dict[
-            str,
-            Union[
-                str,
-                bool,
-                float,
-                int,
-                Sequence[str],
-                Sequence[bool],
-                Sequence[float],
-                Sequence[int],
-            ],
-        ]
-    ] = None,
+    attributes: Optional[OtelAttributes] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """A decorator that traces a method."""
-
-    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(f)
-        def wrapper(*args: Any, **kwargs: Dict[Any, Any]) -> Any:
-            global tracer, granularity
-            if trace_granularity < granularity:
-                return f(*args, **kwargs)
-            if not tracer:
-                return f(*args, **kwargs)
-            with tracer.start_as_current_span(trace_name, attributes=attributes):
-                return f(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+    otel_instance = get_otel_client()
+    if not otel_instance:
+        return lambda f: f
+    return otel_instance.trace_method(trace_name, trace_granularity, attributes)
 
 
-def add_attributes_to_current_span(
-    attributes: Dict[
-        str,
-        Union[
-            str,
-            bool,
-            float,
-            int,
-            Sequence[str],
-            Sequence[bool],
-            Sequence[float],
-            Sequence[int],
-        ],
-    ]
-) -> None:
+def histogram(
+    name: str,
+    unit: str,
+    description: str,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator proxy for creating and updating histograms in OTEL."""
+    otel_instance = get_otel_client()
+    if not otel_instance:
+        return lambda f: f
+    return otel_instance.histogram(name, unit, description)
+
+
+def counter(
+    name: str,
+    unit: str,
+    description: str,
+    arg_counter_extractor: Optional[Callable[..., int]] = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator proxy for creating and updating counters in OTEL."""
+    otel_instance = get_otel_client()
+    if not otel_instance:
+        return lambda f: f
+    return otel_instance.counter(name, unit, description, arg_counter_extractor)
+
+
+def add_attributes_to_current_span(attributes: OtelAttributes) -> None:
     """Add attributes to the current span."""
-    global tracer, granularity
-    if granularity == OpenTelemetryGranularity.NONE:
+    otel_instance = get_otel_client()
+    if not otel_instance:
         return
-    if not tracer:
-        return
-    span = trace.get_current_span()
-    span.set_attributes(attributes)
+    otel_instance.add_attributes_to_current_span(attributes)

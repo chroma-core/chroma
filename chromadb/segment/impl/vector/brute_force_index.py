@@ -1,6 +1,8 @@
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 import numpy as np
 import numpy.typing as npt
+
+from chromadb.telemetry.opentelemetry import histogram
 from chromadb.types import (
     EmbeddingRecord,
     VectorEmbeddingRecord,
@@ -118,6 +120,9 @@ class BruteForceIndex:
             for id in target_ids
         ]
 
+    @histogram(
+        "BruteForceIndex.query", unit="ms", description="Brute force index query time"
+    )
     def query(self, query: VectorQuery) -> Sequence[Sequence[VectorQueryResult]]:
         np_query = np.array(query["vectors"])
         allowed_ids = (

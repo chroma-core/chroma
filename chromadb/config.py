@@ -226,11 +226,15 @@ class Settings(BaseSettings):  # type: ignore
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
     anonymized_telemetry: bool = True
-
+    # TODO remove the OTEL config below as it has been moved to chromadb.telemetry.opentelemetry.TelemetrySettings
+    chroma_otel_enabled: bool = False
     chroma_otel_collection_endpoint: Optional[str] = ""
     chroma_otel_service_name: Optional[str] = "chromadb"
     chroma_otel_collection_headers: Dict[str, str] = {}
     chroma_otel_granularity: Optional[str] = None
+    chroma_otel_traces_enabled: bool = False
+    chroma_otel_metrics_enabled: bool = False
+    chroma_otel_logs_enabled: bool = False
 
     allow_reset: bool = False
 

@@ -2,6 +2,7 @@ from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict,
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
+from chromadb.telemetry.opentelemetry.segments import register_metadata_segment_metrics
 from chromadb.types import Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
@@ -14,6 +15,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
+    histogram,
 )
 from chromadb.types import (
     Where,
@@ -63,6 +65,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._subscription = self._consumer.subscribe(
                 self._topic, self._write_metadata, start=seq_id
             )
+        register_metadata_segment_metrics(self._opentelemetry_client, self)
 
     @trace_method("SqliteMetadataSegment.stop", OpenTelemetryGranularity.ALL)
     @override
@@ -107,6 +110,11 @@ class SqliteMetadataSegment(MetadataReader):
             return cast(int, result)
 
     @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
+    @histogram(
+        name="SqliteMetadataSegment.get_metadata",
+        unit="ms",
+        description="Metadata index query times.",
+    )
     @override
     def get_metadata(
         self,
@@ -453,6 +461,11 @@ class SqliteMetadataSegment(MetadataReader):
                 self._update_metadata(cur, id, record["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
+    @histogram(
+        name="SqliteMetadataSegment._write_metadata",
+        unit="ms",
+        description="Metadata index write times.",
+    )
     def _write_metadata(self, records: Sequence[EmbeddingRecord]) -> None:
         """Write embedding metadata to the database. Care should be taken to ensure
         records are append-only (that is, that seq-ids should increase monotonically)"""

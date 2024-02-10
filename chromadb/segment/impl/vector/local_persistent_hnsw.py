@@ -15,6 +15,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
+    histogram,
 )
 from chromadb.types import (
     EmbeddingRecord,
@@ -31,7 +32,6 @@ import hnswlib
 import logging
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
-
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._index_initialized = True
 
     @trace_method("PersistentLocalHnswSegment._persist", OpenTelemetryGranularity.ALL)
+    @histogram(
+        "PersistentLocalHnswSegment._persist",
+        unit="ms",
+        description="Time to persist index",
+    )
     def _persist(self) -> None:
         """Persist the index and data to disk"""
         index = cast(hnswlib.Index, self._index)
