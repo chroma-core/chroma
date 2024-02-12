@@ -98,6 +98,10 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     def create_segment(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
+        coll.name = f"{coll.name}_{uuid.uuid4()}"
+        self.sysdb.create_collection(
+            name=coll.name, id=coll.id, metadata=coll.metadata, dimension=coll.dimension
+        )
         segments = self.segment_manager.create_segments(asdict(coll))
         for segment in segments:
             self.sysdb.create_segment(segment)

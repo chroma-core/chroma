@@ -1,3 +1,4 @@
+import shutil
 from typing import Generator
 from unittest.mock import patch
 import chromadb
@@ -17,6 +18,7 @@ def ephemeral_api() -> Generator[ClientAPI, None, None]:
 
 @pytest.fixture
 def persistent_api() -> Generator[ClientAPI, None, None]:
+    shutil.rmtree(tempfile.gettempdir() + "/test_server", ignore_errors=True)
     client = chromadb.PersistentClient(
         path=tempfile.gettempdir() + "/test_server",
     )

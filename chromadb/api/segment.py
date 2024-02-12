@@ -347,13 +347,13 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
-            self._sysdb.delete_collection(
-                existing[0]["id"], tenant=tenant, database=database
-            )
             for s in self._manager.delete_segments(existing[0]["id"]):
                 self._sysdb.delete_segment(s)
             if existing and existing[0]["id"] in self._collection_cache:
                 del self._collection_cache[existing[0]["id"]]
+            self._sysdb.delete_collection(
+                existing[0]["id"], tenant=tenant, database=database
+            )
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
