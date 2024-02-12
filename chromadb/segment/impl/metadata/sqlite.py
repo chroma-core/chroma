@@ -416,20 +416,6 @@ class SqliteMetadataSegment(MetadataReader):
         result = cur.execute(sql, params).fetchone()
         if result is None:
             logger.warning(f"Delete of nonexisting embedding ID: {record['id']}")
-        else:
-            id = result[0]
-
-            # Manually delete metadata; cannot use cascade because
-            # that triggers on replace
-            metadata_t = Table("embedding_metadata")
-            q = (
-                self._db.querybuilder()
-                .from_(metadata_t)
-                .where(metadata_t.id == ParameterValue(id))
-                .delete()
-            )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
 
     @trace_method("SqliteMetadataSegment._update_record", OpenTelemetryGranularity.ALL)
     def _update_record(self, cur: Cursor, record: EmbeddingRecord) -> None:
