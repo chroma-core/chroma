@@ -1,6 +1,8 @@
 from typing import Any, Callable, Dict, List, Sequence, Optional, cast
 import fastapi
 import orjson
+
+# https://anyio.readthedocs.io/en/stable/threads.html#adjusting-the-default-maximum-worker-thread-count
 from anyio import (
     to_thread,
 )  # this is used to transform sync code to async. By default, AnyIO uses 40 threads pool
