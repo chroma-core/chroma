@@ -1,12 +1,27 @@
-use crate::errors::ChromaError;
+use crate::errors::{ChromaError, ErrorCodes};
+use thiserror::Error;
 
 use async_trait::async_trait;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 
+#[derive(Debug, Error)]
+pub(crate) enum GetError {
+    #[error("Error getting metadata")]
+    NotFoundError,
+}
+
+impl ChromaError for GetError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetError::NotFoundError => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 pub(crate) trait StringMetadataIndex {
     fn put(&mut self, key: &str, value: &str, offset_id: usize) -> Result<(), Box<dyn ChromaError>>;
-    fn get(&self, key: &str, value: &str) -> Result<RoaringBitmap, Box<dyn ChromaError>>;
+    fn get(&self, key: &str, value: &str) -> Result<&RoaringBitmap, Box<dyn ChromaError>>;
 }
 
 struct InMemoryStringMetadataIndex {
@@ -29,13 +44,13 @@ impl StringMetadataIndex for InMemoryStringMetadataIndex {
         Ok(())
     }
 
-    fn get(&self, key: &str, value: &str) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
+    fn get(&self, key: &str, value: &str) -> Result<&RoaringBitmap, Box<dyn ChromaError>> {
         match self.index.get(key) {
             Some(key_map) => match key_map.get(value) {
-                Some(bitmap) => Ok(bitmap.clone()),
-                None => Ok(RoaringBitmap::new()),
+                Some(bitmap) => Ok(&bitmap),
+                None => Err(Box::new(GetError::NotFoundError)),
             },
-            None => Ok(RoaringBitmap::new()),
+            None => Err(Box::new(GetError::NotFoundError)),
         }
     }
 }
@@ -64,10 +79,18 @@ mod tests {
     }
 
     #[test]
-    fn test_in_memory_string_metadata_index_does_not_contain() {
+    fn test_in_memory_string_metadata_index_does_not_contain_key() {
         let index = InMemoryStringMetadataIndex::new();
-        let bitmap = index.get("key", "value").unwrap();
-        assert_eq!(bitmap.len(), 0);
+        let result = index.get("key", "value");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_in_memory_string_metadata_index_does_not_contain_value() {
+        let mut index = InMemoryStringMetadataIndex::new();
+        index.put("key", "value", 0).unwrap();
+        let result = index.get("key", "value2");
+        assert!(result.is_err());
     }
 
     #[test]
