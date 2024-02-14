@@ -1,7 +1,9 @@
 from typing import Any, Callable, Dict, List, Sequence, Optional, cast
 import fastapi
 import orjson
-from anyio import to_thread
+from anyio import (
+    to_thread,
+)  # this is used to transform sync code to async. By default, AnyIO uses 40 threads pool
 from fastapi import FastAPI as _FastAPI, Response, Request
 from fastapi.responses import JSONResponse
 
@@ -50,8 +52,6 @@ from chromadb.server.fastapi.types import (
     UpdateCollection,
     UpdateEmbedding,
 )
-
-# from starlette.requests import Request
 
 import logging
 
@@ -532,7 +532,7 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def update(self, request: Request, collection_id:str) -> None:
+    async def update(self, request: Request, collection_id: str) -> None:
         raw_body = await request.body()
         add = UpdateEmbedding.model_validate(orjson.loads(raw_body))
         await to_thread.run_sync(
@@ -554,7 +554,7 @@ class FastAPI(chromadb.server.Server):
             attributes=attr_from_collection_lookup(collection_id_arg="collection_id"),
         ),
     )
-    async def upsert(self, request: Request, collection_id:str) -> None:
+    async def upsert(self, request: Request, collection_id: str) -> None:
         raw_body = await request.body()
         collection_id = request.path_params.get("collection_id")
         upsert = AddEmbedding.model_validate(orjson.loads(raw_body))
