@@ -14,7 +14,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, Mapping
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
@@ -195,7 +195,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
             return multiple()
 
         c = self.api.get_collection(name=coll.name)
-
+        _metadata: Optional[Mapping[str, Any]] = coll.metadata
+        _name: str = coll.name
         if new_metadata is not None:
             if len(new_metadata) == 0:
                 with pytest.raises(Exception):
@@ -206,7 +207,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
                     )
                 return multiple()
             coll.metadata = new_metadata
-            self.set_model(coll.name, coll.metadata)
+            _metadata = new_metadata
 
         if new_name is not None:
             if new_name in self.model and new_name != coll.name:
@@ -214,10 +215,10 @@ class CollectionStateMachine(RuleBasedStateMachine):
                     c.modify(metadata=new_metadata, name=new_name)
                 return multiple()
 
-            prev_metadata = self.model[coll.name]
             self.delete_from_model(coll.name)
-            self.set_model(new_name, prev_metadata)
             coll.name = new_name
+            _name = new_name
+        self.set_model(_name, _metadata)  # type: ignore
 
         c.modify(metadata=new_metadata, name=new_name)
         c = self.api.get_collection(name=coll.name)
